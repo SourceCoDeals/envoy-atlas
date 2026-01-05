@@ -77,17 +77,33 @@ export default function Connections() {
   // Poll for sync progress AND keep nudging batch sync forward
   useEffect(() => {
     const smartleadConnection = connections.find(c => c.platform === 'smartlead');
-    if (smartleadConnection?.sync_status === 'syncing') {
-      const pollInterval = setInterval(fetchConnections, 2000);
-      const resumeInterval = setInterval(() => {
+    if (smartleadConnection?.sync_status !== 'syncing') return;
+
+    let pollInterval: number | undefined;
+    let resumeInterval: number | undefined;
+
+    const start = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setError('Your session expired while a sync is in progress. Please sign in again to resume the Smartlead sync.');
+        return;
+      }
+
+      pollInterval = window.setInterval(fetchConnections, 2000);
+      resumeInterval = window.setInterval(() => {
         void continueSmartleadSync();
       }, 12000);
 
-      return () => {
-        clearInterval(pollInterval);
-        clearInterval(resumeInterval);
-      };
-    }
+      // kick once immediately
+      void continueSmartleadSync();
+    };
+
+    void start();
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      if (resumeInterval) clearInterval(resumeInterval);
+    };
   }, [connections, currentWorkspace?.id]);
 
   const fetchConnections = async () => {
@@ -369,6 +385,19 @@ export default function Connections() {
                           <Download className="mr-2 h-4 w-4" />
                           Pull Full History
                         </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={continueSmartleadSync}
+                      disabled={!isSyncingSmartlead || isResumingSync}
+                      title="Manually nudge the batch sync forward"
+                    >
+                      {isResumingSync ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
                       )}
                     </Button>
                     <Button 
