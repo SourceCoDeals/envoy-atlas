@@ -3,7 +3,19 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
+import { AuthProvider } from "@/hooks/useAuth";
+import { WorkspaceProvider } from "@/hooks/useWorkspace";
+import Dashboard from "./pages/Dashboard";
+import Auth from "./pages/Auth";
+import Connections from "./pages/Connections";
+import Campaigns from "./pages/Campaigns";
+import Deliverability from "./pages/Deliverability";
+import Audience from "./pages/Audience";
+import CopyInsights from "./pages/CopyInsights";
+import Experiments from "./pages/Experiments";
+import Playbook from "./pages/Playbook";
+import Alerts from "./pages/Alerts";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -11,15 +23,29 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <WorkspaceProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/connections" element={<Connections />} />
+              <Route path="/campaigns" element={<Campaigns />} />
+              <Route path="/deliverability" element={<Deliverability />} />
+              <Route path="/audience" element={<Audience />} />
+              <Route path="/copy-insights" element={<CopyInsights />} />
+              <Route path="/experiments" element={<Experiments />} />
+              <Route path="/playbook" element={<Playbook />} />
+              <Route path="/alerts" element={<Alerts />} />
+              <Route path="/settings" element={<Settings />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </WorkspaceProvider>
+      </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
