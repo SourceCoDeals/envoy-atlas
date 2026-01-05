@@ -1,21 +1,25 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useCampaigns } from '@/hooks/useCampaigns';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Mail } from 'lucide-react';
+import { CampaignTable } from '@/components/campaigns/CampaignTable';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Loader2, Mail, RefreshCw, ArrowRight } from 'lucide-react';
 
 export default function Campaigns() {
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { campaigns, loading, error, refetch } = useCampaigns();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (!authLoading && !user) {
       navigate('/auth');
     }
-  }, [user, loading, navigate]);
+  }, [user, authLoading, navigate]);
 
-  if (loading || !user) {
+  if (authLoading || !user) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -26,25 +30,55 @@ export default function Campaigns() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Campaigns</h1>
-          <p className="text-muted-foreground">
-            Performance breakdown by campaign, step, and variant
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Campaigns</h1>
+            <p className="text-muted-foreground">
+              Performance breakdown by campaign
+            </p>
+          </div>
+          {campaigns.length > 0 && (
+            <Button variant="outline" size="sm" onClick={refetch} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          )}
         </div>
 
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-              <Mail className="h-8 w-8 text-primary" />
-            </div>
-            <h2 className="text-xl font-semibold mb-2">Campaign Analytics Coming</h2>
-            <p className="text-muted-foreground text-center max-w-md">
-              Connect your Smartlead account to view detailed campaign performance, 
-              funnel analysis, and step-by-step breakdowns.
-            </p>
-          </CardContent>
-        </Card>
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : error ? (
+          <Card className="border-destructive">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <p className="text-destructive mb-4">{error}</p>
+              <Button variant="outline" onClick={refetch}>
+                Try Again
+              </Button>
+            </CardContent>
+          </Card>
+        ) : campaigns.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+                <Mail className="h-8 w-8 text-primary" />
+              </div>
+              <h2 className="text-xl font-semibold mb-2">No Campaigns Yet</h2>
+              <p className="text-muted-foreground text-center max-w-md mb-6">
+                Connect your Smartlead account and sync your data to see campaign performance here.
+              </p>
+              <Button asChild>
+                <Link to="/connections">
+                  Go to Connections
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <CampaignTable campaigns={campaigns} />
+        )}
       </div>
     </DashboardLayout>
   );
