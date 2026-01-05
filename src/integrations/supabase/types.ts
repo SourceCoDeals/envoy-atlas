@@ -134,8 +134,10 @@ export type Database = {
           created_by: string
           id: string
           is_active: boolean
+          last_full_sync_at: string | null
           last_sync_at: string | null
           platform: string
+          sync_progress: Json | null
           sync_status: string | null
           updated_at: string
           workspace_id: string
@@ -146,8 +148,10 @@ export type Database = {
           created_by: string
           id?: string
           is_active?: boolean
+          last_full_sync_at?: string | null
           last_sync_at?: string | null
           platform: string
+          sync_progress?: Json | null
           sync_status?: string | null
           updated_at?: string
           workspace_id: string
@@ -158,8 +162,10 @@ export type Database = {
           created_by?: string
           id?: string
           is_active?: boolean
+          last_full_sync_at?: string | null
           last_sync_at?: string | null
           platform?: string
+          sync_progress?: Json | null
           sync_status?: string | null
           updated_at?: string
           workspace_id?: string
@@ -279,6 +285,7 @@ export type Database = {
           id: string
           is_control: boolean | null
           name: string
+          platform_variant_id: string | null
           subject_line: string | null
           variant_type: string
         }
@@ -289,6 +296,7 @@ export type Database = {
           id?: string
           is_control?: boolean | null
           name: string
+          platform_variant_id?: string | null
           subject_line?: string | null
           variant_type: string
         }
@@ -299,6 +307,7 @@ export type Database = {
           id?: string
           is_control?: boolean | null
           name?: string
+          platform_variant_id?: string | null
           subject_line?: string | null
           variant_type?: string
         }

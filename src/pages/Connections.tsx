@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { StatusDot } from '@/components/dashboard/StatusDot';
+import { Progress } from '@/components/ui/progress';
 import { 
   Loader2, 
   Plug, 
@@ -19,15 +20,32 @@ import {
   ExternalLink,
   Key,
   Clock,
+  Download,
+  AlertCircle,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+
+type SyncProgress = {
+  step?: string;
+  progress?: number;
+  total?: number;
+  current?: number;
+  campaign_name?: string;
+  campaigns_synced?: number;
+  email_accounts_synced?: number;
+  variants_synced?: number;
+  metrics_created?: number;
+  error?: string;
+};
 
 type ApiConnection = {
   id: string;
   platform: string;
   is_active: boolean;
   last_sync_at: string | null;
+  last_full_sync_at: string | null;
   sync_status: string | null;
+  sync_progress: SyncProgress | null;
   created_at: string;
 };
 
@@ -39,6 +57,7 @@ export default function Connections() {
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -54,17 +73,46 @@ export default function Connections() {
     }
   }, [currentWorkspace]);
 
+  // Poll for sync progress when syncing
+  useEffect(() => {
+    const smartleadConnection = connections.find(c => c.platform === 'smartlead');
+    if (smartleadConnection?.sync_status === 'syncing') {
+      const interval = setInterval(fetchConnections, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [connections]);
+
   const fetchConnections = async () => {
     if (!currentWorkspace) return;
 
     try {
       const { data, error } = await supabase
         .from('api_connections')
-        .select('id, platform, is_active, last_sync_at, sync_status, created_at')
+        .select('id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at')
         .eq('workspace_id', currentWorkspace.id);
 
       if (error) throw error;
-      setConnections(data || []);
+      
+      // Parse sync_progress from JSON
+      const parsedData = (data || []).map(conn => ({
+        ...conn,
+        sync_progress: conn.sync_progress as SyncProgress | null,
+      }));
+      
+      setConnections(parsedData);
+      
+      // Check if sync just completed
+      const prevSmartlead = connections.find(c => c.platform === 'smartlead');
+      const currSmartlead = parsedData.find(c => c.platform === 'smartlead');
+      if (prevSmartlead?.sync_status === 'syncing' && currSmartlead?.sync_status === 'success') {
+        setIsSyncing(false);
+        const progress = currSmartlead.sync_progress;
+        setSuccess(
+          `Sync complete! Synced ${progress?.campaigns_synced || 0} campaigns, ` +
+          `${progress?.variants_synced || 0} email variants, ` +
+          `${progress?.email_accounts_synced || 0} email accounts.`
+        );
+      }
     } catch (err) {
       console.error('Error fetching connections:', err);
     } finally {
@@ -83,14 +131,12 @@ export default function Connections() {
     setIsConnecting(true);
 
     try {
-      // For now, we'll store the API key directly (in production, encrypt this)
-      // TODO: Implement proper encryption via edge function
       const { error } = await supabase
         .from('api_connections')
         .upsert({
           workspace_id: currentWorkspace.id,
           platform,
-          api_key_encrypted: apiKey, // Should be encrypted
+          api_key_encrypted: apiKey,
           is_active: true,
           sync_status: 'pending',
           created_by: user.id,
@@ -124,8 +170,42 @@ export default function Connections() {
     }
   };
 
+  const handlePullFullHistory = async () => {
+    if (!currentWorkspace) return;
+    
+    setError(null);
+    setSuccess(null);
+    setIsSyncing(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await supabase.functions.invoke('smartlead-sync', {
+        body: { 
+          workspace_id: currentWorkspace.id,
+          sync_type: 'full'
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Sync failed');
+      }
+
+      // The polling will handle success message
+    } catch (err: any) {
+      console.error('Sync error:', err);
+      setError(err.message || 'Failed to start sync');
+      setIsSyncing(false);
+    }
+  };
+
   const smartleadConnection = connections.find(c => c.platform === 'smartlead');
   const replyioConnection = connections.find(c => c.platform === 'replyio');
+  const isSyncingSmartlead = smartleadConnection?.sync_status === 'syncing' || isSyncing;
+  const syncProgress = smartleadConnection?.sync_progress;
 
   if (authLoading || !user) {
     return (
@@ -147,6 +227,7 @@ export default function Connections() {
 
         {error && (
           <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
@@ -185,8 +266,26 @@ export default function Connections() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Status</span>
-                    <span className="capitalize">{smartleadConnection.sync_status || 'Active'}</span>
+                    <span className="capitalize">
+                      {isSyncingSmartlead ? 'Syncing...' : (smartleadConnection.sync_status || 'Active')}
+                    </span>
                   </div>
+                  
+                  {/* Sync Progress */}
+                  {isSyncingSmartlead && syncProgress && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          {syncProgress.campaign_name 
+                            ? `Syncing: ${syncProgress.campaign_name}` 
+                            : 'Starting sync...'}
+                        </span>
+                        <span>{syncProgress.current || 0} / {syncProgress.total || '?'}</span>
+                      </div>
+                      <Progress value={syncProgress.progress || 0} className="h-2" />
+                    </div>
+                  )}
+
                   {smartleadConnection.last_sync_at && (
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">Last Sync</span>
@@ -196,16 +295,51 @@ export default function Connections() {
                       </span>
                     </div>
                   )}
+                  
+                  {smartleadConnection.last_full_sync_at && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Last Full Sync</span>
+                      <span className="flex items-center gap-1">
+                        <Download className="h-3 w-3" />
+                        {new Date(smartleadConnection.last_full_sync_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Sync Results */}
+                  {syncProgress?.step === 'complete' && (
+                    <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
+                      <p className="font-medium mb-1">Last sync results:</p>
+                      <p>{syncProgress.campaigns_synced} campaigns, {syncProgress.variants_synced} variants, {syncProgress.email_accounts_synced} email accounts</p>
+                    </div>
+                  )}
+
                   <div className="flex gap-2 pt-2">
-                    <Button variant="outline" size="sm" className="flex-1">
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Sync Now
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={handlePullFullHistory}
+                      disabled={isSyncingSmartlead}
+                    >
+                      {isSyncingSmartlead ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="mr-2 h-4 w-4" />
+                          Pull Full History
+                        </>
+                      )}
                     </Button>
                     <Button 
                       variant="outline" 
                       size="sm"
                       className="text-destructive hover:text-destructive"
                       onClick={() => handleDisconnect(smartleadConnection.id)}
+                      disabled={isSyncingSmartlead}
                     >
                       Disconnect
                     </Button>
@@ -294,19 +428,19 @@ export default function Connections() {
               <div className="p-4 rounded-lg bg-accent/30">
                 <h4 className="font-medium mb-1">Historical Backfill</h4>
                 <p className="text-sm text-muted-foreground">
-                  On first connect, we import 6+ months of historical campaign data
+                  Click "Pull Full History" to import all campaigns, email variants, and metrics
                 </p>
               </div>
               <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Incremental Sync</h4>
+                <h4 className="font-medium mb-1">Email Copy Analytics</h4>
                 <p className="text-sm text-muted-foreground">
-                  Every 15 minutes, we fetch new events and update metrics
+                  Subject lines and body copy are synced with performance metrics
                 </p>
               </div>
               <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Webhook Replies</h4>
+                <h4 className="font-medium mb-1">Copy Insights</h4>
                 <p className="text-sm text-muted-foreground">
-                  Reply events are received in real-time via webhooks
+                  View your synced copy analytics on the Copy Insights page
                 </p>
               </div>
             </div>
