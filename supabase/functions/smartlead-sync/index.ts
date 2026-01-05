@@ -213,13 +213,15 @@ serve(async (req) => {
             );
 
             for (const seq of sequences) {
-              for (const variant of seq.seq_variants) {
+              // Handle cases where seq_variants might be undefined or not an array
+              const variants = Array.isArray(seq.seq_variants) ? seq.seq_variants : [];
+              for (const variant of variants) {
                 const { error: variantError } = await supabase
                   .from('campaign_variants')
                   .upsert({
                     campaign_id: campaignDbId,
                     platform_variant_id: String(variant.id),
-                    name: `Step ${seq.seq_number} - ${variant.variant_label}`,
+                    name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
                     variant_type: variant.variant_label || 'A',
                     subject_line: variant.subject,
                     body_preview: variant.email_body?.substring(0, 500),
