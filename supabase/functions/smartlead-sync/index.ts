@@ -142,14 +142,31 @@ serve(async (req) => {
 
     const apiKey = connection.api_key_encrypted;
 
-    // Update sync status to 'syncing'
-    await supabase
+    // Read current connection state so we can resume without resetting progress
+    const { data: existingConn, error: existingConnError } = await supabase
       .from('api_connections')
-      .update({ 
-        sync_status: 'syncing',
-        sync_progress: { step: 'starting', progress: 0 }
-      })
-      .eq('id', connection.id);
+      .select('sync_status, sync_progress')
+      .eq('id', connection.id)
+      .maybeSingle();
+
+    if (existingConnError) {
+      throw existingConnError;
+    }
+
+    // If this is a fresh run (not currently syncing), mark as syncing.
+    // IMPORTANT: don't overwrite sync_progress when resuming.
+    if (existingConn?.sync_status !== 'syncing') {
+      await supabase
+        .from('api_connections')
+        .update({
+          sync_status: 'syncing',
+          sync_progress: { step: 'starting', progress: 0, current: 0 },
+        })
+        .eq('id', connection.id);
+    }
+
+    const existingProgress = (existingConn?.sync_progress ?? {}) as Record<string, unknown>;
+    const resumeFrom = typeof existingProgress.current === 'number' ? existingProgress.current : 0;
 
     const progress = {
       campaigns_synced: 0,
@@ -165,20 +182,27 @@ serve(async (req) => {
       const campaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
       console.log(`Found ${campaigns.length} campaigns`);
 
-      // Update progress
+      // Process in small batches to avoid request timeouts
+      const BATCH_SIZE = 5;
+      const startIndex = Math.max(0, Math.min(resumeFrom, campaigns.length));
+      const endIndex = Math.min(startIndex + BATCH_SIZE, campaigns.length);
+
+      console.log(`Processing batch ${startIndex}-${endIndex} of ${campaigns.length}`);
+
+      // Update progress (batch start)
       await supabase
         .from('api_connections')
-        .update({ 
-          sync_progress: { 
-            step: 'campaigns', 
-            total: campaigns.length, 
-            current: 0,
-            progress: 5 
-          }
+        .update({
+          sync_progress: {
+            step: 'campaigns',
+            total: campaigns.length,
+            current: startIndex,
+            progress: Math.round((startIndex / Math.max(1, campaigns.length)) * 90) + 5,
+          },
         })
         .eq('id', connection.id);
 
-      for (let i = 0; i < campaigns.length; i++) {
+      for (let i = startIndex; i < endIndex; i++) {
         const campaign = campaigns[i];
         console.log(`Processing campaign ${i + 1}/${campaigns.length}: ${campaign.name}`);
 
@@ -186,13 +210,16 @@ serve(async (req) => {
           // Upsert campaign
           const { data: upsertedCampaign, error: campError } = await supabase
             .from('campaigns')
-            .upsert({
-              workspace_id,
-              platform: 'smartlead',
-              platform_id: String(campaign.id),
-              name: campaign.name,
-              status: campaign.status?.toLowerCase() || 'active',
-            }, { onConflict: 'workspace_id,platform_id,platform' })
+            .upsert(
+              {
+                workspace_id,
+                platform: 'smartlead',
+                platform_id: String(campaign.id),
+                name: campaign.name,
+                status: campaign.status?.toLowerCase() || 'active',
+              },
+              { onConflict: 'workspace_id,platform_id,platform' }
+            )
             .select('id')
             .single();
 
@@ -208,7 +235,7 @@ serve(async (req) => {
           // 2. Fetch sequences (email copy variants)
           try {
             const sequences: SmartleadSequence[] = await smartleadRequest(
-              `/campaigns/${campaign.id}/sequences`, 
+              `/campaigns/${campaign.id}/sequences`,
               apiKey
             );
 
@@ -218,24 +245,28 @@ serve(async (req) => {
               for (const variant of variants) {
                 const emailBody = variant.email_body || '';
                 const wordCount = emailBody.split(/\s+/).filter(Boolean).length;
-                
+
                 // Extract personalization variables like {{first_name}}, {{company}}
-                const personalizationVars = [...emailBody.matchAll(/\{\{(\w+)\}\}/g)]
-                  .map(match => match[1]);
-                
+                const personalizationVars = [...emailBody.matchAll(/\{\{(\w+)\}\}/g)].map(
+                  (match) => match[1]
+                );
+
                 const { error: variantError } = await supabase
                   .from('campaign_variants')
-                  .upsert({
-                    campaign_id: campaignDbId,
-                    platform_variant_id: String(variant.id),
-                    name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
-                    variant_type: variant.variant_label || 'A',
-                    subject_line: variant.subject,
-                    body_preview: emailBody.substring(0, 500),
-                    email_body: emailBody,
-                    word_count: wordCount,
-                    personalization_vars: personalizationVars,
-                  }, { onConflict: 'campaign_id,platform_variant_id' });
+                  .upsert(
+                    {
+                      campaign_id: campaignDbId,
+                      platform_variant_id: String(variant.id),
+                      name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
+                      variant_type: variant.variant_label || 'A',
+                      subject_line: variant.subject,
+                      body_preview: emailBody.substring(0, 500),
+                      email_body: emailBody,
+                      word_count: wordCount,
+                      personalization_vars: personalizationVars,
+                    },
+                    { onConflict: 'campaign_id,platform_variant_id' }
+                  );
 
                 if (!variantError) {
                   progress.variants_synced++;
@@ -256,16 +287,19 @@ serve(async (req) => {
             for (const account of emailAccounts) {
               const { error: accountError } = await supabase
                 .from('email_accounts')
-                .upsert({
-                  workspace_id,
-                  platform: 'smartlead',
-                  platform_id: String(account.id),
-                  email_address: account.from_email,
-                  sender_name: account.from_name,
-                  daily_limit: account.message_per_day,
-                  warmup_enabled: account.warmup_details?.status === 'ACTIVE',
-                  is_active: true,
-                }, { onConflict: 'workspace_id,platform_id,platform' });
+                .upsert(
+                  {
+                    workspace_id,
+                    platform: 'smartlead',
+                    platform_id: String(account.id),
+                    email_address: account.from_email,
+                    sender_name: account.from_name,
+                    daily_limit: account.message_per_day,
+                    warmup_enabled: account.warmup_details?.status === 'ACTIVE',
+                    is_active: true,
+                  },
+                  { onConflict: 'workspace_id,platform_id,platform' }
+                );
 
               if (!accountError) {
                 progress.email_accounts_synced++;
@@ -287,18 +321,21 @@ serve(async (req) => {
 
             const { error: metricsError } = await supabase
               .from('daily_metrics')
-              .upsert({
-                workspace_id,
-                campaign_id: campaignDbId,
-                date: today,
-                sent_count: analytics.sent_count || 0,
-                delivered_count: analytics.unique_sent_count || 0,
-                opened_count: analytics.unique_open_count || 0,
-                clicked_count: analytics.unique_click_count || 0,
-                replied_count: analytics.reply_count || 0,
-                bounced_count: analytics.bounce_count || 0,
-                unsubscribed_count: analytics.unsubscribe_count || 0,
-              }, { onConflict: 'workspace_id,campaign_id,date' });
+              .upsert(
+                {
+                  workspace_id,
+                  campaign_id: campaignDbId,
+                  date: today,
+                  sent_count: analytics.sent_count || 0,
+                  delivered_count: analytics.unique_sent_count || 0,
+                  opened_count: analytics.unique_open_count || 0,
+                  clicked_count: analytics.unique_click_count || 0,
+                  replied_count: analytics.reply_count || 0,
+                  bounced_count: analytics.bounce_count || 0,
+                  unsubscribed_count: analytics.unsubscribe_count || 0,
+                },
+                { onConflict: 'workspace_id,campaign_id,date' }
+              );
 
             if (!metricsError) {
               progress.metrics_created++;
@@ -310,58 +347,72 @@ serve(async (req) => {
           // Update progress
           await supabase
             .from('api_connections')
-            .update({ 
-              sync_progress: { 
-                step: 'campaigns', 
-                total: campaigns.length, 
+            .update({
+              sync_progress: {
+                step: 'campaigns',
+                total: campaigns.length,
                 current: i + 1,
                 campaign_name: campaign.name,
-                progress: Math.round(((i + 1) / campaigns.length) * 90) + 5
-              }
+                progress: Math.round(((i + 1) / Math.max(1, campaigns.length)) * 90) + 5,
+                ...progress,
+              },
             })
             .eq('id', connection.id);
-
         } catch (campaignError) {
           console.error(`Error processing campaign ${campaign.id}:`, campaignError);
           progress.errors.push(`Campaign ${campaign.name}: ${String(campaignError)}`);
         }
       }
 
-      // Mark sync as complete
+      const isComplete = endIndex >= campaigns.length;
+
+      // Mark sync as complete or keep syncing for next batch
       await supabase
         .from('api_connections')
-        .update({ 
-          sync_status: 'success',
-          last_sync_at: new Date().toISOString(),
-          last_full_sync_at: sync_type === 'full' ? new Date().toISOString() : undefined,
-          sync_progress: { 
-            step: 'complete', 
-            progress: 100,
-            ...progress
-          }
+        .update({
+          sync_status: isComplete ? 'success' : 'syncing',
+          last_sync_at: isComplete ? new Date().toISOString() : undefined,
+          last_full_sync_at:
+            isComplete && sync_type === 'full' ? new Date().toISOString() : undefined,
+          sync_progress: {
+            step: isComplete ? 'complete' : 'campaigns',
+            total: campaigns.length,
+            current: endIndex,
+            progress: isComplete
+              ? 100
+              : Math.round((endIndex / Math.max(1, campaigns.length)) * 90) + 5,
+            ...progress,
+          },
         })
         .eq('id', connection.id);
 
-      return new Response(JSON.stringify({
-        success: true,
-        message: 'Sync completed successfully',
-        ...progress,
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-
+      return new Response(
+        JSON.stringify({
+          success: true,
+          done: isComplete,
+          next_index: endIndex,
+          total: campaigns.length,
+          message: isComplete
+            ? 'Sync completed successfully'
+            : 'Batch completed; call again to continue',
+          ...progress,
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     } catch (syncError) {
       console.error('Sync error:', syncError);
-      
+
       await supabase
         .from('api_connections')
-        .update({ 
+        .update({
           sync_status: 'error',
-          sync_progress: { 
-            step: 'error', 
+          sync_progress: {
+            step: 'error',
             error: String(syncError),
-            ...progress
-          }
+            ...progress,
+          },
         })
         .eq('id', connection.id);
 
