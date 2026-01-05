@@ -58,6 +58,7 @@ export default function Connections() {
   const [apiKey, setApiKey] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isResumingSync, setIsResumingSync] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -73,14 +74,21 @@ export default function Connections() {
     }
   }, [currentWorkspace]);
 
-  // Poll for sync progress when syncing
+  // Poll for sync progress AND keep nudging batch sync forward
   useEffect(() => {
     const smartleadConnection = connections.find(c => c.platform === 'smartlead');
     if (smartleadConnection?.sync_status === 'syncing') {
-      const interval = setInterval(fetchConnections, 2000);
-      return () => clearInterval(interval);
+      const pollInterval = setInterval(fetchConnections, 2000);
+      const resumeInterval = setInterval(() => {
+        void continueSmartleadSync();
+      }, 12000);
+
+      return () => {
+        clearInterval(pollInterval);
+        clearInterval(resumeInterval);
+      };
     }
-  }, [connections]);
+  }, [connections, currentWorkspace?.id]);
 
   const fetchConnections = async () => {
     if (!currentWorkspace) return;
@@ -170,9 +178,34 @@ export default function Connections() {
     }
   };
 
+  const continueSmartleadSync = async () => {
+    if (!currentWorkspace || isResumingSync) return;
+
+    try {
+      setIsResumingSync(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      await supabase.functions.invoke('smartlead-sync', {
+        body: {
+          workspace_id: currentWorkspace.id,
+          sync_type: 'full',
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+    } catch (e) {
+      // Silent: progress polling + error state in DB will surface
+      console.error('Continue sync error:', e);
+    } finally {
+      setIsResumingSync(false);
+    }
+  };
+
   const handlePullFullHistory = async () => {
     if (!currentWorkspace) return;
-    
+
     setError(null);
     setSuccess(null);
     setIsSyncing(true);
@@ -184,20 +217,21 @@ export default function Connections() {
       }
 
       const response = await supabase.functions.invoke('smartlead-sync', {
-        body: { 
+        body: {
           workspace_id: currentWorkspace.id,
-          sync_type: 'full'
+          sync_type: 'full',
         },
         headers: {
-          Authorization: `Bearer ${session.access_token}`
-        }
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       if (response.error) {
         throw new Error(response.error.message || 'Sync failed');
       }
 
-      // The polling will handle success message
+      // Kick off the next batch soon (polling effect will take over)
+      void continueSmartleadSync();
     } catch (err: any) {
       console.error('Sync error:', err);
       setError(err.message || 'Failed to start sync');
