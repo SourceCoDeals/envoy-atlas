@@ -179,8 +179,8 @@ export default function Connections() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.');
       }
 
       const response = await supabase.functions.invoke('smartlead-sync', {
@@ -188,6 +188,9 @@ export default function Connections() {
           workspace_id: currentWorkspace.id,
           sync_type: 'full'
         },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
       });
 
       if (response.error) {

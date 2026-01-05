@@ -73,14 +73,25 @@ async function smartleadRequest(endpoint: string, apiKey: string) {
 }
 
 serve(async (req) => {
+  console.log('smartlead-sync: Request received', { 
+    method: req.method, 
+    hasAuth: !!req.headers.get('Authorization'),
+  });
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const authHeader = req.headers.get('Authorization');
+    console.log('smartlead-sync: Auth header present:', !!authHeader);
+    
     if (!authHeader) {
-      throw new Error('Missing authorization header');
+      console.error('smartlead-sync: Missing authorization header');
+      return new Response(
+        JSON.stringify({ error: 'Missing authorization header' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
