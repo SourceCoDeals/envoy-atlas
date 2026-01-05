@@ -109,27 +109,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      
-      // Create workspace
-      const { data: workspace, error: wsError } = await supabase
-        .from('workspaces')
-        .insert({ name, slug })
-        .select()
-        .single();
+      // Use the atomic create_workspace function to avoid RLS bootstrapping issues
+      const { data: workspace, error: rpcError } = await supabase
+        .rpc('create_workspace', { _name: name });
 
-      if (wsError) throw wsError;
-
-      // Add current user as admin
-      const { error: memberError } = await supabase
-        .from('workspace_members')
-        .insert({
-          workspace_id: workspace.id,
-          user_id: user.id,
-          role: 'admin',
-        });
-
-      if (memberError) throw memberError;
+      if (rpcError) throw rpcError;
 
       // Refresh workspaces
       await fetchWorkspaces();
