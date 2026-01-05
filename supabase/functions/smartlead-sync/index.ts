@@ -216,6 +216,13 @@ serve(async (req) => {
               // Handle cases where seq_variants might be undefined or not an array
               const variants = Array.isArray(seq.seq_variants) ? seq.seq_variants : [];
               for (const variant of variants) {
+                const emailBody = variant.email_body || '';
+                const wordCount = emailBody.split(/\s+/).filter(Boolean).length;
+                
+                // Extract personalization variables like {{first_name}}, {{company}}
+                const personalizationVars = [...emailBody.matchAll(/\{\{(\w+)\}\}/g)]
+                  .map(match => match[1]);
+                
                 const { error: variantError } = await supabase
                   .from('campaign_variants')
                   .upsert({
@@ -224,7 +231,10 @@ serve(async (req) => {
                     name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
                     variant_type: variant.variant_label || 'A',
                     subject_line: variant.subject,
-                    body_preview: variant.email_body?.substring(0, 500),
+                    body_preview: emailBody.substring(0, 500),
+                    email_body: emailBody,
+                    word_count: wordCount,
+                    personalization_vars: personalizationVars,
                   }, { onConflict: 'campaign_id,platform_variant_id' });
 
                 if (!variantError) {
