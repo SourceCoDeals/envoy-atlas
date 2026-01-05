@@ -282,34 +282,46 @@ export type Database = {
           body_preview: string | null
           campaign_id: string
           created_at: string
+          email_body: string | null
           id: string
           is_control: boolean | null
           name: string
+          personalization_vars: Json | null
           platform_variant_id: string | null
           subject_line: string | null
+          updated_at: string | null
           variant_type: string
+          word_count: number | null
         }
         Insert: {
           body_preview?: string | null
           campaign_id: string
           created_at?: string
+          email_body?: string | null
           id?: string
           is_control?: boolean | null
           name: string
+          personalization_vars?: Json | null
           platform_variant_id?: string | null
           subject_line?: string | null
+          updated_at?: string | null
           variant_type: string
+          word_count?: number | null
         }
         Update: {
           body_preview?: string | null
           campaign_id?: string
           created_at?: string
+          email_body?: string | null
           id?: string
           is_control?: boolean | null
           name?: string
+          personalization_vars?: Json | null
           platform_variant_id?: string | null
           subject_line?: string | null
+          updated_at?: string | null
           variant_type?: string
+          word_count?: number | null
         }
         Relationships: [
           {
@@ -453,6 +465,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "daily_metrics_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+          {
             foreignKeyName: "daily_metrics_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
@@ -551,6 +570,13 @@ export type Database = {
             referencedRelation: "campaign_variants"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "experiment_variants_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
         ]
       }
       experiments: {
@@ -631,6 +657,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "campaign_variants"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "experiments_winner_variant_id_fkey"
+            columns: ["winner_variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
           },
           {
             foreignKeyName: "experiments_workspace_id_fkey"
@@ -725,6 +758,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "campaign_variants"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
           },
           {
             foreignKeyName: "message_events_workspace_id_fkey"
@@ -959,6 +999,13 @@ export type Database = {
             referencedRelation: "campaign_variants"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "sequence_steps_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
         ]
       }
       user_roles: {
@@ -1040,7 +1087,46 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      copy_performance: {
+        Row: {
+          body_preview: string | null
+          campaign_id: string | null
+          campaign_name: string | null
+          click_rate: number | null
+          email_body: string | null
+          is_control: boolean | null
+          open_rate: number | null
+          personalization_vars: Json | null
+          positive_reply_rate: number | null
+          reply_rate: number | null
+          subject_line: string | null
+          total_clicked: number | null
+          total_opened: number | null
+          total_positive_replies: number | null
+          total_replied: number | null
+          total_sent: number | null
+          variant_id: string | null
+          variant_name: string | null
+          variant_type: string | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_variants_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       create_workspace: {
