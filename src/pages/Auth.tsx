@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,6 +25,41 @@ export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+
+  // Dev auto-login
+  useEffect(() => {
+    const devAutoLogin = async () => {
+      if (user || authLoading) return;
+      
+      // Only in dev/preview environments
+      const isDev = window.location.hostname.includes('lovable.app') || 
+                    window.location.hostname === 'localhost';
+      if (!isDev) return;
+
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('dev-auto-login', {
+          body: { email: 'tomos.mughan@sourcecodeals.com' }
+        });
+
+        if (error) {
+          console.error('Auto-login error:', error);
+          setIsLoading(false);
+          return;
+        }
+
+        if (data?.session) {
+          await supabase.auth.setSession(data.session);
+          navigate('/');
+        }
+      } catch (err) {
+        console.error('Auto-login failed:', err);
+      }
+      setIsLoading(false);
+    };
+
+    devAutoLogin();
+  }, [authLoading, user, navigate]);
 
   // Redirect if already logged in
   useEffect(() => {
