@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
+import { useLocation } from 'react-router-dom';
 
 export interface ChatMessage {
   id: string;
@@ -9,12 +10,93 @@ export interface ChatMessage {
   timestamp: Date;
 }
 
+interface QueryContext {
+  currentPage: string;
+  activeFilters?: Record<string, string>;
+  selectedCampaignId?: string;
+  timeRange?: string;
+}
+
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/copy-insights-chat`;
+
+// Page-specific suggested prompts
+const PAGE_SUGGESTIONS: Record<string, string[]> = {
+  'dashboard': [
+    "Give me a performance summary",
+    "What needs my attention today?",
+    "How are we trending vs last month?",
+    "What's our biggest opportunity right now?",
+  ],
+  'campaigns': [
+    "Which campaigns should I scale?",
+    "What's wrong with underperforming campaigns?",
+    "Rank my campaigns by performance",
+    "Which campaigns need attention?",
+  ],
+  'copy-insights': [
+    "What subject lines work best?",
+    "What's the optimal email length?",
+    "What CTA drives the most meetings?",
+    "Are any templates burning out?",
+    "Generate 3 new subject line variants",
+  ],
+  'audience': [
+    "Which segment performs best?",
+    "Is our ICP validated?",
+    "Any segments showing fatigue?",
+    "Where should I focus my volume?",
+  ],
+  'deliverability': [
+    "Is it safe to send right now?",
+    "What's my deliverability risk?",
+    "Any domain authentication issues?",
+    "Which mailbox has problems?",
+  ],
+  'experiments': [
+    "What experiments are running?",
+    "What should I test next?",
+    "Did we find any winners?",
+    "How long until results are ready?",
+  ],
+  'inbox': [
+    "Any hot leads right now?",
+    "What should I respond to first?",
+    "How many positive replies today?",
+    "Show me meeting requests",
+  ],
+  'default': [
+    "What's my reply rate?",
+    "Which campaigns are performing best?",
+    "Why did performance change?",
+    "What should I focus on?",
+    "Give me actionable recommendations",
+  ],
+};
 
 export function useCopyInsightsChat() {
   const { currentWorkspace } = useWorkspace();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const location = useLocation();
+
+  // Derive current page from location
+  const currentPage = useMemo(() => {
+    const path = location.pathname.replace('/', '') || 'dashboard';
+    return path;
+  }, [location.pathname]);
+
+  // Get page-specific suggestions
+  const suggestedPrompts = useMemo(() => {
+    return PAGE_SUGGESTIONS[currentPage] || PAGE_SUGGESTIONS['default'];
+  }, [currentPage]);
+
+  // Build context from current state
+  const getContext = useCallback((): QueryContext => {
+    return {
+      currentPage,
+      // Could be extended to include filters, selected campaigns, etc.
+    };
+  }, [currentPage]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (!currentWorkspace?.id) {
@@ -68,11 +150,18 @@ export function useCopyInsightsChat() {
         body: JSON.stringify({
           messages: allMessages,
           workspaceId: currentWorkspace.id,
+          context: getContext(),
         }),
       });
 
       if (!resp.ok) {
         const errorData = await resp.json().catch(() => ({}));
+        if (resp.status === 429) {
+          throw new Error('Rate limit exceeded. Please wait a moment and try again.');
+        }
+        if (resp.status === 402) {
+          throw new Error('AI credits exhausted. Add credits in Settings → Workspace → Usage.');
+        }
         throw new Error(errorData.error || `Request failed with status ${resp.status}`);
       }
 
@@ -137,7 +226,7 @@ export function useCopyInsightsChat() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentWorkspace?.id, messages]);
+  }, [currentWorkspace?.id, messages, getContext]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -148,5 +237,7 @@ export function useCopyInsightsChat() {
     isLoading,
     sendMessage,
     clearMessages,
+    suggestedPrompts,
+    currentPage,
   };
 }
