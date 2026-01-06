@@ -282,6 +282,7 @@ export type Database = {
           body_avg_sentence_length: number | null
           body_bullet_point_count: number | null
           body_cta_position: string | null
+          body_cta_strength: string | null
           body_cta_type: string | null
           body_has_calendar_link: boolean | null
           body_has_link: boolean | null
@@ -294,6 +295,7 @@ export type Database = {
           body_reading_grade: number | null
           body_sentence_count: number | null
           body_tone: string | null
+          body_value_proposition_count: number | null
           body_word_count: number | null
           extracted_at: string | null
           id: string
@@ -306,6 +308,7 @@ export type Database = {
           subject_personalization_count: number | null
           subject_personalization_position: number | null
           subject_spam_score: number | null
+          subject_urgency_score: number | null
           subject_word_count: number | null
           updated_at: string | null
           variant_id: string
@@ -315,6 +318,7 @@ export type Database = {
           body_avg_sentence_length?: number | null
           body_bullet_point_count?: number | null
           body_cta_position?: string | null
+          body_cta_strength?: string | null
           body_cta_type?: string | null
           body_has_calendar_link?: boolean | null
           body_has_link?: boolean | null
@@ -327,6 +331,7 @@ export type Database = {
           body_reading_grade?: number | null
           body_sentence_count?: number | null
           body_tone?: string | null
+          body_value_proposition_count?: number | null
           body_word_count?: number | null
           extracted_at?: string | null
           id?: string
@@ -339,6 +344,7 @@ export type Database = {
           subject_personalization_count?: number | null
           subject_personalization_position?: number | null
           subject_spam_score?: number | null
+          subject_urgency_score?: number | null
           subject_word_count?: number | null
           updated_at?: string | null
           variant_id: string
@@ -348,6 +354,7 @@ export type Database = {
           body_avg_sentence_length?: number | null
           body_bullet_point_count?: number | null
           body_cta_position?: string | null
+          body_cta_strength?: string | null
           body_cta_type?: string | null
           body_has_calendar_link?: boolean | null
           body_has_link?: boolean | null
@@ -360,6 +367,7 @@ export type Database = {
           body_reading_grade?: number | null
           body_sentence_count?: number | null
           body_tone?: string | null
+          body_value_proposition_count?: number | null
           body_word_count?: number | null
           extracted_at?: string | null
           id?: string
@@ -372,6 +380,7 @@ export type Database = {
           subject_personalization_count?: number | null
           subject_personalization_position?: number | null
           subject_spam_score?: number | null
+          subject_urgency_score?: number | null
           subject_word_count?: number | null
           updated_at?: string | null
           variant_id?: string

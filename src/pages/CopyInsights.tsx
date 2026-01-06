@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -29,6 +29,9 @@ import {
   Lightbulb,
   AlertCircle,
   BookMarked,
+  GitCompare,
+  Target,
+  Ruler,
 } from 'lucide-react';
 import { SaveToLibraryDialog } from '@/components/copylibrary/SaveToLibraryDialog';
 import { useCopyAnalytics, type SubjectLineAnalysis, type BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
@@ -48,6 +51,11 @@ import {
 } from 'recharts';
 import { AIRecommendationsPanel } from '@/components/copyinsights/AIRecommendationsPanel';
 import { VariantSuggestionModal } from '@/components/copyinsights/VariantSuggestionModal';
+import { CTAAnalysisSection } from '@/components/copyinsights/CTAAnalysisSection';
+import { LengthImpactSection } from '@/components/copyinsights/LengthImpactSection';
+import { CopyDecaySection } from '@/components/copyinsights/CopyDecaySection';
+import { CopyComparisonDialog } from '@/components/copyinsights/CopyComparisonDialog';
+import { CopyPerformanceSummary } from '@/components/copyinsights/CopyPerformanceSummary';
 
 type SortField = 'reply_rate' | 'open_rate' | 'positive_rate' | 'sent_count';
 type SortOrder = 'asc' | 'desc';
