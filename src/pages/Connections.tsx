@@ -82,6 +82,7 @@ export default function Connections() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isResumingSync, setIsResumingSync] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [isSyncingReplyio, setIsSyncingReplyio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -341,10 +342,60 @@ export default function Connections() {
     }
   };
 
+  const handleReplyioSync = async (reset = false) => {
+    if (!currentWorkspace) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncingReplyio(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.');
+      }
+
+      const response = await supabase.functions.invoke('replyio-sync', {
+        body: {
+          workspace_id: currentWorkspace.id,
+          sync_type: 'full',
+          reset,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Sync failed');
+      }
+
+      const data = response.data;
+      if (data?.done) {
+        setSuccess(
+          `Reply.io sync complete! Synced ${data.campaigns_synced || 0} campaigns, ` +
+          `${data.leads_synced || 0} leads, ` +
+          `${data.email_accounts_synced || 0} email accounts.`
+        );
+        setIsSyncingReplyio(false);
+      } else if (data?.success) {
+        setSuccess('Reply.io sync in progress. This page will update automatically.');
+      }
+      
+      fetchConnections();
+    } catch (err: any) {
+      console.error('Reply.io sync error:', err);
+      setError(err.message || 'Failed to sync Reply.io');
+      setIsSyncingReplyio(false);
+    }
+  };
+
   const smartleadConnection = connections.find(c => c.platform === 'smartlead');
   const replyioConnection = connections.find(c => c.platform === 'replyio');
   const isSyncingSmartlead = smartleadConnection?.sync_status === 'syncing' || isSyncing;
+  const isSyncingReplyioActive = replyioConnection?.sync_status === 'syncing' || isSyncingReplyio;
   const syncProgress = smartleadConnection?.sync_progress;
+  const replyioSyncProgress = replyioConnection?.sync_progress;
 
   if (authLoading || !user) {
     return (
@@ -616,9 +667,26 @@ export default function Connections() {
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Status</span>
                     <span className="capitalize">
-                      {replyioConnection.sync_status || 'Active'}
+                      {isSyncingReplyioActive ? 'Syncing...' : (replyioConnection.sync_status || 'Active')}
                     </span>
                   </div>
+                  
+                  {/* Sync Progress */}
+                  {isSyncingReplyioActive && replyioSyncProgress && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          {replyioSyncProgress.campaign_name 
+                            ? `Syncing: ${replyioSyncProgress.campaign_name}` 
+                            : 'Starting sync...'}
+                        </span>
+                        <span>
+                          {replyioSyncProgress.campaign_index ?? 0} / {replyioSyncProgress.total_campaigns ?? '?'}
+                        </span>
+                      </div>
+                      <Progress value={replyioSyncProgress.progress || 0} className="h-2" />
+                    </div>
+                  )}
                   
                   {replyioConnection.last_sync_at && (
                     <div className="flex items-center justify-between text-sm">
@@ -630,15 +698,76 @@ export default function Connections() {
                     </div>
                   )}
 
+                  {/* Sync Results */}
+                  {replyioSyncProgress?.step === 'complete' && (
+                    <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
+                      <p className="font-medium mb-1">Last sync results:</p>
+                      <p>{replyioSyncProgress.campaigns_synced || 0} campaigns, {replyioSyncProgress.leads_synced || 0} leads, {replyioSyncProgress.email_accounts_synced || 0} email accounts</p>
+                    </div>
+                  )}
+
                   <div className="flex gap-2 pt-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleDisconnect(replyioConnection.id)}
-                    >
-                      Disconnect
-                    </Button>
+                    {isSyncingReplyioActive ? (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        disabled
+                      >
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Syncing...
+                      </Button>
+                    ) : (
+                      <>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => handleReplyioSync(false)}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Sync Data
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              title="Reset and re-sync from scratch"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="flex items-center gap-2">
+                                <AlertTriangle className="h-5 w-5 text-destructive" />
+                                Reset Reply.io Sync Data?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will delete all synced Reply.io data and start a full re-sync from scratch.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleReplyioSync(true)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                Reset & Full Sync
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleDisconnect(replyioConnection.id)}
+                        >
+                          Disconnect
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
