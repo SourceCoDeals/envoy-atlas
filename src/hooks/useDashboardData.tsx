@@ -9,11 +9,15 @@ interface DashboardStats {
   totalReplied: number;
   totalBounced: number;
   totalPositive: number;
+  totalSpam: number;
+  totalDelivered: number;
   openRate: number;
   clickRate: number;
   replyRate: number;
   bounceRate: number;
   positiveRate: number;
+  spamRate: number;
+  deliveredRate: number;
 }
 
 interface TrendData {
@@ -43,8 +47,9 @@ export function useDashboardData() {
   const [hasData, setHasData] = useState(false);
   const [stats, setStats] = useState<DashboardStats>({
     totalSent: 0, totalOpened: 0, totalClicked: 0, totalReplied: 0, 
-    totalBounced: 0, totalPositive: 0, openRate: 0, clickRate: 0,
-    replyRate: 0, bounceRate: 0, positiveRate: 0,
+    totalBounced: 0, totalPositive: 0, totalSpam: 0, totalDelivered: 0,
+    openRate: 0, clickRate: 0, replyRate: 0, bounceRate: 0, 
+    positiveRate: 0, spamRate: 0, deliveredRate: 0,
   });
   const [trendData, setTrendData] = useState<TrendData[]>([]);
   const [topCampaigns, setTopCampaigns] = useState<TopCampaign[]>([]);
@@ -86,7 +91,12 @@ export function useDashboardData() {
         replied: acc.replied + (m.replied_count || 0),
         bounced: acc.bounced + (m.bounced_count || 0),
         positive: acc.positive + (m.positive_reply_count || 0),
-      }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
+        spam: acc.spam + (m.spam_complaint_count || 0),
+        delivered: acc.delivered + (m.delivered_count || 0),
+      }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0, spam: 0, delivered: 0 });
+
+      // Calculate delivered if not tracked separately (sent - bounced)
+      const delivered = totals.delivered > 0 ? totals.delivered : (totals.sent - totals.bounced);
 
       setStats({
         totalSent: totals.sent,
@@ -95,11 +105,15 @@ export function useDashboardData() {
         totalReplied: totals.replied,
         totalBounced: totals.bounced,
         totalPositive: totals.positive,
+        totalSpam: totals.spam,
+        totalDelivered: delivered,
         openRate: totals.sent > 0 ? (totals.opened / totals.sent) * 100 : 0,
         clickRate: totals.sent > 0 ? (totals.clicked / totals.sent) * 100 : 0,
         replyRate: totals.sent > 0 ? (totals.replied / totals.sent) * 100 : 0,
         bounceRate: totals.sent > 0 ? (totals.bounced / totals.sent) * 100 : 0,
         positiveRate: totals.sent > 0 ? (totals.positive / totals.sent) * 100 : 0,
+        spamRate: totals.sent > 0 ? (totals.spam / totals.sent) * 100 : 0,
+        deliveredRate: totals.sent > 0 ? (delivered / totals.sent) * 100 : 0,
       });
 
       // Group by date for trend

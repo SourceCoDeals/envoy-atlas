@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -9,9 +9,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Inbox as InboxIcon, Search, Filter, Mail, Building2, User, Clock, MessageSquare, ThumbsUp, ThumbsDown, Calendar } from 'lucide-react';
+import { Loader2, Inbox as InboxIcon, Search, Mail, Building2, User, Clock, MessageSquare, Calendar, AlertCircle, Timer } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, differenceInHours } from 'date-fns';
+import { 
+  classifyReply, 
+  CLASSIFICATION_CONFIG, 
+  getPrioritySortOrder,
+  type ReplyClassification,
+  type PriorityLevel 
+} from '@/lib/replyClassification';
 
 interface InboxItem {
   id: string;
@@ -34,6 +41,9 @@ interface InboxItem {
   created_at: string;
   subject_line: string | null;
   variant_name: string | null;
+  classification: ReplyClassification;
+  priority: PriorityLevel;
+  hoursAgo: number;
 }
 
 export default function Inbox() {
@@ -44,7 +54,8 @@ export default function Inbox() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null);
-  const [filter, setFilter] = useState<'all' | 'positive' | 'negative' | 'neutral'>('all');
+  const [filter, setFilter] = useState<'all' | 'hot' | 'action' | 'archive'>('all');
+  const [sortBy, setSortBy] = useState<'priority' | 'time'>('priority');
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -88,28 +99,37 @@ export default function Inbox() {
 
       if (error) throw error;
 
-      const formattedItems: InboxItem[] = (data || []).map((item: any) => ({
-        id: item.id,
-        workspace_id: item.workspace_id,
-        campaign_id: item.campaign_id,
-        campaign_name: item.campaigns?.name || 'Unknown Campaign',
-        lead_id: item.lead_id,
-        lead_email: item.leads?.email || item.lead_email || 'Unknown',
-        email_type: item.leads?.email_type || 'work',
-        email_domain: item.leads?.email_domain || '',
-        first_name: item.leads?.first_name,
-        last_name: item.leads?.last_name,
-        company: item.leads?.company,
-        title: item.leads?.title,
-        event_type: item.event_type,
-        reply_content: item.reply_content,
-        reply_sentiment: item.reply_sentiment,
-        sequence_step: item.sequence_step,
-        occurred_at: item.occurred_at,
-        created_at: item.created_at,
-        subject_line: item.campaign_variants?.subject_line,
-        variant_name: item.campaign_variants?.name,
-      }));
+      const formattedItems: InboxItem[] = (data || []).map((item: any) => {
+        const classification = classifyReply(item.reply_content, item.event_type);
+        const config = CLASSIFICATION_CONFIG[classification];
+        const hoursAgo = differenceInHours(new Date(), new Date(item.occurred_at));
+        
+        return {
+          id: item.id,
+          workspace_id: item.workspace_id,
+          campaign_id: item.campaign_id,
+          campaign_name: item.campaigns?.name || 'Unknown Campaign',
+          lead_id: item.lead_id,
+          lead_email: item.leads?.email || item.lead_email || 'Unknown',
+          email_type: item.leads?.email_type || 'work',
+          email_domain: item.leads?.email_domain || '',
+          first_name: item.leads?.first_name,
+          last_name: item.leads?.last_name,
+          company: item.leads?.company,
+          title: item.leads?.title,
+          event_type: item.event_type,
+          reply_content: item.reply_content,
+          reply_sentiment: item.reply_sentiment,
+          sequence_step: item.sequence_step,
+          occurred_at: item.occurred_at,
+          created_at: item.created_at,
+          subject_line: item.campaign_variants?.subject_line,
+          variant_name: item.campaign_variants?.name,
+          classification,
+          priority: config.priority,
+          hoursAgo,
+        };
+      });
 
       setItems(formattedItems);
       if (formattedItems.length > 0 && !selectedItem) {
@@ -122,17 +142,32 @@ export default function Inbox() {
     }
   };
 
-  const getSentimentBadge = (eventType: string, sentiment: string | null) => {
-    if (eventType === 'positive_reply' || eventType === 'interested' || sentiment === 'interested') {
-      return <Badge className="bg-success/20 text-success border-success/30">Positive</Badge>;
+  const getClassificationBadge = (item: InboxItem) => {
+    const config = CLASSIFICATION_CONFIG[item.classification];
+    const isOverdue = 
+      (item.priority === 'P0' && item.hoursAgo > 1) ||
+      (item.priority === 'P1' && item.hoursAgo > 4) ||
+      (item.priority === 'P2' && item.hoursAgo > 24);
+    
+    return (
+      <Badge className={`${config.bgClass} ${config.textClass} ${config.borderClass} text-xs`}>
+        {isOverdue && <Timer className="mr-1 h-3 w-3" />}
+        {config.label}
+      </Badge>
+    );
+  };
+
+  const getPriorityIndicator = (priority: PriorityLevel) => {
+    switch (priority) {
+      case 'P0':
+        return <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />;
+      case 'P1':
+        return <div className="w-2 h-2 rounded-full bg-orange-500" />;
+      case 'P2':
+        return <div className="w-2 h-2 rounded-full bg-yellow-500" />;
+      default:
+        return <div className="w-2 h-2 rounded-full bg-muted-foreground/30" />;
     }
-    if (eventType === 'negative_reply' || eventType === 'not_interested' || sentiment === 'not_interested') {
-      return <Badge className="bg-destructive/20 text-destructive border-destructive/30">Negative</Badge>;
-    }
-    if (eventType === 'out_of_office') {
-      return <Badge variant="secondary">Out of Office</Badge>;
-    }
-    return <Badge variant="outline">Neutral</Badge>;
   };
 
   const getEmailTypeBadge = (emailType: string) => {
@@ -142,26 +177,46 @@ export default function Inbox() {
     return <Badge variant="outline" className="text-xs">Work</Badge>;
   };
 
-  const filteredItems = items.filter(item => {
-    const matchesSearch = 
-      item.lead_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.campaign_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.company && item.company.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (item.reply_content && item.reply_content.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredItems = useMemo(() => {
+    let result = items.filter(item => {
+      const matchesSearch = 
+        item.lead_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.campaign_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.company && item.company.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (item.reply_content && item.reply_content.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    if (filter === 'all') return matchesSearch;
-    if (filter === 'positive') return matchesSearch && (item.event_type === 'positive_reply' || item.event_type === 'interested');
-    if (filter === 'negative') return matchesSearch && (item.event_type === 'negative_reply' || item.event_type === 'not_interested');
-    return matchesSearch && !['positive_reply', 'negative_reply', 'interested', 'not_interested'].includes(item.event_type);
-  });
+      if (filter === 'all') return matchesSearch;
+      if (filter === 'hot') return matchesSearch && ['P0', 'P1'].includes(item.priority);
+      if (filter === 'action') return matchesSearch && ['P2', 'P3'].includes(item.priority);
+      if (filter === 'archive') return matchesSearch && ['P4', 'hold'].includes(item.priority);
+      return matchesSearch;
+    });
 
-  const stats = {
+    // Sort by priority or time
+    if (sortBy === 'priority') {
+      result = result.sort((a, b) => {
+        const priorityDiff = getPrioritySortOrder(a.priority) - getPrioritySortOrder(b.priority);
+        if (priorityDiff !== 0) return priorityDiff;
+        return new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
+      });
+    } else {
+      result = result.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+    }
+
+    return result;
+  }, [items, searchQuery, filter, sortBy]);
+
+  const stats = useMemo(() => ({
     total: items.length,
-    positive: items.filter(i => i.event_type === 'positive_reply' || i.event_type === 'interested').length,
-    negative: items.filter(i => i.event_type === 'negative_reply' || i.event_type === 'not_interested').length,
-    personal: items.filter(i => i.email_type === 'personal').length,
-    work: items.filter(i => i.email_type === 'work').length,
-  };
+    hot: items.filter(i => ['P0', 'P1'].includes(i.priority)).length,
+    action: items.filter(i => ['P2', 'P3'].includes(i.priority)).length,
+    overdue: items.filter(i => {
+      if (i.priority === 'P0' && i.hoursAgo > 1) return true;
+      if (i.priority === 'P1' && i.hoursAgo > 4) return true;
+      if (i.priority === 'P2' && i.hoursAgo > 24) return true;
+      return false;
+    }).length,
+  }), [items]);
 
   if (authLoading || !user) {
     return (
@@ -181,8 +236,8 @@ export default function Inbox() {
           </div>
         </div>
 
-        {/* Stats Row */}
-        <div className="grid gap-4 md:grid-cols-5">
+        {/* Stats Row - Priority Based */}
+        <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
@@ -192,40 +247,31 @@ export default function Inbox() {
               <p className="text-xs text-muted-foreground">Total Replies</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-red-500/30">
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
-                <ThumbsUp className="h-4 w-4 text-success" />
-                <span className="text-2xl font-bold text-success">{stats.positive}</span>
+                <AlertCircle className="h-4 w-4 text-red-500" />
+                <span className="text-2xl font-bold text-red-500">{stats.hot}</span>
               </div>
-              <p className="text-xs text-muted-foreground">Positive</p>
+              <p className="text-xs text-muted-foreground">Hot Leads (P0-P1)</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
-                <ThumbsDown className="h-4 w-4 text-destructive" />
-                <span className="text-2xl font-bold text-destructive">{stats.negative}</span>
+                <Clock className="h-4 w-4 text-yellow-500" />
+                <span className="text-2xl font-bold text-yellow-500">{stats.action}</span>
               </div>
-              <p className="text-xs text-muted-foreground">Negative</p>
+              <p className="text-xs text-muted-foreground">Needs Action (P2-P3)</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className={stats.overdue > 0 ? 'border-destructive/50' : ''}>
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-primary" />
-                <span className="text-2xl font-bold">{stats.work}</span>
+                <Timer className="h-4 w-4 text-destructive" />
+                <span className={`text-2xl font-bold ${stats.overdue > 0 ? 'text-destructive' : ''}`}>{stats.overdue}</span>
               </div>
-              <p className="text-xs text-muted-foreground">Work Emails</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2">
-                <User className="h-4 w-4 text-chart-4" />
-                <span className="text-2xl font-bold">{stats.personal}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">Personal Emails</p>
+              <p className="text-xs text-muted-foreground">Overdue Responses</p>
             </CardContent>
           </Card>
         </div>
@@ -263,42 +309,53 @@ export default function Inbox() {
                 <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
                   <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="all">All</TabsTrigger>
-                    <TabsTrigger value="positive">Positive</TabsTrigger>
-                    <TabsTrigger value="negative">Negative</TabsTrigger>
-                    <TabsTrigger value="neutral">Other</TabsTrigger>
+                    <TabsTrigger value="hot" className="text-red-500">🔥 Hot</TabsTrigger>
+                    <TabsTrigger value="action">Action</TabsTrigger>
+                    <TabsTrigger value="archive">Archive</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </CardHeader>
               <CardContent className="p-0">
                 <ScrollArea className="h-[500px]">
-                  {filteredItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className={`p-4 border-b cursor-pointer hover:bg-accent/50 transition-colors ${
-                        selectedItem?.id === item.id ? 'bg-accent' : ''
-                      }`}
-                      onClick={() => setSelectedItem(item)}
-                    >
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <span className="font-medium text-sm truncate">
-                          {item.first_name || item.lead_email.split('@')[0]}
-                        </span>
-                        {getSentimentBadge(item.event_type, item.reply_sentiment)}
+                  {filteredItems.map((item) => {
+                    const config = CLASSIFICATION_CONFIG[item.classification];
+                    const isOverdue = 
+                      (item.priority === 'P0' && item.hoursAgo > 1) ||
+                      (item.priority === 'P1' && item.hoursAgo > 4) ||
+                      (item.priority === 'P2' && item.hoursAgo > 24);
+                    
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-4 border-b cursor-pointer hover:bg-accent/50 transition-colors ${
+                          selectedItem?.id === item.id ? 'bg-accent' : ''
+                        } ${isOverdue ? 'border-l-2 border-l-destructive' : ''}`}
+                        onClick={() => setSelectedItem(item)}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            {getPriorityIndicator(item.priority)}
+                            <span className="font-medium text-sm truncate">
+                              {item.first_name || item.lead_email.split('@')[0]}
+                            </span>
+                          </div>
+                          {getClassificationBadge(item)}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mb-1 pl-4">
+                          {item.company || item.email_domain}
+                        </p>
+                        <p className="text-xs text-muted-foreground line-clamp-2 pl-4">
+                          {item.reply_content?.substring(0, 100) || 'No content available'}
+                        </p>
+                        <div className="flex items-center gap-2 mt-2 pl-4">
+                          <span className={`text-xs ${isOverdue ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                            {formatDistanceToNow(new Date(item.occurred_at), { addSuffix: true })}
+                            {isOverdue && ' (overdue)'}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground truncate mb-1">
-                        {item.company || item.email_domain}
-                      </p>
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        {item.reply_content?.substring(0, 100) || 'No content available'}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        {getEmailTypeBadge(item.email_type)}
-                        <span className="text-xs text-muted-foreground">
-                          {formatDistanceToNow(new Date(item.occurred_at), { addSuffix: true })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </ScrollArea>
               </CardContent>
             </Card>
@@ -321,8 +378,20 @@ export default function Inbox() {
                         </CardDescription>
                       </div>
                       <div className="flex items-center gap-2">
-                        {getEmailTypeBadge(selectedItem.email_type)}
-                        {getSentimentBadge(selectedItem.event_type, selectedItem.reply_sentiment)}
+                        {getClassificationBadge(selectedItem)}
+                      </div>
+                    </div>
+                    
+                    {/* Recommended Action Banner */}
+                    <div className={`p-3 rounded-lg text-sm ${CLASSIFICATION_CONFIG[selectedItem.classification].bgClass}`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-medium">Recommended: </span>
+                          <span>{CLASSIFICATION_CONFIG[selectedItem.classification].action}</span>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          Target: {CLASSIFICATION_CONFIG[selectedItem.classification].targetResponseTime}
+                        </Badge>
                       </div>
                     </div>
                   </CardHeader>
