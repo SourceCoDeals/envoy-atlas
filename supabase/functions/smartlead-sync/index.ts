@@ -251,25 +251,46 @@ serve(async (req) => {
                   (match) => match[1]
                 );
 
-                const { error: variantError } = await supabase
+                // campaign_variants currently does NOT have a unique constraint on
+                // (campaign_id, platform_variant_id), so we can't rely on upsert.
+                // Instead: find existing row and update, otherwise insert.
+                const { data: existingVariant, error: existingVariantError } = await supabase
                   .from('campaign_variants')
-                  .upsert(
-                    {
-                      campaign_id: campaignDbId,
-                      platform_variant_id: String(variant.id),
-                      name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
-                      variant_type: variant.variant_label || 'A',
-                      subject_line: variant.subject,
-                      body_preview: emailBody.substring(0, 500),
-                      email_body: emailBody,
-                      word_count: wordCount,
-                      personalization_vars: personalizationVars,
-                    },
-                    { onConflict: 'campaign_id,platform_variant_id' }
-                  );
+                  .select('id')
+                  .eq('campaign_id', campaignDbId)
+                  .eq('platform_variant_id', String(variant.id))
+                  .maybeSingle();
 
-                if (!variantError) {
-                  progress.variants_synced++;
+                if (existingVariantError) {
+                  console.error('Variant lookup failed:', existingVariantError);
+                  progress.errors.push(
+                    `Variant lookup ${campaign.name} (variant ${variant.id}): ${existingVariantError.message}`
+                  );
+                } else {
+                  const payload = {
+                    campaign_id: campaignDbId,
+                    platform_variant_id: String(variant.id),
+                    name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
+                    variant_type: variant.variant_label || 'A',
+                    subject_line: variant.subject,
+                    body_preview: emailBody.substring(0, 500),
+                    email_body: emailBody,
+                    word_count: wordCount,
+                    personalization_vars: personalizationVars,
+                  };
+
+                  const { error: variantWriteError } = existingVariant?.id
+                    ? await supabase.from('campaign_variants').update(payload).eq('id', existingVariant.id)
+                    : await supabase.from('campaign_variants').insert(payload);
+
+                  if (variantWriteError) {
+                    console.error('Variant write failed:', variantWriteError);
+                    progress.errors.push(
+                      `Variant write ${campaign.name} (variant ${variant.id}): ${variantWriteError.message}`
+                    );
+                  } else {
+                    progress.variants_synced++;
+                  }
                 }
               }
             }
@@ -319,27 +340,53 @@ serve(async (req) => {
             // Get today's date for the metrics
             const today = new Date().toISOString().split('T')[0];
 
-            const { error: metricsError } = await supabase
-              .from('daily_metrics')
-              .upsert(
-                {
-                  workspace_id,
-                  campaign_id: campaignDbId,
-                  date: today,
-                  sent_count: analytics.sent_count || 0,
-                  delivered_count: analytics.unique_sent_count || 0,
-                  opened_count: analytics.unique_open_count || 0,
-                  clicked_count: analytics.unique_click_count || 0,
-                  replied_count: analytics.reply_count || 0,
-                  bounced_count: analytics.bounce_count || 0,
-                  unsubscribed_count: analytics.unsubscribe_count || 0,
-                },
-                { onConflict: 'workspace_id,campaign_id,date' }
-              );
+             // daily_metrics has a UNIQUE constraint across
+             // (workspace_id, date, campaign_id, variant_id, email_account_id, segment_id)
+             // and NULLs do not conflict, so we can't use upsert for our "campaign/day" rollup.
+             // Instead: update existing rollup row (all NULL dims), otherwise insert.
+             const { data: existingMetric, error: existingMetricError } = await supabase
+               .from('daily_metrics')
+               .select('id')
+               .eq('workspace_id', workspace_id)
+               .eq('campaign_id', campaignDbId)
+               .eq('date', today)
+               .is('variant_id', null)
+               .is('email_account_id', null)
+               .is('segment_id', null)
+               .maybeSingle();
 
-            if (!metricsError) {
-              progress.metrics_created++;
-            }
+             if (existingMetricError) {
+               console.error('Metrics lookup failed:', existingMetricError);
+               progress.errors.push(
+                 `Metrics lookup ${campaign.name} (${today}): ${existingMetricError.message}`
+               );
+             } else {
+               const metricsPayload = {
+                 workspace_id,
+                 campaign_id: campaignDbId,
+                 date: today,
+                 sent_count: analytics.sent_count || 0,
+                 delivered_count: analytics.unique_sent_count || 0,
+                 opened_count: analytics.unique_open_count || 0,
+                 clicked_count: analytics.unique_click_count || 0,
+                 replied_count: analytics.reply_count || 0,
+                 bounced_count: analytics.bounce_count || 0,
+                 unsubscribed_count: analytics.unsubscribe_count || 0,
+               };
+
+               const { error: metricsWriteError } = existingMetric?.id
+                 ? await supabase.from('daily_metrics').update(metricsPayload).eq('id', existingMetric.id)
+                 : await supabase.from('daily_metrics').insert(metricsPayload);
+
+               if (metricsWriteError) {
+                 console.error('Metrics write failed:', metricsWriteError);
+                 progress.errors.push(
+                   `Metrics write ${campaign.name} (${today}): ${metricsWriteError.message}`
+                 );
+               } else {
+                 progress.metrics_created++;
+               }
+             }
           } catch (analyticsError) {
             console.error(`Failed to fetch analytics for campaign ${campaign.id}:`, analyticsError);
           }
