@@ -281,12 +281,37 @@ serve(async (req) => {
           // 2. Fetch sequences (email copy variants)
           try {
             const sequences: SmartleadSequence[] = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
+            console.log(`Campaign ${campaign.id} has ${sequences?.length || 0} sequences`);
+            
+            // Log first sequence structure for debugging
+            if (sequences?.length > 0) {
+              console.log(`  First sequence keys: ${Object.keys(sequences[0]).join(', ')}`);
+              console.log(`  First sequence sample:`, JSON.stringify({
+                seq_number: sequences[0].seq_number,
+                has_variants: !!sequences[0].seq_variants,
+                variants_count: sequences[0].seq_variants?.length || 0,
+                variant_sample: sequences[0].seq_variants?.[0] ? {
+                  id: sequences[0].seq_variants[0].id,
+                  variant_label: sequences[0].seq_variants[0].variant_label,
+                  has_subject: !!sequences[0].seq_variants[0].subject,
+                  has_body: !!sequences[0].seq_variants[0].email_body,
+                } : null
+              }));
+            }
             
             for (const seq of sequences) {
               const variants = Array.isArray(seq.seq_variants) ? seq.seq_variants : [];
+              console.log(`  Seq ${seq.seq_number}: ${variants.length} variants`);
               
               for (const variant of variants) {
+                // Skip variants without a valid ID
+                if (variant.id === undefined && variant.id !== 0) {
+                  console.warn(`  Skipping variant with no ID in seq ${seq.seq_number}`);
+                  continue;
+                }
+                
                 const emailBody = variant.email_body || '';
+                const subjectLine = variant.subject || (variant as any).email_subject || null;
                 const wordCount = emailBody.split(/\s+/).filter(Boolean).length;
                 const personalizationVars = [...emailBody.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]);
 
@@ -295,7 +320,7 @@ serve(async (req) => {
                   platform_variant_id: String(variant.id),
                   name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
                   variant_type: variant.variant_label || 'A',
-                  subject_line: variant.subject,
+                  subject_line: subjectLine,
                   body_preview: emailBody.substring(0, 500),
                   email_body: emailBody,
                   word_count: wordCount,
@@ -303,13 +328,21 @@ serve(async (req) => {
                   is_control: seq.seq_number === 1 && (variant.variant_label === 'A' || !variant.variant_label),
                 };
 
+                console.log(`    Upserting variant ${variant.id} (${variant.variant_label || 'Default'})`);
+
                 const { error: variantError } = await supabase
                   .from('campaign_variants')
                   .upsert(variantPayload, { 
                     onConflict: 'campaign_id,platform_variant_id' 
                   });
 
-                if (!variantError) progress.variants_synced++;
+                if (variantError) {
+                  console.error(`    VARIANT UPSERT FAILED for ${variant.id}:`, variantError.message, variantError.details);
+                  progress.errors.push(`Variant ${variant.id}: ${variantError.message}`);
+                } else {
+                  console.log(`    Variant ${variant.id} upserted successfully`);
+                  progress.variants_synced++;
+                }
               }
 
               // Create sequence step
@@ -329,6 +362,7 @@ serve(async (req) => {
             }
           } catch (seqError) {
             console.error(`Failed to fetch sequences for campaign ${campaign.id}:`, seqError);
+            progress.errors.push(`Sequences for ${campaign.name}: ${String(seqError)}`);
           }
 
           // 3. Fetch email accounts
