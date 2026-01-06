@@ -7,9 +7,11 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CreateWorkspace } from '@/components/onboarding/CreateWorkspace';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
-import { EmailHealthScore, calculateHealthScore } from '@/components/dashboard/EmailHealthScore';
+import { EmailHealthScore, calculateHealthScore, getOverallHealthScore, getHealthLevel } from '@/components/dashboard/EmailHealthScore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { 
   AreaChart, 
   Area, 
@@ -18,12 +20,23 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
+  BarChart,
+  Bar,
 } from 'recharts';
 import { 
   Loader2, 
   ArrowRight,
   Plug,
   ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+  Mail,
+  MessageSquare,
+  Users,
+  Target,
+  Zap,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -52,13 +65,48 @@ export default function Dashboard() {
     return <CreateWorkspace />;
   }
 
+  // Calculate health scores
+  const healthScores = calculateHealthScore({
+    bounceRate: stats.bounceRate,
+    spamRate: stats.spamRate,
+    replyRate: stats.replyRate,
+    positiveReplyRate: stats.positiveRate,
+    deliveredRate: stats.deliveredRate,
+  });
+  const overallHealth = getOverallHealthScore(healthScores);
+  const healthLevel = getHealthLevel(overallHealth);
+
+  // Quick diagnostic checks
+  const diagnostics = [
+    {
+      label: 'Deliverability',
+      value: stats.bounceRate < 2,
+      message: stats.bounceRate < 2 ? 'Healthy' : `${stats.bounceRate.toFixed(1)}% bounce rate`,
+      icon: stats.bounceRate < 2 ? CheckCircle : AlertTriangle,
+    },
+    {
+      label: 'Reply Rate',
+      value: stats.replyRate >= 3,
+      message: stats.replyRate >= 3 ? 'On target' : 'Below 3% target',
+      icon: stats.replyRate >= 3 ? CheckCircle : AlertTriangle,
+    },
+    {
+      label: 'Positive Rate',
+      value: stats.positiveRate >= 1,
+      message: stats.positiveRate >= 1 ? 'Good conversion' : 'Needs improvement',
+      icon: stats.positiveRate >= 1 ? CheckCircle : AlertTriangle,
+    },
+  ];
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
-            <p className="text-muted-foreground">Campaign performance at a glance</p>
+            <p className="text-muted-foreground">
+              Is your cold email program healthy? Check your vitals at a glance.
+            </p>
           </div>
           {hasData && (
             <Button variant="outline" size="sm" asChild>
@@ -94,59 +142,105 @@ export default function Dashboard() {
           </Card>
         ) : (
           <>
-            {/* Health Score */}
-            <div className="dashboard-grid dashboard-grid-cols-2">
-              <EmailHealthScore 
-                {...calculateHealthScore({
-                  bounceRate: stats.bounceRate,
-                  spamRate: stats.spamRate,
-                  replyRate: stats.replyRate,
-                  positiveReplyRate: stats.positiveRate,
-                  deliveredRate: stats.deliveredRate,
-                })}
-              />
-              
-              {/* KPI Cards */}
+            {/* Health Score + Quick Diagnostics */}
+            <div className="grid gap-4 lg:grid-cols-3">
+              {/* Health Score */}
+              <div className="lg:col-span-2">
+                <EmailHealthScore {...healthScores} />
+              </div>
+
+              {/* Quick Diagnostics */}
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Key Metrics</CardTitle>
-                  <CardDescription>Core performance indicators</CardDescription>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Quick Diagnostics</CardTitle>
+                  <CardDescription>System health checks</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Total Sent</p>
-                      <p className="text-2xl font-bold">{stats.totalSent.toLocaleString()}</p>
+                <CardContent className="space-y-3">
+                  {diagnostics.map((d, i) => (
+                    <div key={i} className={`p-3 rounded-lg flex items-center gap-3 ${d.value ? 'bg-success/10' : 'bg-warning/10'}`}>
+                      <d.icon className={`h-5 w-5 ${d.value ? 'text-success' : 'text-warning'}`} />
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">{d.label}</p>
+                        <p className="text-xs text-muted-foreground">{d.message}</p>
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Reply Rate</p>
-                      <p className="text-2xl font-bold">{stats.replyRate.toFixed(1)}%</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Positive Rate</p>
-                      <p className="text-2xl font-bold text-success">{stats.positiveRate.toFixed(1)}%</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Bounce Rate</p>
-                      <p className={`text-2xl font-bold ${stats.bounceRate > 5 ? 'text-destructive' : ''}`}>
-                        {stats.bounceRate.toFixed(1)}%
-                      </p>
-                    </div>
+                  ))}
+
+                  <div className="pt-2 border-t">
+                    <Link 
+                      to="/deliverability" 
+                      className="text-sm text-primary hover:underline flex items-center gap-1"
+                    >
+                      View detailed health report
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
                   </div>
                 </CardContent>
               </Card>
             </div>
 
+            {/* Key Metrics Row */}
+            <div className="grid gap-4 md:grid-cols-4">
+              <Card>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-2xl font-bold">{stats.totalSent.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Total Sent</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4 text-chart-1" />
+                      <span className="text-2xl font-bold">{stats.replyRate.toFixed(1)}%</span>
+                    </div>
+                    {stats.replyRate >= 5 && <TrendingUp className="h-4 w-4 text-success" />}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Reply Rate</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Target className="h-4 w-4 text-success" />
+                      <span className="text-2xl font-bold text-success">{stats.positiveRate.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Positive Reply Rate</p>
+                </CardContent>
+              </Card>
+              <Card className={stats.bounceRate > 5 ? 'border-destructive/50' : ''}>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className={`h-4 w-4 ${stats.bounceRate > 5 ? 'text-destructive' : 'text-muted-foreground'}`} />
+                      <span className={`text-2xl font-bold ${stats.bounceRate > 5 ? 'text-destructive' : ''}`}>
+                        {stats.bounceRate.toFixed(1)}%
+                      </span>
+                    </div>
+                    {stats.bounceRate > 5 && <TrendingDown className="h-4 w-4 text-destructive" />}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Bounce Rate</p>
+                </CardContent>
+              </Card>
+            </div>
+
             {/* Charts Row */}
-            <div className="dashboard-grid dashboard-grid-cols-2">
+            <div className="grid gap-4 lg:grid-cols-2">
               {/* Performance Trend */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Performance Trend</CardTitle>
-                  <CardDescription>Daily sends and replies</CardDescription>
+                  <CardDescription>Daily sends and positive replies (last 14 days)</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[300px]">
+                  <div className="h-[280px]">
                     {trendData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={trendData}>
@@ -191,7 +285,7 @@ export default function Dashboard() {
                 </CardHeader>
                 <CardContent>
                   {topCampaigns.length > 0 ? (
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       {topCampaigns.map((campaign, index) => (
                         <Link
                           key={campaign.id}
@@ -199,11 +293,11 @@ export default function Dashboard() {
                           className="flex items-center justify-between p-3 rounded-lg bg-accent/30 hover:bg-accent/50 transition-colors"
                         >
                           <div className="flex items-center gap-3">
-                            <span className="text-lg font-bold text-muted-foreground w-6">
+                            <span className={`text-lg font-bold ${index === 0 ? 'text-yellow-500' : 'text-muted-foreground'} w-6`}>
                               {index + 1}
                             </span>
                             <div>
-                              <p className="font-medium text-sm">{campaign.name}</p>
+                              <p className="font-medium text-sm line-clamp-1">{campaign.name}</p>
                               <p className="text-xs text-muted-foreground">
                                 {campaign.sent.toLocaleString()} sent
                               </p>
@@ -237,23 +331,41 @@ export default function Dashboard() {
             )}
 
             {/* Quick Links */}
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <Card className="hover:border-primary/50 transition-colors cursor-pointer" onClick={() => navigate('/inbox')}>
                 <CardContent className="pt-6">
-                  <h3 className="font-semibold mb-1">Master Inbox</h3>
-                  <p className="text-sm text-muted-foreground">View all responses in one place</p>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Mail className="h-5 w-5 text-primary" />
+                    <h3 className="font-semibold">Master Inbox</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">Triage and respond to leads</p>
                 </CardContent>
               </Card>
               <Card className="hover:border-primary/50 transition-colors cursor-pointer" onClick={() => navigate('/copy-insights')}>
                 <CardContent className="pt-6">
-                  <h3 className="font-semibold mb-1">Copy Insights</h3>
-                  <p className="text-sm text-muted-foreground">Analyze subject line performance</p>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Zap className="h-5 w-5 text-chart-4" />
+                    <h3 className="font-semibold">Copy Insights</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">Analyze what messaging works</p>
                 </CardContent>
               </Card>
               <Card className="hover:border-primary/50 transition-colors cursor-pointer" onClick={() => navigate('/audience-insights')}>
                 <CardContent className="pt-6">
-                  <h3 className="font-semibold mb-1">Audience Insights</h3>
-                  <p className="text-sm text-muted-foreground">Personal vs work email analysis</p>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Users className="h-5 w-5 text-chart-2" />
+                    <h3 className="font-semibold">Audience Insights</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">Validate your ICP</p>
+                </CardContent>
+              </Card>
+              <Card className="hover:border-primary/50 transition-colors cursor-pointer" onClick={() => navigate('/deliverability')}>
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Target className="h-5 w-5 text-chart-3" />
+                    <h3 className="font-semibold">Deliverability</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">Monitor inbox placement</p>
                 </CardContent>
               </Card>
             </div>
