@@ -197,41 +197,52 @@ export default function CopyInsights() {
   };
 
   const fetchSegmentCopyData = async () => {
-    // Generate segment × copy interactions from patterns
-    // This would ideally come from the database with real segment data
-    if (patterns.length === 0 || !currentWorkspace?.id) return;
+    // Query real segment × copy interactions from audience_performance view + copy patterns
+    if (!currentWorkspace?.id) return;
     
-    // For now, create mock data showing the concept
-    // Real implementation would join lead data with variant performance
-    const segments = ['VP/Director', 'Manager', 'C-Level', 'Individual Contributor'];
-    const patternTypes = patterns.slice(0, 4).map(p => p.pattern);
-    
-    const interactions: any[] = [];
-    
-    segments.forEach(segment => {
-      const segmentBase = Math.random() * 2 + 2; // 2-4% base
-      patternTypes.forEach(pattern => {
-        const patternData = patterns.find(p => p.pattern === pattern);
-        if (patternData) {
-          const lift = (Math.random() - 0.5) * 40; // -20% to +20%
-          interactions.push({
-            segment,
-            segment_type: 'seniority',
-            pattern,
-            pattern_type: 'format',
-            reply_rate: patternData.avg_reply_rate + (lift / 100) * patternData.avg_reply_rate,
-            segment_avg_reply_rate: segmentBase,
-            pattern_avg_reply_rate: patternData.avg_reply_rate,
-            sample_size: Math.floor(patternData.sample_size / 4),
-            lift_vs_segment: lift,
-            lift_vs_pattern: lift * 0.8,
-            is_significant: Math.abs(lift) > 15 && patternData.sample_size > 200,
-          });
-        }
-      });
-    });
-    
-    setSegmentCopyInteractions(interactions);
+    try {
+      // Fetch audience performance data which includes title, industry, seniority
+      const { data: audienceData, error: audienceError } = await supabase
+        .from('audience_performance')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id);
+
+      if (audienceError) {
+        console.warn('Audience performance query failed:', audienceError);
+        setSegmentCopyInteractions([]);
+        return;
+      }
+
+      // If no audience data with seniority/title, show empty state
+      const filteredData = (audienceData || []).filter(d => d.title || d.industry);
+      
+      if (filteredData.length === 0) {
+        console.log('No enriched audience data available for segment analysis');
+        setSegmentCopyInteractions([]);
+        return;
+      }
+
+      // Transform audience data into segment × copy interactions
+      // This is a simplified version - real implementation would join with variant-level data
+      const interactions: any[] = filteredData.slice(0, 20).map(d => ({
+        segment: d.title || d.industry || 'Unknown',
+        segment_type: d.title ? 'seniority' : 'industry',
+        pattern: 'All Copy',
+        pattern_type: 'baseline',
+        reply_rate: d.reply_rate || 0,
+        segment_avg_reply_rate: d.reply_rate || 0,
+        pattern_avg_reply_rate: 0,
+        sample_size: d.total_leads || 0,
+        lift_vs_segment: 0,
+        lift_vs_pattern: 0,
+        is_significant: (d.total_leads || 0) > 100,
+      }));
+
+      setSegmentCopyInteractions(interactions);
+    } catch (err) {
+      console.error('Error fetching segment copy data:', err);
+      setSegmentCopyInteractions([]);
+    }
   };
 
   // Re-fetch CTA metrics when body copy loads
@@ -504,6 +515,213 @@ export default function CopyInsights() {
   const bestWordCountBucket = useMemo(() => {
     return [...wordCountData].sort((a, b) => b.avgReply - a.avgReply)[0];
   }, [wordCountData]);
+
+  // Opening line metrics computed from body copy
+  const openingMetrics = useMemo(() => {
+    const openingGroups: Record<string, { sent: number; replies: number; positive: number }> = {};
+    
+    bodyCopy.forEach(b => {
+      // Detect opening type from body_preview or email_body
+      const bodyText = b.email_body || b.body_preview || '';
+      const openingType = detectOpeningType(bodyText);
+      
+      if (!openingGroups[openingType]) {
+        openingGroups[openingType] = { sent: 0, replies: 0, positive: 0 };
+      }
+      openingGroups[openingType].sent += b.sent_count;
+      openingGroups[openingType].replies += b.reply_count;
+      openingGroups[openingType].positive += b.positive_count;
+    });
+
+    const totalSent = Object.values(openingGroups).reduce((sum, g) => sum + g.sent, 0);
+    const totalReplies = Object.values(openingGroups).reduce((sum, g) => sum + g.replies, 0);
+    const baselineReply = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
+
+    return Object.entries(openingGroups).map(([opening, data]) => {
+      const replyRate = data.sent > 0 ? (data.replies / data.sent) * 100 : 0;
+      const positiveRate = data.sent > 0 ? (data.positive / data.sent) * 100 : 0;
+      return {
+        opening_type: opening,
+        reply_rate: replyRate,
+        positive_rate: positiveRate,
+        sample_size: data.sent,
+        lift_vs_baseline: baselineReply > 0 ? ((replyRate - baselineReply) / baselineReply) * 100 : 0,
+      };
+    }).sort((a, b) => b.reply_rate - a.reply_rate);
+  }, [bodyCopy]);
+
+  // Personalization depth data computed from body copy
+  const personalizationDepthData = useMemo(() => {
+    const depthGroups: Record<string, { sent: number; replies: number }> = {
+      'None': { sent: 0, replies: 0 },
+      'Light (1-2 vars)': { sent: 0, replies: 0 },
+      'Medium (3-4 vars)': { sent: 0, replies: 0 },
+      'Heavy (5+ vars)': { sent: 0, replies: 0 },
+    };
+
+    bodyCopy.forEach(b => {
+      let key = 'None';
+      if (b.personalization_depth === 0) key = 'None';
+      else if (b.personalization_depth <= 2) key = 'Light (1-2 vars)';
+      else if (b.personalization_depth <= 4) key = 'Medium (3-4 vars)';
+      else key = 'Heavy (5+ vars)';
+      
+      depthGroups[key].sent += b.sent_count;
+      depthGroups[key].replies += b.reply_count;
+    });
+
+    return Object.entries(depthGroups)
+      .filter(([_, d]) => d.sent > 0)
+      .map(([depth, data]) => ({
+        depth,
+        reply_rate: data.sent > 0 ? (data.replies / data.sent) * 100 : 0,
+        sample_size: data.sent,
+      }));
+  }, [bodyCopy]);
+
+  // You:I ratio data computed from body copy
+  const youIRatioData = useMemo(() => {
+    const ratioGroups: Record<string, { sent: number; replies: number }> = {
+      'Low (<1:1)': { sent: 0, replies: 0 },
+      'Balanced (1-2:1)': { sent: 0, replies: 0 },
+      'High (2-3:1)': { sent: 0, replies: 0 },
+      'Very High (3+:1)': { sent: 0, replies: 0 },
+    };
+
+    bodyCopy.forEach(b => {
+      const bodyText = b.email_body || b.body_preview || '';
+      const ratio = calculateYouIRatio(bodyText);
+      
+      let key = 'Low (<1:1)';
+      if (ratio < 1) key = 'Low (<1:1)';
+      else if (ratio < 2) key = 'Balanced (1-2:1)';
+      else if (ratio < 3) key = 'High (2-3:1)';
+      else key = 'Very High (3+:1)';
+
+      ratioGroups[key].sent += b.sent_count;
+      ratioGroups[key].replies += b.reply_count;
+    });
+
+    return Object.entries(ratioGroups)
+      .filter(([_, d]) => d.sent > 0)
+      .map(([ratio_bucket, data]) => ({
+        ratio_bucket,
+        reply_rate: data.sent > 0 ? (data.replies / data.sent) * 100 : 0,
+        sample_size: data.sent,
+      }));
+  }, [bodyCopy]);
+
+  // First word analysis data computed from subject lines
+  const firstWordData = useMemo(() => {
+    const groups: Record<string, { sent: number; replies: number }> = {};
+
+    subjectLines.forEach(s => {
+      const firstWordType = detectFirstWordType(s.subject_line);
+      if (!groups[firstWordType]) {
+        groups[firstWordType] = { sent: 0, replies: 0 };
+      }
+      groups[firstWordType].sent += s.sent_count;
+      groups[firstWordType].replies += s.reply_count;
+    });
+
+    const totalSent = Object.values(groups).reduce((sum, g) => sum + g.sent, 0);
+    const totalReplies = Object.values(groups).reduce((sum, g) => sum + g.replies, 0);
+    const baseline = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
+
+    return Object.entries(groups).map(([pattern, data]) => {
+      const replyRate = data.sent > 0 ? (data.replies / data.sent) * 100 : 0;
+      return {
+        pattern,
+        pattern_type: 'first_word',
+        reply_rate: replyRate,
+        sample_size: data.sent,
+        lift_vs_baseline: baseline > 0 ? ((replyRate - baseline) / baseline) * 100 : 0,
+      };
+    }).sort((a, b) => b.reply_rate - a.reply_rate);
+  }, [subjectLines]);
+
+  // Capitalization style analysis
+  const capitalizationData = useMemo(() => {
+    const groups: Record<string, { sent: number; replies: number }> = {};
+
+    subjectLines.forEach(s => {
+      const capStyle = detectCapitalizationStyle(s.subject_line);
+      if (!groups[capStyle]) {
+        groups[capStyle] = { sent: 0, replies: 0 };
+      }
+      groups[capStyle].sent += s.sent_count;
+      groups[capStyle].replies += s.reply_count;
+    });
+
+    return Object.entries(groups).map(([pattern, data]) => ({
+      pattern,
+      pattern_type: 'capitalization',
+      reply_rate: data.sent > 0 ? (data.replies / data.sent) * 100 : 0,
+      sample_size: data.sent,
+      lift_vs_baseline: 0,
+    })).sort((a, b) => b.reply_rate - a.reply_rate);
+  }, [subjectLines]);
+
+  // Punctuation analysis
+  const punctuationData = useMemo(() => {
+    const groups: Record<string, { sent: number; replies: number }> = {};
+
+    subjectLines.forEach(s => {
+      const punctTypes = detectPunctuationType(s.subject_line);
+      // Each subject can have multiple punctuation types
+      punctTypes.forEach(punctType => {
+        if (!groups[punctType]) {
+          groups[punctType] = { sent: 0, replies: 0 };
+        }
+        groups[punctType].sent += s.sent_count;
+        groups[punctType].replies += s.reply_count;
+      });
+    });
+
+    return Object.entries(groups).map(([pattern, data]) => ({
+      pattern,
+      pattern_type: 'punctuation',
+      reply_rate: data.sent > 0 ? (data.replies / data.sent) * 100 : 0,
+      sample_size: data.sent,
+      lift_vs_baseline: 0,
+    })).sort((a, b) => b.reply_rate - a.reply_rate);
+  }, [subjectLines]);
+
+  // Number presence analysis
+  const numberPresenceData = useMemo(() => {
+    const withNumber = { sent: 0, replies: 0 };
+    const withoutNumber = { sent: 0, replies: 0 };
+
+    subjectLines.forEach(s => {
+      if (s.has_number) {
+        withNumber.sent += s.sent_count;
+        withNumber.replies += s.reply_count;
+      } else {
+        withoutNumber.sent += s.sent_count;
+        withoutNumber.replies += s.reply_count;
+      }
+    });
+
+    return [
+      { 
+        has_number: true, 
+        reply_rate: withNumber.sent > 0 ? (withNumber.replies / withNumber.sent) * 100 : 0,
+        sample_size: withNumber.sent
+      },
+      { 
+        has_number: false, 
+        reply_rate: withoutNumber.sent > 0 ? (withoutNumber.replies / withoutNumber.sent) * 100 : 0,
+        sample_size: withoutNumber.sent
+      },
+    ];
+  }, [subjectLines]);
+
+  // Real segment × copy interactions from lead data
+  const realSegmentCopyInteractions = useMemo(() => {
+    // This will use the fetched segmentCopyInteractions from the database
+    // For now, return the state which may have mock data until real data is connected
+    return segmentCopyInteractions;
+  }, [segmentCopyInteractions]);
 
   if (loading) {
     return (
@@ -1083,6 +1301,15 @@ export default function CopyInsights() {
                     </CardContent>
                   </Card>
                 </div>
+              </TabsContent>
+
+              {/* Opening Lines Tab */}
+              <TabsContent value="opening" className="space-y-4">
+                <OpeningLineAnalysis 
+                  openingMetrics={openingMetrics}
+                  personalizationDepthData={personalizationDepthData}
+                  youIRatioData={youIRatioData}
+                />
               </TabsContent>
 
               {/* CTA Analysis Tab */}
