@@ -7,6 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import Dashboard from "./pages/Dashboard";
 import DealHub from "./pages/DealHub";
+import MonthlyReport from "./pages/MonthlyReport";
 import Auth from "./pages/Auth";
 import Connections from "./pages/Connections";
 import Campaigns from "./pages/Campaigns";
@@ -36,6 +37,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/deal-hub" element={<DealHub />} />
+              <Route path="/monthly-report" element={<MonthlyReport />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/connections" element={<Connections />} />
               <Route path="/campaigns" element={<Campaigns />} />
