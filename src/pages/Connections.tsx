@@ -64,6 +64,7 @@ export default function Connections() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isResumingSync, setIsResumingSync] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -261,6 +262,31 @@ export default function Connections() {
     }
   };
 
+  const handleStopSync = async () => {
+    if (!currentWorkspace) return;
+    
+    setIsStopping(true);
+    setError(null);
+    
+    try {
+      const { error } = await supabase
+        .from('api_connections')
+        .update({ sync_status: 'stopped' })
+        .eq('workspace_id', currentWorkspace.id)
+        .eq('platform', 'smartlead');
+      
+      if (error) throw error;
+      
+      setSuccess('Sync stopped. You can reset and restart when ready.');
+      setIsSyncing(false);
+      fetchConnections();
+    } catch (err: any) {
+      setError(err.message || 'Failed to stop sync');
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
   const smartleadConnection = connections.find(c => c.platform === 'smartlead');
   const replyioConnection = connections.find(c => c.platform === 'replyio');
   const isSyncingSmartlead = smartleadConnection?.sync_status === 'syncing' || isSyncing;
@@ -376,43 +402,55 @@ export default function Connections() {
                   )}
 
                   <div className="flex gap-2 pt-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="flex-1"
-                      onClick={() => handlePullFullHistory(false)}
-                      disabled={isSyncingSmartlead}
-                    >
-                      {isSyncingSmartlead ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Syncing...
-                        </>
-                      ) : (
-                        <>
+                    {isSyncingSmartlead ? (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1 text-destructive hover:text-destructive"
+                        onClick={handleStopSync}
+                        disabled={isStopping}
+                      >
+                        {isStopping ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Stopping...
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="mr-2 h-4 w-4" />
+                            Stop Sync
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => handlePullFullHistory(false)}
+                        >
                           <Download className="mr-2 h-4 w-4" />
                           Continue Sync
-                        </>
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handlePullFullHistory(true)}
-                      disabled={isSyncingSmartlead}
-                      title="Reset and re-sync from scratch"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleDisconnect(smartleadConnection.id)}
-                      disabled={isSyncingSmartlead}
-                    >
-                      Disconnect
-                    </Button>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePullFullHistory(true)}
+                          title="Reset and re-sync from scratch"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleDisconnect(smartleadConnection.id)}
+                        >
+                          Disconnect
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
