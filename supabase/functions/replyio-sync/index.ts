@@ -1,24 +1,20 @@
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const REPLYIO_BASE_URL = 'https://api.reply.io';
-const RATE_LIMIT_DELAY = 500; // Reply.io has 10-second throttle on some endpoints
-const BATCH_SIZE = 5;
+const REPLYIO_BASE_URL = 'https://api.reply.io/v3';
+const RATE_LIMIT_DELAY = 300;
+const BATCH_SIZE = 50;
 const TIME_BUDGET_MS = 45000;
+const SYNC_LOCK_TIMEOUT_MS = 30000;
 
-// Personal email domains for classification
 const PERSONAL_DOMAINS = new Set([
-  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 
-  'aol.com', 'icloud.com', 'protonmail.com', 'mail.com',
-  'live.com', 'msn.com', 'me.com', 'ymail.com', 'googlemail.com',
-  'yahoo.co.uk', 'hotmail.co.uk', 'outlook.co.uk', 'btinternet.com',
-  'gmx.com', 'gmx.net', 'web.de', 'zoho.com', 'fastmail.com',
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com',
+  'icloud.com', 'mail.com', 'protonmail.com', 'zoho.com', 'yandex.com',
+  'gmx.com', 'live.com', 'msn.com', 'me.com', 'inbox.com'
 ]);
 
 function classifyEmailType(email: string): 'personal' | 'work' {
@@ -30,82 +26,98 @@ function extractEmailDomain(email: string): string {
   return email.split('@')[1]?.toLowerCase() || '';
 }
 
-// Map Reply.io status codes to readable strings
-function mapCampaignStatus(status: number): string {
-  switch (status) {
-    case 0: return 'new';
-    case 2: return 'active';
-    case 4: return 'paused';
-    default: return 'unknown';
-  }
+function mapSequenceStatus(status: string): string {
+  const statusMap: Record<string, string> = {
+    'Active': 'active',
+    'Paused': 'paused',
+    'Stopped': 'stopped',
+    'Draft': 'draft',
+  };
+  return statusMap[status] || status.toLowerCase();
 }
 
-// Map Reply.io stage IDs to sentiment
-function mapStageToSentiment(stageId: number): { sentiment: string; eventType: string } {
-  switch (stageId) {
-    case 3: // Replied
-      return { sentiment: 'neutral', eventType: 'replied' };
-    case 4: // Interested
-      return { sentiment: 'positive', eventType: 'positive_reply' };
-    case 5: // Not interested
-      return { sentiment: 'negative', eventType: 'negative_reply' };
-    case 7: // Do not contact
-      return { sentiment: 'negative', eventType: 'negative_reply' };
-    case 8: // Bad contact info
-      return { sentiment: 'neutral', eventType: 'bounce' };
-    default:
-      return { sentiment: 'neutral', eventType: 'replied' };
-  }
-}
-
-interface ReplyioCampaign {
+// Reply.io v3 API interfaces
+interface ReplyioSequence {
   id: number;
+  teamId: number;
+  ownerId: number;
   name: string;
+  status: string;
   created: string;
-  status: number;
-  emailAccounts: string[];
-  ownerEmail: string;
-  deliveriesCount: number;
-  opensCount: number;
-  repliesCount: number;
-  bouncesCount: number;
-  optOutsCount: number;
-  outOfOfficeCount: number;
-  peopleCount: number;
-  peopleFinished: number;
-  peopleActive: number;
-  peoplePaused: number;
+  isArchived: boolean;
+}
+
+interface ReplyioStep {
+  id: number;
+  type: string;
+  number: number;
+  delayInMinutes: number;
+  executionMode: string;
+  templates: Array<{
+    id: number;
+    templateId: number;
+    subject: string;
+    body: string;
+  }>;
 }
 
 interface ReplyioContact {
   id: number;
   email: string;
-  firstName?: string;
-  lastName?: string;
-  company?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  title?: string;
-  phone?: string;
-  linkedInProfile?: string;
-  addingDate?: string;
-  companySize?: string;
-  industry?: string;
+  firstName: string;
+  lastName: string;
+  title: string;
+  company: string;
+  city: string;
+  state: string;
+  country: string;
+  phone: string;
+  linkedInProfile: string;
+  companySize: string;
+  industry: string;
+  addingDate: string;
 }
 
-async function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+interface ReplyioEmailAccount {
+  id: number;
+  email: string;
+  senderName: string;
 }
+
+interface ReplyioSequenceStats {
+  sequenceId: number;
+  sequenceName: string;
+  deliveredContacts: number;
+  repliedContacts: number;
+  interestedContacts: number;
+  replyRate: number;
+  deliveryRate: number;
+  interestedRate: number;
+}
+
+interface SyncProgress {
+  step: 'email_accounts' | 'sequences' | 'contacts' | 'complete';
+  sequence_index: number;
+  contact_cursor: number | null;
+  total_sequences: number;
+  processed_sequences: number;
+  total_contacts: number;
+  processed_contacts: number;
+  current_sequence_name: string;
+  last_heartbeat: string;
+  errors: string[];
+}
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function replyioRequest(endpoint: string, apiKey: string, retries = 3): Promise<any> {
-  for (let i = 0; i < retries; i++) {
-    await delay(RATE_LIMIT_DELAY);
-    const url = `${REPLYIO_BASE_URL}${endpoint}`;
-    console.log(`Fetching: ${endpoint}`);
-    
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const response = await fetch(url, {
+      await delay(RATE_LIMIT_DELAY);
+      
+      const response = await fetch(`${REPLYIO_BASE_URL}${endpoint}`, {
         headers: {
           'x-api-key': apiKey,
           'Content-Type': 'application/json',
@@ -113,75 +125,149 @@ async function replyioRequest(endpoint: string, apiKey: string, retries = 3): Pr
       });
       
       if (response.status === 429) {
-        console.log(`Rate limited, waiting ${(i + 1) * 10} seconds...`);
-        await delay((i + 1) * 10000);
+        console.log(`Rate limited on ${endpoint}, waiting...`);
+        await delay(2000 * (attempt + 1));
         continue;
       }
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`API error ${response.status}: ${errorText}`);
-        if (i === retries - 1) throw new Error(`Reply.io API error (${response.status}): ${errorText}`);
-        continue;
+        throw new Error(`Reply.io API error ${response.status}: ${errorText}`);
       }
       
       const text = await response.text();
       if (!text) return null;
       return JSON.parse(text);
     } catch (error) {
-      if (i === retries - 1) throw error;
-      console.log(`Retry ${i + 1}/${retries} after error:`, error);
-      await delay(1000 * (i + 1));
+      lastError = error as Error;
+      console.error(`Attempt ${attempt + 1} failed for ${endpoint}:`, error);
+      if (attempt < retries - 1) {
+        await delay(1000 * (attempt + 1));
+      }
     }
   }
+  
+  throw lastError || new Error(`Failed to fetch ${endpoint}`);
 }
 
-serve(async (req) => {
-  console.log('replyio-sync: Request received', { method: req.method });
+async function updateProgress(
+  supabase: any,
+  connectionId: string,
+  progress: Partial<SyncProgress>,
+  status?: string
+) {
+  const updateData: any = {
+    sync_progress: progress,
+    updated_at: new Date().toISOString(),
+  };
+  
+  if (status) {
+    updateData.sync_status = status;
+  }
+  
+  await supabase
+    .from('api_connections')
+    .update(updateData)
+    .eq('id', connectionId);
+}
 
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const startTime = Date.now();
+  
   try {
+    // Auth check
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      console.error('replyio-sync: Missing authorization header');
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), 
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Verify user
     const { data: { user }, error: authError } = await createClient(
       supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: authHeader } } }
     ).auth.getUser();
+    
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Invalid token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
-    if (authError || !user) throw new Error('Unauthorized');
+    const { workspace_id, sync_type = 'full', reset = false, force_advance = false } = await req.json();
+    
+    if (!workspace_id) {
+      return new Response(JSON.stringify({ error: 'Missing workspace_id' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
-    const { workspace_id, sync_type = 'full', reset = false } = await req.json();
-    if (!workspace_id) throw new Error('workspace_id is required');
+    // Verify workspace membership
+    const { data: membership } = await supabase
+      .from('workspace_members')
+      .select('id')
+      .eq('workspace_id', workspace_id)
+      .eq('user_id', user.id)
+      .single();
 
-    const { data: membership, error: memberError } = await supabase
-      .from('workspace_members').select('role')
-      .eq('workspace_id', workspace_id).eq('user_id', user.id).single();
-    if (memberError || !membership) throw new Error('Access denied to workspace');
+    if (!membership) {
+      return new Response(JSON.stringify({ error: 'Not a workspace member' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
+    // Get Reply.io connection
     const { data: connection, error: connError } = await supabase
-      .from('api_connections').select('id, api_key_encrypted, sync_progress, sync_status')
-      .eq('workspace_id', workspace_id).eq('platform', 'replyio').eq('is_active', true).single();
-    if (connError || !connection) throw new Error('No active Reply.io connection found');
+      .from('api_connections')
+      .select('*')
+      .eq('workspace_id', workspace_id)
+      .eq('platform', 'replyio')
+      .eq('is_active', true)
+      .single();
+
+    if (connError || !connection) {
+      return new Response(JSON.stringify({ error: 'No active Reply.io connection found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const apiKey = connection.api_key_encrypted;
-    const existingSyncProgress = connection.sync_progress as any || {};
+    const existingProgress = (connection.sync_progress as SyncProgress) || null;
+
+    // Check sync lock (unless force_advance)
+    if (!force_advance && existingProgress?.last_heartbeat) {
+      const timeSinceHeartbeat = Date.now() - new Date(existingProgress.last_heartbeat).getTime();
+      if (timeSinceHeartbeat < SYNC_LOCK_TIMEOUT_MS) {
+        console.log('Another sync is running, skipping...');
+        return new Response(JSON.stringify({ 
+          skipped: true, 
+          message: 'Another sync is in progress',
+          progress: existingProgress 
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
 
     // Handle reset
     if (reset) {
-      console.log('Resetting sync data for workspace:', workspace_id);
+      console.log('Resetting Reply.io data...');
       
+      // Get campaign IDs first
       const { data: campaigns } = await supabase
         .from('campaigns')
         .select('id')
@@ -191,341 +277,366 @@ serve(async (req) => {
       const campaignIds = campaigns?.map(c => c.id) || [];
       
       if (campaignIds.length > 0) {
-        await supabase.from('message_events').delete().eq('workspace_id', workspace_id).eq('platform', 'replyio');
-        await supabase.from('daily_metrics').delete().in('campaign_id', campaignIds);
-        await supabase.from('hourly_metrics').delete().in('campaign_id', campaignIds);
-        await supabase.from('leads').delete().eq('workspace_id', workspace_id).eq('platform', 'replyio');
-        await supabase.from('campaign_variants').delete().in('campaign_id', campaignIds);
-        await supabase.from('sequence_steps').delete().in('campaign_id', campaignIds);
-        await supabase.from('campaigns').delete().eq('workspace_id', workspace_id).eq('platform', 'replyio');
+        await supabase.from('daily_metrics').delete()
+          .eq('workspace_id', workspace_id)
+          .in('campaign_id', campaignIds);
+        await supabase.from('message_events').delete()
+          .eq('workspace_id', workspace_id)
+          .in('campaign_id', campaignIds);
+        await supabase.from('campaign_variants').delete()
+          .in('campaign_id', campaignIds);
+        await supabase.from('sequence_steps').delete()
+          .in('campaign_id', campaignIds);
+        await supabase.from('leads').delete()
+          .eq('workspace_id', workspace_id)
+          .eq('platform', 'replyio');
+        await supabase.from('campaigns').delete()
+          .eq('workspace_id', workspace_id)
+          .eq('platform', 'replyio');
       }
       
-      await supabase.from('email_accounts').delete().eq('workspace_id', workspace_id).eq('platform', 'replyio');
-      
-      await supabase.from('api_connections').update({
-        sync_status: 'syncing',
-        sync_progress: { campaign_index: 0 },
-      }).eq('id', connection.id);
+      await supabase.from('email_accounts').delete()
+        .eq('workspace_id', workspace_id)
+        .eq('platform', 'replyio');
     }
 
-    // Get sync progress
-    let resumeFromCampaign = reset ? 0 : (existingSyncProgress.campaign_index || 0);
-
-    await supabase.from('api_connections').update({
-      sync_status: 'syncing',
-      sync_progress: {
-        ...existingSyncProgress,
-        last_heartbeat: new Date().toISOString(),
-      },
-    }).eq('id', connection.id);
-
-    const progress = {
-      campaigns_synced: 0,
-      email_accounts_synced: 0,
-      leads_synced: 0,
-      metrics_created: 0,
-      events_created: 0,
-      errors: [] as string[],
+    // Initialize or resume progress
+    let progress: SyncProgress = reset || !existingProgress ? {
+      step: 'email_accounts',
+      sequence_index: 0,
+      contact_cursor: null,
+      total_sequences: 0,
+      processed_sequences: 0,
+      total_contacts: 0,
+      processed_contacts: 0,
+      current_sequence_name: '',
+      last_heartbeat: new Date().toISOString(),
+      errors: [],
+    } : {
+      ...existingProgress,
+      last_heartbeat: new Date().toISOString(),
     };
 
-    const startTime = Date.now();
-    const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
+    // Force advance - skip to next sequence
+    if (force_advance && progress.step === 'sequences') {
+      progress.sequence_index++;
+      progress.errors.push(`Forced skip at sequence ${progress.sequence_index}`);
+    }
+
+    await updateProgress(supabase, connection.id, progress, 'syncing');
+
+    const checkTimeBudget = () => Date.now() - startTime > TIME_BUDGET_MS;
 
     try {
-      // Reply.io doesn't have a "list all campaigns" endpoint directly
-      // We need to fetch campaigns by ID or use v2 sequences endpoint
-      // Let's try using v2 sequences which acts as campaigns
-      console.log('Fetching campaigns/sequences...');
-      
-      // First, let's get all email accounts to determine what campaigns exist
-      // Reply.io structure: campaigns contain email accounts and contacts
-      // We'll fetch campaigns by querying contacts first or use a known approach
-      
-      // Try v2 sequences endpoint
-      let campaigns: ReplyioCampaign[] = [];
-      
-      try {
-        const schedulesData = await replyioRequest('/v2/schedules', apiKey);
-        console.log('Schedules data:', schedulesData ? 'found' : 'empty');
-      } catch (e) {
-        console.log('Could not fetch schedules:', e);
-      }
-
-      // Since Reply.io API requires specific campaign IDs or names,
-      // we need to discover campaigns through contacts or use a different approach
-      // Let's try to fetch existing campaigns from our DB first, then update them
-      
-      // For new syncs, we'll need the user to provide campaign IDs or we iterate
-      // Reply.io API documentation shows we need campaign IDs
-      
-      // Alternative: Get contacts and their campaign associations
-      // Using v1/people endpoint to get all contacts, then their campaigns
-      
-      console.log('Fetching contacts to discover campaigns...');
-      
-      const contactsPageSize = 100;
-      let contactsPage = 1;
-      let hasMoreContacts = true;
-      const discoveredCampaignIds = new Set<number>();
-      const allContacts: ReplyioContact[] = [];
-      
-      // First, get all people lists to enumerate contacts
-      try {
-        const listsData = await replyioRequest('/v1/people/lists', apiKey);
-        console.log(`Found ${listsData?.length || 0} contact lists`);
-        
-        if (Array.isArray(listsData) && listsData.length > 0) {
-          for (const list of listsData) {
-            console.log(`Fetching contacts from list: ${list.name} (ID: ${list.id})`);
-            
-            let page = 1;
-            let hasMore = true;
-            
-            while (hasMore && !isTimeBudgetExceeded()) {
-              const listContacts = await replyioRequest(`/v1/people/list/${list.id}?page=${page}&limit=100`, apiKey);
-              
-              if (listContacts?.people && Array.isArray(listContacts.people)) {
-                allContacts.push(...listContacts.people);
-                
-                // Get campaigns for each contact
-                for (const contact of listContacts.people) {
-                  try {
-                    const contactCampaigns = await replyioRequest(`/v1/people/${contact.id}/sequences`, apiKey);
-                    if (Array.isArray(contactCampaigns)) {
-                      for (const seq of contactCampaigns) {
-                        discoveredCampaignIds.add(seq.sequenceId);
-                      }
-                    }
-                  } catch (e) {
-                    console.log(`Could not fetch campaigns for contact ${contact.id}:`, e);
-                  }
-                }
-                
-                hasMore = listContacts.pagesCount > page;
-                page++;
-              } else {
-                hasMore = false;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.error('Error fetching contact lists:', e);
-        progress.errors.push(`Contact lists: ${String(e)}`);
-      }
-
-      console.log(`Discovered ${discoveredCampaignIds.size} unique campaigns`);
-      console.log(`Found ${allContacts.length} contacts`);
-
-      // Fetch campaign details for each discovered campaign
-      const campaignIds = Array.from(discoveredCampaignIds);
-      
-      for (let i = resumeFromCampaign; i < campaignIds.length && !isTimeBudgetExceeded(); i++) {
-        const campaignId = campaignIds[i];
-        console.log(`Fetching campaign details for ID: ${campaignId}`);
+      // Step 1: Sync Email Accounts
+      if (progress.step === 'email_accounts') {
+        console.log('Syncing email accounts...');
         
         try {
-          const campaignData: ReplyioCampaign = await replyioRequest(`/v1/campaigns?id=${campaignId}`, apiKey);
+          const emailAccounts: ReplyioEmailAccount[] = await replyioRequest('/email-accounts', apiKey);
           
-          if (!campaignData) {
-            console.log(`Campaign ${campaignId} returned no data`);
-            continue;
-          }
-
-          // Upsert campaign
-          const { data: upsertedCampaign, error: campError } = await supabase
-            .from('campaigns')
-            .upsert({ 
-              workspace_id, 
-              platform: 'replyio', 
-              platform_id: String(campaignData.id), 
-              name: campaignData.name, 
-              status: mapCampaignStatus(campaignData.status),
-              updated_at: new Date().toISOString()
-            }, { 
-              onConflict: 'workspace_id,platform_id,platform' 
-            })
-            .select('id')
-            .single();
-
-          if (campError) {
-            console.error(`Failed to upsert campaign ${campaignId}:`, campError);
-            progress.errors.push(`Campaign ${campaignData.name}: ${campError.message}`);
-            continue;
-          }
-
-          const campaignDbId = upsertedCampaign.id;
-          progress.campaigns_synced++;
-
-          // Process email accounts from campaign
-          if (campaignData.emailAccounts && Array.isArray(campaignData.emailAccounts)) {
-            for (const emailAccount of campaignData.emailAccounts) {
-              const { error: accountError } = await supabase
-                .from('email_accounts')
-                .upsert({
-                  workspace_id, 
-                  platform: 'replyio', 
-                  platform_id: `replyio-${emailAccount}`,
-                  email_address: emailAccount, 
-                  sender_name: emailAccount.split('@')[0],
-                  is_active: true,
-                }, { 
-                  onConflict: 'workspace_id,platform_id,platform' 
-                });
-                
-              if (!accountError) progress.email_accounts_synced++;
+          if (Array.isArray(emailAccounts)) {
+            for (const account of emailAccounts) {
+              await supabase.from('email_accounts').upsert({
+                workspace_id,
+                platform: 'replyio',
+                platform_id: String(account.id),
+                email_address: account.email,
+                sender_name: account.senderName || null,
+                is_active: true,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'workspace_id,platform,platform_id' });
             }
+            
+            console.log(`Synced ${emailAccounts.length} email accounts`);
           }
+        } catch (error) {
+          console.error('Error syncing email accounts:', error);
+          progress.errors.push(`Email accounts: ${(error as Error).message}`);
+        }
+        
+        progress.step = 'sequences';
+        progress.last_heartbeat = new Date().toISOString();
+        await updateProgress(supabase, connection.id, progress);
+      }
 
-          // Create daily metrics from campaign stats
-          const today = new Date().toISOString().split('T')[0];
+      // Step 2: Sync Sequences (Campaigns)
+      if (progress.step === 'sequences') {
+        console.log('Syncing sequences...');
+        
+        // Fetch all sequences using v3 API
+        let allSequences: ReplyioSequence[] = [];
+        let cursor: string | null = null;
+        
+        do {
+          const endpoint = cursor 
+            ? `/sequences?cursor=${cursor}&limit=100`
+            : '/sequences?limit=100';
           
-          const metricsPayload = {
-            workspace_id, 
-            campaign_id: campaignDbId, 
-            date: today,
-            sent_count: campaignData.deliveriesCount || 0,
-            delivered_count: campaignData.deliveriesCount || 0,
-            opened_count: campaignData.opensCount || 0,
-            replied_count: campaignData.repliesCount || 0,
-            bounced_count: campaignData.bouncesCount || 0,
-            unsubscribed_count: campaignData.optOutsCount || 0,
-          };
+          const response = await replyioRequest(endpoint, apiKey);
+          const sequences = response?.sequences || response || [];
+          
+          if (Array.isArray(sequences)) {
+            allSequences = allSequences.concat(sequences);
+          }
+          
+          cursor = response?.nextCursor || null;
+          
+          if (checkTimeBudget()) break;
+        } while (cursor);
+        
+        // Filter out archived sequences
+        allSequences = allSequences.filter(s => !s.isArchived);
+        progress.total_sequences = allSequences.length;
+        
+        console.log(`Found ${allSequences.length} sequences to process`);
+        
+        // Process sequences from where we left off
+        for (let i = progress.sequence_index; i < allSequences.length; i++) {
+          if (checkTimeBudget()) {
+            console.log('Time budget exceeded, saving progress...');
+            progress.sequence_index = i;
+            await updateProgress(supabase, connection.id, progress);
+            
+            return new Response(JSON.stringify({
+              success: true,
+              complete: false,
+              progress,
+              message: 'Time budget exceeded, will continue on next call',
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          
+          const sequence = allSequences[i];
+          progress.current_sequence_name = sequence.name;
+          progress.sequence_index = i;
+          progress.processed_sequences = i;
+          progress.last_heartbeat = new Date().toISOString();
+          
+          console.log(`Processing sequence ${i + 1}/${allSequences.length}: ${sequence.name}`);
+          
+          try {
+            // Upsert campaign
+            const { data: campaign, error: campaignError } = await supabase
+              .from('campaigns')
+              .upsert({
+                workspace_id,
+                platform: 'replyio',
+                platform_id: String(sequence.id),
+                name: sequence.name,
+                status: mapSequenceStatus(sequence.status),
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'workspace_id,platform,platform_id' })
+              .select('id')
+              .single();
+            
+            if (campaignError) throw campaignError;
+            const campaignId = campaign.id;
+            
+            // Fetch and sync steps (templates/variants)
+            try {
+              const steps: ReplyioStep[] = await replyioRequest(`/sequences/${sequence.id}/steps`, apiKey);
+              
+              if (Array.isArray(steps)) {
+                for (const step of steps) {
+                  // Upsert sequence step
+                  await supabase.from('sequence_steps').upsert({
+                    campaign_id: campaignId,
+                    step_number: step.number || 1,
+                    delay_days: Math.floor((step.delayInMinutes || 0) / 1440),
+                    subject_line: step.templates?.[0]?.subject || null,
+                    body_preview: step.templates?.[0]?.body?.substring(0, 200) || null,
+                  }, { onConflict: 'campaign_id,step_number' });
+                  
+                  // Upsert templates as variants
+                  if (step.templates && Array.isArray(step.templates)) {
+                    for (let ti = 0; ti < step.templates.length; ti++) {
+                      const template = step.templates[ti];
+                      await supabase.from('campaign_variants').upsert({
+                        campaign_id: campaignId,
+                        platform_variant_id: String(template.id || template.templateId),
+                        name: `Step ${step.number} - Variant ${String.fromCharCode(65 + ti)}`,
+                        variant_type: 'email',
+                        subject_line: template.subject || null,
+                        email_body: template.body || null,
+                        body_preview: template.body?.substring(0, 200) || null,
+                        is_control: ti === 0,
+                      }, { onConflict: 'campaign_id,platform_variant_id' });
+                    }
+                  }
+                }
+              }
+            } catch (stepError) {
+              console.error(`Error fetching steps for sequence ${sequence.id}:`, stepError);
+            }
+            
+            // Fetch and sync statistics
+            try {
+              const stats: ReplyioSequenceStats = await replyioRequest(`/statistics/sequences/${sequence.id}`, apiKey);
+              
+              if (stats) {
+                const today = new Date().toISOString().split('T')[0];
+                await supabase.from('daily_metrics').upsert({
+                  workspace_id,
+                  campaign_id: campaignId,
+                  date: today,
+                  sent_count: stats.deliveredContacts || 0,
+                  delivered_count: stats.deliveredContacts || 0,
+                  replied_count: stats.repliedContacts || 0,
+                  positive_reply_count: stats.interestedContacts || 0,
+                  updated_at: new Date().toISOString(),
+                }, { onConflict: 'workspace_id,campaign_id,date,email_account_id,variant_id,segment_id' });
+              }
+            } catch (statsError) {
+              console.error(`Error fetching stats for sequence ${sequence.id}:`, statsError);
+            }
+            
+          } catch (error) {
+            console.error(`Error processing sequence ${sequence.id}:`, error);
+            progress.errors.push(`Sequence ${sequence.name}: ${(error as Error).message}`);
+          }
+          
+          // Update progress after each sequence
+          await updateProgress(supabase, connection.id, progress);
+        }
+        
+        progress.step = 'contacts';
+        progress.processed_sequences = progress.total_sequences;
+        progress.last_heartbeat = new Date().toISOString();
+        await updateProgress(supabase, connection.id, progress);
+      }
 
-          const { data: existingMetric } = await supabase
-            .from('daily_metrics')
-            .select('id')
-            .eq('workspace_id', workspace_id)
-            .eq('campaign_id', campaignDbId)
-            .eq('date', today)
-            .is('variant_id', null)
-            .is('email_account_id', null)
-            .is('segment_id', null)
-            .maybeSingle();
-
-          const { error: metricsError } = existingMetric?.id
-            ? await supabase.from('daily_metrics').update(metricsPayload).eq('id', existingMetric.id)
-            : await supabase.from('daily_metrics').insert(metricsPayload);
-
-          if (!metricsError) progress.metrics_created++;
-
-          // Update progress
-          await supabase.from('api_connections').update({
-            sync_progress: {
-              campaign_index: i + 1,
-              total_campaigns: campaignIds.length,
-              current_campaign: i + 1,
-              campaign_name: campaignData.name,
-              step: 'campaigns',
-              progress: Math.round(((i + 1) / Math.max(1, campaignIds.length)) * 90) + 5,
-              ...progress,
-            },
-          }).eq('id', connection.id);
-
-        } catch (campaignError) {
-          console.error(`Error processing campaign ${campaignId}:`, campaignError);
-          progress.errors.push(`Campaign ${campaignId}: ${String(campaignError)}`);
+      // Step 3: Sync Contacts
+      if (progress.step === 'contacts') {
+        console.log('Syncing contacts...');
+        
+        let hasMore = true;
+        let cursor = progress.contact_cursor;
+        let processedInThisRun = 0;
+        
+        while (hasMore && !checkTimeBudget()) {
+          try {
+            const endpoint = cursor 
+              ? `/contacts?cursor=${cursor}&limit=${BATCH_SIZE}`
+              : `/contacts?limit=${BATCH_SIZE}`;
+            
+            const response = await replyioRequest(endpoint, apiKey);
+            const contacts: ReplyioContact[] = response?.contacts || response || [];
+            
+            if (!Array.isArray(contacts) || contacts.length === 0) {
+              hasMore = false;
+              break;
+            }
+            
+            // Batch upsert contacts as leads
+            const leadsToUpsert = contacts.map(contact => ({
+              workspace_id,
+              platform: 'replyio',
+              platform_lead_id: String(contact.id),
+              email: contact.email,
+              first_name: contact.firstName || null,
+              last_name: contact.lastName || null,
+              title: contact.title || null,
+              company: contact.company || null,
+              location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || null,
+              phone_number: contact.phone || null,
+              linkedin_url: contact.linkedInProfile || null,
+              company_size: contact.companySize || null,
+              industry: contact.industry || null,
+              email_domain: extractEmailDomain(contact.email),
+              email_type: classifyEmailType(contact.email),
+              updated_at: new Date().toISOString(),
+            }));
+            
+            await supabase.from('leads').upsert(leadsToUpsert, {
+              onConflict: 'workspace_id,platform,platform_lead_id',
+            });
+            
+            processedInThisRun += contacts.length;
+            progress.processed_contacts += contacts.length;
+            cursor = response?.nextCursor || null;
+            progress.contact_cursor = cursor;
+            hasMore = !!cursor;
+            
+            progress.last_heartbeat = new Date().toISOString();
+            await updateProgress(supabase, connection.id, progress);
+            
+            console.log(`Processed ${processedInThisRun} contacts (total: ${progress.processed_contacts})`);
+            
+          } catch (error) {
+            console.error('Error syncing contacts:', error);
+            progress.errors.push(`Contacts: ${(error as Error).message}`);
+            hasMore = false;
+          }
+        }
+        
+        if (!hasMore || !cursor) {
+          progress.step = 'complete';
         }
       }
 
-      // Now sync contacts as leads
-      console.log(`Processing ${allContacts.length} contacts as leads...`);
-      
-      for (const contact of allContacts) {
-        if (isTimeBudgetExceeded()) break;
-        
-        const email = contact.email?.toLowerCase();
-        if (!email) continue;
+      // Complete
+      if (progress.step === 'complete') {
+        await supabase
+          .from('api_connections')
+          .update({
+            sync_status: 'completed',
+            sync_progress: progress,
+            last_sync_at: new Date().toISOString(),
+            last_full_sync_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', connection.id);
 
-        const leadPayload = {
-          workspace_id,
-          platform: 'replyio',
-          platform_lead_id: String(contact.id),
-          email: email,
-          first_name: contact.firstName || null,
-          last_name: contact.lastName || null,
-          company: contact.company || null,
-          title: contact.title || null,
-          phone_number: contact.phone || null,
-          linkedin_url: contact.linkedInProfile || null,
-          location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || null,
-          industry: contact.industry || null,
-          company_size: contact.companySize || null,
-          email_type: classifyEmailType(email),
-          email_domain: extractEmailDomain(email),
-          status: 'active',
-        };
-
-        const { error: leadError } = await supabase
-          .from('leads')
-          .upsert(leadPayload, { 
-            onConflict: 'workspace_id,platform,platform_lead_id' 
-          });
-
-        if (!leadError) progress.leads_synced++;
+        return new Response(JSON.stringify({
+          success: true,
+          complete: true,
+          progress,
+          message: 'Sync completed successfully',
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
-      const isComplete = !isTimeBudgetExceeded() && 
-        (campaignIds.length === 0 || resumeFromCampaign + BATCH_SIZE >= campaignIds.length);
-
-      await supabase.from('api_connections').update({
-        sync_status: isComplete ? 'success' : 'syncing',
-        last_sync_at: isComplete ? new Date().toISOString() : undefined,
-        last_full_sync_at: isComplete && sync_type === 'full' ? new Date().toISOString() : undefined,
-        sync_progress: {
-          campaign_index: Math.min(resumeFromCampaign + BATCH_SIZE, campaignIds.length),
-          total_campaigns: campaignIds.length,
-          step: isComplete ? 'complete' : 'campaigns',
-          progress: isComplete ? 100 : Math.round((resumeFromCampaign / Math.max(1, campaignIds.length)) * 90) + 5,
-          completed: isComplete,
-          ...progress,
-        },
-      }).eq('id', connection.id);
-
-      console.log('Progress:', { isComplete, ...progress });
-
+      // Not complete - needs continuation
       return new Response(JSON.stringify({
-        success: true, 
-        done: isComplete, 
-        campaign_index: resumeFromCampaign,
-        total: campaignIds.length,
-        message: isComplete ? 'Sync completed successfully' : `Processed campaigns; call again to continue`,
-        ...progress,
+        success: true,
+        complete: false,
+        progress,
+        message: 'Sync in progress, call again to continue',
       }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
 
     } catch (syncError) {
       console.error('Sync error:', syncError);
-      progress.errors.push(String(syncError));
-
-      await supabase.from('api_connections').update({
-        sync_status: 'error',
-        sync_progress: {
-          ...existingSyncProgress,
-          error: String(syncError),
-          ...progress,
-        },
-      }).eq('id', connection.id);
+      progress.errors.push(`Sync error: ${(syncError as Error).message}`);
+      
+      await supabase
+        .from('api_connections')
+        .update({
+          sync_status: 'error',
+          sync_progress: progress,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', connection.id);
 
       return new Response(JSON.stringify({
         success: false,
-        error: String(syncError),
-        ...progress,
-      }), { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        error: (syncError as Error).message,
+        progress,
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
   } catch (error) {
-    console.error('replyio-sync error:', error);
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: String(error) 
-    }), { 
-      status: 500, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    console.error('Request error:', error);
+    return new Response(JSON.stringify({ error: (error as Error).message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });
