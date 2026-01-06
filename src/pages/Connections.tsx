@@ -23,7 +23,19 @@ import {
   Download,
   AlertCircle,
   FastForward,
+  AlertTriangle,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { supabase } from '@/integrations/supabase/client';
 
 type SyncProgress = {
@@ -101,7 +113,7 @@ export default function Connections() {
       pollInterval = window.setInterval(fetchConnections, 2000);
       resumeInterval = window.setInterval(() => {
         void continueSmartleadSync();
-      }, 5000); // Reduced from 12s to 5s for faster resume
+      }, 60000); // 60s interval - each sync batch takes time, avoid overlapping calls
 
       // kick once immediately
       void continueSmartleadSync();
@@ -449,14 +461,38 @@ export default function Connections() {
                           <Download className="mr-2 h-4 w-4" />
                           Continue Sync
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handlePullFullHistory(true)}
-                          title="Reset and re-sync from scratch"
-                        >
-                          <RefreshCw className="h-4 w-4" />
-                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              title="Reset and re-sync from scratch"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="flex items-center gap-2">
+                                <AlertTriangle className="h-5 w-5 text-destructive" />
+                                Reset Sync Data?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will delete all synced data and start a full re-sync from scratch.
+                                This may take a long time for accounts with many campaigns.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handlePullFullHistory(true)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                Reset & Full Sync
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                         <Button 
                           variant="outline" 
                           size="sm"
