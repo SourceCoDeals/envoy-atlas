@@ -3,10 +3,11 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { CampaignTable } from '@/components/campaigns/CampaignTable';
+import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfolioOverview';
+import { EnhancedCampaignTable } from '@/components/campaigns/EnhancedCampaignTable';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Mail, RefreshCw, ArrowRight } from 'lucide-react';
+import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download } from 'lucide-react';
 
 export default function Campaigns() {
   const navigate = useNavigate();
@@ -34,14 +35,16 @@ export default function Campaigns() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Campaigns</h1>
             <p className="text-muted-foreground">
-              Performance breakdown by campaign
+              Portfolio analysis and performance breakdown
             </p>
           </div>
           {campaigns.length > 0 && (
-            <Button variant="outline" size="sm" onClick={refetch} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={refetch} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           )}
         </div>
 
@@ -77,7 +80,29 @@ export default function Campaigns() {
             </CardContent>
           </Card>
         ) : (
-          <CampaignTable campaigns={campaigns} />
+          <div className="space-y-6">
+            {/* Portfolio Overview */}
+            <CampaignPortfolioOverview campaigns={campaigns} />
+
+            {/* Action Bar */}
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled>
+                <Plus className="h-4 w-4 mr-2" />
+                New Campaign
+              </Button>
+              <Button variant="outline" size="sm" disabled>
+                <GitCompare className="h-4 w-4 mr-2" />
+                Compare Selected
+              </Button>
+              <Button variant="outline" size="sm" disabled>
+                <Download className="h-4 w-4 mr-2" />
+                Export Data
+              </Button>
+            </div>
+
+            {/* Enhanced Campaign Table */}
+            <EnhancedCampaignTable campaigns={campaigns} />
+          </div>
         )}
       </div>
     </DashboardLayout>
