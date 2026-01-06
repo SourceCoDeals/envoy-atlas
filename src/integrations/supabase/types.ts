@@ -1154,10 +1154,13 @@ export type Database = {
           category: string | null
           company: string | null
           company_size: string | null
+          company_size_category: string | null
           created_at: string
+          department: string | null
           email: string
           email_domain: string | null
           email_type: string | null
+          enriched_at: string | null
           first_name: string | null
           id: string
           industry: string | null
@@ -1168,6 +1171,7 @@ export type Database = {
           phone_number: string | null
           platform: string
           platform_lead_id: string | null
+          seniority_level: string | null
           status: string | null
           title: string | null
           updated_at: string
@@ -1179,10 +1183,13 @@ export type Database = {
           category?: string | null
           company?: string | null
           company_size?: string | null
+          company_size_category?: string | null
           created_at?: string
+          department?: string | null
           email: string
           email_domain?: string | null
           email_type?: string | null
+          enriched_at?: string | null
           first_name?: string | null
           id?: string
           industry?: string | null
@@ -1193,6 +1200,7 @@ export type Database = {
           phone_number?: string | null
           platform: string
           platform_lead_id?: string | null
+          seniority_level?: string | null
           status?: string | null
           title?: string | null
           updated_at?: string
@@ -1204,10 +1212,13 @@ export type Database = {
           category?: string | null
           company?: string | null
           company_size?: string | null
+          company_size_category?: string | null
           created_at?: string
+          department?: string | null
           email?: string
           email_domain?: string | null
           email_type?: string | null
+          enriched_at?: string | null
           first_name?: string | null
           id?: string
           industry?: string | null
@@ -1218,6 +1229,7 @@ export type Database = {
           phone_number?: string | null
           platform?: string
           platform_lead_id?: string | null
+          seniority_level?: string | null
           status?: string | null
           title?: string | null
           updated_at?: string
