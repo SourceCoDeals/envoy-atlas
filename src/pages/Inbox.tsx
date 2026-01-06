@@ -9,9 +9,27 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Inbox as InboxIcon, Search, Mail, Building2, User, Clock, MessageSquare, Calendar, AlertCircle, Timer } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { 
+  Loader2, 
+  Inbox as InboxIcon, 
+  Search, 
+  Mail, 
+  Building2, 
+  User, 
+  Clock, 
+  MessageSquare, 
+  Calendar, 
+  AlertCircle, 
+  Timer,
+  Flame,
+  CheckCircle,
+  XCircle,
+  ArrowRight,
+  RefreshCw,
+} from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { format, formatDistanceToNow, differenceInHours } from 'date-fns';
+import { format, formatDistanceToNow, differenceInHours, differenceInMinutes } from 'date-fns';
 import { 
   classifyReply, 
   CLASSIFICATION_CONFIG, 
@@ -19,6 +37,7 @@ import {
   type ReplyClassification,
   type PriorityLevel 
 } from '@/lib/replyClassification';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface InboxItem {
   id: string;
@@ -44,6 +63,8 @@ interface InboxItem {
   classification: ReplyClassification;
   priority: PriorityLevel;
   hoursAgo: number;
+  minutesAgo: number;
+  isOverdue: boolean;
 }
 
 export default function Inbox() {
@@ -95,7 +116,7 @@ export default function Inbox() {
         .eq('workspace_id', currentWorkspace.id)
         .in('event_type', ['reply', 'replied', 'positive_reply', 'negative_reply', 'interested', 'not_interested', 'out_of_office'])
         .order('occurred_at', { ascending: false })
-        .limit(200);
+        .limit(500);
 
       if (error) throw error;
 
@@ -103,6 +124,14 @@ export default function Inbox() {
         const classification = classifyReply(item.reply_content, item.event_type);
         const config = CLASSIFICATION_CONFIG[classification];
         const hoursAgo = differenceInHours(new Date(), new Date(item.occurred_at));
+        const minutesAgo = differenceInMinutes(new Date(), new Date(item.occurred_at));
+        
+        // Calculate if overdue based on target response time
+        let isOverdue = false;
+        if (config.priority === 'P0' && hoursAgo >= 1) isOverdue = true;
+        if (config.priority === 'P1' && hoursAgo >= 4) isOverdue = true;
+        if (config.priority === 'P2' && hoursAgo >= 24) isOverdue = true;
+        if (config.priority === 'P3' && hoursAgo >= 48) isOverdue = true;
         
         return {
           id: item.id,
@@ -128,6 +157,8 @@ export default function Inbox() {
           classification,
           priority: config.priority,
           hoursAgo,
+          minutesAgo,
+          isOverdue,
         };
       });
 
@@ -144,20 +175,18 @@ export default function Inbox() {
 
   const getClassificationBadge = (item: InboxItem) => {
     const config = CLASSIFICATION_CONFIG[item.classification];
-    const isOverdue = 
-      (item.priority === 'P0' && item.hoursAgo > 1) ||
-      (item.priority === 'P1' && item.hoursAgo > 4) ||
-      (item.priority === 'P2' && item.hoursAgo > 24);
-    
     return (
       <Badge className={`${config.bgClass} ${config.textClass} ${config.borderClass} text-xs`}>
-        {isOverdue && <Timer className="mr-1 h-3 w-3" />}
+        {item.isOverdue && <Timer className="mr-1 h-3 w-3" />}
         {config.label}
       </Badge>
     );
   };
 
-  const getPriorityIndicator = (priority: PriorityLevel) => {
+  const getPriorityIndicator = (priority: PriorityLevel, isOverdue: boolean) => {
+    if (isOverdue) {
+      return <div className="w-2 h-2 rounded-full bg-destructive animate-pulse" />;
+    }
     switch (priority) {
       case 'P0':
         return <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />;
@@ -168,13 +197,6 @@ export default function Inbox() {
       default:
         return <div className="w-2 h-2 rounded-full bg-muted-foreground/30" />;
     }
-  };
-
-  const getEmailTypeBadge = (emailType: string) => {
-    if (emailType === 'personal') {
-      return <Badge variant="secondary" className="text-xs">Personal</Badge>;
-    }
-    return <Badge variant="outline" className="text-xs">Work</Badge>;
   };
 
   const filteredItems = useMemo(() => {
@@ -192,9 +214,12 @@ export default function Inbox() {
       return matchesSearch;
     });
 
-    // Sort by priority or time
     if (sortBy === 'priority') {
       result = result.sort((a, b) => {
+        // Overdue items first
+        if (a.isOverdue && !b.isOverdue) return -1;
+        if (!a.isOverdue && b.isOverdue) return 1;
+        // Then by priority
         const priorityDiff = getPrioritySortOrder(a.priority) - getPrioritySortOrder(b.priority);
         if (priorityDiff !== 0) return priorityDiff;
         return new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
@@ -206,17 +231,46 @@ export default function Inbox() {
     return result;
   }, [items, searchQuery, filter, sortBy]);
 
-  const stats = useMemo(() => ({
-    total: items.length,
-    hot: items.filter(i => ['P0', 'P1'].includes(i.priority)).length,
-    action: items.filter(i => ['P2', 'P3'].includes(i.priority)).length,
-    overdue: items.filter(i => {
-      if (i.priority === 'P0' && i.hoursAgo > 1) return true;
-      if (i.priority === 'P1' && i.hoursAgo > 4) return true;
-      if (i.priority === 'P2' && i.hoursAgo > 24) return true;
-      return false;
-    }).length,
-  }), [items]);
+  const stats = useMemo(() => {
+    const hot = items.filter(i => ['P0', 'P1'].includes(i.priority)).length;
+    const action = items.filter(i => ['P2', 'P3'].includes(i.priority)).length;
+    const overdue = items.filter(i => i.isOverdue).length;
+    
+    // Classification breakdown
+    const classificationCounts: Record<string, number> = {};
+    items.forEach(i => {
+      classificationCounts[i.classification] = (classificationCounts[i.classification] || 0) + 1;
+    });
+    
+    return {
+      total: items.length,
+      hot,
+      action,
+      overdue,
+      classificationCounts,
+    };
+  }, [items]);
+
+  // Classification chart data
+  const classificationChartData = Object.entries(stats.classificationCounts).map(([key, value]) => ({
+    name: CLASSIFICATION_CONFIG[key as ReplyClassification]?.label || key,
+    value,
+    color: key === 'meeting_request' ? 'hsl(var(--success))' : 
+           key === 'interested' ? 'hsl(var(--chart-1))' : 
+           key === 'question' ? 'hsl(var(--chart-2))' : 
+           key === 'not_interested' ? 'hsl(var(--destructive))' : 
+           'hsl(var(--muted-foreground))',
+  }));
+
+  const getResponseTimeDisplay = (item: InboxItem) => {
+    if (item.minutesAgo < 60) {
+      return `${item.minutesAgo}m ago`;
+    }
+    if (item.hoursAgo < 24) {
+      return `${item.hoursAgo}h ago`;
+    }
+    return formatDistanceToNow(new Date(item.occurred_at), { addSuffix: true });
+  };
 
   if (authLoading || !user) {
     return (
@@ -232,12 +286,18 @@ export default function Inbox() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Master Inbox</h1>
-            <p className="text-muted-foreground">All campaign responses in one place</p>
+            <p className="text-muted-foreground">
+              Triage Center – Who needs attention right now?
+            </p>
           </div>
+          <Button variant="outline" size="sm" onClick={fetchInboxItems}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
         </div>
 
         {/* Stats Row - Priority Based */}
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-5">
           <Card>
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
@@ -250,7 +310,7 @@ export default function Inbox() {
           <Card className="border-red-500/30">
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-red-500" />
+                <Flame className="h-4 w-4 text-red-500" />
                 <span className="text-2xl font-bold text-red-500">{stats.hot}</span>
               </div>
               <p className="text-xs text-muted-foreground">Hot Leads (P0-P1)</p>
@@ -269,9 +329,36 @@ export default function Inbox() {
             <CardContent className="pt-4">
               <div className="flex items-center gap-2">
                 <Timer className="h-4 w-4 text-destructive" />
-                <span className={`text-2xl font-bold ${stats.overdue > 0 ? 'text-destructive' : ''}`}>{stats.overdue}</span>
+                <span className={`text-2xl font-bold ${stats.overdue > 0 ? 'text-destructive' : ''}`}>
+                  {stats.overdue}
+                </span>
               </div>
               <p className="text-xs text-muted-foreground">Overdue Responses</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-2">
+              <div className="h-[60px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={classificationChartData.slice(0, 5)}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={15}
+                      outerRadius={25}
+                    >
+                      {classificationChartData.map((entry, index) => (
+                        <Cell key={index} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-xs text-muted-foreground text-center">Breakdown</p>
             </CardContent>
           </Card>
         </div>
@@ -297,44 +384,54 @@ export default function Inbox() {
             {/* Left sidebar - message list */}
             <Card className="lg:col-span-1">
               <CardHeader className="pb-3">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search replies..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9"
-                  />
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  <Select value={sortBy} onValueChange={(v) => setSortBy(v as 'priority' | 'time')}>
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="priority">Priority</SelectItem>
+                      <SelectItem value="time">Recent</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
                   <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="all">All</TabsTrigger>
-                    <TabsTrigger value="hot" className="text-red-500">🔥 Hot</TabsTrigger>
+                    <TabsTrigger value="hot" className="text-red-500">
+                      <Flame className="h-3 w-3 mr-1" />
+                      Hot
+                    </TabsTrigger>
                     <TabsTrigger value="action">Action</TabsTrigger>
                     <TabsTrigger value="archive">Archive</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </CardHeader>
               <CardContent className="p-0">
-                <ScrollArea className="h-[500px]">
+                <ScrollArea className="h-[550px]">
                   {filteredItems.map((item) => {
                     const config = CLASSIFICATION_CONFIG[item.classification];
-                    const isOverdue = 
-                      (item.priority === 'P0' && item.hoursAgo > 1) ||
-                      (item.priority === 'P1' && item.hoursAgo > 4) ||
-                      (item.priority === 'P2' && item.hoursAgo > 24);
                     
                     return (
                       <div
                         key={item.id}
                         className={`p-4 border-b cursor-pointer hover:bg-accent/50 transition-colors ${
                           selectedItem?.id === item.id ? 'bg-accent' : ''
-                        } ${isOverdue ? 'border-l-2 border-l-destructive' : ''}`}
+                        } ${item.isOverdue ? 'border-l-2 border-l-destructive' : ''}`}
                         onClick={() => setSelectedItem(item)}
                       >
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="flex items-center gap-2">
-                            {getPriorityIndicator(item.priority)}
+                            {getPriorityIndicator(item.priority, item.isOverdue)}
                             <span className="font-medium text-sm truncate">
                               {item.first_name || item.lead_email.split('@')[0]}
                             </span>
@@ -345,13 +442,16 @@ export default function Inbox() {
                           {item.company || item.email_domain}
                         </p>
                         <p className="text-xs text-muted-foreground line-clamp-2 pl-4">
-                          {item.reply_content?.substring(0, 100) || 'No content available'}
+                          {item.reply_content?.substring(0, 80) || 'No content'}
                         </p>
-                        <div className="flex items-center gap-2 mt-2 pl-4">
-                          <span className={`text-xs ${isOverdue ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
-                            {formatDistanceToNow(new Date(item.occurred_at), { addSuffix: true })}
-                            {isOverdue && ' (overdue)'}
+                        <div className="flex items-center justify-between mt-2 pl-4">
+                          <span className={`text-xs ${item.isOverdue ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                            {getResponseTimeDisplay(item)}
+                            {item.isOverdue && ' ⚠️'}
                           </span>
+                          <Badge variant="outline" className="text-[10px] px-1 py-0">
+                            {item.priority}
+                          </Badge>
                         </div>
                       </div>
                     );
@@ -379,20 +479,32 @@ export default function Inbox() {
                       </div>
                       <div className="flex items-center gap-2">
                         {getClassificationBadge(selectedItem)}
+                        <Badge variant="outline" className="text-xs">
+                          {selectedItem.priority}
+                        </Badge>
                       </div>
                     </div>
                     
                     {/* Recommended Action Banner */}
-                    <div className={`p-3 rounded-lg text-sm ${CLASSIFICATION_CONFIG[selectedItem.classification].bgClass}`}>
+                    <div className={`p-3 rounded-lg text-sm mt-2 ${CLASSIFICATION_CONFIG[selectedItem.classification].bgClass}`}>
                       <div className="flex items-center justify-between">
-                        <div>
-                          <span className="font-medium">Recommended: </span>
-                          <span>{CLASSIFICATION_CONFIG[selectedItem.classification].action}</span>
+                        <div className="flex items-center gap-2">
+                          <ArrowRight className={`h-4 w-4 ${CLASSIFICATION_CONFIG[selectedItem.classification].textClass}`} />
+                          <div>
+                            <span className="font-medium">Action: </span>
+                            <span>{CLASSIFICATION_CONFIG[selectedItem.classification].action}</span>
+                          </div>
                         </div>
                         <Badge variant="outline" className="text-xs">
                           Target: {CLASSIFICATION_CONFIG[selectedItem.classification].targetResponseTime}
                         </Badge>
                       </div>
+                      {selectedItem.isOverdue && (
+                        <p className="text-xs text-destructive mt-1 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          Response overdue – speed wins deals!
+                        </p>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
