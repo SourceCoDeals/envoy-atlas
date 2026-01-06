@@ -70,6 +70,7 @@ export interface BodyCopyAnalysis {
   reading_grade: number;
   sentence_count: number;
   paragraph_count: number;
+  bullet_count: number;
   
   confidence_level: 'low' | 'medium' | 'high';
 }
@@ -169,6 +170,7 @@ interface VariantFeatures {
   body_sentence_count: number | null;
   body_paragraph_count: number | null;
   body_question_count: number | null;
+  body_bullet_point_count: number | null;
   body_has_link: boolean | null;
   body_link_count: number | null;
   body_cta_type: string | null;
@@ -433,6 +435,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
           const wordCount = feat?.body_word_count ?? v.word_count ?? body.split(/\s+/).filter(Boolean).length;
           const sentenceCount = feat?.body_sentence_count ?? 0;
           const paragraphCount = feat?.body_paragraph_count ?? 0;
+          const bulletCount = feat?.body_bullet_point_count ?? (body.match(/^[\s]*[-•*]\s/gm)?.length || 0);
           const hasLink = feat?.body_has_link ?? /https?:\/\/|www\./i.test(body);
           const hasQuestion = feat?.body_question_count ? feat.body_question_count > 0 : body.includes('?');
           const ctaType = (feat?.body_cta_type as any) ?? detectCTAType(body);
@@ -470,6 +473,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
             reading_grade: readingGrade,
             sentence_count: sentenceCount,
             paragraph_count: paragraphCount,
+            bullet_count: bulletCount,
             
             confidence_level: getConfidenceLevel(m.sent),
           };

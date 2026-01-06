@@ -1233,6 +1233,7 @@ export default function CopyInsights() {
                         <TableRow>
                           <TableHead className="w-[25%]">Email</TableHead>
                           <TableHead>Words</TableHead>
+                          <TableHead>Bullets</TableHead>
                           <TableHead>Personalization</TableHead>
                           <TableHead>CTA Type</TableHead>
                           <TableHead>Has Link</TableHead>
@@ -1267,6 +1268,20 @@ export default function CopyInsights() {
                                 }`}
                               >
                                 {item.word_count}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs ${
+                                  item.bullet_count >= 2 && item.bullet_count <= 4
+                                    ? 'bg-success/10 text-success border-success/30' 
+                                    : item.bullet_count > 5 
+                                    ? 'bg-destructive/10 text-destructive border-destructive/30'
+                                    : ''
+                                }`}
+                              >
+                                {item.bullet_count}
                               </Badge>
                             </TableCell>
                             <TableCell>
