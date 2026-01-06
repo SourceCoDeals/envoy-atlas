@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
@@ -13,6 +13,7 @@ export default function Campaigns() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { campaigns, loading, error, refetch } = useCampaigns();
+  const [tierFilter, setTierFilter] = useState('all');
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -81,8 +82,12 @@ export default function Campaigns() {
           </Card>
         ) : (
           <div className="space-y-6">
-            {/* Portfolio Overview */}
-            <CampaignPortfolioOverview campaigns={campaigns} />
+            {/* Portfolio Overview - clickable filters */}
+            <CampaignPortfolioOverview 
+              campaigns={campaigns} 
+              onTierFilterChange={setTierFilter}
+              activeTierFilter={tierFilter}
+            />
 
             {/* Action Bar */}
             <div className="flex gap-2">
@@ -100,8 +105,12 @@ export default function Campaigns() {
               </Button>
             </div>
 
-            {/* Enhanced Campaign Table */}
-            <EnhancedCampaignTable campaigns={campaigns} />
+            {/* Enhanced Campaign Table with tier filter sync */}
+            <EnhancedCampaignTable 
+              campaigns={campaigns} 
+              tierFilter={tierFilter}
+              onTierFilterChange={setTierFilter}
+            />
           </div>
         )}
       </div>

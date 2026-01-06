@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Star, TrendingUp, Shield, Activity, Zap } from 'lucide-react';
+import { Star, TrendingUp, Shield, Activity, Zap, CheckCircle, AlertTriangle, XCircle, HelpCircle } from 'lucide-react';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
 import { CampaignTier } from './CampaignPortfolioOverview';
 
@@ -11,25 +11,33 @@ interface CampaignQualityScoreProps {
 }
 
 export function CampaignQualityScore({ campaign, tier }: CampaignQualityScoreProps) {
-  const replyRateBenchmark = 2.8;
-  
-  // Calculate component scores
-  const efficiencyScore = Math.min((campaign.reply_rate / replyRateBenchmark) * 20 + (campaign.reply_rate * 0.4) * 4, 40);
-  const reliabilityScore = campaign.bounce_rate < 2 ? 20 : campaign.bounce_rate < 3 ? 15 : campaign.bounce_rate < 5 ? 10 : 0;
-  const deliveryRate = ((campaign.total_sent - (campaign.total_bounced || 0)) / campaign.total_sent) * 100;
-  const healthScore = Math.min(deliveryRate / 5, 20);
-  const momentumScore = campaign.total_sent > 1000 ? 20 : campaign.total_sent > 500 ? 15 : campaign.total_sent > 100 ? 10 : 5;
-
   const getTierBadge = () => {
     switch (tier.tier) {
       case 'star':
         return <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-500/30"><Star className="w-3 h-3 mr-1" />STAR PERFORMER</Badge>;
       case 'solid':
-        return <Badge className="bg-success/20 text-success border-success/30">SOLID</Badge>;
+        return <Badge className="bg-success/20 text-success border-success/30"><CheckCircle className="w-3 h-3 mr-1" />SOLID</Badge>;
       case 'optimize':
-        return <Badge className="bg-warning/20 text-warning border-warning/30">NEEDS OPTIMIZATION</Badge>;
+        return <Badge className="bg-warning/20 text-warning border-warning/30"><AlertTriangle className="w-3 h-3 mr-1" />NEEDS OPTIMIZATION</Badge>;
       case 'problem':
-        return <Badge className="bg-destructive/20 text-destructive border-destructive/30">PROBLEM</Badge>;
+        return <Badge className="bg-destructive/20 text-destructive border-destructive/30"><XCircle className="w-3 h-3 mr-1" />PROBLEM</Badge>;
+      case 'insufficient':
+        return <Badge variant="outline" className="text-muted-foreground"><HelpCircle className="w-3 h-3 mr-1" />INSUFFICIENT DATA</Badge>;
+    }
+  };
+
+  const getConfidenceBadge = () => {
+    switch (tier.confidence) {
+      case 'high':
+        return <Badge variant="outline" className="text-success border-success/30">High Confidence</Badge>;
+      case 'good':
+        return <Badge variant="outline" className="text-success/70 border-success/30">Good Confidence</Badge>;
+      case 'medium':
+        return <Badge variant="outline" className="text-warning border-warning/30">Medium Confidence</Badge>;
+      case 'low':
+        return <Badge variant="outline" className="text-warning/70 border-warning/30">Low Confidence</Badge>;
+      default:
+        return <Badge variant="outline" className="text-muted-foreground">No Confidence</Badge>;
     }
   };
 
@@ -43,14 +51,40 @@ export function CampaignQualityScore({ campaign, tier }: CampaignQualityScorePro
         return 'Below target performance. Review copy, audience targeting, and send timing.';
       case 'problem':
         return 'Significantly underperforming. Consider pausing and analyzing root cause before continuing.';
+      case 'insufficient':
+        return 'Not enough data to evaluate. Continue sending to gather at least 100 sends before analyzing.';
     }
   };
 
   const scoreComponents = [
-    { name: 'Efficiency', score: efficiencyScore, max: 40, icon: Zap, description: 'Reply & positive rates' },
-    { name: 'Reliability', score: reliabilityScore, max: 20, icon: Shield, description: 'Bounce rate' },
-    { name: 'Health', score: healthScore, max: 20, icon: Activity, description: 'Delivery consistency' },
-    { name: 'Momentum', score: momentumScore, max: 20, icon: TrendingUp, description: 'Volume & engagement' },
+    { 
+      name: 'Efficiency', 
+      score: tier.scoreBreakdown.efficiency, 
+      max: 40, 
+      icon: Zap, 
+      description: 'Reply & positive rates' 
+    },
+    { 
+      name: 'Reliability', 
+      score: tier.scoreBreakdown.reliability, 
+      max: 20, 
+      icon: Shield, 
+      description: 'Bounce rate' 
+    },
+    { 
+      name: 'Health', 
+      score: tier.scoreBreakdown.health, 
+      max: 20, 
+      icon: Activity, 
+      description: 'Delivery consistency' 
+    },
+    { 
+      name: 'Momentum', 
+      score: tier.scoreBreakdown.momentum, 
+      max: 20, 
+      icon: TrendingUp, 
+      description: 'Volume & scale' 
+    },
   ];
 
   return (
@@ -63,11 +97,20 @@ export function CampaignQualityScore({ campaign, tier }: CampaignQualityScorePro
         {/* Main Score */}
         <div className="text-center p-6 rounded-lg bg-muted/50">
           <div className="flex items-center justify-center gap-2 mb-2">
-            <span className="text-5xl font-bold">{Math.round(tier.score)}</span>
-            <span className="text-2xl text-muted-foreground">/100</span>
+            {tier.score !== null ? (
+              <>
+                <span className="text-5xl font-bold">{tier.score}</span>
+                <span className="text-2xl text-muted-foreground">/100</span>
+              </>
+            ) : (
+              <span className="text-3xl font-bold text-muted-foreground">—</span>
+            )}
           </div>
-          <div className="mb-3">{getTierBadge()}</div>
-          <Progress value={tier.score} className="h-2 mb-4" />
+          <div className="flex items-center justify-center gap-2 mb-3">
+            {getTierBadge()}
+            {getConfidenceBadge()}
+          </div>
+          {tier.score !== null && <Progress value={tier.score} className="h-2 mb-4" />}
           <p className="text-sm text-muted-foreground">
             <strong>Recommendation: {tier.recommendation}</strong>
           </p>
@@ -87,12 +130,23 @@ export function CampaignQualityScore({ campaign, tier }: CampaignQualityScorePro
                   <span>{name}</span>
                   <span className="text-xs text-muted-foreground">({description})</span>
                 </div>
-                <span className="font-mono">{Math.round(score)}/{max}</span>
+                <span className="font-mono">{score}/{max}</span>
               </div>
               <Progress value={(score / max) * 100} className="h-1.5" />
             </div>
           ))}
         </div>
+
+        {/* Confidence Note */}
+        {tier.confidence !== 'high' && tier.confidence !== 'good' && tier.score !== null && (
+          <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm">
+            <p className="text-warning font-medium">⚠️ Low confidence score</p>
+            <p className="text-muted-foreground text-xs mt-1">
+              Score has been adjusted down due to limited sample size ({campaign.total_sent.toLocaleString()} sends). 
+              Continue sending to increase statistical confidence.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

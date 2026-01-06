@@ -1,20 +1,22 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
-import { calculateCampaignScore, CampaignTier } from './CampaignPortfolioOverview';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, TrendingUp, TrendingDown, Minus, Circle } from 'lucide-react';
 
 interface EnhancedCampaignTableProps {
   campaigns: CampaignWithMetrics[];
+  tierFilter?: string;
+  onTierFilterChange?: (tier: string) => void;
 }
 
-type SortField = 'name' | 'score' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings';
+type SortField = 'name' | 'score' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence';
 type SortDirection = 'asc' | 'desc';
 
 interface CampaignWithScore extends CampaignWithMetrics {
@@ -23,13 +25,67 @@ interface CampaignWithScore extends CampaignWithMetrics {
   estimatedMeetings: number;
 }
 
-export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps) {
+const getConfidenceIcon = (confidence: ConfidenceLevel) => {
+  switch (confidence) {
+    case 'high':
+      return <Circle className="h-3 w-3 fill-success text-success" />;
+    case 'good':
+      return <Circle className="h-3 w-3 fill-success/70 text-success/70" />;
+    case 'medium':
+      return <Circle className="h-3 w-3 fill-warning text-warning" />;
+    case 'low':
+      return <Circle className="h-3 w-3 fill-warning/60 text-warning/60" />;
+    default:
+      return <Circle className="h-3 w-3 fill-muted text-muted-foreground" />;
+  }
+};
+
+const getConfidenceLabel = (confidence: ConfidenceLevel) => {
+  switch (confidence) {
+    case 'high': return 'High (1000+)';
+    case 'good': return 'Good (500-999)';
+    case 'medium': return 'Medium (200-499)';
+    case 'low': return 'Low (50-199)';
+    default: return 'Insufficient (<50)';
+  }
+};
+
+const getTierRowClass = (tier: CampaignTier['tier']) => {
+  switch (tier) {
+    case 'star':
+      return 'border-l-4 border-l-yellow-500 bg-yellow-500/5';
+    case 'solid':
+      return 'border-l-4 border-l-success bg-success/5';
+    case 'optimize':
+      return 'border-l-4 border-l-warning bg-warning/5';
+    case 'problem':
+      return 'border-l-4 border-l-destructive bg-destructive/5';
+    default:
+      return 'border-l-4 border-l-muted';
+  }
+};
+
+export function EnhancedCampaignTable({ 
+  campaigns, 
+  tierFilter = 'all',
+  onTierFilterChange 
+}: EnhancedCampaignTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [tierFilter, setTierFilter] = useState<string>('all');
+  const [localTierFilter, setLocalTierFilter] = useState<string>(tierFilter);
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
+
+  // Sync external tier filter with local state
+  useEffect(() => {
+    setLocalTierFilter(tierFilter);
+  }, [tierFilter]);
+
+  const handleTierChange = (value: string) => {
+    setLocalTierFilter(value);
+    onTierFilterChange?.(value);
+  };
 
   const campaignsWithScores: CampaignWithScore[] = useMemo(() => {
     return campaigns.map(campaign => {
@@ -57,18 +113,18 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
       result = result.filter(c => c.status === statusFilter);
     }
 
-    if (tierFilter !== 'all') {
-      result = result.filter(c => c.tier.tier === tierFilter);
+    if (localTierFilter !== 'all') {
+      result = result.filter(c => c.tier.tier === localTierFilter);
     }
 
     result.sort((a, b) => {
-      let aVal: number | string;
-      let bVal: number | string;
+      let aVal: number | string | null;
+      let bVal: number | string | null;
 
       switch (sortField) {
         case 'score':
-          aVal = a.tier.score;
-          bVal = b.tier.score;
+          aVal = a.tier.score ?? -1;
+          bVal = b.tier.score ?? -1;
           break;
         case 'positive_rate':
           aVal = a.estimatedPositiveRate;
@@ -77,6 +133,11 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
         case 'meetings':
           aVal = a.estimatedMeetings;
           bVal = b.estimatedMeetings;
+          break;
+        case 'confidence':
+          const confOrder = { high: 5, good: 4, medium: 3, low: 2, none: 1 };
+          aVal = confOrder[a.tier.confidence];
+          bVal = confOrder[b.tier.confidence];
           break;
         default:
           aVal = a[sortField as keyof CampaignWithMetrics] as number | string;
@@ -91,7 +152,7 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
     });
 
     return result;
-  }, [campaignsWithScores, searchQuery, statusFilter, tierFilter, sortField, sortDirection]);
+  }, [campaignsWithScores, searchQuery, statusFilter, localTierFilter, sortField, sortDirection]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -129,28 +190,78 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
     </TableHead>
   );
 
-  const getTierIcon = (tier: string) => {
+  const getTierBadge = (tier: CampaignTier['tier']) => {
     switch (tier) {
-      case 'star': return <Star className="h-4 w-4 text-yellow-500" />;
-      case 'solid': return <CheckCircle className="h-4 w-4 text-success" />;
-      case 'optimize': return <AlertTriangle className="h-4 w-4 text-warning" />;
-      case 'problem': return <XCircle className="h-4 w-4 text-destructive" />;
+      case 'star': 
+        return (
+          <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-500/30 gap-1">
+            <Star className="h-3 w-3" />
+            Star
+          </Badge>
+        );
+      case 'solid': 
+        return (
+          <Badge className="bg-success/20 text-success border-success/30 gap-1">
+            <CheckCircle className="h-3 w-3" />
+            Solid
+          </Badge>
+        );
+      case 'optimize': 
+        return (
+          <Badge className="bg-warning/20 text-warning border-warning/30 gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            Optimize
+          </Badge>
+        );
+      case 'problem': 
+        return (
+          <Badge className="bg-destructive/20 text-destructive border-destructive/30 gap-1">
+            <XCircle className="h-3 w-3" />
+            Problem
+          </Badge>
+        );
+      default:
+        return (
+          <Badge variant="outline" className="gap-1 text-muted-foreground">
+            <HelpCircle className="h-3 w-3" />
+            Needs Data
+          </Badge>
+        );
     }
   };
 
-  const getActionBadge = (recommendation: string) => {
+  const getActionBadge = (tier: CampaignTier) => {
+    const { recommendation, confidence } = tier;
+    
     switch (recommendation) {
       case 'Scale':
         return <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-500/30">Scale</Badge>;
+      case 'Scale (verify)':
+        return <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-500/30">Scale ⚠️</Badge>;
       case 'Maintain':
         return <Badge className="bg-success/20 text-success border-success/30">Maintain</Badge>;
       case 'Optimize':
         return <Badge className="bg-warning/20 text-warning border-warning/30">Optimize</Badge>;
       case 'Pause':
         return <Badge className="bg-destructive/20 text-destructive border-destructive/30">Pause</Badge>;
+      case 'Gather Data':
+        return <Badge variant="outline" className="text-muted-foreground">Gather Data</Badge>;
       default:
         return <Badge variant="outline">{recommendation}</Badge>;
     }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const isPaused = status === 'paused' || status === 'stopped';
+    const isActive = status === 'active' || status === 'running';
+    
+    if (isPaused) {
+      return <Badge variant="outline" className="text-muted-foreground bg-muted/50">Paused</Badge>;
+    }
+    if (isActive) {
+      return <Badge variant="outline" className="text-success bg-success/10 border-success/30">Active</Badge>;
+    }
+    return <Badge variant="outline" className="capitalize">{status}</Badge>;
   };
 
   return (
@@ -177,8 +288,8 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
             ))}
           </SelectContent>
         </Select>
-        <Select value={tierFilter} onValueChange={setTierFilter}>
-          <SelectTrigger className="w-[140px]">
+        <Select value={localTierFilter} onValueChange={handleTierChange}>
+          <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="Tier" />
           </SelectTrigger>
           <SelectContent>
@@ -187,6 +298,7 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
             <SelectItem value="solid">✓ Solid</SelectItem>
             <SelectItem value="optimize">⚠️ Optimize</SelectItem>
             <SelectItem value="problem">🔴 Problems</SelectItem>
+            <SelectItem value="insufficient">❓ Needs Data</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -216,9 +328,11 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
               </TableHead>
               <SortableHeader field="name" className="min-w-[200px]">Campaign</SortableHeader>
               <SortableHeader field="score" className="w-[80px] text-center">Score</SortableHeader>
-              <TableHead className="w-[80px] text-center">Tier</TableHead>
+              <TableHead className="w-[100px] text-center">Tier</TableHead>
+              <SortableHeader field="confidence" className="w-[80px] text-center">Conf</SortableHeader>
+              <TableHead className="w-[80px] text-center">Status</TableHead>
               <SortableHeader field="total_sent" className="text-right">Sent</SortableHeader>
-              <SortableHeader field="reply_rate" className="text-right">Reply</SortableHeader>
+              <SortableHeader field="reply_rate" className="text-right">Reply %</SortableHeader>
               <SortableHeader field="positive_rate" className="text-right">Pos %</SortableHeader>
               <SortableHeader field="meetings" className="text-right">Mtgs</SortableHeader>
               <TableHead className="text-center">Action</TableHead>
@@ -227,13 +341,16 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
           <TableBody>
             {filteredAndSortedCampaigns.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                   No campaigns match your filters
                 </TableCell>
               </TableRow>
             ) : (
               filteredAndSortedCampaigns.map((campaign) => (
-                <TableRow key={campaign.id} className="cursor-pointer hover:bg-accent/50">
+                <TableRow 
+                  key={campaign.id} 
+                  className={`cursor-pointer hover:bg-accent/50 ${getTierRowClass(campaign.tier.tier)}`}
+                >
                   <TableCell>
                     <Checkbox
                       checked={selectedCampaigns.has(campaign.id)}
@@ -249,11 +366,63 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
                       </div>
                     </Link>
                   </TableCell>
-                  <TableCell className="text-center font-mono font-bold">
-                    {Math.round(campaign.tier.score)}
+                  <TableCell className="text-center">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <span className="font-mono font-bold">
+                            {campaign.tier.score !== null ? campaign.tier.score : '—'}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="font-medium mb-2">Score Breakdown</p>
+                          <div className="text-xs space-y-1">
+                            <div className="flex justify-between">
+                              <span>Efficiency (reply & pos rate)</span>
+                              <span>{campaign.tier.scoreBreakdown.efficiency}/40</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Reliability (bounce rate)</span>
+                              <span>{campaign.tier.scoreBreakdown.reliability}/20</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Health (delivery)</span>
+                              <span>{campaign.tier.scoreBreakdown.health}/20</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Momentum (volume)</span>
+                              <span>{campaign.tier.scoreBreakdown.momentum}/20</span>
+                            </div>
+                          </div>
+                          {campaign.tier.confidence !== 'high' && campaign.tier.confidence !== 'good' && (
+                            <p className="text-xs text-muted-foreground mt-2 italic">
+                              Score reduced due to low sample size
+                            </p>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </TableCell>
                   <TableCell className="text-center">
-                    {getTierIcon(campaign.tier.tier)}
+                    {getTierBadge(campaign.tier.tier)}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <div className="flex items-center justify-center gap-1">
+                            {getConfidenceIcon(campaign.tier.confidence)}
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{getConfidenceLabel(campaign.tier.confidence)}</p>
+                          <p className="text-xs text-muted-foreground">Based on sample size</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {getStatusBadge(campaign.status)}
                   </TableCell>
                   <TableCell className="text-right font-mono">
                     {campaign.total_sent.toLocaleString()}
@@ -268,13 +437,30 @@ export function EnhancedCampaignTable({ campaigns }: EnhancedCampaignTableProps)
                     {campaign.estimatedMeetings}
                   </TableCell>
                   <TableCell className="text-center">
-                    {getActionBadge(campaign.tier.recommendation)}
+                    {getActionBadge(campaign.tier)}
                   </TableCell>
                 </TableRow>
               ))
             )}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground pt-2 border-t">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">Tiers:</span>
+          <span className="flex items-center gap-1"><Star className="h-3 w-3 text-yellow-500" /> Star (Scale)</span>
+          <span className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-success" /> Solid (Maintain)</span>
+          <span className="flex items-center gap-1"><AlertTriangle className="h-3 w-3 text-warning" /> Optimize (Fix)</span>
+          <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" /> Problem (Pause)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-medium">Confidence:</span>
+          <span className="flex items-center gap-1"><Circle className="h-3 w-3 fill-success text-success" /> High (1000+)</span>
+          <span className="flex items-center gap-1"><Circle className="h-3 w-3 fill-warning text-warning" /> Med (200-499)</span>
+          <span className="flex items-center gap-1"><Circle className="h-3 w-3 fill-muted text-muted" /> None (&lt;50)</span>
+        </div>
       </div>
     </div>
   );
