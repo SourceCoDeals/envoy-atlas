@@ -42,6 +42,7 @@ import {
   PieChart,
   Library,
   Briefcase,
+  CalendarDays,
 } from 'lucide-react';
 
 interface NavItem {
@@ -60,6 +61,10 @@ const mainNavItems: NavItem[] = [
   { title: 'Copy Library', href: '/copy-library', icon: Library },
   { title: 'Audience Insights', href: '/audience-insights', icon: PieChart },
   { title: 'Deliverability', href: '/deliverability', icon: Shield },
+];
+
+const reportsNavItems: NavItem[] = [
+  { title: 'Monthly Report', href: '/monthly-report', icon: CalendarDays },
 ];
 
 const experimentNavItems: NavItem[] = [
@@ -175,6 +180,20 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               </p>
             )}
             {mainNavItems.map((item) => (
+              <NavLink key={item.href} item={item} />
+            ))}
+          </div>
+
+          <Separator />
+
+          {/* Reports */}
+          <div className="space-y-1">
+            {!sidebarCollapsed && (
+              <p className="px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
+                Reports
+              </p>
+            )}
+            {reportsNavItems.map((item) => (
               <NavLink key={item.href} item={item} />
             ))}
           </div>
