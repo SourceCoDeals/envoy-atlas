@@ -318,7 +318,10 @@ Deno.serve(async (req) => {
     }
 
     // Initialize or resume progress
-    let progress: SyncProgress = reset || !existingProgress ? {
+    // If the previous run is not actively "syncing", we start fresh to avoid carrying stale errors/progress.
+    const shouldStartFresh = reset || !existingProgress || connection.sync_status !== 'syncing';
+
+    let progress: SyncProgress = shouldStartFresh ? {
       step: 'email_accounts',
       sequence_index: 0,
       contact_cursor: null,
@@ -332,6 +335,8 @@ Deno.serve(async (req) => {
     } : {
       ...existingProgress,
       last_heartbeat: new Date().toISOString(),
+      // Clear any old errors so the UI reflects the current run.
+      errors: [],
     };
 
     // Force advance - skip to next sequence
@@ -393,12 +398,13 @@ Deno.serve(async (req) => {
           
           // Handle various response formats
           let sequences: ReplyioSequence[] = [];
-          if (Array.isArray(response)) {
-            sequences = response;
-          } else if (response?.sequences && Array.isArray(response.sequences)) {
-            sequences = response.sequences;
-          } else if (response?.items && Array.isArray(response.items)) {
-            sequences = response.items;
+          const normalized = response?.response ?? response;
+          if (Array.isArray(normalized)) {
+            sequences = normalized;
+          } else if (normalized?.sequences && Array.isArray(normalized.sequences)) {
+            sequences = normalized.sequences;
+          } else if (normalized?.items && Array.isArray(normalized.items)) {
+            sequences = normalized.items;
           }
           
           console.log(`Fetched ${sequences.length} sequences at skip=${skip}`);
@@ -546,13 +552,28 @@ Deno.serve(async (req) => {
               let contactSkip = 0;
               
               while (hasMoreContacts && !checkTimeBudget()) {
-                const contactsResponse = await replyioRequest(
-                  `/sequences/${sequence.id}/contacts/extended?top=50&skip=${contactSkip}`,
-                  apiKey
-                );
-                
-                const contacts = contactsResponse?.items || contactsResponse || [];
-                
+                let contactsResponse: any;
+                try {
+                  contactsResponse = await replyioRequest(
+                    `/sequences/${sequence.id}/contacts/extended?top=50&skip=${contactSkip}`,
+                    apiKey
+                  );
+                } catch (e) {
+                  // Some Reply.io workspaces don't support the /extended variant.
+                  const msg = (e as Error).message || '';
+                  if (msg.includes('API error 404')) {
+                    contactsResponse = await replyioRequest(
+                      `/sequences/${sequence.id}/contacts?top=50&skip=${contactSkip}`,
+                      apiKey
+                    );
+                  } else {
+                    throw e;
+                  }
+                }
+
+                const normalizedContacts = contactsResponse?.response ?? contactsResponse;
+                const contacts = normalizedContacts?.items || normalizedContacts || [];
+
                 if (!Array.isArray(contacts) || contacts.length === 0) {
                   hasMoreContacts = false;
                   break;
