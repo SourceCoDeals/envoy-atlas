@@ -82,7 +82,7 @@ export default function Inbox() {
           leads (email, first_name, last_name, company, title, email_type, email_domain)
         `)
         .eq('workspace_id', currentWorkspace.id)
-        .in('event_type', ['reply', 'positive_reply', 'negative_reply', 'interested', 'not_interested', 'out_of_office'])
+        .in('event_type', ['reply', 'replied', 'positive_reply', 'negative_reply', 'interested', 'not_interested', 'out_of_office'])
         .order('occurred_at', { ascending: false })
         .limit(200);
 
