@@ -40,6 +40,7 @@ import {
   Building2,
   Plug,
   PieChart,
+  Library,
 } from 'lucide-react';
 
 interface NavItem {
@@ -54,6 +55,7 @@ const mainNavItems: NavItem[] = [
   { title: 'Inbox', href: '/inbox', icon: Inbox },
   { title: 'Campaigns', href: '/campaigns', icon: Mail },
   { title: 'Copy Insights', href: '/copy-insights', icon: FileText },
+  { title: 'Copy Library', href: '/copy-library', icon: Library },
   { title: 'Audience Insights', href: '/audience-insights', icon: PieChart },
   { title: 'Deliverability', href: '/deliverability', icon: Shield },
 ];
