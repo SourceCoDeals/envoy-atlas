@@ -8,9 +8,9 @@ const corsHeaders = {
 };
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
-const RATE_LIMIT_DELAY = 300;
-const BATCH_SIZE = 2; // Reduced from 5 to prevent timeouts
-const TIME_BUDGET_MS = 22000; // 22 seconds - leave buffer before timeout
+const RATE_LIMIT_DELAY = 150; // Reduced from 300ms - Smartlead allows 10 req/2s
+const BATCH_SIZE = 5; // Increased from 2 for faster throughput
+const TIME_BUDGET_MS = 45000; // 45 seconds - increased from 22s
 
 // Personal email domains for classification
 const PERSONAL_DOMAINS = new Set([
@@ -245,7 +245,6 @@ serve(async (req) => {
 
     // Time budget tracking
     const startTime = Date.now();
-    const TIME_BUDGET_MS = 22000; // 22 seconds - leave buffer before timeout
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
 
     try {
@@ -440,10 +439,15 @@ serve(async (req) => {
             progress.errors.push(`Sequences for ${campaign.name}: ${String(seqError)}`);
           }
 
-          // 3. Fetch email accounts
-          try {
-            const emailAccounts: SmartleadEmailAccount[] = await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, apiKey);
-            
+          // 3 & 4. Fetch email accounts and analytics in PARALLEL
+          const [emailAccountsResult, analyticsResult] = await Promise.allSettled([
+            smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, apiKey),
+            smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey),
+          ]);
+
+          // Process email accounts
+          if (emailAccountsResult.status === 'fulfilled') {
+            const emailAccounts: SmartleadEmailAccount[] = emailAccountsResult.value;
             for (const account of emailAccounts) {
               const { error: accountError } = await supabase
                 .from('email_accounts')
@@ -462,13 +466,13 @@ serve(async (req) => {
                 
               if (!accountError) progress.email_accounts_synced++;
             }
-          } catch (emailError) {
-            console.error(`Failed to fetch email accounts for campaign ${campaign.id}:`, emailError);
+          } else {
+            console.error(`Failed to fetch email accounts for campaign ${campaign.id}:`, emailAccountsResult.reason);
           }
 
-          // 4. Fetch analytics
-          try {
-            const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
+          // Process analytics
+          if (analyticsResult.status === 'fulfilled') {
+            const analytics: SmartleadAnalytics = analyticsResult.value;
             const today = new Date().toISOString().split('T')[0];
 
             const metricsPayload = {
@@ -501,8 +505,6 @@ serve(async (req) => {
               : await supabase.from('daily_metrics').insert(metricsPayload);
 
             if (!metricsError) progress.metrics_created++;
-          } catch (analyticsError) {
-            console.error(`Failed to fetch analytics for campaign ${campaign.id}:`, analyticsError);
           }
 
           // 5. Fetch ALL leads using leads-statistics endpoint (provides richer data with history)
@@ -561,133 +563,174 @@ serve(async (req) => {
 
               console.log(`  Fetched ${leads.length} leads at offset ${offset}`);
 
+              // Batch arrays for bulk inserts
+              const leadPayloads: any[] = [];
+              const leadPlatformIds: string[] = [];
+
               for (const leadStat of leads) {
-                // leads-statistics returns: lead_id, from (sender), to (lead email), status, history[]
                 const email = leadStat.to?.toLowerCase();
                 if (!email) continue;
 
-                // Upsert lead (email_domain and email_type are auto-computed by DB)
-                const leadPayload = {
+                const platformLeadId = String(leadStat.lead_id || leadStat.email_lead_map_id);
+                leadPayloads.push({
                   workspace_id,
                   campaign_id: campaignDbId,
                   platform: 'smartlead',
-                  platform_lead_id: String(leadStat.lead_id || leadStat.email_lead_map_id),
+                  platform_lead_id: platformLeadId,
                   email: email,
                   status: leadStat.status?.toLowerCase() || 'active',
-                };
+                });
+                leadPlatformIds.push(platformLeadId);
+              }
 
-                const { data: dbLead, error: leadError } = await supabase
+              // Bulk upsert leads
+              if (leadPayloads.length > 0) {
+                const { error: bulkLeadError } = await supabase
                   .from('leads')
-                  .upsert(leadPayload, { 
+                  .upsert(leadPayloads, { 
                     onConflict: 'workspace_id,platform,platform_lead_id' 
-                  })
-                  .select('id')
-                  .single();
+                  });
 
-                if (leadError) {
-                  console.error(`Error upserting lead ${email}:`, leadError);
-                  continue;
+                if (bulkLeadError) {
+                  console.error('Bulk lead upsert error:', bulkLeadError);
+                } else {
+                  progress.leads_synced += leadPayloads.length;
                 }
 
-                progress.leads_synced++;
+                // Fetch all the lead IDs we just upserted
+                const { data: dbLeads } = await supabase
+                  .from('leads')
+                  .select('id, platform_lead_id')
+                  .eq('workspace_id', workspace_id)
+                  .eq('platform', 'smartlead')
+                  .in('platform_lead_id', leadPlatformIds);
 
-                // Process history events directly from leads-statistics response (no extra API call needed!)
-                const history = leadStat.history || [];
-                for (const msg of history) {
-                  const msgType = (msg.type || '').toUpperCase();
-                  
-                  if (['SENT', 'OPEN', 'CLICK', 'REPLY', 'BOUNCE', 'UNSUBSCRIBE'].includes(msgType)) {
-                    let eventType = msgType.toLowerCase();
-                    let sentiment = 'neutral';
+                const leadIdMap = new Map<string, string>();
+                for (const l of dbLeads || []) {
+                  leadIdMap.set(l.platform_lead_id, l.id);
+                }
+
+                // Collect all events for batch insert
+                const eventPayloads: any[] = [];
+                const hourlyUpdates = new Map<string, { replied: number; positive: number; hour: number; dayOfWeek: number; date: string }>();
+
+                for (const leadStat of leads) {
+                  const email = leadStat.to?.toLowerCase();
+                  if (!email) continue;
+
+                  const platformLeadId = String(leadStat.lead_id || leadStat.email_lead_map_id);
+                  const dbLeadId = leadIdMap.get(platformLeadId);
+                  if (!dbLeadId) continue;
+
+                  const history = leadStat.history || [];
+                  for (const msg of history) {
+                    const msgType = (msg.type || '').toUpperCase();
                     
-                    if (msgType === 'REPLY') {
-                      // Use lead status to determine sentiment
-                      const leadStatus = (leadStat.status || '').toLowerCase();
-                      if (leadStatus === 'interested' || leadStatus === 'meeting_booked') {
-                        sentiment = 'positive';
-                        eventType = 'positive_reply';
-                      } else if (leadStatus === 'not_interested' || leadStatus === 'wrong_person') {
-                        sentiment = 'negative';
-                        eventType = 'negative_reply';
-                      } else {
-                        eventType = 'replied';
-                      }
-                    }
-
-                    const occurredAt = msg.time ? new Date(msg.time).toISOString() : new Date().toISOString();
-                    const platformEventId = msg.stats_id || msg.message_id || `${leadStat.lead_id}-${msgType}-${occurredAt}`;
-
-                    // Check if event exists
-                    const { data: existingEvent } = await supabase
-                      .from('message_events')
-                      .select('id')
-                      .eq('workspace_id', workspace_id)
-                      .eq('lead_id', dbLead.id)
-                      .eq('event_type', eventType)
-                      .eq('platform_event_id', platformEventId)
-                      .maybeSingle();
-
-                    if (!existingEvent) {
-                      const { error: eventError } = await supabase
-                        .from('message_events')
-                        .insert({
-                          workspace_id,
-                          campaign_id: campaignDbId,
-                          lead_id: dbLead.id,
-                          platform: 'smartlead',
-                          platform_event_id: platformEventId,
-                          event_type: eventType,
-                          occurred_at: occurredAt,
-                          sent_at: msgType === 'SENT' ? occurredAt : null,
-                          lead_email: email,
-                          reply_content: msgType === 'REPLY' ? (msg.email_body || null) : null,
-                          reply_sentiment: msgType === 'REPLY' ? sentiment : null,
-                          sequence_step: parseInt(msg.email_seq_number) || 1,
-                        });
-
-                      if (!eventError) {
-                        progress.events_created++;
-
-                        // Update hourly metrics for time-of-day analysis
-                        if (msgType === 'REPLY') {
-                          const replyDate = new Date(occurredAt);
-                          const hour = replyDate.getUTCHours();
-                          const dayOfWeek = replyDate.getUTCDay();
-                          const dateStr = occurredAt.split('T')[0];
-
-                          const { data: existingHourly } = await supabase
-                            .from('hourly_metrics')
-                            .select('id, replied_count, positive_reply_count')
-                            .eq('workspace_id', workspace_id)
-                            .eq('campaign_id', campaignDbId)
-                            .eq('date', dateStr)
-                            .eq('hour', hour)
-                            .maybeSingle();
-
-                          if (existingHourly) {
-                            await supabase
-                              .from('hourly_metrics')
-                              .update({
-                                replied_count: (existingHourly.replied_count || 0) + 1,
-                                positive_reply_count: (existingHourly.positive_reply_count || 0) + (sentiment === 'positive' ? 1 : 0),
-                              })
-                              .eq('id', existingHourly.id);
-                          } else {
-                            await supabase
-                              .from('hourly_metrics')
-                              .insert({
-                                workspace_id,
-                                campaign_id: campaignDbId,
-                                date: dateStr,
-                                hour: hour,
-                                day_of_week: dayOfWeek,
-                                replied_count: 1,
-                                positive_reply_count: sentiment === 'positive' ? 1 : 0,
-                              });
-                          }
+                    if (['SENT', 'OPEN', 'CLICK', 'REPLY', 'BOUNCE', 'UNSUBSCRIBE'].includes(msgType)) {
+                      let eventType = msgType.toLowerCase();
+                      let sentiment = 'neutral';
+                      
+                      if (msgType === 'REPLY') {
+                        const leadStatus = (leadStat.status || '').toLowerCase();
+                        if (leadStatus === 'interested' || leadStatus === 'meeting_booked') {
+                          sentiment = 'positive';
+                          eventType = 'positive_reply';
+                        } else if (leadStatus === 'not_interested' || leadStatus === 'wrong_person') {
+                          sentiment = 'negative';
+                          eventType = 'negative_reply';
+                        } else {
+                          eventType = 'replied';
                         }
                       }
+
+                      const occurredAt = msg.time ? new Date(msg.time).toISOString() : new Date().toISOString();
+                      const platformEventId = msg.stats_id || msg.message_id || `${leadStat.lead_id}-${msgType}-${occurredAt}`;
+
+                      eventPayloads.push({
+                        workspace_id,
+                        campaign_id: campaignDbId,
+                        lead_id: dbLeadId,
+                        platform: 'smartlead',
+                        platform_event_id: platformEventId,
+                        event_type: eventType,
+                        occurred_at: occurredAt,
+                        sent_at: msgType === 'SENT' ? occurredAt : null,
+                        lead_email: email,
+                        reply_content: msgType === 'REPLY' ? (msg.email_body || null) : null,
+                        reply_sentiment: msgType === 'REPLY' ? sentiment : null,
+                        sequence_step: parseInt(msg.email_seq_number) || 1,
+                      });
+
+                      // Track hourly metrics for replies
+                      if (msgType === 'REPLY') {
+                        const replyDate = new Date(occurredAt);
+                        const hour = replyDate.getUTCHours();
+                        const dayOfWeek = replyDate.getUTCDay();
+                        const dateStr = occurredAt.split('T')[0];
+                        const key = `${dateStr}-${hour}`;
+                        
+                        const existing = hourlyUpdates.get(key) || { replied: 0, positive: 0, hour, dayOfWeek, date: dateStr };
+                        existing.replied += 1;
+                        existing.positive += sentiment === 'positive' ? 1 : 0;
+                        hourlyUpdates.set(key, existing);
+                      }
                     }
+                  }
+                }
+
+                // Bulk insert events (use ON CONFLICT DO NOTHING for deduplication)
+                if (eventPayloads.length > 0) {
+                  // Insert in batches of 500 to avoid payload size limits
+                  const batchSize = 500;
+                  for (let ei = 0; ei < eventPayloads.length; ei += batchSize) {
+                    const batch = eventPayloads.slice(ei, ei + batchSize);
+                    const { error: eventError, data: insertedEvents } = await supabase
+                      .from('message_events')
+                      .upsert(batch, { 
+                        onConflict: 'workspace_id,lead_id,event_type,platform_event_id',
+                        ignoreDuplicates: true 
+                      })
+                      .select('id');
+
+                    if (!eventError) {
+                      progress.events_created += insertedEvents?.length || 0;
+                    } else {
+                      console.error('Batch event insert error:', eventError);
+                    }
+                  }
+                }
+
+                // Batch upsert hourly metrics
+                for (const [, data] of hourlyUpdates) {
+                  const { data: existingHourly } = await supabase
+                    .from('hourly_metrics')
+                    .select('id, replied_count, positive_reply_count')
+                    .eq('workspace_id', workspace_id)
+                    .eq('campaign_id', campaignDbId)
+                    .eq('date', data.date)
+                    .eq('hour', data.hour)
+                    .maybeSingle();
+
+                  if (existingHourly) {
+                    await supabase
+                      .from('hourly_metrics')
+                      .update({
+                        replied_count: (existingHourly.replied_count || 0) + data.replied,
+                        positive_reply_count: (existingHourly.positive_reply_count || 0) + data.positive,
+                      })
+                      .eq('id', existingHourly.id);
+                  } else {
+                    await supabase
+                      .from('hourly_metrics')
+                      .insert({
+                        workspace_id,
+                        campaign_id: campaignDbId,
+                        date: data.date,
+                        hour: data.hour,
+                        day_of_week: data.dayOfWeek,
+                        replied_count: data.replied,
+                        positive_reply_count: data.positive,
+                      });
                   }
                 }
               }
