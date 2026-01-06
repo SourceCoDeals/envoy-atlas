@@ -277,6 +277,130 @@ export type Database = {
           },
         ]
       }
+      campaign_variant_features: {
+        Row: {
+          body_avg_sentence_length: number | null
+          body_bullet_point_count: number | null
+          body_cta_position: string | null
+          body_cta_type: string | null
+          body_has_calendar_link: boolean | null
+          body_has_link: boolean | null
+          body_has_proof: boolean | null
+          body_link_count: number | null
+          body_paragraph_count: number | null
+          body_personalization_density: number | null
+          body_personalization_types: string[] | null
+          body_question_count: number | null
+          body_reading_grade: number | null
+          body_sentence_count: number | null
+          body_tone: string | null
+          body_word_count: number | null
+          extracted_at: string | null
+          id: string
+          subject_capitalization_style: string | null
+          subject_char_count: number | null
+          subject_first_word_type: string | null
+          subject_has_emoji: boolean | null
+          subject_has_number: boolean | null
+          subject_is_question: boolean | null
+          subject_personalization_count: number | null
+          subject_personalization_position: number | null
+          subject_spam_score: number | null
+          subject_word_count: number | null
+          updated_at: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Insert: {
+          body_avg_sentence_length?: number | null
+          body_bullet_point_count?: number | null
+          body_cta_position?: string | null
+          body_cta_type?: string | null
+          body_has_calendar_link?: boolean | null
+          body_has_link?: boolean | null
+          body_has_proof?: boolean | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_density?: number | null
+          body_personalization_types?: string[] | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_tone?: string | null
+          body_word_count?: number | null
+          extracted_at?: string | null
+          id?: string
+          subject_capitalization_style?: string | null
+          subject_char_count?: number | null
+          subject_first_word_type?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_is_question?: boolean | null
+          subject_personalization_count?: number | null
+          subject_personalization_position?: number | null
+          subject_spam_score?: number | null
+          subject_word_count?: number | null
+          updated_at?: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Update: {
+          body_avg_sentence_length?: number | null
+          body_bullet_point_count?: number | null
+          body_cta_position?: string | null
+          body_cta_type?: string | null
+          body_has_calendar_link?: boolean | null
+          body_has_link?: boolean | null
+          body_has_proof?: boolean | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_density?: number | null
+          body_personalization_types?: string[] | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_tone?: string | null
+          body_word_count?: number | null
+          extracted_at?: string | null
+          id?: string
+          subject_capitalization_style?: string | null
+          subject_char_count?: number | null
+          subject_first_word_type?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_is_question?: boolean | null
+          subject_personalization_count?: number | null
+          subject_personalization_position?: number | null
+          subject_spam_score?: number | null
+          subject_word_count?: number | null
+          updated_at?: string | null
+          variant_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_variant_features_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_variant_features_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+          {
+            foreignKeyName: "campaign_variant_features_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_variants: {
         Row: {
           body_preview: string | null
@@ -367,6 +491,104 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      copy_patterns: {
+        Row: {
+          confidence_interval_lower: number | null
+          confidence_interval_upper: number | null
+          confidence_level: string | null
+          created_at: string | null
+          id: string
+          interaction_effects: Json | null
+          is_validated: boolean | null
+          last_computed: string | null
+          meeting_rate: number | null
+          meeting_rate_lift: number | null
+          open_rate: number | null
+          open_rate_lift: number | null
+          p_value: number | null
+          pattern_criteria: Json
+          pattern_description: string | null
+          pattern_name: string
+          pattern_type: string
+          positive_rate: number | null
+          positive_rate_lift: number | null
+          reply_rate: number | null
+          reply_rate_lift: number | null
+          sample_size: number
+          segment_effects: Json | null
+          step_effects: Json | null
+          updated_at: string | null
+          validated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          confidence_interval_lower?: number | null
+          confidence_interval_upper?: number | null
+          confidence_level?: string | null
+          created_at?: string | null
+          id?: string
+          interaction_effects?: Json | null
+          is_validated?: boolean | null
+          last_computed?: string | null
+          meeting_rate?: number | null
+          meeting_rate_lift?: number | null
+          open_rate?: number | null
+          open_rate_lift?: number | null
+          p_value?: number | null
+          pattern_criteria: Json
+          pattern_description?: string | null
+          pattern_name: string
+          pattern_type: string
+          positive_rate?: number | null
+          positive_rate_lift?: number | null
+          reply_rate?: number | null
+          reply_rate_lift?: number | null
+          sample_size?: number
+          segment_effects?: Json | null
+          step_effects?: Json | null
+          updated_at?: string | null
+          validated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          confidence_interval_lower?: number | null
+          confidence_interval_upper?: number | null
+          confidence_level?: string | null
+          created_at?: string | null
+          id?: string
+          interaction_effects?: Json | null
+          is_validated?: boolean | null
+          last_computed?: string | null
+          meeting_rate?: number | null
+          meeting_rate_lift?: number | null
+          open_rate?: number | null
+          open_rate_lift?: number | null
+          p_value?: number | null
+          pattern_criteria?: Json
+          pattern_description?: string | null
+          pattern_name?: string
+          pattern_type?: string
+          positive_rate?: number | null
+          positive_rate_lift?: number | null
+          reply_rate?: number | null
+          reply_rate_lift?: number | null
+          sample_size?: number
+          segment_effects?: Json | null
+          step_effects?: Json | null
+          updated_at?: string | null
+          validated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "copy_patterns_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -1210,6 +1432,97 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      variant_decay_tracking: {
+        Row: {
+          created_at: string | null
+          current_positive_rate: number | null
+          current_reply_rate: number | null
+          current_sample_size: number | null
+          decay_detected_at: string | null
+          decay_diagnosis: string | null
+          decay_percentage: number | null
+          decay_severity: string | null
+          id: string
+          initial_positive_rate: number | null
+          initial_reply_rate: number | null
+          initial_sample_size: number | null
+          is_decaying: boolean | null
+          is_statistically_significant: boolean | null
+          last_computed: string | null
+          p_value: number | null
+          total_sends: number | null
+          updated_at: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          current_positive_rate?: number | null
+          current_reply_rate?: number | null
+          current_sample_size?: number | null
+          decay_detected_at?: string | null
+          decay_diagnosis?: string | null
+          decay_percentage?: number | null
+          decay_severity?: string | null
+          id?: string
+          initial_positive_rate?: number | null
+          initial_reply_rate?: number | null
+          initial_sample_size?: number | null
+          is_decaying?: boolean | null
+          is_statistically_significant?: boolean | null
+          last_computed?: string | null
+          p_value?: number | null
+          total_sends?: number | null
+          updated_at?: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          current_positive_rate?: number | null
+          current_reply_rate?: number | null
+          current_sample_size?: number | null
+          decay_detected_at?: string | null
+          decay_diagnosis?: string | null
+          decay_percentage?: number | null
+          decay_severity?: string | null
+          id?: string
+          initial_positive_rate?: number | null
+          initial_reply_rate?: number | null
+          initial_sample_size?: number | null
+          is_decaying?: boolean | null
+          is_statistically_significant?: boolean | null
+          last_computed?: string | null
+          p_value?: number | null
+          total_sends?: number | null
+          updated_at?: string | null
+          variant_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "variant_decay_tracking_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "variant_decay_tracking_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+          {
+            foreignKeyName: "variant_decay_tracking_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       workspace_members: {
         Row: {
