@@ -165,7 +165,7 @@ serve(async (req) => {
 
     if (authError || !user) throw new Error('Unauthorized');
 
-    const { workspace_id, sync_type = 'full', reset = false } = await req.json();
+    const { workspace_id, sync_type = 'full', reset = false, force_advance = false } = await req.json();
     if (!workspace_id) throw new Error('workspace_id is required');
 
     const { data: membership, error: memberError } = await supabase
@@ -214,7 +214,13 @@ serve(async (req) => {
 
     // Get sync progress
     let existingProgress = reset ? { batch_index: 0 } : (connection.sync_progress || { batch_index: 0 });
-    const resumeFrom = typeof existingProgress.batch_index === 'number' ? existingProgress.batch_index : 0;
+    let resumeFrom = typeof existingProgress.batch_index === 'number' ? existingProgress.batch_index : 0;
+    
+    // Force advance skips to next batch (useful when stuck on a problematic batch)
+    if (force_advance && resumeFrom > 0) {
+      console.log(`Force advancing from batch ${resumeFrom} to ${resumeFrom + 1}`);
+      resumeFrom += 1;
+    }
 
     // Update status to syncing
     await supabase.from('api_connections').update({

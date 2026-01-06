@@ -22,6 +22,7 @@ import {
   Clock,
   Download,
   AlertCircle,
+  FastForward,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -225,7 +226,7 @@ export default function Connections() {
     }
   };
 
-  const handlePullFullHistory = async (reset = false) => {
+  const handlePullFullHistory = async (reset = false, forceAdvance = false) => {
     if (!currentWorkspace) return;
 
     setError(null);
@@ -243,6 +244,7 @@ export default function Connections() {
           workspace_id: currentWorkspace.id,
           sync_type: 'full',
           reset,
+          force_advance: forceAdvance,
         },
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -403,25 +405,36 @@ export default function Connections() {
 
                   <div className="flex gap-2 pt-2">
                     {isSyncingSmartlead ? (
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="flex-1 text-destructive hover:text-destructive"
-                        onClick={handleStopSync}
-                        disabled={isStopping}
-                      >
-                        {isStopping ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Stopping...
-                          </>
-                        ) : (
-                          <>
-                            <XCircle className="mr-2 h-4 w-4" />
-                            Stop Sync
-                          </>
-                        )}
-                      </Button>
+                      <>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handlePullFullHistory(false, true)}
+                          title="Skip to next batch if sync is stuck"
+                        >
+                          <FastForward className="mr-2 h-4 w-4" />
+                          Skip Batch
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="text-destructive hover:text-destructive"
+                          onClick={handleStopSync}
+                          disabled={isStopping}
+                        >
+                          {isStopping ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Stopping...
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Stop Sync
+                            </>
+                          )}
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Button 
