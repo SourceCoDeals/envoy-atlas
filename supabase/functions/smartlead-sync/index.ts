@@ -437,7 +437,7 @@ serve(async (req) => {
                 const { data: dbLead, error: leadError } = await supabase
                   .from('leads')
                   .upsert(leadPayload, { 
-                    onConflict: 'workspace_id,email' 
+                    onConflict: 'workspace_id,campaign_id,platform,platform_lead_id' 
                   })
                   .select('id')
                   .single();
