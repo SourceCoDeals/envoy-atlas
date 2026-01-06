@@ -101,7 +101,7 @@ export default function Connections() {
       pollInterval = window.setInterval(fetchConnections, 2000);
       resumeInterval = window.setInterval(() => {
         void continueSmartleadSync();
-      }, 12000);
+      }, 5000); // Reduced from 12s to 5s for faster resume
 
       // kick once immediately
       void continueSmartleadSync();
