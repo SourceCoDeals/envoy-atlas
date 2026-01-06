@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +54,7 @@ export interface AIRecommendationsData {
 interface AIRecommendationsPanelProps {
   workspaceId: string | undefined;
   hasData: boolean;
+  autoLoad?: boolean;
 }
 
 const getTypeIcon = (type: AIRecommendation['type']) => {
@@ -99,15 +100,47 @@ const getConfidenceColor = (confidence: AIRecommendation['confidence']) => {
   }
 };
 
-export function AIRecommendationsPanel({ workspaceId, hasData }: AIRecommendationsPanelProps) {
+// Cache key for localStorage
+const CACHE_KEY_PREFIX = 'ai_recommendations_';
+const CACHE_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+
+export function AIRecommendationsPanel({ workspaceId, hasData, autoLoad = true }: AIRecommendationsPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState<AIRecommendationsData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedRecs, setExpandedRecs] = useState<Set<number>>(new Set());
+  const [expandedRecs, setExpandedRecs] = useState<Set<number>>(new Set([0])); // First one expanded by default
+  const hasAutoLoaded = useRef(false);
 
-  const generateRecommendations = async () => {
+  // Load cached data on mount
+  useEffect(() => {
+    if (workspaceId) {
+      const cacheKey = `${CACHE_KEY_PREFIX}${workspaceId}`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const { data: cachedData, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < CACHE_DURATION_MS) {
+            setData(cachedData);
+            return; // Use cached data, don't auto-load
+          }
+        } catch (e) {
+          localStorage.removeItem(cacheKey);
+        }
+      }
+    }
+  }, [workspaceId]);
+
+  // Auto-load recommendations when component mounts (if hasData and no cached data)
+  useEffect(() => {
+    if (autoLoad && hasData && workspaceId && !data && !hasAutoLoaded.current && !isLoading) {
+      hasAutoLoaded.current = true;
+      generateRecommendations(false); // Don't show toast on auto-load
+    }
+  }, [hasData, workspaceId, autoLoad, data, isLoading]);
+
+  const generateRecommendations = async (showToast = true) => {
     if (!workspaceId) {
-      toast.error('No workspace selected');
+      if (showToast) toast.error('No workspace selected');
       return;
     }
 
@@ -122,9 +155,9 @@ export function AIRecommendationsPanel({ workspaceId, hasData }: AIRecommendatio
       if (fnError) throw fnError;
       if (result.error) {
         if (result.error.includes('Rate limit')) {
-          toast.error('Rate limit exceeded. Please try again in a moment.');
+          if (showToast) toast.error('Rate limit exceeded. Please try again in a moment.');
         } else if (result.error.includes('credits')) {
-          toast.error('AI credits exhausted. Please add credits to continue.');
+          if (showToast) toast.error('AI credits exhausted. Please add credits to continue.');
         } else {
           throw new Error(result.error);
         }
@@ -133,11 +166,19 @@ export function AIRecommendationsPanel({ workspaceId, hasData }: AIRecommendatio
       }
 
       setData(result);
-      toast.success('AI recommendations generated!');
+      
+      // Cache the result
+      const cacheKey = `${CACHE_KEY_PREFIX}${workspaceId}`;
+      localStorage.setItem(cacheKey, JSON.stringify({
+        data: result,
+        timestamp: Date.now(),
+      }));
+      
+      if (showToast) toast.success('AI recommendations generated!');
     } catch (err: any) {
       console.error('Error generating recommendations:', err);
       setError(err.message || 'Failed to generate recommendations');
-      toast.error('Failed to generate recommendations');
+      if (showToast) toast.error('Failed to generate recommendations');
     } finally {
       setIsLoading(false);
     }
@@ -181,7 +222,7 @@ export function AIRecommendationsPanel({ workspaceId, hasData }: AIRecommendatio
             <CardTitle className="text-lg">AI Recommendations</CardTitle>
           </div>
           <Button 
-            onClick={generateRecommendations} 
+            onClick={() => generateRecommendations(true)}
             disabled={isLoading}
             size="sm"
             className="gap-2"
@@ -349,7 +390,7 @@ export function AIRecommendationsPanel({ workspaceId, hasData }: AIRecommendatio
             <p className="text-sm text-muted-foreground mb-3">
               Click "Generate" to analyze your copy patterns and get AI-powered recommendations.
             </p>
-            <Button onClick={generateRecommendations} disabled={isLoading}>
+            <Button onClick={() => generateRecommendations(true)} disabled={isLoading}>
               <Sparkles className="h-4 w-4 mr-2" />
               Generate AI Insights
             </Button>
