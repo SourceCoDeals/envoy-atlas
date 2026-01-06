@@ -68,6 +68,7 @@ import { SegmentCopyMatrix } from '@/components/copyinsights/SegmentCopyMatrix';
 import { OpeningLineAnalysis } from '@/components/copyinsights/OpeningLineAnalysis';
 import { SubjectLineDeepDive } from '@/components/copyinsights/SubjectLineDeepDive';
 import { BodyCopyDeepDive } from '@/components/copyinsights/BodyCopyDeepDive';
+import { ChatPanel } from '@/components/copyinsights/ChatPanel';
 import { 
   detectOpeningType, 
   detectFirstWordType, 
@@ -1624,6 +1625,9 @@ export default function CopyInsights() {
           };
         })}
       />
+
+      {/* AI Chat Panel */}
+      <ChatPanel />
     </DashboardLayout>
   );
 }
