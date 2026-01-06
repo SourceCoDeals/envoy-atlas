@@ -117,14 +117,21 @@ export function useCopyInsights() {
           campaignAggMetrics[m.campaign_id].positive += m.positive_reply_count || 0;
         });
 
-        // Build performance data
+        // Build performance data - try variant metrics first, then campaign metrics as fallback
         const performanceData: CopyPerformance[] = (variants || [])
           .filter(v => v.subject_line)
           .map(v => {
             const campaign = v.campaigns as unknown as { id: string; name: string };
-            const vMetrics = variantMetrics[v.id] || campaignAggMetrics[v.campaign_id] || { 
-              sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 
-            };
+            
+            // Try variant-level metrics first
+            let vMetrics = variantMetrics[v.id];
+            
+            // Fallback to campaign-level metrics if no variant metrics
+            if (!vMetrics || vMetrics.sent === 0) {
+              vMetrics = campaignAggMetrics[v.campaign_id] || { 
+                sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 
+              };
+            }
 
             const sent = vMetrics.sent;
             const body = v.body_preview || '';
