@@ -348,11 +348,13 @@ serve(async (req) => {
 
           // 2. Fetch sequences (email copy variants)
           try {
-            const sequences: SmartleadSequence[] = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
-            console.log(`Campaign ${campaign.id} has ${sequences?.length || 0} sequences`);
+            const sequencesRaw = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
+            // Handle case where API returns null, undefined, or non-array
+            const sequences: SmartleadSequence[] = Array.isArray(sequencesRaw) ? sequencesRaw : [];
+            console.log(`Campaign ${campaign.id} has ${sequences.length} sequences`);
             
             // Log first sequence structure for debugging
-            if (sequences?.length > 0) {
+            if (sequences.length > 0) {
               console.log(`  First sequence keys: ${Object.keys(sequences[0]).join(', ')}`);
               console.log(`  First sequence sample:`, JSON.stringify({
                 seq_number: sequences[0].seq_number,
