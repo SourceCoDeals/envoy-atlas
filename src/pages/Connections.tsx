@@ -30,6 +30,9 @@ type SyncProgress = {
   progress?: number;
   total?: number;
   current?: number;
+  // backend function fields
+  total_campaigns?: number;
+  current_campaign?: number;
   campaign_name?: string;
   campaigns_synced?: number;
   email_accounts_synced?: number;
@@ -336,7 +339,9 @@ export default function Connections() {
                             ? `Syncing: ${syncProgress.campaign_name}` 
                             : 'Starting sync...'}
                         </span>
-                        <span>{syncProgress.current || 0} / {syncProgress.total || '?'}</span>
+                        <span>
+                          {syncProgress.current_campaign ?? syncProgress.current ?? 0} / {syncProgress.total_campaigns ?? syncProgress.total ?? '?'}
+                        </span>
                       </div>
                       <Progress value={syncProgress.progress || 0} className="h-2" />
                     </div>
