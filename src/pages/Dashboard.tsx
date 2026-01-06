@@ -7,6 +7,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CreateWorkspace } from '@/components/onboarding/CreateWorkspace';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
+import { EmailHealthScore, calculateHealthScore } from '@/components/dashboard/EmailHealthScore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
@@ -20,7 +21,6 @@ import {
 } from 'recharts';
 import { 
   Loader2, 
-  AlertTriangle,
   ArrowRight,
   Plug,
   ExternalLink,
@@ -94,27 +94,47 @@ export default function Dashboard() {
           </Card>
         ) : (
           <>
-            {/* KPI Cards */}
-            <div className="dashboard-grid dashboard-grid-cols-4">
-              <MetricCard
-                label="Total Sent"
-                value={stats.totalSent}
+            {/* Health Score */}
+            <div className="dashboard-grid dashboard-grid-cols-2">
+              <EmailHealthScore 
+                {...calculateHealthScore({
+                  bounceRate: stats.bounceRate,
+                  spamRate: stats.spamRate,
+                  replyRate: stats.replyRate,
+                  positiveReplyRate: stats.positiveRate,
+                  deliveredRate: stats.deliveredRate,
+                })}
               />
-              <MetricCard
-                label="Reply Rate"
-                value={stats.replyRate}
-                format="percent"
-              />
-              <MetricCard
-                label="Positive Reply Rate"
-                value={stats.positiveRate}
-                format="percent"
-              />
-              <MetricCard
-                label="Bounce Rate"
-                value={stats.bounceRate}
-                format="percent"
-              />
+              
+              {/* KPI Cards */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg">Key Metrics</CardTitle>
+                  <CardDescription>Core performance indicators</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Total Sent</p>
+                      <p className="text-2xl font-bold">{stats.totalSent.toLocaleString()}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Reply Rate</p>
+                      <p className="text-2xl font-bold">{stats.replyRate.toFixed(1)}%</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Positive Rate</p>
+                      <p className="text-2xl font-bold text-success">{stats.positiveRate.toFixed(1)}%</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Bounce Rate</p>
+                      <p className={`text-2xl font-bold ${stats.bounceRate > 5 ? 'text-destructive' : ''}`}>
+                        {stats.bounceRate.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Charts Row */}

@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { 
   Loader2, 
   FileText, 
@@ -16,14 +15,14 @@ import {
   Search, 
   ArrowUpDown, 
   ExternalLink,
-  MessageSquare,
   Hash,
-  AtSign,
-  BarChart3,
   AlignLeft,
+  BarChart3,
+  MessageSquare,
   Sparkles,
 } from 'lucide-react';
 import { useCopyInsights, CopyPerformance } from '@/hooks/useCopyInsights';
+import { StatisticalConfidenceBadge } from '@/components/dashboard/StatisticalConfidenceBadge';
 import { 
   BarChart, 
   Bar, 
@@ -32,10 +31,7 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  ScatterChart,
-  Scatter,
   Cell,
-  Legend,
 } from 'recharts';
 
 type SortField = 'reply_rate' | 'open_rate' | 'click_rate' | 'positive_rate' | 'sent_count' | 'word_count';
@@ -407,7 +403,12 @@ export default function CopyInsights() {
                               <TableCell className="text-muted-foreground text-sm">
                                 {item.campaign_name}
                               </TableCell>
-                              <TableCell>{item.sent_count.toLocaleString()}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  {item.sent_count.toLocaleString()}
+                                  <StatisticalConfidenceBadge sampleSize={item.sent_count} size="sm" />
+                                </div>
+                              </TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   {formatRate(item.open_rate)}
