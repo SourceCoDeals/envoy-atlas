@@ -37,6 +37,12 @@ import { SaveToLibraryDialog } from '@/components/copylibrary/SaveToLibraryDialo
 import { useCopyAnalytics, type SubjectLineAnalysis, type BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
 import { StatisticalConfidenceBadge, calculateConfidenceInterval, getConfidenceLevel } from '@/components/dashboard/StatisticalConfidenceBadge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { 
+  getPersonalizationLabel, 
+  getFormatLabel, 
+  PERSONALIZATION_DESCRIPTIONS,
+  FORMAT_DESCRIPTIONS,
+} from '@/lib/patternTaxonomy';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
@@ -245,11 +251,43 @@ export default function CopyInsights() {
       industry: 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30',
       none: 'bg-muted text-muted-foreground border-border',
     };
-    return <Badge className={`text-xs ${colors[type] || colors.none}`}>{type.replace('_', ' ')}</Badge>;
+    const label = getPersonalizationLabel(type);
+    const description = PERSONALIZATION_DESCRIPTIONS[type];
+    
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge className={`text-xs cursor-help ${colors[type] || colors.none}`}>{label}</Badge>
+          </TooltipTrigger>
+          {description && (
+            <TooltipContent>
+              <p className="text-xs">{description}</p>
+            </TooltipContent>
+          )}
+        </Tooltip>
+      </TooltipProvider>
+    );
   };
 
   const getFormatBadge = (type: string) => {
-    return <Badge variant="outline" className="text-xs">{type.replace('_', ' ')}</Badge>;
+    const label = getFormatLabel(type);
+    const description = FORMAT_DESCRIPTIONS[type];
+    
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className="text-xs cursor-help">{label}</Badge>
+          </TooltipTrigger>
+          {description && (
+            <TooltipContent>
+              <p className="text-xs">{description}</p>
+            </TooltipContent>
+          )}
+        </Tooltip>
+      </TooltipProvider>
+    );
   };
 
   const getLengthBadge = (category: string, charCount: number) => {
