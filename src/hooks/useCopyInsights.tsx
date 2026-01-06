@@ -18,6 +18,8 @@ export interface CopyPerformance {
   click_rate: number;
   reply_rate: number;
   positive_rate: number;
+  word_count: number;
+  personalization_vars: string[];
 }
 
 export function useCopyInsights() {
@@ -43,6 +45,8 @@ export function useCopyInsights() {
             subject_line,
             body_preview,
             campaign_id,
+            word_count,
+            personalization_vars,
             campaigns!inner (
               id,
               name,
@@ -123,6 +127,14 @@ export function useCopyInsights() {
             };
 
             const sent = vMetrics.sent;
+            const body = v.body_preview || '';
+            const wordCount = v.word_count || body.split(/\s+/).filter(Boolean).length;
+            const persVars = Array.isArray(v.personalization_vars) 
+              ? v.personalization_vars 
+              : (typeof v.personalization_vars === 'object' && v.personalization_vars !== null)
+                ? Object.values(v.personalization_vars)
+                : [];
+
             return {
               subject_line: v.subject_line || '',
               body_preview: v.body_preview,
@@ -139,6 +151,8 @@ export function useCopyInsights() {
               click_rate: sent > 0 ? (vMetrics.clicked / sent) * 100 : 0,
               reply_rate: sent > 0 ? (vMetrics.replied / sent) * 100 : 0,
               positive_rate: sent > 0 ? (vMetrics.positive / sent) * 100 : 0,
+              word_count: wordCount,
+              personalization_vars: persVars as string[],
             };
           })
           .sort((a, b) => b.reply_rate - a.reply_rate);
