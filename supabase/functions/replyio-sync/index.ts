@@ -846,10 +846,38 @@ Deno.serve(async (req) => {
           })
           .eq('id', connection.id);
 
+        // Trigger pattern computation when sync completes
+        console.log('Sync complete - triggering pattern computation...');
+        let patternsTriggered = false;
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          
+          const patternResponse = await fetch(`${supabaseUrl}/functions/v1/compute-patterns`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${supabaseServiceKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ workspace_id }),
+          });
+          
+          if (patternResponse.ok) {
+            const patternResult = await patternResponse.json();
+            console.log('Pattern computation triggered:', patternResult);
+            patternsTriggered = true;
+          } else {
+            console.warn('Pattern computation failed:', await patternResponse.text());
+          }
+        } catch (patternError) {
+          console.error('Failed to trigger pattern computation:', patternError);
+        }
+
         return new Response(JSON.stringify({
           success: true,
           complete: true,
           progress,
+          patterns_triggered: patternsTriggered,
           message: 'Sync completed successfully',
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },

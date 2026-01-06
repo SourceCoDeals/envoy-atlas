@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.compute-patterns]
 verify_jwt = false
+
+[functions.backfill-features]
+verify_jwt = false

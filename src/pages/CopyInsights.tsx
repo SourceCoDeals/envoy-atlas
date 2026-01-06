@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -26,10 +27,14 @@ import {
   CheckCircle,
   AlertCircle,
   Target,
+  RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { useCopyAnalytics, type SubjectLineAnalysis, type PatternAnalysis } from '@/hooks/useCopyAnalytics';
 import { StatisticalConfidenceBadge, getConfidenceLevel, calculateConfidenceInterval } from '@/components/dashboard/StatisticalConfidenceBadge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import { 
   BarChart, 
   Bar, 
@@ -50,11 +55,94 @@ type SortOrder = 'asc' | 'desc';
 export default function CopyInsights() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
+  const { currentWorkspace } = useWorkspace();
   const { subjectLines, bodyCopy, patterns, discoveredPatterns, topPerformers, recommendations, loading, error } = useCopyAnalytics();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('reply_rate');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [activeTab, setActiveTab] = useState('overview');
+  const [isRecomputing, setIsRecomputing] = useState(false);
+  const [isBackfilling, setIsBackfilling] = useState(false);
+
+  const handleBackfillAndRecompute = useCallback(async () => {
+    if (!currentWorkspace?.id) {
+      toast.error('No workspace selected');
+      return;
+    }
+
+    setIsBackfilling(true);
+    toast.info('Starting feature backfill...');
+
+    try {
+      // Step 1: Backfill features
+      let backfillComplete = false;
+      let totalBackfilled = 0;
+      
+      while (!backfillComplete) {
+        const { data: backfillResult, error: backfillError } = await supabase.functions.invoke('backfill-features', {
+          body: { workspace_id: currentWorkspace.id, batch_size: 100 },
+        });
+
+        if (backfillError) throw backfillError;
+        
+        totalBackfilled += backfillResult.backfilled || 0;
+        backfillComplete = (backfillResult.remaining || 0) === 0;
+        
+        if (!backfillComplete) {
+          toast.info(`Backfilled ${totalBackfilled} variants, ${backfillResult.remaining} remaining...`);
+        }
+      }
+
+      toast.success(`Feature backfill complete! Processed ${totalBackfilled} variants`);
+      setIsBackfilling(false);
+      
+      // Step 2: Recompute patterns
+      setIsRecomputing(true);
+      toast.info('Computing patterns...');
+
+      const { data: patternResult, error: patternError } = await supabase.functions.invoke('compute-patterns', {
+        body: { workspace_id: currentWorkspace.id },
+      });
+
+      if (patternError) throw patternError;
+
+      toast.success(`Pattern analysis complete! Found ${patternResult.patterns_computed} patterns (${patternResult.validated_patterns} validated)`);
+      
+      // Refresh the page data
+      window.location.reload();
+    } catch (err: any) {
+      console.error('Recompute error:', err);
+      toast.error(`Error: ${err.message}`);
+    } finally {
+      setIsBackfilling(false);
+      setIsRecomputing(false);
+    }
+  }, [currentWorkspace?.id]);
+
+  const handleRecomputePatterns = useCallback(async () => {
+    if (!currentWorkspace?.id) {
+      toast.error('No workspace selected');
+      return;
+    }
+
+    setIsRecomputing(true);
+    
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('compute-patterns', {
+        body: { workspace_id: currentWorkspace.id },
+      });
+
+      if (fnError) throw fnError;
+
+      toast.success(`Computed ${data.patterns_computed} patterns (${data.validated_patterns} statistically validated)`);
+      window.location.reload();
+    } catch (err: any) {
+      console.error('Pattern computation error:', err);
+      toast.error(`Error: ${err.message}`);
+    } finally {
+      setIsRecomputing(false);
+    }
+  }, [currentWorkspace?.id]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -186,6 +274,50 @@ export default function CopyInsights() {
             <p className="text-muted-foreground">
               The Message Laboratory – Turn opinions into data
             </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleBackfillAndRecompute}
+                    disabled={isBackfilling || isRecomputing}
+                  >
+                    {isBackfilling ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Backfilling...</>
+                    ) : (
+                      <><Sparkles className="h-4 w-4 mr-2" /> Backfill & Analyze</>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Extract features for all variants and recompute patterns</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleRecomputePatterns}
+                    disabled={isRecomputing || isBackfilling}
+                  >
+                    {isRecomputing ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Computing...</>
+                    ) : (
+                      <><RefreshCw className="h-4 w-4 mr-2" /> Recompute Patterns</>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Recalculate pattern analysis with current data</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
 

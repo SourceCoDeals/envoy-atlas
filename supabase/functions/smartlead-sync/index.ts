@@ -1033,12 +1033,41 @@ serve(async (req) => {
 
       console.log('Progress:', { isComplete, campaign_index: nextCampaignIndex, total: totalCampaigns, ...progress });
 
+      // Trigger pattern computation when sync completes
+      if (isComplete) {
+        console.log('Sync complete - triggering pattern computation...');
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          
+          const patternResponse = await fetch(`${supabaseUrl}/functions/v1/compute-patterns`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${supabaseServiceKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ workspace_id }),
+          });
+          
+          if (patternResponse.ok) {
+            const patternResult = await patternResponse.json();
+            console.log('Pattern computation triggered:', patternResult);
+          } else {
+            console.warn('Pattern computation failed:', await patternResponse.text());
+          }
+        } catch (patternError) {
+          console.error('Failed to trigger pattern computation:', patternError);
+          // Don't fail the sync if pattern computation fails
+        }
+      }
+
       return new Response(JSON.stringify({
         success: true, 
         done: isComplete, 
         campaign_index: nextCampaignIndex,
         total: totalCampaigns,
         message: isComplete ? 'Sync completed successfully' : `Processed to campaign ${nextCampaignIndex}; call again to continue`,
+        patterns_triggered: isComplete,
         ...progress,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
