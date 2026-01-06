@@ -246,17 +246,34 @@ Deno.serve(async (req) => {
     }
 
     const apiKey = connection.api_key_encrypted;
-    const existingProgress = (connection.sync_progress as SyncProgress) || null;
+
+    // The connection may contain legacy sync_progress shapes from older Reply.io sync versions.
+    // If so, we must ignore it and start from a clean v3 progress object.
+    const rawProgress = (connection.sync_progress as any) || null;
+    const isValidV3Progress = (p: any): p is SyncProgress => {
+      return !!p &&
+        typeof p === 'object' &&
+        ['email_accounts', 'sequences', 'contacts', 'complete'].includes(p.step) &&
+        typeof p.sequence_index === 'number' &&
+        'processed_sequences' in p &&
+        'processed_contacts' in p;
+    };
+
+    const existingProgress: SyncProgress | null = isValidV3Progress(rawProgress) ? rawProgress : null;
+
+    if (rawProgress && !existingProgress) {
+      console.log('Detected legacy Reply.io sync_progress; resetting to v3 progress format');
+    }
 
     // Check sync lock (unless force_advance)
     if (!force_advance && existingProgress?.last_heartbeat) {
       const timeSinceHeartbeat = Date.now() - new Date(existingProgress.last_heartbeat).getTime();
       if (timeSinceHeartbeat < SYNC_LOCK_TIMEOUT_MS) {
         console.log('Another sync is running, skipping...');
-        return new Response(JSON.stringify({ 
-          skipped: true, 
+        return new Response(JSON.stringify({
+          skipped: true,
           message: 'Another sync is in progress',
-          progress: existingProgress 
+          progress: existingProgress,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -266,16 +283,16 @@ Deno.serve(async (req) => {
     // Handle reset
     if (reset) {
       console.log('Resetting Reply.io data...');
-      
+
       // Get campaign IDs first
       const { data: campaigns } = await supabase
         .from('campaigns')
         .select('id')
         .eq('workspace_id', workspace_id)
         .eq('platform', 'replyio');
-      
+
       const campaignIds = campaigns?.map(c => c.id) || [];
-      
+
       if (campaignIds.length > 0) {
         await supabase.from('daily_metrics').delete()
           .eq('workspace_id', workspace_id)
@@ -294,7 +311,7 @@ Deno.serve(async (req) => {
           .eq('workspace_id', workspace_id)
           .eq('platform', 'replyio');
       }
-      
+
       await supabase.from('email_accounts').delete()
         .eq('workspace_id', workspace_id)
         .eq('platform', 'replyio');
