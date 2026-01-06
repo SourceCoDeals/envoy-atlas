@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.backfill-features]
 verify_jwt = false
+
+[functions.generate-copy-recommendations]
+verify_jwt = false

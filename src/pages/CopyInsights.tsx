@@ -17,21 +17,20 @@ import {
   TrendingUp, 
   Search, 
   ArrowUpDown,
-  ExternalLink,
   Hash,
   AlignLeft,
   BarChart3,
-  Lightbulb,
   Trophy,
   FlaskConical,
   CheckCircle,
-  AlertCircle,
-  Target,
   RefreshCw,
   Sparkles,
+  Wand2,
+  Lightbulb,
+  AlertCircle,
 } from 'lucide-react';
-import { useCopyAnalytics, type SubjectLineAnalysis, type PatternAnalysis } from '@/hooks/useCopyAnalytics';
-import { StatisticalConfidenceBadge, getConfidenceLevel, calculateConfidenceInterval } from '@/components/dashboard/StatisticalConfidenceBadge';
+import { useCopyAnalytics, type SubjectLineAnalysis, type BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
+import { StatisticalConfidenceBadge } from '@/components/dashboard/StatisticalConfidenceBadge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -44,10 +43,9 @@ import {
   Tooltip as RechartsTooltip, 
   ResponsiveContainer,
   Cell,
-  ScatterChart,
-  Scatter,
-  ZAxis,
 } from 'recharts';
+import { AIRecommendationsPanel } from '@/components/copyinsights/AIRecommendationsPanel';
+import { VariantSuggestionModal } from '@/components/copyinsights/VariantSuggestionModal';
 
 type SortField = 'reply_rate' | 'open_rate' | 'positive_rate' | 'sent_count';
 type SortOrder = 'asc' | 'desc';
@@ -63,6 +61,15 @@ export default function CopyInsights() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isRecomputing, setIsRecomputing] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
+  const [selectedVariant, setSelectedVariant] = useState<{
+    id: string;
+    subject_line: string;
+    body_preview: string;
+    campaign_name: string;
+    reply_rate: number;
+    sent_count: number;
+  } | null>(null);
+  const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
 
   const handleBackfillAndRecompute = useCallback(async () => {
     if (!currentWorkspace?.id) {
@@ -381,37 +388,11 @@ export default function CopyInsights() {
                 </CardContent>
               </Card>
 
-              {/* AI Recommendations */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <Lightbulb className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-lg">Insights</CardTitle>
-                  </div>
-                  <CardDescription>Data-driven recommendations</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {recommendations.length > 0 ? (
-                    recommendations.map((rec, i) => (
-                      <div key={i} className="p-3 rounded-lg bg-primary/5 border border-primary/20">
-                        <p className="text-sm">{rec}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Need more data to generate recommendations.</p>
-                  )}
-                  
-                  <div className="pt-2 border-t">
-                    <p className="text-xs text-muted-foreground mb-2">Suggested Test:</p>
-                    <div className="p-3 rounded-lg bg-muted/50">
-                      <p className="text-sm font-medium">A/B Test Hypothesis</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Test combining your top personalization pattern with question format to potentially improve reply rates.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              {/* AI Recommendations Panel */}
+              <AIRecommendationsPanel 
+                workspaceId={currentWorkspace?.id} 
+                hasData={hasData} 
+              />
             </div>
 
             {/* Pattern Discovery */}
@@ -675,6 +656,7 @@ export default function CopyInsights() {
                             </Button>
                           </TableHead>
                           <TableHead>Confidence</TableHead>
+                          <TableHead className="w-[60px]"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -698,6 +680,33 @@ export default function CopyInsights() {
                             <TableCell className="font-mono text-sm font-medium">{formatRate(item.reply_rate)}</TableCell>
                             <TableCell>
                               <StatisticalConfidenceBadge sampleSize={item.sent_count} size="sm" />
+                            </TableCell>
+                            <TableCell>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => {
+                                        setSelectedVariant({
+                                          id: item.variant_id,
+                                          subject_line: item.subject_line,
+                                          body_preview: '',
+                                          campaign_name: item.campaign_name,
+                                          reply_rate: item.reply_rate,
+                                          sent_count: item.sent_count,
+                                        });
+                                        setIsVariantModalOpen(true);
+                                      }}
+                                    >
+                                      <Wand2 className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Get AI suggestions</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -809,6 +818,14 @@ export default function CopyInsights() {
           </>
         )}
       </div>
+
+      {/* Variant Suggestion Modal */}
+      <VariantSuggestionModal
+        open={isVariantModalOpen}
+        onOpenChange={setIsVariantModalOpen}
+        variant={selectedVariant}
+        workspaceId={currentWorkspace?.id}
+      />
     </DashboardLayout>
   );
 }
