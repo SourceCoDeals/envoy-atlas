@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { SaveToLibraryDialog } from '@/components/copylibrary/SaveToLibraryDialog';
 import { useCopyAnalytics, type SubjectLineAnalysis, type BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
-import { StatisticalConfidenceBadge } from '@/components/dashboard/StatisticalConfidenceBadge';
+import { StatisticalConfidenceBadge, calculateConfidenceInterval, getConfidenceLevel } from '@/components/dashboard/StatisticalConfidenceBadge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -268,7 +268,14 @@ export default function CopyInsights() {
 
   const hasData = subjectLines.length > 0;
 
-  // Pattern chart data
+  // Calculate baseline reply rate for pattern comparison
+  const baselineReplyRate = useMemo(() => {
+    const totalSent = subjectLines.reduce((sum, s) => sum + s.sent_count, 0);
+    const totalReplies = subjectLines.reduce((sum, s) => sum + s.reply_count, 0);
+    return totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
+  }, [subjectLines]);
+
+  // Pattern chart data with baseline
   const patternChartData = patterns
     .filter(p => p.significance !== 'low')
     .slice(0, 10)
@@ -276,28 +283,39 @@ export default function CopyInsights() {
       name: p.pattern.length > 25 ? p.pattern.substring(0, 25) + '...' : p.pattern,
       reply_rate: p.avg_reply_rate,
       sample_size: p.sample_size,
+      baseline: baselineReplyRate,
+      lift: p.comparison_to_baseline,
     }));
 
-  // Word count distribution for body copy
-  const wordCountData = [
-    { range: 'Under 50', count: bodyCopy.filter(b => b.word_count < 50).length, avgReply: 0 },
-    { range: '50-100', count: bodyCopy.filter(b => b.word_count >= 50 && b.word_count < 100).length, avgReply: 0 },
-    { range: '100-150', count: bodyCopy.filter(b => b.word_count >= 100 && b.word_count < 150).length, avgReply: 0 },
-    { range: '150+', count: bodyCopy.filter(b => b.word_count >= 150).length, avgReply: 0 },
-  ];
+  // Word count distribution for body copy with sample sizes
+  const wordCountData = useMemo(() => {
+    const buckets = [
+      { range: 'Under 50', min: 0, max: 50, count: 0, totalSent: 0, totalReplies: 0, avgReply: 0 },
+      { range: '50-100', min: 50, max: 100, count: 0, totalSent: 0, totalReplies: 0, avgReply: 0 },
+      { range: '100-150', min: 100, max: 150, count: 0, totalSent: 0, totalReplies: 0, avgReply: 0 },
+      { range: '150+', min: 150, max: Infinity, count: 0, totalSent: 0, totalReplies: 0, avgReply: 0 },
+    ];
+    
+    bodyCopy.forEach(b => {
+      const bucket = buckets.find(bkt => b.word_count >= bkt.min && b.word_count < bkt.max);
+      if (bucket) {
+        bucket.count++;
+        bucket.totalSent += b.sent_count;
+        bucket.totalReplies += b.reply_count;
+      }
+    });
+    
+    buckets.forEach(d => {
+      d.avgReply = d.totalSent > 0 ? (d.totalReplies / d.totalSent) * 100 : 0;
+    });
+    
+    return buckets;
+  }, [bodyCopy]);
 
-  bodyCopy.forEach(b => {
-    let bucket;
-    if (b.word_count < 50) bucket = wordCountData[0];
-    else if (b.word_count < 100) bucket = wordCountData[1];
-    else if (b.word_count < 150) bucket = wordCountData[2];
-    else bucket = wordCountData[3];
-    bucket.avgReply += b.reply_rate;
-  });
-
-  wordCountData.forEach(d => {
-    d.avgReply = d.count > 0 ? d.avgReply / d.count : 0;
-  });
+  // Find best performing word count bucket
+  const bestWordCountBucket = useMemo(() => {
+    return [...wordCountData].sort((a, b) => b.avgReply - a.avgReply)[0];
+  }, [wordCountData]);
 
   if (loading) {
     return (
@@ -387,60 +405,105 @@ export default function CopyInsights() {
               {/* Top Performers */}
               <Card className="lg:col-span-2">
                 <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <Trophy className="h-5 w-5 text-yellow-500" />
-                    <CardTitle className="text-lg">Top Performers</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Trophy className="h-5 w-5 text-yellow-500" />
+                      <CardTitle className="text-lg">Top Performers</CardTitle>
+                    </div>
+                    {topPerformers.length > 0 && topPerformers[0].sent_count < 500 && (
+                      <Badge variant="outline" className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30">
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        Results may change with more data
+                      </Badge>
+                    )}
                   </div>
-                  <CardDescription>Highest reply rate subject lines (min 100 sends)</CardDescription>
+                  <CardDescription>
+                    Highest reply rate subject lines (min 100 sends) • Baseline: {formatRate(baselineReplyRate)}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {topPerformers.slice(0, 5).map((item, index) => (
-                    <div 
-                      key={item.variant_id} 
-                      className={`p-3 rounded-lg ${index === 0 ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-muted/50'}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-bold text-lg ${index === 0 ? 'text-yellow-500' : 'text-muted-foreground'}`}>
-                            #{index + 1}
-                          </span>
-                          <div>
-                            <p className="font-medium text-sm line-clamp-1">{item.subject_line}</p>
-                            <p className="text-xs text-muted-foreground">{item.campaign_name}</p>
+                  {topPerformers.slice(0, 5).map((item, index) => {
+                    const ci = calculateConfidenceInterval(item.reply_rate, item.sent_count);
+                    const confidenceLevel = getConfidenceLevel(item.sent_count);
+                    const liftVsBaseline = baselineReplyRate > 0 
+                      ? ((item.reply_rate - baselineReplyRate) / baselineReplyRate) * 100 
+                      : 0;
+                    
+                    return (
+                      <div 
+                        key={item.variant_id} 
+                        className={`p-3 rounded-lg ${index === 0 ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-muted/50'}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`font-bold text-lg ${index === 0 ? 'text-yellow-500' : 'text-muted-foreground'}`}>
+                              #{index + 1}
+                            </span>
+                            <div>
+                              <p className="font-medium text-sm line-clamp-1">{item.subject_line}</p>
+                              <p className="text-xs text-muted-foreground">{item.campaign_name}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="text-right flex-shrink-0 cursor-help">
+                                    <div className="flex items-center gap-1">
+                                      <p className="font-mono text-sm font-medium text-success">{formatRate(item.reply_rate)}</p>
+                                      <span className="text-xs text-muted-foreground">
+                                        ± {ci.marginOfError.toFixed(1)}%
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      n={item.sent_count.toLocaleString()}
+                                      {liftVsBaseline > 0 && (
+                                        <span className="text-success ml-1">+{liftVsBaseline.toFixed(0)}% vs avg</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <p className="font-medium mb-1">95% Confidence Interval</p>
+                                  <p className="text-xs mb-1">
+                                    Range: {ci.lower.toFixed(1)}% - {ci.upper.toFixed(1)}%
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {confidenceLevel === 'low' && 'Need 200+ sends for medium confidence'}
+                                    {confidenceLevel === 'medium' && 'Need 500+ sends for high confidence'}
+                                    {confidenceLevel === 'high' && 'Statistically reliable result'}
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => handleSaveToLibrary(item)}
+                                  >
+                                    <BookMarked className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Save to Copy Library</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-right flex-shrink-0">
-                            <p className="font-mono text-sm font-medium text-success">{formatRate(item.reply_rate)}</p>
-                            <p className="text-xs text-muted-foreground">{item.sent_count.toLocaleString()} sent</p>
-                          </div>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  onClick={() => handleSaveToLibrary(item)}
-                                >
-                                  <BookMarked className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Save to Copy Library</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
+                        <div className="flex items-center gap-2 mt-2">
+                          {getPersonalizationBadge(item.personalization_type)}
+                          {getFormatBadge(item.format_type)}
+                          {getLengthBadge(item.length_category, item.char_count)}
+                          <StatisticalConfidenceBadge sampleSize={item.sent_count} size="sm" />
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-2">
-                        {getPersonalizationBadge(item.personalization_type)}
-                        {getFormatBadge(item.format_type)}
-                        {getLengthBadge(item.length_category, item.char_count)}
-                        <StatisticalConfidenceBadge sampleSize={item.sent_count} size="sm" />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </CardContent>
               </Card>
 
@@ -459,15 +522,22 @@ export default function CopyInsights() {
                     <FlaskConical className="h-5 w-5 text-chart-1" />
                     <CardTitle className="text-lg">Pattern Discovery</CardTitle>
                   </div>
-                  {discoveredPatterns.some(p => p.is_validated) && (
-                    <Badge className="bg-success/10 text-success border-success/30">
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      {discoveredPatterns.filter(p => p.is_validated).length} Validated
-                    </Badge>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {baselineReplyRate > 0 && (
+                      <Badge variant="outline" className="text-xs">
+                        Baseline: {formatRate(baselineReplyRate)}
+                      </Badge>
+                    )}
+                    {discoveredPatterns.some(p => p.is_validated) && (
+                      <Badge className="bg-success/10 text-success border-success/30">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        {discoveredPatterns.filter(p => p.is_validated).length} Validated
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <CardDescription>
-                  Statistically significant patterns correlated with higher reply rates
+                  Patterns compared against {formatRate(baselineReplyRate)} baseline reply rate
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -486,13 +556,35 @@ export default function CopyInsights() {
                               border: '1px solid hsl(var(--border))',
                               borderRadius: '8px',
                             }}
-                            formatter={(value: number) => [`${value.toFixed(2)}%`, 'Reply Rate']}
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div className="p-2 rounded-lg border bg-card text-card-foreground shadow-md">
+                                    <p className="font-medium text-sm">{data.name}</p>
+                                    <p className="text-sm">
+                                      Reply Rate: <span className="font-mono font-medium">{data.reply_rate.toFixed(2)}%</span>
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      vs {baselineReplyRate.toFixed(2)}% baseline = 
+                                      <span className={data.lift > 0 ? ' text-success' : ' text-destructive'}>
+                                        {data.lift > 0 ? ' +' : ' '}{data.lift.toFixed(0)}% lift
+                                      </span>
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      Sample: n={data.sample_size.toLocaleString()}
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
                           />
                           <Bar dataKey="reply_rate" fill="hsl(var(--chart-1))">
                             {patternChartData.map((entry, index) => (
                               <Cell 
                                 key={index} 
-                                fill={entry.reply_rate > 8 ? 'hsl(var(--success))' : 'hsl(var(--chart-1))'} 
+                                fill={entry.lift > 0 ? 'hsl(var(--success))' : 'hsl(var(--chart-1))'} 
                               />
                             ))}
                           </Bar>
@@ -511,9 +603,9 @@ export default function CopyInsights() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Pattern</TableHead>
-                          <TableHead className="text-right">Reply Rate</TableHead>
-                          <TableHead className="text-right">Lift</TableHead>
-                          <TableHead className="text-right">Confidence</TableHead>
+                          <TableHead className="text-right">Rate (n=)</TableHead>
+                          <TableHead className="text-right">vs Baseline</TableHead>
+                          <TableHead className="text-right">p-value</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -528,8 +620,7 @@ export default function CopyInsights() {
                                         <CheckCircle className="h-3.5 w-3.5 text-success flex-shrink-0" />
                                       </TooltipTrigger>
                                       <TooltipContent>
-                                        <p>Statistically validated pattern</p>
-                                        {p.p_value && <p className="text-xs">p-value: {p.p_value.toFixed(4)}</p>}
+                                        <p>Statistically validated (p &lt; 0.05)</p>
                                       </TooltipContent>
                                     </Tooltip>
                                   </TooltipProvider>
@@ -540,27 +631,48 @@ export default function CopyInsights() {
                             <TableCell className="text-right">
                               <TooltipProvider>
                                 <Tooltip>
-                                  <TooltipTrigger className="font-mono text-sm">
+                                  <TooltipTrigger className="font-mono text-sm cursor-help">
                                     {formatRate(p.avg_reply_rate)}
+                                    <span className="text-xs text-muted-foreground ml-1">
+                                      ({p.sample_size >= 1000 ? `${(p.sample_size / 1000).toFixed(1)}k` : p.sample_size})
+                                    </span>
                                   </TooltipTrigger>
-                                  <TooltipContent>
+                                  <TooltipContent className="max-w-xs">
                                     <p className="font-medium">Sample: {p.sample_size.toLocaleString()}</p>
-                                    {p.confidence_interval_lower && p.confidence_interval_upper && (
+                                    {p.confidence_interval_lower !== undefined && p.confidence_interval_upper !== undefined && (
                                       <p className="text-xs text-muted-foreground">
-                                        95% CI: {p.confidence_interval_lower.toFixed(1)}% - {p.confidence_interval_upper.toFixed(1)}%
+                                        95% CI: {p.confidence_interval_lower.toFixed(2)}% - {p.confidence_interval_upper.toFixed(2)}%
                                       </p>
                                     )}
+                                    <p className="text-xs mt-1">
+                                      <StatisticalConfidenceBadge sampleSize={p.sample_size} size="sm" showTooltip={false} />
+                                    </p>
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
                             </TableCell>
                             <TableCell className="text-right">
-                              <span className={p.comparison_to_baseline > 0 ? 'text-success font-medium' : 'text-destructive'}>
-                                {p.comparison_to_baseline > 0 ? '+' : ''}{p.comparison_to_baseline.toFixed(0)}%
-                              </span>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className={`font-medium ${p.comparison_to_baseline > 0 ? 'text-success' : 'text-destructive'}`}>
+                                    {p.comparison_to_baseline > 0 ? '+' : ''}{p.comparison_to_baseline.toFixed(0)}%
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">
+                                      {formatRate(p.avg_reply_rate)} vs {formatRate(baselineReplyRate)} baseline
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
                             </TableCell>
                             <TableCell className="text-right">
-                              <StatisticalConfidenceBadge sampleSize={p.sample_size} size="sm" showTooltip />
+                              {p.p_value !== undefined ? (
+                                <span className={`font-mono text-xs ${p.p_value < 0.05 ? 'text-success font-medium' : 'text-muted-foreground'}`}>
+                                  {p.p_value < 0.001 ? '<0.001' : p.p_value.toFixed(3)}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -594,38 +706,82 @@ export default function CopyInsights() {
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-base">Body Length Impact</CardTitle>
-                      <CardDescription>Reply rate by word count</CardDescription>
+                      <CardDescription>Reply rate by word count (with sample sizes)</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="h-[200px]">
+                      <div className="h-[220px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={wordCountData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                             <XAxis dataKey="range" fontSize={12} />
                             <YAxis fontSize={12} tickFormatter={(v) => `${v.toFixed(1)}%`} />
                             <RechartsTooltip
-                              contentStyle={{
-                                backgroundColor: 'hsl(var(--card))',
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '8px',
+                              content={({ active, payload }) => {
+                                if (active && payload && payload.length) {
+                                  const data = payload[0].payload;
+                                  return (
+                                    <div className="p-2 rounded-lg border bg-card text-card-foreground shadow-md">
+                                      <p className="font-medium text-sm">{data.range} words</p>
+                                      <p className="text-sm">
+                                        Reply Rate: <span className="font-mono font-medium">{data.avgReply.toFixed(2)}%</span>
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {data.count} variants • {data.totalSent.toLocaleString()} sends
+                                      </p>
+                                    </div>
+                                  );
+                                }
+                                return null;
                               }}
-                              formatter={(value: number) => [`${value.toFixed(2)}%`, 'Avg Reply Rate']}
                             />
-                            <Bar dataKey="avgReply" fill="hsl(var(--chart-2))" />
+                            <Bar 
+                              dataKey="avgReply" 
+                              fill="hsl(var(--chart-2))"
+                              label={({ x, y, width, value, index }) => {
+                                const data = wordCountData[index];
+                                return (
+                                  <g>
+                                    <text
+                                      x={x + width / 2}
+                                      y={y - 5}
+                                      fill="hsl(var(--foreground))"
+                                      textAnchor="middle"
+                                      fontSize={11}
+                                      fontWeight={500}
+                                    >
+                                      {(value as number).toFixed(1)}%
+                                    </text>
+                                  </g>
+                                );
+                              }}
+                            >
+                              {wordCountData.map((entry, index) => (
+                                <Cell 
+                                  key={index} 
+                                  fill={entry.range === bestWordCountBucket?.range ? 'hsl(var(--success))' : 'hsl(var(--chart-2))'} 
+                                />
+                              ))}
+                            </Bar>
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Research shows 50-100 words is the sweet spot for cold email.
-                      </p>
+                      {bestWordCountBucket && bestWordCountBucket.totalSent > 0 && (
+                        <div className="mt-3 p-2 rounded-lg bg-success/5 border border-success/20">
+                          <p className="text-xs text-success">
+                            <TrendingUp className="h-3 w-3 inline mr-1" />
+                            <strong>Your data shows:</strong> {bestWordCountBucket.range} words performs best at {bestWordCountBucket.avgReply.toFixed(1)}% 
+                            (n={bestWordCountBucket.totalSent.toLocaleString()})
+                          </p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 
-                  {/* Key Metrics */}
+                  {/* Key Metrics - Actionable */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-base">Quick Stats</CardTitle>
-                      <CardDescription>Overall copy performance</CardDescription>
+                      <CardDescription>Actionable copy insights</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
@@ -638,34 +794,73 @@ export default function CopyInsights() {
                           <p className="text-2xl font-bold text-success">
                             {subjectLines.filter(s => s.confidence_level === 'high').length}
                           </p>
+                          <p className="text-xs text-muted-foreground">
+                            ({((subjectLines.filter(s => s.confidence_level === 'high').length / subjectLines.length) * 100).toFixed(0)}% of variants)
+                          </p>
                         </div>
                       </div>
                       
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Question format usage</span>
-                          <span className="font-mono">
-                            {((subjectLines.filter(s => s.format_type === 'question').length / subjectLines.length) * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        <Progress 
-                          value={(subjectLines.filter(s => s.format_type === 'question').length / subjectLines.length) * 100} 
-                          className="h-2"
-                        />
-                      </div>
+                      {/* Question Format with Recommendation */}
+                      {(() => {
+                        const questionVariants = subjectLines.filter(s => s.format_type === 'question');
+                        const questionUsage = (questionVariants.length / subjectLines.length) * 100;
+                        const questionPattern = patterns.find(p => p.pattern.toLowerCase().includes('question'));
+                        const lift = questionPattern?.comparison_to_baseline || 0;
+                        
+                        return (
+                          <div className="space-y-2 p-3 rounded-lg bg-muted/30">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium">Question format</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono">{questionUsage.toFixed(0)}%</span>
+                                {lift !== 0 && (
+                                  <Badge className={`text-xs ${lift > 0 ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
+                                    {lift > 0 ? '+' : ''}{lift.toFixed(0)}% lift
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <Progress value={questionUsage} className="h-2" />
+                            {lift > 10 && questionUsage < 25 && (
+                              <p className="text-xs text-success">
+                                💡 Increasing to 25% could generate more replies
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                       
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Company personalization</span>
-                          <span className="font-mono">
-                            {((subjectLines.filter(s => s.personalization_type === 'company').length / subjectLines.length) * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        <Progress 
-                          value={(subjectLines.filter(s => s.personalization_type === 'company').length / subjectLines.length) * 100} 
-                          className="h-2"
-                        />
-                      </div>
+                      {/* Company Personalization with Recommendation */}
+                      {(() => {
+                        const companyVariants = subjectLines.filter(s => s.personalization_type === 'company');
+                        const companyUsage = (companyVariants.length / subjectLines.length) * 100;
+                        const companyPattern = patterns.find(p => p.pattern.toLowerCase().includes('company'));
+                        const lift = companyPattern?.comparison_to_baseline || 0;
+                        const topPerformersWithCompany = topPerformers.filter(t => t.personalization_type === 'company').length;
+                        const topPerformersUsage = (topPerformersWithCompany / Math.max(topPerformers.length, 1)) * 100;
+                        
+                        return (
+                          <div className="space-y-2 p-3 rounded-lg bg-muted/30">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium">Company personalization</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono">{companyUsage.toFixed(0)}%</span>
+                                {lift !== 0 && (
+                                  <Badge className={`text-xs ${lift > 0 ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
+                                    {lift > 0 ? '+' : ''}{lift.toFixed(0)}% lift
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <Progress value={companyUsage} className="h-2" />
+                            {topPerformersUsage > companyUsage + 10 && (
+                              <p className="text-xs text-success">
+                                💡 Top performers use it {topPerformersUsage.toFixed(0)}% of the time
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </CardContent>
                   </Card>
                 </div>
@@ -716,7 +911,9 @@ export default function CopyInsights() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredSubjects.slice(0, 50).map((item) => (
+                        {filteredSubjects.slice(0, 50).map((item) => {
+                          const ci = calculateConfidenceInterval(item.reply_rate, item.sent_count);
+                          return (
                           <TableRow key={item.variant_id}>
                             <TableCell>
                               <div>
@@ -733,7 +930,21 @@ export default function CopyInsights() {
                             </TableCell>
                             <TableCell className="font-mono text-sm">{item.sent_count.toLocaleString()}</TableCell>
                             <TableCell className="font-mono text-sm">{formatRate(item.open_rate)}</TableCell>
-                            <TableCell className="font-mono text-sm font-medium">{formatRate(item.reply_rate)}</TableCell>
+                            <TableCell>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className="font-mono text-sm font-medium cursor-help">
+                                    {formatRate(item.reply_rate)}
+                                    <span className="text-xs text-muted-foreground ml-1">
+                                      ±{ci.marginOfError.toFixed(1)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">95% CI: {ci.lower.toFixed(1)}% - {ci.upper.toFixed(1)}%</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableCell>
                             <TableCell>
                               <StatisticalConfidenceBadge sampleSize={item.sent_count} size="sm" />
                             </TableCell>
@@ -765,7 +976,8 @@ export default function CopyInsights() {
                               </TooltipProvider>
                             </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </CardContent>
@@ -809,7 +1021,9 @@ export default function CopyInsights() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredBody.slice(0, 50).map((item) => (
+                        {filteredBody.slice(0, 50).map((item) => {
+                          const ci = calculateConfidenceInterval(item.reply_rate, item.sent_count);
+                          return (
                           <TableRow key={item.variant_id}>
                             <TableCell>
                               <div>
@@ -857,14 +1071,28 @@ export default function CopyInsights() {
                                 <CheckCircle className="h-4 w-4 text-success" />
                               )}
                             </TableCell>
-                            <TableCell className="font-mono text-sm font-medium">
-                              {formatRate(item.reply_rate)}
+                            <TableCell>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className="font-mono text-sm font-medium cursor-help">
+                                    {formatRate(item.reply_rate)}
+                                    <span className="text-xs text-muted-foreground ml-1">
+                                      ±{ci.marginOfError.toFixed(1)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">95% CI: {ci.lower.toFixed(1)}% - {ci.upper.toFixed(1)}%</p>
+                                    <p className="text-xs text-muted-foreground">n={item.sent_count.toLocaleString()}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
                             </TableCell>
                             <TableCell>
                               <StatisticalConfidenceBadge sampleSize={item.sent_count} size="sm" />
                             </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </CardContent>
