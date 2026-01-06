@@ -205,7 +205,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { workspace_id, sync_type = 'full', reset = false, force_advance = false } = await req.json();
+    const { workspace_id, sync_type = 'full', reset = false, force_advance = false, diagnostic = false } = await req.json();
     
     if (!workspace_id) {
       return new Response(JSON.stringify({ error: 'Missing workspace_id' }), {
@@ -246,6 +246,26 @@ Deno.serve(async (req) => {
     }
 
     const apiKey = connection.api_key_encrypted;
+
+    // Diagnostic mode: quick sanity checks without mutating data.
+    if (diagnostic) {
+      const results: Record<string, any> = {};
+      try {
+        results.email_accounts = await replyioRequest('/email-accounts?top=1&skip=0', apiKey);
+      } catch (e) {
+        results.email_accounts_error = (e as Error).message;
+      }
+
+      try {
+        results.sequences = await replyioRequest('/sequences?top=1&skip=0', apiKey);
+      } catch (e) {
+        results.sequences_error = (e as Error).message;
+      }
+
+      return new Response(JSON.stringify({ ok: true, diagnostic: true, results }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // The connection may contain legacy sync_progress shapes from older Reply.io sync versions.
     // If so, we must ignore it and start from a clean v3 progress object.

@@ -95,6 +95,8 @@ export default function Connections() {
   const [isSyncingReplyio, setIsSyncingReplyio] = useState(false);
   const [isResumingReplyio, setIsResumingReplyio] = useState(false);
   const [isStoppingReplyio, setIsStoppingReplyio] = useState(false);
+  const [isDiagnosingReplyio, setIsDiagnosingReplyio] = useState(false);
+  const [replyioDiagnostics, setReplyioDiagnostics] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -347,6 +349,33 @@ export default function Connections() {
       console.log('Continue Reply.io sync call completed (may have timed out, will retry)');
     } finally {
       setIsResumingReplyio(false);
+    }
+  };
+
+  const runReplyioDiagnostics = async () => {
+    if (!currentWorkspace || isDiagnosingReplyio) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setReplyioDiagnostics(null);
+      setIsDiagnosingReplyio(true);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated. Please sign in again.');
+
+      const res = await supabase.functions.invoke('replyio-sync', {
+        body: { workspace_id: currentWorkspace.id, diagnostic: true },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || 'Diagnostics failed');
+      setReplyioDiagnostics(res.data?.results || res.data);
+      setSuccess('Reply.io diagnostics captured below.');
+    } catch (e: any) {
+      setError(e.message || 'Failed to run diagnostics');
+    } finally {
+      setIsDiagnosingReplyio(false);
     }
   };
 
@@ -851,6 +880,19 @@ export default function Connections() {
                       </div>
                     )}
 
+                  {replyioDiagnostics && (
+                    <Alert>
+                      <AlertDescription>
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium">Reply.io diagnostics</p>
+                          <pre className="max-h-56 overflow-auto rounded-md bg-accent/40 p-3 text-xs text-foreground">
+                            {JSON.stringify(replyioDiagnostics, null, 2)}
+                          </pre>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
                   <div className="flex gap-2 pt-2">
                     {isSyncingReplyioActive ? (
                       <>
@@ -893,6 +935,19 @@ export default function Connections() {
                         >
                           <Download className="mr-2 h-4 w-4" />
                           Sync Data
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={runReplyioDiagnostics}
+                          disabled={isDiagnosingReplyio}
+                          title="Run a quick API sanity-check (no data changes)"
+                        >
+                          {isDiagnosingReplyio ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <AlertCircle className="h-4 w-4" />
+                          )}
                         </Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
