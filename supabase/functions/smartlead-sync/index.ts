@@ -678,23 +678,21 @@ serve(async (req) => {
                   }
                 }
 
-                // Bulk insert events (use ON CONFLICT DO NOTHING for deduplication)
+                // Bulk insert events - use insert with ignoreDuplicates 
                 if (eventPayloads.length > 0) {
                   // Insert in batches of 500 to avoid payload size limits
                   const batchSize = 500;
                   for (let ei = 0; ei < eventPayloads.length; ei += batchSize) {
                     const batch = eventPayloads.slice(ei, ei + batchSize);
-                    const { error: eventError, data: insertedEvents } = await supabase
+                    // Use insert - duplicates will be rejected by the unique index
+                    const { error: eventError } = await supabase
                       .from('message_events')
-                      .upsert(batch, { 
-                        onConflict: 'workspace_id,lead_id,event_type,platform_event_id',
-                        ignoreDuplicates: true 
-                      })
-                      .select('id');
+                      .insert(batch);
 
                     if (!eventError) {
-                      progress.events_created += insertedEvents?.length || 0;
-                    } else {
+                      progress.events_created += batch.length;
+                    } else if (eventError.code !== '23505') {
+                      // Ignore unique constraint violations, log other errors
                       console.error('Batch event insert error:', eventError);
                     }
                   }
