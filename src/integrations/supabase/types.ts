@@ -498,6 +498,88 @@ export type Database = {
           },
         ]
       }
+      copy_library: {
+        Row: {
+          ai_tags: string[] | null
+          body_preview: string | null
+          category: string
+          created_at: string
+          created_by: string
+          email_body: string | null
+          id: string
+          is_template: boolean
+          manual_tags: string[] | null
+          notes: string | null
+          performance_snapshot: Json | null
+          personalization_vars: Json | null
+          source_variant_id: string | null
+          status: string
+          subject_line: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          ai_tags?: string[] | null
+          body_preview?: string | null
+          category?: string
+          created_at?: string
+          created_by: string
+          email_body?: string | null
+          id?: string
+          is_template?: boolean
+          manual_tags?: string[] | null
+          notes?: string | null
+          performance_snapshot?: Json | null
+          personalization_vars?: Json | null
+          source_variant_id?: string | null
+          status?: string
+          subject_line: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          ai_tags?: string[] | null
+          body_preview?: string | null
+          category?: string
+          created_at?: string
+          created_by?: string
+          email_body?: string | null
+          id?: string
+          is_template?: boolean
+          manual_tags?: string[] | null
+          notes?: string | null
+          performance_snapshot?: Json | null
+          personalization_vars?: Json | null
+          source_variant_id?: string | null
+          status?: string
+          subject_line?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "copy_library_source_variant_id_fkey"
+            columns: ["source_variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "copy_library_source_variant_id_fkey"
+            columns: ["source_variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+          {
+            foreignKeyName: "copy_library_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       copy_patterns: {
         Row: {
           confidence_interval_lower: number | null

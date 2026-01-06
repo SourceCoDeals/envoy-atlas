@@ -15,6 +15,7 @@ import Deliverability from "./pages/Deliverability";
 import Audience from "./pages/Audience";
 import AudienceInsights from "./pages/AudienceInsights";
 import CopyInsights from "./pages/CopyInsights";
+import CopyLibrary from "./pages/CopyLibrary";
 import Experiments from "./pages/Experiments";
 import Playbook from "./pages/Playbook";
 import Alerts from "./pages/Alerts";
@@ -42,6 +43,7 @@ const App = () => (
               <Route path="/audience" element={<Audience />} />
               <Route path="/audience-insights" element={<AudienceInsights />} />
               <Route path="/copy-insights" element={<CopyInsights />} />
+              <Route path="/copy-library" element={<CopyLibrary />} />
               <Route path="/experiments" element={<Experiments />} />
               <Route path="/playbook" element={<Playbook />} />
               <Route path="/alerts" element={<Alerts />} />
