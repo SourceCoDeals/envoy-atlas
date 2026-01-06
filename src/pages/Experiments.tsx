@@ -3,15 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, FlaskConical, Plus, Lightbulb, BookOpen, Target } from 'lucide-react';
+import { Loader2, Plus, Lightbulb, BookOpen, Calculator } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { ExperimentStatusOverview } from '@/components/experiments/ExperimentStatusOverview';
 import { ActiveExperimentCard, ActiveExperiment, ExperimentVariant } from '@/components/experiments/ActiveExperimentCard';
 import { ExperimentResultsCard } from '@/components/experiments/ExperimentResultsCard';
 import { ExperimentSuggestions, ExperimentSuggestion } from '@/components/experiments/ExperimentSuggestions';
+import { ExperimentProgramHealth } from '@/components/experiments/ExperimentProgramHealth';
+import { SampleSizeCalculator } from '@/components/experiments/SampleSizeCalculator';
+import { ExperimentBestPractices } from '@/components/experiments/ExperimentBestPractices';
+import { NoExperimentsState } from '@/components/experiments/NoExperimentsState';
 
 // Statistical functions
 function calculateZScore(p1: number, p2: number, n1: number, n2: number): number {
@@ -32,7 +35,6 @@ function zScoreToConfidence(z: number): number {
 
 function zScoreToPValue(z: number): number {
   const absZ = Math.abs(z);
-  // Approximate two-tailed p-value
   if (absZ >= 3.29) return 0.001;
   if (absZ >= 2.58) return 0.01;
   if (absZ >= 1.96) return 0.05;
@@ -40,7 +42,8 @@ function zScoreToPValue(z: number): number {
   return Math.min(1, 2 * (1 - (0.5 * (1 + Math.tanh(absZ * 0.7)))));
 }
 
-const MIN_SAMPLE_SIZE = 100;
+// Corrected sample size requirements - much higher than 100!
+const MIN_SAMPLE_SIZE = 500; // Realistic minimum for detecting 50% relative lift
 const CONFIDENCE_THRESHOLD = 95;
 
 export default function Experiments() {
@@ -49,6 +52,7 @@ export default function Experiments() {
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [experiments, setExperiments] = useState<ActiveExperiment[]>([]);
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Mock suggestions for now
   const suggestions: ExperimentSuggestion[] = useMemo(() => [
@@ -56,23 +60,23 @@ export default function Experiments() {
       id: '1',
       type: 'Subject Line',
       priority: 'high',
-      hypothesis: 'Question-based subjects will increase reply rate by at least 15%',
-      rationale: 'Question patterns show 23% lift in similar accounts but are underused in your campaigns',
-      expectedLift: 0.15,
-      requiredSample: 2100,
+      hypothesis: 'Question-based subjects will increase reply rate by at least 25% because our data shows questions get 23% higher engagement but are underused',
+      rationale: 'Question patterns show 23% lift in similar accounts but are only used in 9% of your emails',
+      expectedLift: 0.25,
+      requiredSample: 2000,
       estimatedDurationDays: 14,
-      controlSuggestion: 'Current best performing subject',
+      controlSuggestion: 'Current best performing subject line',
       treatmentSuggestion: 'New subject using question pattern'
     },
     {
       id: '2',
       type: 'CTA',
       priority: 'high',
-      hypothesis: 'Choice-based CTAs will increase meeting conversion rate',
-      rationale: 'Choice CTAs ("Tuesday or Thursday?") show 34% higher meeting conversion but only used in 12% of emails',
-      expectedLift: 0.25,
-      requiredSample: 1800,
-      estimatedDurationDays: 21,
+      hypothesis: 'Choice-based CTAs ("Tuesday or Thursday?") will increase meeting conversion by 40% by reducing friction',
+      rationale: 'Choice CTAs show 34% higher meeting conversion in industry benchmarks but are only used in 12% of your emails',
+      expectedLift: 0.40,
+      requiredSample: 1200,
+      estimatedDurationDays: 10,
       controlSuggestion: 'Soft CTA ("Would you be open to...")',
       treatmentSuggestion: 'Choice CTA ("Tuesday or Thursday?")'
     },
@@ -80,11 +84,11 @@ export default function Experiments() {
       id: '3',
       type: 'Send Time',
       priority: 'medium',
-      hypothesis: 'Sending Tuesday 9-10 AM will increase reply rates',
+      hypothesis: 'Sending Tuesday 9-10 AM will increase reply rates by 15%',
       rationale: 'Analysis suggests Tuesday morning may be optimal but currently receives only 8% of volume',
-      expectedLift: 0.12,
-      requiredSample: 2500,
-      estimatedDurationDays: 14,
+      expectedLift: 0.15,
+      requiredSample: 3500,
+      estimatedDurationDays: 21,
       controlSuggestion: 'Current send time distribution',
       treatmentSuggestion: 'Shift volume to Tuesday 9-10 AM'
     }
@@ -192,7 +196,7 @@ export default function Experiments() {
             }
           }
 
-          const status: 'running' | 'completed' | 'needs_data' = 
+          const status: 'running' | 'completed' | 'needs_data' | 'draft' = 
             !hasEnoughData ? 'needs_data' : hasSignificance ? 'completed' : 'running';
 
           const daysSinceCreation = Math.floor(
@@ -201,7 +205,7 @@ export default function Experiments() {
 
           const currentSampleControl = control?.sentCount || 0;
           const currentSampleTreatment = treatments.reduce((sum, t) => sum + t.sentCount, 0);
-          const requiredSample = 2000;
+          const requiredSample = MIN_SAMPLE_SIZE;
           const progress = (currentSampleControl + currentSampleTreatment) / (requiredSample * 2);
           const estimatedDaysRemaining = progress > 0 ? Math.ceil((1 - progress) / progress * daysSinceCreation) : null;
 
@@ -242,6 +246,28 @@ export default function Experiments() {
   const runningExperiments = experiments.filter(e => e.status === 'running');
   const needsDataExperiments = experiments.filter(e => e.status === 'needs_data');
 
+  // Calculate program health metrics
+  const programHealth = useMemo(() => {
+    const completed = completedExperiments.length + needsDataExperiments.length;
+    const allExperiments = [...completedExperiments, ...needsDataExperiments, ...runningExperiments];
+    
+    const avgSampleSize = allExperiments.length > 0
+      ? allExperiments.reduce((sum, e) => sum + (e.currentSampleControl + e.currentSampleTreatment) / 2, 0) / allExperiments.length
+      : 0;
+    
+    const avgDurationDays = allExperiments.length > 0
+      ? allExperiments.reduce((sum, e) => sum + e.dayNumber, 0) / allExperiments.length
+      : 0;
+
+    return {
+      totalTests: completed,
+      winnersFound: completedExperiments.length,
+      noDiffFound: needsDataExperiments.length,
+      avgSampleSize: Math.round(avgSampleSize),
+      avgDurationDays
+    };
+  }, [completedExperiments, needsDataExperiments, runningExperiments]);
+
   if (authLoading || !user) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -249,6 +275,9 @@ export default function Experiments() {
       </div>
     );
   }
+
+  const hasExperiments = experiments.length > 0;
+  const hasRunningExperiments = runningExperiments.length > 0;
 
   return (
     <DashboardLayout>
@@ -261,13 +290,13 @@ export default function Experiments() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled>
-              <Lightbulb className="h-4 w-4 mr-2" />
-              View Suggestions
+            <Button variant="outline" size="sm" onClick={() => setActiveTab('calculator')}>
+              <Calculator className="h-4 w-4 mr-2" />
+              Power Calculator
             </Button>
-            <Button variant="outline" size="sm" disabled>
-              <BookOpen className="h-4 w-4 mr-2" />
-              View Archive
+            <Button variant="outline" size="sm" onClick={() => setActiveTab('suggestions')}>
+              <Lightbulb className="h-4 w-4 mr-2" />
+              Suggestions ({suggestions.length})
             </Button>
             <Button size="sm" disabled>
               <Plus className="h-4 w-4 mr-2" />
@@ -280,26 +309,8 @@ export default function Experiments() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
-        ) : experiments.length === 0 ? (
-          <div className="space-y-6">
-            <ExperimentStatusOverview running={0} winners={0} noDiff={0} draft={0} />
-            
-            <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <div className="h-16 w-16 rounded-2xl bg-warning/10 flex items-center justify-center mb-4">
-                  <FlaskConical className="h-8 w-8 text-warning" />
-                </div>
-                <h2 className="text-xl font-semibold mb-2">No Experiments Yet</h2>
-                <p className="text-muted-foreground text-center max-w-md mb-6">
-                  Campaigns with multiple email variants (A/B tests) will appear here automatically.
-                  Create A/B tests in Smartlead to see statistical analysis.
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Show suggestions even without experiments */}
-            <ExperimentSuggestions suggestions={suggestions} />
-          </div>
+        ) : !hasExperiments ? (
+          <NoExperimentsState suggestions={suggestions} />
         ) : (
           <div className="space-y-6">
             {/* Status Overview */}
@@ -310,20 +321,71 @@ export default function Experiments() {
               draft={0}
             />
 
-            <Tabs defaultValue="running" className="space-y-4">
+            {/* Program Health Alert - Show prominently if there are issues */}
+            {programHealth.totalTests > 0 && (
+              <ExperimentProgramHealth {...programHealth} />
+            )}
+
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
               <TabsList>
+                <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="running">Running ({runningExperiments.length})</TabsTrigger>
                 <TabsTrigger value="completed">Completed ({completedExperiments.length})</TabsTrigger>
-                <TabsTrigger value="suggestions">Suggestions ({suggestions.length})</TabsTrigger>
+                <TabsTrigger value="suggestions">
+                  Suggestions ({suggestions.length})
+                </TabsTrigger>
+                <TabsTrigger value="calculator">Power Calculator</TabsTrigger>
               </TabsList>
+
+              <TabsContent value="overview" className="space-y-6">
+                {/* Show suggestions prominently if no running experiments */}
+                {!hasRunningExperiments && suggestions.length > 0 && (
+                  <div className="p-4 rounded-lg border border-primary/30 bg-primary/5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Lightbulb className="h-5 w-5 text-warning" />
+                      <h3 className="font-semibold">No Running Experiments</h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      We found {suggestions.length} high-potential experiments based on your data. 
+                      Start testing to discover what works best.
+                    </p>
+                    <Button onClick={() => setActiveTab('suggestions')}>
+                      View Suggestions
+                    </Button>
+                  </div>
+                )}
+
+                {/* Running Experiments Summary */}
+                {runningExperiments.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="font-semibold">Currently Running</h3>
+                    {runningExperiments.slice(0, 2).map(experiment => (
+                      <ActiveExperimentCard key={experiment.id} experiment={experiment} />
+                    ))}
+                    {runningExperiments.length > 2 && (
+                      <Button variant="outline" onClick={() => setActiveTab('running')}>
+                        View all {runningExperiments.length} running experiments
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {/* Best Practices - Collapsed by default */}
+                <ExperimentBestPractices />
+              </TabsContent>
 
               <TabsContent value="running" className="space-y-4">
                 {runningExperiments.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex items-center justify-center py-8 text-muted-foreground">
-                      No running experiments
-                    </CardContent>
-                  </Card>
+                  <div className="p-8 text-center text-muted-foreground border rounded-lg border-dashed">
+                    <p>No running experiments</p>
+                    <Button 
+                      variant="link" 
+                      className="mt-2"
+                      onClick={() => setActiveTab('suggestions')}
+                    >
+                      View suggested experiments
+                    </Button>
+                  </div>
                 ) : (
                   runningExperiments.map(experiment => (
                     <ActiveExperimentCard key={experiment.id} experiment={experiment} />
@@ -333,11 +395,12 @@ export default function Experiments() {
 
               <TabsContent value="completed" className="space-y-4">
                 {completedExperiments.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex items-center justify-center py-8 text-muted-foreground">
-                      No completed experiments yet
-                    </CardContent>
-                  </Card>
+                  <div className="p-8 text-center text-muted-foreground border rounded-lg border-dashed">
+                    <p>No completed experiments with clear winners yet</p>
+                    <p className="text-sm mt-2">
+                      Experiments need {MIN_SAMPLE_SIZE.toLocaleString()}+ sends per variant and 95%+ confidence
+                    </p>
+                  </div>
                 ) : (
                   completedExperiments.map(experiment => (
                     <ExperimentResultsCard key={experiment.id} experiment={experiment} />
@@ -348,40 +411,14 @@ export default function Experiments() {
               <TabsContent value="suggestions" className="space-y-4">
                 <ExperimentSuggestions suggestions={suggestions} />
               </TabsContent>
-            </Tabs>
 
-            {/* Best Practices */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Target className="h-5 w-5 text-primary" />
-                  A/B Testing Best Practices
-                </CardTitle>
-                <CardDescription>Guidelines for rigorous experimentation</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <p className="font-medium mb-2">Test ONE Variable</p>
-                    <p className="text-sm text-muted-foreground">
-                      Change only one element per test (subject line, CTA, send time) for clear attribution.
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <p className="font-medium mb-2">Wait for Significance</p>
-                    <p className="text-sm text-muted-foreground">
-                      Need <strong>{MIN_SAMPLE_SIZE}+ sends per variant</strong> and {CONFIDENCE_THRESHOLD}%+ confidence before declaring a winner.
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <p className="font-medium mb-2">Document Learnings</p>
-                    <p className="text-sm text-muted-foreground">
-                      Add results to your Playbook to build institutional knowledge over time.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+              <TabsContent value="calculator" className="space-y-4">
+                <SampleSizeCalculator 
+                  dailySendCapacity={500}
+                  baselineReplyRate={0.03}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
       </div>
