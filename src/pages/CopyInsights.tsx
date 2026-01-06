@@ -64,6 +64,16 @@ import { CopyDecaySection } from '@/components/copyinsights/CopyDecaySection';
 import { CopyComparisonDialog } from '@/components/copyinsights/CopyComparisonDialog';
 import { CopyPerformanceSummary } from '@/components/copyinsights/CopyPerformanceSummary';
 import { SegmentCopyMatrix } from '@/components/copyinsights/SegmentCopyMatrix';
+import { OpeningLineAnalysis } from '@/components/copyinsights/OpeningLineAnalysis';
+import { SubjectLineDeepDive } from '@/components/copyinsights/SubjectLineDeepDive';
+import { BodyCopyDeepDive } from '@/components/copyinsights/BodyCopyDeepDive';
+import { 
+  detectOpeningType, 
+  detectFirstWordType, 
+  detectCapitalizationStyle,
+  detectPunctuationType,
+  calculateYouIRatio,
+} from '@/lib/patternTaxonomy';
 
 type SortField = 'reply_rate' | 'open_rate' | 'positive_rate' | 'sent_count';
 type SortOrder = 'asc' | 'desc';
@@ -863,10 +873,14 @@ export default function CopyInsights() {
             {/* Tabs for detailed analysis */}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
               <div className="flex items-center justify-between">
-                <TabsList>
+                <TabsList className="flex-wrap h-auto gap-1">
                   <TabsTrigger value="overview">
                     <BarChart3 className="h-4 w-4 mr-2" />
                     Overview
+                  </TabsTrigger>
+                  <TabsTrigger value="opening">
+                    <MessageSquareText className="h-4 w-4 mr-2" />
+                    Opening Lines
                   </TabsTrigger>
                   <TabsTrigger value="cta">
                     <Target className="h-4 w-4 mr-2" />
