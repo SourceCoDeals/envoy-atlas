@@ -265,19 +265,32 @@ export function useCopyAnalytics(): CopyAnalyticsData {
       }));
       setDiscoveredPatterns(discovered);
 
-      // Fetch metrics for all variants
-      const { data: metrics, error: metricsError } = await supabase
+      // Fetch variant-level metrics first
+      const { data: variantMetrics, error: variantMetricsError } = await supabase
         .from('daily_metrics')
         .select('variant_id, sent_count, opened_count, replied_count, positive_reply_count')
         .eq('workspace_id', currentWorkspace.id)
         .not('variant_id', 'is', null);
 
-      if (metricsError) throw metricsError;
+      if (variantMetricsError) {
+        console.warn('Variant metrics query failed:', variantMetricsError);
+      }
+
+      // Also fetch campaign-level metrics as fallback
+      const { data: campaignMetrics, error: campaignMetricsError } = await supabase
+        .from('daily_metrics')
+        .select('campaign_id, sent_count, opened_count, replied_count, positive_reply_count')
+        .eq('workspace_id', currentWorkspace.id)
+        .is('variant_id', null);
+
+      if (campaignMetricsError) {
+        console.warn('Campaign metrics query failed:', campaignMetricsError);
+      }
 
       // Aggregate metrics by variant
       const metricsMap = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
       
-      (metrics || []).forEach(m => {
+      (variantMetrics || []).forEach(m => {
         if (!m.variant_id) return;
         const existing = metricsMap.get(m.variant_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
         metricsMap.set(m.variant_id, {
@@ -288,11 +301,52 @@ export function useCopyAnalytics(): CopyAnalyticsData {
         });
       });
 
+      // Aggregate campaign-level metrics for fallback
+      const campaignMetricsMap = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
+      
+      (campaignMetrics || []).forEach(m => {
+        if (!m.campaign_id) return;
+        const existing = campaignMetricsMap.get(m.campaign_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+        campaignMetricsMap.set(m.campaign_id, {
+          sent: existing.sent + (m.sent_count || 0),
+          opened: existing.opened + (m.opened_count || 0),
+          replied: existing.replied + (m.replied_count || 0),
+          positive: existing.positive + (m.positive_reply_count || 0),
+        });
+      });
+
+      // Count variants per campaign for metric distribution
+      const variantCountPerCampaign = new Map<string, number>();
+      (variants || []).forEach(v => {
+        if (v.campaign_id) {
+          variantCountPerCampaign.set(v.campaign_id, (variantCountPerCampaign.get(v.campaign_id) || 0) + 1);
+        }
+      });
+
       // Process subject lines with extracted features
       const subjectAnalysis: SubjectLineAnalysis[] = (variants || [])
         .filter(v => v.subject_line)
         .map(v => {
-          const m = metricsMap.get(v.id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+          // Try variant-level metrics first, then fallback to campaign-level (distributed across variants)
+          let m = metricsMap.get(v.id);
+          
+          if (!m || m.sent === 0) {
+            // Fallback to campaign-level metrics distributed across variants
+            const campaignM = campaignMetricsMap.get(v.campaign_id);
+            const variantCount = variantCountPerCampaign.get(v.campaign_id) || 1;
+            if (campaignM) {
+              // Distribute campaign metrics evenly across variants (approximation)
+              // We show campaign-level rates, not divided counts
+              m = {
+                sent: Math.round(campaignM.sent / variantCount),
+                opened: Math.round(campaignM.opened / variantCount),
+                replied: Math.round(campaignM.replied / variantCount),
+                positive: Math.round(campaignM.positive / variantCount),
+              };
+            }
+          }
+          
+          m = m || { sent: 0, opened: 0, replied: 0, positive: 0 };
           const subjectLine = v.subject_line || '';
           const feat = featuresMap.get(v.id);
           
@@ -351,7 +405,24 @@ export function useCopyAnalytics(): CopyAnalyticsData {
       const bodyAnalysis: BodyCopyAnalysis[] = (variants || [])
         .filter(v => v.body_preview || v.email_body)
         .map(v => {
-          const m = metricsMap.get(v.id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+          // Try variant-level metrics first, then fallback to campaign-level (distributed across variants)
+          let m = metricsMap.get(v.id);
+          
+          if (!m || m.sent === 0) {
+            // Fallback to campaign-level metrics distributed across variants
+            const campaignM = campaignMetricsMap.get(v.campaign_id);
+            const variantCount = variantCountPerCampaign.get(v.campaign_id) || 1;
+            if (campaignM) {
+              m = {
+                sent: Math.round(campaignM.sent / variantCount),
+                opened: Math.round(campaignM.opened / variantCount),
+                replied: Math.round(campaignM.replied / variantCount),
+                positive: Math.round(campaignM.positive / variantCount),
+              };
+            }
+          }
+          
+          m = m || { sent: 0, opened: 0, replied: 0, positive: 0 };
           const body = v.email_body || v.body_preview || '';
           const vars = Array.isArray(v.personalization_vars) 
             ? (v.personalization_vars as string[]) 
