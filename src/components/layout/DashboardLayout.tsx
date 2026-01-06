@@ -25,6 +25,7 @@ import {
   BarChart3,
   LayoutDashboard,
   Mail,
+  Inbox,
   Shield,
   Users,
   FileText,
@@ -38,6 +39,7 @@ import {
   User,
   Building2,
   Plug,
+  PieChart,
 } from 'lucide-react';
 
 interface NavItem {
@@ -49,10 +51,11 @@ interface NavItem {
 
 const mainNavItems: NavItem[] = [
   { title: 'Overview', href: '/', icon: LayoutDashboard },
+  { title: 'Inbox', href: '/inbox', icon: Inbox },
   { title: 'Campaigns', href: '/campaigns', icon: Mail },
-  { title: 'Deliverability', href: '/deliverability', icon: Shield },
-  { title: 'Audience', href: '/audience', icon: Users },
   { title: 'Copy Insights', href: '/copy-insights', icon: FileText },
+  { title: 'Audience Insights', href: '/audience-insights', icon: PieChart },
+  { title: 'Deliverability', href: '/deliverability', icon: Shield },
 ];
 
 const experimentNavItems: NavItem[] = [

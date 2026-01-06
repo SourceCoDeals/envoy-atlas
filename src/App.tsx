@@ -9,8 +9,11 @@ import Dashboard from "./pages/Dashboard";
 import Auth from "./pages/Auth";
 import Connections from "./pages/Connections";
 import Campaigns from "./pages/Campaigns";
+import CampaignDetail from "./pages/CampaignDetail";
+import Inbox from "./pages/Inbox";
 import Deliverability from "./pages/Deliverability";
 import Audience from "./pages/Audience";
+import AudienceInsights from "./pages/AudienceInsights";
 import CopyInsights from "./pages/CopyInsights";
 import Experiments from "./pages/Experiments";
 import Playbook from "./pages/Playbook";
@@ -33,8 +36,11 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/connections" element={<Connections />} />
               <Route path="/campaigns" element={<Campaigns />} />
+              <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
+              <Route path="/inbox" element={<Inbox />} />
               <Route path="/deliverability" element={<Deliverability />} />
               <Route path="/audience" element={<Audience />} />
+              <Route path="/audience-insights" element={<AudienceInsights />} />
               <Route path="/copy-insights" element={<CopyInsights />} />
               <Route path="/experiments" element={<Experiments />} />
               <Route path="/playbook" element={<Playbook />} />

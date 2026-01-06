@@ -35,6 +35,8 @@ type SyncProgress = {
   email_accounts_synced?: number;
   variants_synced?: number;
   metrics_created?: number;
+  leads_synced?: number;
+  events_created?: number;
   error?: string;
 };
 
@@ -219,7 +221,7 @@ export default function Connections() {
     }
   };
 
-  const handlePullFullHistory = async () => {
+  const handlePullFullHistory = async (reset = false) => {
     if (!currentWorkspace) return;
 
     setError(null);
@@ -236,6 +238,7 @@ export default function Connections() {
         body: {
           workspace_id: currentWorkspace.id,
           sync_type: 'full',
+          reset,
         },
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -363,7 +366,7 @@ export default function Connections() {
                   {syncProgress?.step === 'complete' && (
                     <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
                       <p className="font-medium mb-1">Last sync results:</p>
-                      <p>{syncProgress.campaigns_synced} campaigns, {syncProgress.variants_synced} variants, {syncProgress.email_accounts_synced} email accounts</p>
+                      <p>{syncProgress.campaigns_synced} campaigns, {syncProgress.variants_synced} variants, {syncProgress.leads_synced || 0} leads, {syncProgress.events_created || 0} events</p>
                     </div>
                   )}
 
@@ -372,7 +375,7 @@ export default function Connections() {
                       variant="outline" 
                       size="sm" 
                       className="flex-1"
-                      onClick={handlePullFullHistory}
+                      onClick={() => handlePullFullHistory(false)}
                       disabled={isSyncingSmartlead}
                     >
                       {isSyncingSmartlead ? (
@@ -383,22 +386,18 @@ export default function Connections() {
                       ) : (
                         <>
                           <Download className="mr-2 h-4 w-4" />
-                          Pull Full History
+                          Continue Sync
                         </>
                       )}
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={continueSmartleadSync}
-                      disabled={!isSyncingSmartlead || isResumingSync}
-                      title="Manually nudge the batch sync forward"
+                      onClick={() => handlePullFullHistory(true)}
+                      disabled={isSyncingSmartlead}
+                      title="Reset and re-sync from scratch"
                     >
-                      {isResumingSync ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
+                      <RefreshCw className="h-4 w-4" />
                     </Button>
                     <Button 
                       variant="outline" 

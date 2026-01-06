@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
-const RATE_LIMIT_DELAY = 250; // 250ms between requests (safe margin for 10 req/2sec)
+const RATE_LIMIT_DELAY = 250;
 
 interface SmartleadCampaign {
   id: number;
@@ -19,9 +19,7 @@ interface SmartleadCampaign {
 
 interface SmartleadSequence {
   seq_number: number;
-  seq_delay_details: {
-    delay_in_days: number;
-  };
+  seq_delay_details: { delay_in_days: number };
   seq_variants: Array<{
     id: number;
     variant_label: string;
@@ -35,9 +33,7 @@ interface SmartleadEmailAccount {
   from_email: string;
   from_name: string;
   message_per_day: number;
-  warmup_details?: {
-    status: string;
-  };
+  warmup_details?: { status: string };
 }
 
 interface SmartleadAnalytics {
@@ -52,31 +48,46 @@ interface SmartleadAnalytics {
   unsubscribe_count: number;
 }
 
+interface SmartleadLead {
+  id: number;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  company_name?: string;
+  linkedin_profile?: string;
+  phone_number?: string;
+  website?: string;
+  lead_status?: string;
+  category?: string; // interested, not_interested, out_of_office, etc
+}
+
+interface SmartleadLeadMessageHistory {
+  id: number;
+  type: string; // SENT, OPEN, CLICK, REPLY, BOUNCE, etc
+  time: string;
+  email_body?: string;
+  email_subject?: string;
+  seq_number?: number;
+}
+
 async function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function smartleadRequest(endpoint: string, apiKey: string) {
   await delay(RATE_LIMIT_DELAY);
-  
   const url = `${SMARTLEAD_BASE_URL}${endpoint}${endpoint.includes('?') ? '&' : '?'}api_key=${apiKey}`;
   console.log(`Fetching: ${endpoint}`);
-  
   const response = await fetch(url);
-  
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Smartlead API error (${response.status}): ${errorText}`);
   }
-  
   return response.json();
 }
 
 serve(async (req) => {
-  console.log('smartlead-sync: Request received', { 
-    method: req.method, 
-    hasAuth: !!req.headers.get('Authorization'),
-  });
+  console.log('smartlead-sync: Request received', { method: req.method, hasAuth: !!req.headers.get('Authorization') });
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -88,84 +99,54 @@ serve(async (req) => {
     
     if (!authHeader) {
       console.error('smartlead-sync: Missing authorization header');
-      return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ error: 'Missing authorization header' }), 
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Verify user
     const { data: { user }, error: authError } = await createClient(
-      supabaseUrl,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
+      supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: authHeader } } }
     ).auth.getUser();
 
-    if (authError || !user) {
-      throw new Error('Unauthorized');
-    }
+    if (authError || !user) throw new Error('Unauthorized');
 
-    const { workspace_id, sync_type = 'full' } = await req.json();
+    const { workspace_id, sync_type = 'full', reset = false } = await req.json();
+    if (!workspace_id) throw new Error('workspace_id is required');
 
-    if (!workspace_id) {
-      throw new Error('workspace_id is required');
-    }
-
-    // Verify user has access to workspace
     const { data: membership, error: memberError } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', workspace_id)
-      .eq('user_id', user.id)
-      .single();
+      .from('workspace_members').select('role')
+      .eq('workspace_id', workspace_id).eq('user_id', user.id).single();
+    if (memberError || !membership) throw new Error('Access denied to workspace');
 
-    if (memberError || !membership) {
-      throw new Error('Access denied to workspace');
-    }
-
-    // Get Smartlead API connection
     const { data: connection, error: connError } = await supabase
-      .from('api_connections')
-      .select('id, api_key_encrypted')
-      .eq('workspace_id', workspace_id)
-      .eq('platform', 'smartlead')
-      .eq('is_active', true)
-      .single();
-
-    if (connError || !connection) {
-      throw new Error('No active Smartlead connection found');
-    }
+      .from('api_connections').select('id, api_key_encrypted')
+      .eq('workspace_id', workspace_id).eq('platform', 'smartlead').eq('is_active', true).single();
+    if (connError || !connection) throw new Error('No active Smartlead connection found');
 
     const apiKey = connection.api_key_encrypted;
 
-    // Read current connection state so we can resume without resetting progress
-    const { data: existingConn, error: existingConnError } = await supabase
-      .from('api_connections')
-      .select('sync_status, sync_progress')
-      .eq('id', connection.id)
-      .maybeSingle();
+    // Read or reset sync progress
+    const { data: existingConn } = await supabase
+      .from('api_connections').select('sync_status, sync_progress').eq('id', connection.id).maybeSingle();
 
-    if (existingConnError) {
-      throw existingConnError;
+    let existingProgress = (existingConn?.sync_progress ?? {}) as Record<string, unknown>;
+    if (reset) {
+      existingProgress = {};
+      await supabase.from('api_connections').update({
+        sync_status: 'syncing',
+        sync_progress: { step: 'starting', progress: 0, current: 0 },
+      }).eq('id', connection.id);
+    } else if (existingConn?.sync_status !== 'syncing') {
+      await supabase.from('api_connections').update({
+        sync_status: 'syncing',
+        sync_progress: { step: 'starting', progress: 0, current: 0 },
+      }).eq('id', connection.id);
     }
 
-    // If this is a fresh run (not currently syncing), mark as syncing.
-    // IMPORTANT: don't overwrite sync_progress when resuming.
-    if (existingConn?.sync_status !== 'syncing') {
-      await supabase
-        .from('api_connections')
-        .update({
-          sync_status: 'syncing',
-          sync_progress: { step: 'starting', progress: 0, current: 0 },
-        })
-        .eq('id', connection.id);
-    }
-
-    const existingProgress = (existingConn?.sync_progress ?? {}) as Record<string, unknown>;
     const resumeFrom = typeof existingProgress.current === 'number' ? existingProgress.current : 0;
 
     const progress = {
@@ -173,34 +154,25 @@ serve(async (req) => {
       email_accounts_synced: 0,
       variants_synced: 0,
       metrics_created: 0,
+      leads_synced: 0,
+      events_created: 0,
       errors: [] as string[],
     };
 
     try {
-      // 1. Fetch all campaigns
       console.log('Fetching campaigns...');
       const campaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
       console.log(`Found ${campaigns.length} campaigns`);
 
-      // Process in small batches to avoid request timeouts
-      const BATCH_SIZE = 5;
+      const BATCH_SIZE = 3;
       const startIndex = Math.max(0, Math.min(resumeFrom, campaigns.length));
       const endIndex = Math.min(startIndex + BATCH_SIZE, campaigns.length);
 
       console.log(`Processing batch ${startIndex}-${endIndex} of ${campaigns.length}`);
 
-      // Update progress (batch start)
-      await supabase
-        .from('api_connections')
-        .update({
-          sync_progress: {
-            step: 'campaigns',
-            total: campaigns.length,
-            current: startIndex,
-            progress: Math.round((startIndex / Math.max(1, campaigns.length)) * 90) + 5,
-          },
-        })
-        .eq('id', connection.id);
+      await supabase.from('api_connections').update({
+        sync_progress: { step: 'campaigns', total: campaigns.length, current: startIndex, progress: Math.round((startIndex / Math.max(1, campaigns.length)) * 90) + 5 },
+      }).eq('id', connection.id);
 
       for (let i = startIndex; i < endIndex; i++) {
         const campaign = campaigns[i];
@@ -210,18 +182,8 @@ serve(async (req) => {
           // Upsert campaign
           const { data: upsertedCampaign, error: campError } = await supabase
             .from('campaigns')
-            .upsert(
-              {
-                workspace_id,
-                platform: 'smartlead',
-                platform_id: String(campaign.id),
-                name: campaign.name,
-                status: campaign.status?.toLowerCase() || 'active',
-              },
-              { onConflict: 'workspace_id,platform_id,platform' }
-            )
-            .select('id')
-            .single();
+            .upsert({ workspace_id, platform: 'smartlead', platform_id: String(campaign.id), name: campaign.name, status: campaign.status?.toLowerCase() || 'active' }, { onConflict: 'workspace_id,platform_id,platform' })
+            .select('id').single();
 
           if (campError) {
             console.error(`Failed to upsert campaign ${campaign.id}:`, campError);
@@ -232,179 +194,189 @@ serve(async (req) => {
           const campaignDbId = upsertedCampaign.id;
           progress.campaigns_synced++;
 
-          // 2. Fetch sequences (email copy variants)
+          // Fetch sequences (email copy variants)
           try {
-            const sequences: SmartleadSequence[] = await smartleadRequest(
-              `/campaigns/${campaign.id}/sequences`,
-              apiKey
-            );
-
+            const sequences: SmartleadSequence[] = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
             for (const seq of sequences) {
-              // Handle cases where seq_variants might be undefined or not an array
               const variants = Array.isArray(seq.seq_variants) ? seq.seq_variants : [];
               for (const variant of variants) {
                 const emailBody = variant.email_body || '';
                 const wordCount = emailBody.split(/\s+/).filter(Boolean).length;
+                const personalizationVars = [...emailBody.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]);
 
-                // Extract personalization variables like {{first_name}}, {{company}}
-                const personalizationVars = [...emailBody.matchAll(/\{\{(\w+)\}\}/g)].map(
-                  (match) => match[1]
-                );
+                const { data: existingVariant } = await supabase
+                  .from('campaign_variants').select('id')
+                  .eq('campaign_id', campaignDbId).eq('platform_variant_id', String(variant.id)).maybeSingle();
 
-                // campaign_variants currently does NOT have a unique constraint on
-                // (campaign_id, platform_variant_id), so we can't rely on upsert.
-                // Instead: find existing row and update, otherwise insert.
-                const { data: existingVariant, error: existingVariantError } = await supabase
-                  .from('campaign_variants')
-                  .select('id')
-                  .eq('campaign_id', campaignDbId)
-                  .eq('platform_variant_id', String(variant.id))
-                  .maybeSingle();
+                const payload = {
+                  campaign_id: campaignDbId,
+                  platform_variant_id: String(variant.id),
+                  name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
+                  variant_type: variant.variant_label || 'A',
+                  subject_line: variant.subject,
+                  body_preview: emailBody.substring(0, 500),
+                  email_body: emailBody,
+                  word_count: wordCount,
+                  personalization_vars: personalizationVars,
+                };
 
-                if (existingVariantError) {
-                  console.error('Variant lookup failed:', existingVariantError);
-                  progress.errors.push(
-                    `Variant lookup ${campaign.name} (variant ${variant.id}): ${existingVariantError.message}`
-                  );
-                } else {
-                  const payload = {
-                    campaign_id: campaignDbId,
-                    platform_variant_id: String(variant.id),
-                    name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
-                    variant_type: variant.variant_label || 'A',
-                    subject_line: variant.subject,
-                    body_preview: emailBody.substring(0, 500),
-                    email_body: emailBody,
-                    word_count: wordCount,
-                    personalization_vars: personalizationVars,
-                  };
+                const { error: variantWriteError } = existingVariant?.id
+                  ? await supabase.from('campaign_variants').update(payload).eq('id', existingVariant.id)
+                  : await supabase.from('campaign_variants').insert(payload);
 
-                  const { error: variantWriteError } = existingVariant?.id
-                    ? await supabase.from('campaign_variants').update(payload).eq('id', existingVariant.id)
-                    : await supabase.from('campaign_variants').insert(payload);
-
-                  if (variantWriteError) {
-                    console.error('Variant write failed:', variantWriteError);
-                    progress.errors.push(
-                      `Variant write ${campaign.name} (variant ${variant.id}): ${variantWriteError.message}`
-                    );
-                  } else {
-                    progress.variants_synced++;
-                  }
-                }
+                if (!variantWriteError) progress.variants_synced++;
               }
             }
           } catch (seqError) {
             console.error(`Failed to fetch sequences for campaign ${campaign.id}:`, seqError);
           }
 
-          // 3. Fetch email accounts
+          // Fetch email accounts
           try {
-            const emailAccounts: SmartleadEmailAccount[] = await smartleadRequest(
-              `/campaigns/${campaign.id}/email-accounts`,
-              apiKey
-            );
-
+            const emailAccounts: SmartleadEmailAccount[] = await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, apiKey);
             for (const account of emailAccounts) {
-              const { error: accountError } = await supabase
-                .from('email_accounts')
-                .upsert(
-                  {
-                    workspace_id,
-                    platform: 'smartlead',
-                    platform_id: String(account.id),
-                    email_address: account.from_email,
-                    sender_name: account.from_name,
-                    daily_limit: account.message_per_day,
-                    warmup_enabled: account.warmup_details?.status === 'ACTIVE',
-                    is_active: true,
-                  },
-                  { onConflict: 'workspace_id,platform_id,platform' }
-                );
-
-              if (!accountError) {
-                progress.email_accounts_synced++;
-              }
+              const { error: accountError } = await supabase.from('email_accounts').upsert({
+                workspace_id, platform: 'smartlead', platform_id: String(account.id),
+                email_address: account.from_email, sender_name: account.from_name,
+                daily_limit: account.message_per_day,
+                warmup_enabled: account.warmup_details?.status === 'ACTIVE',
+                is_active: true,
+              }, { onConflict: 'workspace_id,platform_id,platform' });
+              if (!accountError) progress.email_accounts_synced++;
             }
           } catch (emailError) {
             console.error(`Failed to fetch email accounts for campaign ${campaign.id}:`, emailError);
           }
 
-          // 4. Fetch analytics
+          // Fetch analytics
           try {
-            const analytics: SmartleadAnalytics = await smartleadRequest(
-              `/campaigns/${campaign.id}/analytics`,
-              apiKey
-            );
-
-            // Get today's date for the metrics
+            const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
             const today = new Date().toISOString().split('T')[0];
 
-             // daily_metrics has a UNIQUE constraint across
-             // (workspace_id, date, campaign_id, variant_id, email_account_id, segment_id)
-             // and NULLs do not conflict, so we can't use upsert for our "campaign/day" rollup.
-             // Instead: update existing rollup row (all NULL dims), otherwise insert.
-             const { data: existingMetric, error: existingMetricError } = await supabase
-               .from('daily_metrics')
-               .select('id')
-               .eq('workspace_id', workspace_id)
-               .eq('campaign_id', campaignDbId)
-               .eq('date', today)
-               .is('variant_id', null)
-               .is('email_account_id', null)
-               .is('segment_id', null)
-               .maybeSingle();
+            const { data: existingMetric } = await supabase
+              .from('daily_metrics').select('id')
+              .eq('workspace_id', workspace_id).eq('campaign_id', campaignDbId).eq('date', today)
+              .is('variant_id', null).is('email_account_id', null).is('segment_id', null).maybeSingle();
 
-             if (existingMetricError) {
-               console.error('Metrics lookup failed:', existingMetricError);
-               progress.errors.push(
-                 `Metrics lookup ${campaign.name} (${today}): ${existingMetricError.message}`
-               );
-             } else {
-               const metricsPayload = {
-                 workspace_id,
-                 campaign_id: campaignDbId,
-                 date: today,
-                 sent_count: analytics.sent_count || 0,
-                 delivered_count: analytics.unique_sent_count || 0,
-                 opened_count: analytics.unique_open_count || 0,
-                 clicked_count: analytics.unique_click_count || 0,
-                 replied_count: analytics.reply_count || 0,
-                 bounced_count: analytics.bounce_count || 0,
-                 unsubscribed_count: analytics.unsubscribe_count || 0,
-               };
+            const metricsPayload = {
+              workspace_id, campaign_id: campaignDbId, date: today,
+              sent_count: analytics.sent_count || 0,
+              delivered_count: analytics.unique_sent_count || 0,
+              opened_count: analytics.unique_open_count || 0,
+              clicked_count: analytics.unique_click_count || 0,
+              replied_count: analytics.reply_count || 0,
+              bounced_count: analytics.bounce_count || 0,
+              unsubscribed_count: analytics.unsubscribe_count || 0,
+            };
 
-               const { error: metricsWriteError } = existingMetric?.id
-                 ? await supabase.from('daily_metrics').update(metricsPayload).eq('id', existingMetric.id)
-                 : await supabase.from('daily_metrics').insert(metricsPayload);
+            const { error: metricsWriteError } = existingMetric?.id
+              ? await supabase.from('daily_metrics').update(metricsPayload).eq('id', existingMetric.id)
+              : await supabase.from('daily_metrics').insert(metricsPayload);
 
-               if (metricsWriteError) {
-                 console.error('Metrics write failed:', metricsWriteError);
-                 progress.errors.push(
-                   `Metrics write ${campaign.name} (${today}): ${metricsWriteError.message}`
-                 );
-               } else {
-                 progress.metrics_created++;
-               }
-             }
+            if (!metricsWriteError) progress.metrics_created++;
           } catch (analyticsError) {
             console.error(`Failed to fetch analytics for campaign ${campaign.id}:`, analyticsError);
           }
 
+          // Fetch leads with their status/category for inbox + audience insights
+          try {
+            // Get leads with different statuses to capture replies
+            for (const leadStatus of ['REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'OUT_OF_OFFICE']) {
+              const leads: SmartleadLead[] = await smartleadRequest(`/campaigns/${campaign.id}/leads?limit=100&lead_status=${leadStatus}`, apiKey);
+              
+              for (const lead of leads) {
+                // Upsert lead
+                const { data: existingLead } = await supabase
+                  .from('leads').select('id')
+                  .eq('workspace_id', workspace_id).eq('platform', 'smartlead').eq('platform_lead_id', String(lead.id)).maybeSingle();
+
+                const leadPayload = {
+                  workspace_id,
+                  campaign_id: campaignDbId,
+                  platform: 'smartlead',
+                  platform_lead_id: String(lead.id),
+                  email: lead.email,
+                  first_name: lead.first_name || null,
+                  last_name: lead.last_name || null,
+                  company: lead.company_name || null,
+                  linkedin_url: lead.linkedin_profile || null,
+                  status: lead.lead_status || leadStatus.toLowerCase(),
+                };
+
+                let leadDbId: string;
+                if (existingLead?.id) {
+                  await supabase.from('leads').update(leadPayload).eq('id', existingLead.id);
+                  leadDbId = existingLead.id;
+                } else {
+                  const { data: newLead } = await supabase.from('leads').insert(leadPayload).select('id').single();
+                  leadDbId = newLead?.id;
+                }
+
+                if (leadDbId) {
+                  progress.leads_synced++;
+
+                  // Fetch message history for this lead to get actual reply content and timestamps
+                  try {
+                    const messageHistory: SmartleadLeadMessageHistory[] = await smartleadRequest(
+                      `/campaigns/${campaign.id}/leads/${lead.id}/message-history`,
+                      apiKey
+                    );
+
+                    for (const msg of messageHistory) {
+                      if (['REPLY', 'OPEN', 'CLICK', 'BOUNCE', 'UNSUBSCRIBE'].includes(msg.type)) {
+                        const eventType = msg.type === 'REPLY' 
+                          ? (lead.category === 'interested' ? 'positive_reply' : lead.category === 'not_interested' ? 'negative_reply' : 'reply')
+                          : msg.type.toLowerCase();
+
+                        const occurredAt = msg.time ? new Date(msg.time).toISOString() : new Date().toISOString();
+
+                        // Check if event already exists
+                        const { data: existingEvent } = await supabase
+                          .from('message_events').select('id')
+                          .eq('workspace_id', workspace_id)
+                          .eq('lead_id', leadDbId)
+                          .eq('event_type', eventType)
+                          .eq('platform_event_id', String(msg.id))
+                          .maybeSingle();
+
+                        if (!existingEvent) {
+                          await supabase.from('message_events').insert({
+                            workspace_id,
+                            campaign_id: campaignDbId,
+                            lead_id: leadDbId,
+                            platform: 'smartlead',
+                            platform_event_id: String(msg.id),
+                            event_type: eventType,
+                            occurred_at: occurredAt,
+                            lead_email: lead.email,
+                            reply_content: msg.email_body || null,
+                            reply_sentiment: lead.category || null,
+                            sequence_step: msg.seq_number || null,
+                          });
+                          progress.events_created++;
+                        }
+                      }
+                    }
+                  } catch (historyError) {
+                    // Some leads may not have accessible history
+                    console.log(`Could not fetch history for lead ${lead.id}`);
+                  }
+                }
+              }
+            }
+          } catch (leadsError) {
+            console.error(`Failed to fetch leads for campaign ${campaign.id}:`, leadsError);
+          }
+
           // Update progress
-          await supabase
-            .from('api_connections')
-            .update({
-              sync_progress: {
-                step: 'campaigns',
-                total: campaigns.length,
-                current: i + 1,
-                campaign_name: campaign.name,
-                progress: Math.round(((i + 1) / Math.max(1, campaigns.length)) * 90) + 5,
-                ...progress,
-              },
-            })
-            .eq('id', connection.id);
+          await supabase.from('api_connections').update({
+            sync_progress: {
+              step: 'campaigns', total: campaigns.length, current: i + 1,
+              campaign_name: campaign.name,
+              progress: Math.round(((i + 1) / Math.max(1, campaigns.length)) * 90) + 5,
+              ...progress,
+            },
+          }).eq('id', connection.id);
         } catch (campaignError) {
           console.error(`Error processing campaign ${campaign.id}:`, campaignError);
           progress.errors.push(`Campaign ${campaign.name}: ${String(campaignError)}`);
@@ -413,68 +385,35 @@ serve(async (req) => {
 
       const isComplete = endIndex >= campaigns.length;
 
-      // Mark sync as complete or keep syncing for next batch
-      await supabase
-        .from('api_connections')
-        .update({
-          sync_status: isComplete ? 'success' : 'syncing',
-          last_sync_at: isComplete ? new Date().toISOString() : undefined,
-          last_full_sync_at:
-            isComplete && sync_type === 'full' ? new Date().toISOString() : undefined,
-          sync_progress: {
-            step: isComplete ? 'complete' : 'campaigns',
-            total: campaigns.length,
-            current: endIndex,
-            progress: isComplete
-              ? 100
-              : Math.round((endIndex / Math.max(1, campaigns.length)) * 90) + 5,
-            ...progress,
-          },
-        })
-        .eq('id', connection.id);
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          done: isComplete,
-          next_index: endIndex,
-          total: campaigns.length,
-          message: isComplete
-            ? 'Sync completed successfully'
-            : 'Batch completed; call again to continue',
+      await supabase.from('api_connections').update({
+        sync_status: isComplete ? 'success' : 'syncing',
+        last_sync_at: isComplete ? new Date().toISOString() : undefined,
+        last_full_sync_at: isComplete && sync_type === 'full' ? new Date().toISOString() : undefined,
+        sync_progress: {
+          step: isComplete ? 'complete' : 'campaigns',
+          total: campaigns.length, current: endIndex,
+          progress: isComplete ? 100 : Math.round((endIndex / Math.max(1, campaigns.length)) * 90) + 5,
           ...progress,
-        }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+        },
+      }).eq('id', connection.id);
+
+      return new Response(JSON.stringify({
+        success: true, done: isComplete, next_index: endIndex, total: campaigns.length,
+        message: isComplete ? 'Sync completed successfully' : 'Batch completed; call again to continue',
+        ...progress,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     } catch (syncError) {
       console.error('Sync error:', syncError);
-
-      await supabase
-        .from('api_connections')
-        .update({
-          sync_status: 'error',
-          sync_progress: {
-            step: 'error',
-            error: String(syncError),
-            ...progress,
-          },
-        })
-        .eq('id', connection.id);
-
+      await supabase.from('api_connections').update({
+        sync_status: 'error', sync_progress: { step: 'error', error: String(syncError), ...progress },
+      }).eq('id', connection.id);
       throw syncError;
     }
-
   } catch (error: unknown) {
     console.error('Error in smartlead-sync:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ 
-      success: false,
-      error: errorMessage 
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({ success: false, error: errorMessage }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });
