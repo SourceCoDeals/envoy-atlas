@@ -424,10 +424,7 @@ serve(async (req) => {
                 const email = leadStat.to?.toLowerCase();
                 if (!email) continue;
 
-                const emailType = classifyEmailType(email);
-                const emailDomain = extractEmailDomain(email);
-
-                // Upsert lead
+                // Upsert lead (email_domain and email_type are auto-computed by DB)
                 const leadPayload = {
                   workspace_id,
                   campaign_id: campaignDbId,
@@ -435,8 +432,6 @@ serve(async (req) => {
                   platform_lead_id: String(leadStat.lead_id || leadStat.email_lead_map_id),
                   email: email,
                   status: leadStat.status?.toLowerCase() || 'active',
-                  email_type: emailType,
-                  email_domain: emailDomain,
                 };
 
                 const { data: dbLead, error: leadError } = await supabase
