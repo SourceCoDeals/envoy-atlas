@@ -41,6 +41,7 @@ import {
   Plug,
   PieChart,
   Library,
+  Briefcase,
 } from 'lucide-react';
 
 interface NavItem {
@@ -52,6 +53,7 @@ interface NavItem {
 
 const mainNavItems: NavItem[] = [
   { title: 'Overview', href: '/', icon: LayoutDashboard },
+  { title: 'Deal Hub', href: '/deal-hub', icon: Briefcase },
   { title: 'Inbox', href: '/inbox', icon: Inbox },
   { title: 'Campaigns', href: '/campaigns', icon: Mail },
   { title: 'Copy Insights', href: '/copy-insights', icon: FileText },
