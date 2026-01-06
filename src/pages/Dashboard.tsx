@@ -128,13 +128,13 @@ export default function Dashboard() {
               <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
                 <Plug className="h-8 w-8 text-primary" />
               </div>
-              <h2 className="text-xl font-semibold mb-2">Connect Smartlead</h2>
+              <h2 className="text-xl font-semibold mb-2">No Data Yet</h2>
               <p className="text-muted-foreground text-center max-w-md mb-6">
-                Connect your Smartlead account to start importing campaigns and tracking performance metrics.
+                Connect your Smartlead or Reply.io account and sync your campaigns to see performance metrics.
               </p>
               <Button asChild>
                 <Link to="/connections">
-                  Connect Smartlead
+                  Go to Connections
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
