@@ -41,7 +41,11 @@ interface SmartleadCampaign {
 interface SmartleadSequence {
   seq_number: number;
   seq_delay_details: { delay_in_days: number };
-  seq_variants: Array<{
+  // Direct fields for non-A/B campaigns
+  subject?: string;
+  email_body?: string;
+  // Array of variants for A/B test campaigns (field name from API is sequence_variants)
+  sequence_variants?: Array<{
     id: number;
     variant_label: string;
     subject: string;
@@ -288,36 +292,42 @@ serve(async (req) => {
               console.log(`  First sequence keys: ${Object.keys(sequences[0]).join(', ')}`);
               console.log(`  First sequence sample:`, JSON.stringify({
                 seq_number: sequences[0].seq_number,
-                has_variants: !!sequences[0].seq_variants,
-                variants_count: sequences[0].seq_variants?.length || 0,
-                variant_sample: sequences[0].seq_variants?.[0] ? {
-                  id: sequences[0].seq_variants[0].id,
-                  variant_label: sequences[0].seq_variants[0].variant_label,
-                  has_subject: !!sequences[0].seq_variants[0].subject,
-                  has_body: !!sequences[0].seq_variants[0].email_body,
-                } : null
+                has_sequence_variants: !!sequences[0].sequence_variants,
+                sequence_variants_count: sequences[0].sequence_variants?.length || 0,
+                has_direct_subject: !!sequences[0].subject,
+                has_direct_body: !!sequences[0].email_body,
               }));
             }
             
             for (const seq of sequences) {
-              const variants = Array.isArray(seq.seq_variants) ? seq.seq_variants : [];
-              console.log(`  Seq ${seq.seq_number}: ${variants.length} variants`);
+              // Use sequence_variants (correct field name from Smartlead API)
+              let variants = Array.isArray(seq.sequence_variants) ? seq.sequence_variants : [];
+              
+              // If no variants array, create one from the sequence's direct subject/body
+              // This handles non-A/B tested campaigns where copy is directly on the sequence
+              if (variants.length === 0 && (seq.subject || seq.email_body)) {
+                console.log(`    Seq ${seq.seq_number}: Creating variant from sequence direct fields`);
+                variants = [{
+                  id: `seq_${campaign.id}_${seq.seq_number}` as any,
+                  variant_label: 'A',
+                  subject: seq.subject || '',
+                  email_body: seq.email_body || '',
+                }];
+              }
+              
+              console.log(`  Seq ${seq.seq_number}: ${variants.length} variant(s)`);
               
               for (const variant of variants) {
-                // Skip variants without a valid ID
-                if (variant.id === undefined && variant.id !== 0) {
-                  console.warn(`  Skipping variant with no ID in seq ${seq.seq_number}`);
-                  continue;
-                }
+                const variantId = variant.id ?? `seq_${campaign.id}_${seq.seq_number}`;
                 
                 const emailBody = variant.email_body || '';
-                const subjectLine = variant.subject || (variant as any).email_subject || null;
+                const subjectLine = variant.subject || null;
                 const wordCount = emailBody.split(/\s+/).filter(Boolean).length;
                 const personalizationVars = [...emailBody.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]);
 
                 const variantPayload = {
                   campaign_id: campaignDbId,
-                  platform_variant_id: String(variant.id),
+                  platform_variant_id: String(variantId),
                   name: `Step ${seq.seq_number} - ${variant.variant_label || 'Default'}`,
                   variant_type: variant.variant_label || 'A',
                   subject_line: subjectLine,
@@ -328,7 +338,7 @@ serve(async (req) => {
                   is_control: seq.seq_number === 1 && (variant.variant_label === 'A' || !variant.variant_label),
                 };
 
-                console.log(`    Upserting variant ${variant.id} (${variant.variant_label || 'Default'})`);
+                console.log(`    Upserting variant ${variantId} (${variant.variant_label || 'Default'}) - subject: ${subjectLine ? 'yes' : 'no'}`);
 
                 const { error: variantError } = await supabase
                   .from('campaign_variants')
@@ -337,22 +347,22 @@ serve(async (req) => {
                   });
 
                 if (variantError) {
-                  console.error(`    VARIANT UPSERT FAILED for ${variant.id}:`, variantError.message, variantError.details);
-                  progress.errors.push(`Variant ${variant.id}: ${variantError.message}`);
+                  console.error(`    VARIANT UPSERT FAILED for ${variantId}:`, variantError.message, variantError.details);
+                  progress.errors.push(`Variant ${variantId}: ${variantError.message}`);
                 } else {
-                  console.log(`    Variant ${variant.id} upserted successfully`);
+                  console.log(`    Variant ${variantId} upserted successfully`);
                   progress.variants_synced++;
                 }
               }
 
-              // Create sequence step
+              // Create sequence step - use direct sequence fields
               const { error: stepError } = await supabase
                 .from('sequence_steps')
                 .upsert({
                   campaign_id: campaignDbId,
                   step_number: seq.seq_number,
-                  subject_line: seq.seq_variants?.[0]?.subject || null,
-                  body_preview: seq.seq_variants?.[0]?.email_body?.substring(0, 200) || null,
+                  subject_line: seq.subject || null,
+                  body_preview: seq.email_body?.substring(0, 200) || null,
                   delay_days: seq.seq_delay_details?.delay_in_days || 0
                 }, { 
                   onConflict: 'campaign_id,step_number' 
