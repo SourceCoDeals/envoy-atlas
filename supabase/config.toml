@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.dev-auto-login]
 verify_jwt = false
+
+[functions.replyio-sync]
+verify_jwt = false
