@@ -7,26 +7,51 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Users, Building2, Briefcase, Globe, Target } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Loader2, Users, Building2, Briefcase, Target, TrendingUp, TrendingDown, AlertTriangle, Sparkles } from 'lucide-react';
 import { useAudienceAnalytics } from '@/hooks/useAudienceAnalytics';
 import { SegmentPerformanceRanking, createSegmentRankings } from '@/components/audience/SegmentPerformanceRanking';
 import { ICPValidationSection, createICPHypothesis } from '@/components/audience/ICPValidationSection';
 import { FatigueMonitor, calculateSegmentFatigue } from '@/components/audience/FatigueMonitor';
 import { VolumeAllocationRecommendations, generateVolumeRecommendations } from '@/components/audience/VolumeAllocationRecommendations';
-import { SegmentCopyMatrix, generateSegmentCopyInteractions } from '@/components/audience/SegmentCopyMatrix';
+import { SegmentCopyMatrix as CopyInsightsMatrix } from '@/components/copyinsights/SegmentCopyMatrix';
 
 export default function AudienceInsights() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { segments, titles, industries, companySizes, domains, totalLeads, loading } = useAudienceAnalytics();
+  const {
+    seniorityPerformance,
+    industryPerformance,
+    departmentPerformance,
+    segmentCopyInteractions,
+    totalLeads,
+    totalContacted,
+    avgReplyRate,
+    bestSegment,
+    worstSegment,
+    dataQuality,
+    loading,
+    triggerEnrichment,
+  } = useAudienceAnalytics();
+  
   const [activeTab, setActiveTab] = useState('performance');
   const [dimension, setDimension] = useState('seniority');
+  const [enriching, setEnriching] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/auth');
     }
   }, [user, authLoading, navigate]);
+
+  const handleEnrichment = async () => {
+    setEnriching(true);
+    try {
+      await triggerEnrichment();
+    } finally {
+      setEnriching(false);
+    }
+  };
 
   if (authLoading || !user) {
     return (
@@ -36,35 +61,45 @@ export default function AudienceInsights() {
     );
   }
 
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   const hasData = totalLeads > 0;
 
-  // Calculate average reply rate
-  const avgReplyRate = segments.reduce((sum, s) => sum + s.reply_rate * s.contacted, 0) / 
-    Math.max(segments.reduce((sum, s) => sum + s.contacted, 0), 1);
-
-  // Create segment rankings based on dimension
+  // Create segment rankings for the ranking component
   const seniorityRankings = createSegmentRankings(
-    titles.reduce((acc, t) => {
-      const existing = acc.find(a => a.name === t.seniority);
-      if (existing) {
-        existing.sent += t.contacted;
-        existing.replied += t.replied;
-        existing.positive += t.positive;
-      } else {
-        acc.push({ name: t.seniority, type: 'seniority', sent: t.contacted, replied: t.replied, positive: t.positive, meetings: 0 });
-      }
-      return acc;
-    }, [] as any[]),
+    seniorityPerformance.map(s => ({
+      name: s.segment,
+      type: 'seniority',
+      sent: s.contacted,
+      replied: s.replied,
+      positive: s.positiveReplies,
+      meetings: s.meetings,
+    })),
     avgReplyRate
   );
 
   const industryRankings = createSegmentRankings(
-    industries.map(i => ({ name: i.industry, type: 'industry', sent: i.contacted, replied: i.replied, positive: i.positive, meetings: 0 })),
+    industryPerformance.map(s => ({
+      name: s.segment,
+      type: 'industry',
+      sent: s.contacted,
+      replied: s.replied,
+      positive: s.positiveReplies,
+      meetings: s.meetings,
+    })),
     avgReplyRate
   );
 
   // Create ICP hypotheses from best performing segments
-  const icpHypotheses = seniorityRankings.slice(0, 2).filter(s => s.volume > 500).map((s, i) => 
+  const icpHypotheses = seniorityRankings.slice(0, 2).filter(s => s.volume >= 100).map((s, i) =>
     createICPHypothesis(
       `icp-${i}`,
       `${s.segment} Decision Makers`,
@@ -75,7 +110,7 @@ export default function AudienceInsights() {
   );
 
   // Create fatigue data
-  const fatigueData = seniorityRankings.map(s => 
+  const fatigueData = seniorityRankings.map(s =>
     calculateSegmentFatigue(s.segment, s.segment, {
       avgEmailsPerLead: 2 + Math.random() * 2,
       replyRateFirstTouch: s.replyRate * 1.3,
@@ -97,30 +132,6 @@ export default function AudienceInsights() {
     seniorityRankings.reduce((sum, s) => sum + s.volume, 0)
   );
 
-  // Segment × Copy matrix
-  const copyPatterns = ['Question Subject', 'Personalized Open', 'Value First', 'Direct Ask'];
-  const { interactions: copyInteractions, insights: copyInsights } = generateSegmentCopyInteractions(
-    seniorityRankings.slice(0, 4).map(s => s.segment),
-    copyPatterns,
-    (segment, pattern) => {
-      const baseRate = seniorityRankings.find(s => s.segment === segment)?.replyRate || 3;
-      return {
-        replyRate: baseRate * (0.8 + Math.random() * 0.4),
-        sampleSize: 100 + Math.floor(Math.random() * 500),
-      };
-    }
-  );
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      </DashboardLayout>
-    );
-  }
-
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -131,7 +142,27 @@ export default function AudienceInsights() {
               ICP validation and targeting intelligence engine
             </p>
           </div>
+          {dataQuality.issues.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleEnrichment} disabled={enriching}>
+              {enriching ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+              Enrich Leads
+            </Button>
+          )}
         </div>
+
+        {/* Data Quality Warning */}
+        {dataQuality.issues.length > 0 && (
+          <Alert variant="destructive" className="bg-destructive/10 border-destructive/30">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="ml-2">
+              <span className="font-medium">Data quality issues detected: </span>
+              {dataQuality.issues.join('. ')}
+              {dataQuality.enrichmentPercent < 100 && (
+                <span className="ml-1">Click "Enrich Leads" to classify leads by seniority and department.</span>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {!hasData ? (
           <Card className="border-dashed">
@@ -145,7 +176,7 @@ export default function AudienceInsights() {
           </Card>
         ) : (
           <>
-            {/* Summary Stats */}
+            {/* Summary Stats - Redesigned */}
             <div className="grid gap-4 md:grid-cols-4">
               <Card>
                 <CardContent className="pt-4">
@@ -154,33 +185,72 @@ export default function AudienceInsights() {
                     <span className="text-2xl font-bold">{totalLeads.toLocaleString()}</span>
                   </div>
                   <p className="text-xs text-muted-foreground">Total Leads</p>
+                  <p className="text-xs text-muted-foreground mt-1">{totalContacted.toLocaleString()} contacted</p>
                 </CardContent>
               </Card>
+              
+              <Card className={bestSegment ? "border-success/30 bg-success/5" : ""}>
+                <CardContent className="pt-4">
+                  {bestSegment ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-success" />
+                        <span className="text-2xl font-bold text-success">{bestSegment.segment}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Best Segment</p>
+                      <p className="text-xs text-success mt-1">
+                        {bestSegment.replyRate.toFixed(1)}% reply rate (+{bestSegment.vsAverage.toFixed(0)}% vs avg)
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-lg text-muted-foreground">—</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Best Segment</p>
+                      <p className="text-xs text-muted-foreground mt-1">Need more data</p>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className={worstSegment ? "border-destructive/30 bg-destructive/5" : ""}>
+                <CardContent className="pt-4">
+                  {worstSegment ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <TrendingDown className="h-4 w-4 text-destructive" />
+                        <span className="text-2xl font-bold text-destructive">{worstSegment.segment}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Worst Segment</p>
+                      <p className="text-xs text-destructive mt-1">
+                        {worstSegment.replyRate.toFixed(1)}% reply rate ({worstSegment.vsAverage.toFixed(0)}% vs avg)
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <TrendingDown className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-lg text-muted-foreground">—</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Worst Segment</p>
+                      <p className="text-xs text-muted-foreground mt-1">Need more data</p>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-2">
-                    <Briefcase className="h-4 w-4 text-chart-1" />
-                    <span className="text-2xl font-bold">{titles.length}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Unique Titles</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4">
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4 text-chart-2" />
-                    <span className="text-2xl font-bold">{industries.length}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Industries</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4">
-                  <div className="flex items-center gap-2">
-                    <Target className="h-4 w-4 text-success" />
+                    <Target className="h-4 w-4 text-primary" />
                     <span className="text-2xl font-bold">{avgReplyRate.toFixed(1)}%</span>
                   </div>
                   <p className="text-xs text-muted-foreground">Avg Reply Rate</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {dataQuality.uniqueSeniorityLevels} seniority levels tracked
+                  </p>
                 </CardContent>
               </Card>
             </div>
@@ -210,7 +280,9 @@ export default function AudienceInsights() {
                   segments={dimension === 'seniority' ? seniorityRankings : industryRankings}
                   averageReplyRate={avgReplyRate}
                   dimensionLabel={dimension === 'seniority' ? 'seniority level' : 'industry'}
-                  insight={`${dimension === 'seniority' ? 'VP and Director' : 'Top'}-level contacts significantly outperform others. Consider reallocating volume to high-performing segments.`}
+                  insight={seniorityRankings.length > 1 
+                    ? `${seniorityRankings[0]?.segment || 'Top'} contacts outperform others. Consider reallocating volume to high-performing segments.`
+                    : 'Enrich leads to see segment-level insights.'}
                 />
               </TabsContent>
 
@@ -223,10 +295,20 @@ export default function AudienceInsights() {
               </TabsContent>
 
               <TabsContent value="copy" className="space-y-4">
-                <SegmentCopyMatrix
-                  interactions={copyInteractions}
-                  copyPatterns={copyPatterns}
-                  insights={copyInsights}
+                <CopyInsightsMatrix 
+                  interactions={segmentCopyInteractions.map(i => ({
+                    segment: i.segment,
+                    segment_type: i.segmentType,
+                    pattern: i.pattern,
+                    pattern_type: i.patternType,
+                    reply_rate: i.replyRate,
+                    segment_avg_reply_rate: i.segmentAvgReplyRate,
+                    pattern_avg_reply_rate: i.patternAvgReplyRate,
+                    sample_size: i.sampleSize,
+                    lift_vs_segment: i.liftVsSegment,
+                    lift_vs_pattern: i.liftVsPattern,
+                    is_significant: i.isSignificant,
+                  }))}
                 />
               </TabsContent>
 
