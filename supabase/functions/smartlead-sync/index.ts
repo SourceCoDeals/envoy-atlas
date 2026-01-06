@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 const RATE_LIMIT_DELAY = 300;
-const BATCH_SIZE = 5;
+const BATCH_SIZE = 2; // Reduced from 5 to prevent timeouts
 
 // Personal email domains for classification
 const PERSONAL_DOMAINS = new Set([
@@ -487,7 +487,7 @@ serve(async (req) => {
                 const { data: dbLead, error: leadError } = await supabase
                   .from('leads')
                   .upsert(leadPayload, { 
-                    onConflict: 'workspace_id,campaign_id,platform,platform_lead_id' 
+                    onConflict: 'workspace_id,platform,platform_lead_id' 
                   })
                   .select('id')
                   .single();
