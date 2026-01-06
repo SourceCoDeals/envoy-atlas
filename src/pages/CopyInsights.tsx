@@ -33,6 +33,7 @@ import {
   Target,
   Ruler,
   Users,
+  MessageSquareText,
 } from 'lucide-react';
 import { SaveToLibraryDialog } from '@/components/copylibrary/SaveToLibraryDialog';
 import { useCopyAnalytics, type SubjectLineAnalysis, type BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
