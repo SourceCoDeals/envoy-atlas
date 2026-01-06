@@ -43,7 +43,7 @@ type SyncProgress = {
   progress?: number;
   total?: number;
   current?: number;
-  // backend function fields
+  // Smartlead fields
   campaign_index?: number;
   batch_index?: number;
   total_campaigns?: number;
@@ -56,6 +56,16 @@ type SyncProgress = {
   leads_synced?: number;
   events_created?: number;
   error?: string;
+  // Reply.io v3 fields
+  sequence_index?: number;
+  contact_cursor?: number | null;
+  total_sequences?: number;
+  processed_sequences?: number;
+  total_contacts?: number;
+  processed_contacts?: number;
+  current_sequence_name?: string;
+  last_heartbeat?: string;
+  errors?: string[];
 };
 
 type ApiConnection = {
@@ -83,6 +93,8 @@ export default function Connections() {
   const [isResumingSync, setIsResumingSync] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isSyncingReplyio, setIsSyncingReplyio] = useState(false);
+  const [isResumingReplyio, setIsResumingReplyio] = useState(false);
+  const [isStoppingReplyio, setIsStoppingReplyio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -98,10 +110,36 @@ export default function Connections() {
     }
   }, [currentWorkspace]);
 
-  // Poll for sync progress AND keep nudging batch sync forward
+  // Auto-continue Reply.io sync when in progress
+  useEffect(() => {
+    const replyioConnection = connections.find(c => c.platform === 'replyio');
+    if (!replyioConnection || replyioConnection.sync_status !== 'syncing') return;
+    if (!currentWorkspace?.id) return;
+
+    console.log('Reply.io sync in progress, setting up polling...');
+    
+    const pollInterval = window.setInterval(() => {
+      fetchConnections();
+    }, 2000);
+
+    const resumeInterval = window.setInterval(() => {
+      void continueReplyioSync();
+    }, 60000);
+
+    // Initial resume call
+    void continueReplyioSync();
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      if (resumeInterval) clearInterval(resumeInterval);
+    };
+  }, [connections.find(c => c.platform === 'replyio')?.sync_status, currentWorkspace?.id]);
+
+  // Auto-continue Smartlead sync when in progress
   useEffect(() => {
     const smartleadConnection = connections.find(c => c.platform === 'smartlead');
-    if (smartleadConnection?.sync_status !== 'syncing') return;
+    if (!smartleadConnection || smartleadConnection.sync_status !== 'syncing') return;
+    if (!currentWorkspace?.id) return;
 
     let pollInterval: number | undefined;
     let resumeInterval: number | undefined;
@@ -116,9 +154,8 @@ export default function Connections() {
       pollInterval = window.setInterval(fetchConnections, 2000);
       resumeInterval = window.setInterval(() => {
         void continueSmartleadSync();
-      }, 60000); // 60s interval - each sync batch takes time, avoid overlapping calls
+      }, 60000);
 
-      // kick once immediately
       void continueSmartleadSync();
     };
 
@@ -128,7 +165,7 @@ export default function Connections() {
       if (pollInterval) clearInterval(pollInterval);
       if (resumeInterval) clearInterval(resumeInterval);
     };
-  }, [connections, currentWorkspace?.id]);
+  }, [connections.find(c => c.platform === 'smartlead')?.sync_status, currentWorkspace?.id]);
 
   const fetchConnections = async () => {
     if (!currentWorkspace) return;
@@ -141,7 +178,6 @@ export default function Connections() {
 
       if (error) throw error;
       
-      // Parse sync_progress from JSON
       const parsedData = (data || []).map(conn => ({
         ...conn,
         sync_progress: conn.sync_progress as SyncProgress | null,
@@ -149,7 +185,7 @@ export default function Connections() {
       
       setConnections(parsedData);
       
-      // Check if sync just completed
+      // Check if Smartlead sync just completed
       const prevSmartlead = connections.find(c => c.platform === 'smartlead');
       const currSmartlead = parsedData.find(c => c.platform === 'smartlead');
       if (prevSmartlead?.sync_status === 'syncing' && currSmartlead?.sync_status === 'success') {
@@ -159,6 +195,18 @@ export default function Connections() {
           `Sync complete! Synced ${progress?.campaigns_synced || 0} campaigns, ` +
           `${progress?.variants_synced || 0} email variants, ` +
           `${progress?.email_accounts_synced || 0} email accounts.`
+        );
+      }
+
+      // Check if Reply.io sync just completed
+      const prevReplyio = connections.find(c => c.platform === 'replyio');
+      const currReplyio = parsedData.find(c => c.platform === 'replyio');
+      if (prevReplyio?.sync_status === 'syncing' && currReplyio?.sync_status === 'completed') {
+        setIsSyncingReplyio(false);
+        const progress = currReplyio.sync_progress;
+        setSuccess(
+          `Reply.io sync complete! Synced ${progress?.processed_sequences || 0} sequences, ` +
+          `${progress?.processed_contacts || 0} contacts.`
         );
       }
     } catch (err) {
@@ -272,10 +320,33 @@ export default function Connections() {
         },
       });
     } catch (e) {
-      // Silent: don't show banner for automatic continue calls
       console.log('Continue sync call completed (may have timed out, will retry)');
     } finally {
       setIsResumingSync(false);
+    }
+  };
+
+  const continueReplyioSync = async () => {
+    if (!currentWorkspace || isResumingReplyio) return;
+    
+    const replyioConnection = connections.find(c => c.platform === 'replyio');
+    if (!replyioConnection || replyioConnection.sync_status !== 'syncing') return;
+
+    try {
+      setIsResumingReplyio(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      await supabase.functions.invoke('replyio-sync', {
+        body: { workspace_id: currentWorkspace.id, sync_type: 'full' },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      
+      await fetchConnections();
+    } catch (error) {
+      console.log('Continue Reply.io sync call completed (may have timed out, will retry)');
+    } finally {
+      setIsResumingReplyio(false);
     }
   };
 
@@ -308,7 +379,6 @@ export default function Connections() {
         throw new Error(response.error.message || 'Sync failed');
       }
 
-      // Kick off the next batch soon (polling effect will take over)
       void continueSmartleadSync();
     } catch (err: any) {
       console.error('Sync error:', err);
@@ -342,6 +412,50 @@ export default function Connections() {
     }
   };
 
+  const handleStopReplyioSync = async () => {
+    if (!currentWorkspace) return;
+    
+    setIsStoppingReplyio(true);
+    setError(null);
+    
+    try {
+      const { error } = await supabase
+        .from('api_connections')
+        .update({ sync_status: 'stopped' })
+        .eq('workspace_id', currentWorkspace.id)
+        .eq('platform', 'replyio');
+      
+      if (error) throw error;
+      
+      setSuccess('Reply.io sync stopped.');
+      setIsSyncingReplyio(false);
+      fetchConnections();
+    } catch (err: any) {
+      setError(err.message || 'Failed to stop sync');
+    } finally {
+      setIsStoppingReplyio(false);
+    }
+  };
+
+  const handleForceAdvanceReplyio = async () => {
+    if (!currentWorkspace) return;
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      await supabase.functions.invoke('replyio-sync', {
+        body: { workspace_id: currentWorkspace.id, force_advance: true },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      
+      await fetchConnections();
+      setSuccess('Forced advance to next sequence');
+    } catch (error) {
+      console.error('Error force advancing Reply.io sync:', error);
+    }
+  };
+
   const handleReplyioSync = async (reset = false) => {
     if (!currentWorkspace) return;
 
@@ -371,15 +485,16 @@ export default function Connections() {
       }
 
       const data = response.data;
-      if (data?.done) {
+      if (data?.complete) {
         setSuccess(
-          `Reply.io sync complete! Synced ${data.campaigns_synced || 0} campaigns, ` +
-          `${data.leads_synced || 0} leads, ` +
-          `${data.email_accounts_synced || 0} email accounts.`
+          `Reply.io sync complete! Synced ${data.progress?.processed_sequences || 0} sequences, ` +
+          `${data.progress?.processed_contacts || 0} contacts.`
         );
         setIsSyncingReplyio(false);
-      } else if (data?.success) {
-        setSuccess('Reply.io sync in progress. This page will update automatically.');
+      } else if (data?.skipped) {
+        setSuccess('Sync already in progress...');
+      } else {
+        setSuccess('Reply.io sync started, processing in background...');
       }
       
       fetchConnections();
@@ -396,6 +511,24 @@ export default function Connections() {
   const isSyncingReplyioActive = replyioConnection?.sync_status === 'syncing' || isSyncingReplyio;
   const syncProgress = smartleadConnection?.sync_progress;
   const replyioSyncProgress = replyioConnection?.sync_progress;
+
+  // Calculate Reply.io progress percentage
+  const getReplyioProgress = () => {
+    if (!replyioSyncProgress) return 0;
+    const step = replyioSyncProgress.step;
+    if (step === 'email_accounts') return 5;
+    if (step === 'sequences') {
+      const total = replyioSyncProgress.total_sequences || 1;
+      const processed = replyioSyncProgress.processed_sequences || 0;
+      return 5 + (processed / total) * 70;
+    }
+    if (step === 'contacts') {
+      const processed = replyioSyncProgress.processed_contacts || 0;
+      return 75 + Math.min(processed / 100, 1) * 20;
+    }
+    if (step === 'complete') return 100;
+    return 0;
+  };
 
   if (authLoading || !user) {
     return (
@@ -461,7 +594,6 @@ export default function Connections() {
                     </span>
                   </div>
                   
-                  {/* Sync Progress */}
                   {isSyncingSmartlead && syncProgress && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
@@ -471,7 +603,6 @@ export default function Connections() {
                             : 'Starting sync...'}
                         </span>
                         <span>
-                          {/* Prefer campaign_index, fallback to current_campaign, then batch_index * 2 */}
                           {syncProgress.campaign_index ?? syncProgress.current_campaign ?? (syncProgress.batch_index ? syncProgress.batch_index * 2 : 0)} / {syncProgress.total_campaigns ?? syncProgress.total ?? '?'}
                         </span>
                       </div>
@@ -499,7 +630,6 @@ export default function Connections() {
                     </div>
                   )}
 
-                  {/* Sync Results */}
                   {syncProgress?.step === 'complete' && (
                     <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
                       <p className="font-medium mb-1">Last sync results:</p>
@@ -676,15 +806,19 @@ export default function Connections() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">
-                          {replyioSyncProgress.campaign_name 
-                            ? `Syncing: ${replyioSyncProgress.campaign_name}` 
-                            : 'Starting sync...'}
+                          {replyioSyncProgress.step === 'email_accounts' && 'Syncing email accounts...'}
+                          {replyioSyncProgress.step === 'sequences' && (replyioSyncProgress.current_sequence_name 
+                            ? `Syncing: ${replyioSyncProgress.current_sequence_name}` 
+                            : 'Syncing sequences...')}
+                          {replyioSyncProgress.step === 'contacts' && `Syncing contacts (${replyioSyncProgress.processed_contacts || 0} processed)`}
                         </span>
                         <span>
-                          {replyioSyncProgress.campaign_index ?? 0} / {replyioSyncProgress.total_campaigns ?? '?'}
+                          {replyioSyncProgress.step === 'sequences' && (
+                            `${replyioSyncProgress.processed_sequences || 0} / ${replyioSyncProgress.total_sequences || '?'}`
+                          )}
                         </span>
                       </div>
-                      <Progress value={replyioSyncProgress.progress || 0} className="h-2" />
+                      <Progress value={getReplyioProgress()} className="h-2" />
                     </div>
                   )}
                   
@@ -702,20 +836,52 @@ export default function Connections() {
                   {replyioSyncProgress?.step === 'complete' && (
                     <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
                       <p className="font-medium mb-1">Last sync results:</p>
-                      <p>{replyioSyncProgress.campaigns_synced || 0} campaigns, {replyioSyncProgress.leads_synced || 0} leads, {replyioSyncProgress.email_accounts_synced || 0} email accounts</p>
+                      <p>{replyioSyncProgress.processed_sequences || 0} sequences, {replyioSyncProgress.processed_contacts || 0} contacts</p>
+                    </div>
+                  )}
+
+                  {/* Errors Display */}
+                  {replyioSyncProgress?.errors && replyioSyncProgress.errors.length > 0 && (
+                    <div className="text-xs text-destructive bg-destructive/10 rounded-lg p-3">
+                      <p className="font-medium mb-1">Errors:</p>
+                      {replyioSyncProgress.errors.slice(-3).map((err, i) => (
+                        <p key={i} className="truncate">{err}</p>
+                      ))}
                     </div>
                   )}
 
                   <div className="flex gap-2 pt-2">
                     {isSyncingReplyioActive ? (
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        disabled
-                      >
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Syncing...
-                      </Button>
+                      <>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={handleForceAdvanceReplyio}
+                          title="Skip to next sequence if sync is stuck"
+                        >
+                          <FastForward className="mr-2 h-4 w-4" />
+                          Skip
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="text-destructive hover:text-destructive"
+                          onClick={handleStopReplyioSync}
+                          disabled={isStoppingReplyio}
+                        >
+                          {isStoppingReplyio ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Stopping...
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Stop Sync
+                            </>
+                          )}
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Button 
