@@ -28,7 +28,9 @@ import {
   Wand2,
   Lightbulb,
   AlertCircle,
+  BookMarked,
 } from 'lucide-react';
+import { SaveToLibraryDialog } from '@/components/copylibrary/SaveToLibraryDialog';
 import { useCopyAnalytics, type SubjectLineAnalysis, type BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
 import { StatisticalConfidenceBadge } from '@/components/dashboard/StatisticalConfidenceBadge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -70,6 +72,33 @@ export default function CopyInsights() {
     sent_count: number;
   } | null>(null);
   const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveVariantData, setSaveVariantData] = useState<{
+    subject_line: string;
+    body_preview?: string | null;
+    source_variant_id?: string | null;
+    performance?: {
+      sent_count?: number;
+      reply_rate?: number;
+      positive_rate?: number;
+    };
+  } | null>(null);
+
+  const handleSaveToLibrary = (item: SubjectLineAnalysis) => {
+    // Find matching body copy for this variant
+    const bodyData = bodyCopy.find(b => b.variant_id === item.variant_id);
+    setSaveVariantData({
+      subject_line: item.subject_line,
+      body_preview: bodyData?.body_preview || null,
+      source_variant_id: item.variant_id,
+      performance: {
+        sent_count: item.sent_count,
+        reply_rate: item.reply_rate / 100,
+        positive_rate: item.positive_rate / 100,
+      },
+    });
+    setSaveDialogOpen(true);
+  };
 
   const handleBackfillAndRecompute = useCallback(async () => {
     if (!currentWorkspace?.id) {
@@ -372,9 +401,28 @@ export default function CopyInsights() {
                             <p className="text-xs text-muted-foreground">{item.campaign_name}</p>
                           </div>
                         </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="font-mono text-sm font-medium text-success">{formatRate(item.reply_rate)}</p>
-                          <p className="text-xs text-muted-foreground">{item.sent_count.toLocaleString()} sent</p>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right flex-shrink-0">
+                            <p className="font-mono text-sm font-medium text-success">{formatRate(item.reply_rate)}</p>
+                            <p className="text-xs text-muted-foreground">{item.sent_count.toLocaleString()} sent</p>
+                          </div>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => handleSaveToLibrary(item)}
+                                >
+                                  <BookMarked className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Save to Copy Library</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 mt-2">
@@ -825,6 +873,13 @@ export default function CopyInsights() {
         onOpenChange={setIsVariantModalOpen}
         variant={selectedVariant}
         workspaceId={currentWorkspace?.id}
+      />
+
+      {/* Save to Library Dialog */}
+      <SaveToLibraryDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        variantData={saveVariantData}
       />
     </DashboardLayout>
   );
