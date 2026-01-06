@@ -28,14 +28,15 @@ import {
   Target,
 } from 'lucide-react';
 import { useCopyAnalytics, type SubjectLineAnalysis, type PatternAnalysis } from '@/hooks/useCopyAnalytics';
-import { StatisticalConfidenceBadge, getConfidenceLevel } from '@/components/dashboard/StatisticalConfidenceBadge';
+import { StatisticalConfidenceBadge, getConfidenceLevel, calculateConfidenceInterval } from '@/components/dashboard/StatisticalConfidenceBadge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
   BarChart, 
   Bar, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
-  Tooltip, 
+  Tooltip as RechartsTooltip, 
   ResponsiveContainer,
   Cell,
   ScatterChart,
@@ -49,7 +50,7 @@ type SortOrder = 'asc' | 'desc';
 export default function CopyInsights() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { subjectLines, bodyCopy, patterns, topPerformers, recommendations, loading, error } = useCopyAnalytics();
+  const { subjectLines, bodyCopy, patterns, discoveredPatterns, topPerformers, recommendations, loading, error } = useCopyAnalytics();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('reply_rate');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
@@ -281,15 +282,23 @@ export default function CopyInsights() {
               </Card>
             </div>
 
-            {/* Pattern Analysis */}
+            {/* Pattern Discovery */}
             <Card>
               <CardHeader>
-                <div className="flex items-center gap-2">
-                  <FlaskConical className="h-5 w-5 text-chart-1" />
-                  <CardTitle className="text-lg">Pattern Analysis</CardTitle>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FlaskConical className="h-5 w-5 text-chart-1" />
+                    <CardTitle className="text-lg">Pattern Discovery</CardTitle>
+                  </div>
+                  {discoveredPatterns.some(p => p.is_validated) && (
+                    <Badge className="bg-success/10 text-success border-success/30">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      {discoveredPatterns.filter(p => p.is_validated).length} Validated
+                    </Badge>
+                  )}
                 </div>
                 <CardDescription>
-                  What patterns correlate with higher reply rates? (Only showing patterns with statistical significance)
+                  Statistically significant patterns correlated with higher reply rates
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -302,7 +311,7 @@ export default function CopyInsights() {
                           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                           <XAxis type="number" fontSize={12} tickFormatter={(v) => `${v.toFixed(1)}%`} />
                           <YAxis dataKey="name" type="category" fontSize={11} width={120} />
-                          <Tooltip
+                          <RechartsTooltip
                             contentStyle={{
                               backgroundColor: 'hsl(var(--card))',
                               border: '1px solid hsl(var(--border))',
@@ -327,40 +336,62 @@ export default function CopyInsights() {
                     )}
                   </div>
 
-                  {/* Pattern Table */}
+                  {/* Pattern Table with Enhanced Confidence */}
                   <ScrollArea className="h-[300px]">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Pattern</TableHead>
-                          <TableHead className="text-right">Avg Reply</TableHead>
-                          <TableHead className="text-right">vs Baseline</TableHead>
+                          <TableHead className="text-right">Reply Rate</TableHead>
+                          <TableHead className="text-right">Lift</TableHead>
                           <TableHead className="text-right">Confidence</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {patterns.slice(0, 12).map((p, i) => (
-                          <TableRow key={i}>
-                            <TableCell className="text-sm">{p.pattern}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">
-                              {formatRate(p.avg_reply_rate)}
+                          <TableRow key={i} className={p.is_validated ? 'bg-success/5' : ''}>
+                            <TableCell className="text-sm">
+                              <div className="flex items-center gap-2">
+                                {p.is_validated && (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger>
+                                        <CheckCircle className="h-3.5 w-3.5 text-success flex-shrink-0" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Statistically validated pattern</p>
+                                        {p.p_value && <p className="text-xs">p-value: {p.p_value.toFixed(4)}</p>}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
+                                <span>{p.pattern}</span>
+                              </div>
                             </TableCell>
                             <TableCell className="text-right">
-                              <span className={p.comparison_to_baseline > 0 ? 'text-success' : 'text-destructive'}>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className="font-mono text-sm">
+                                    {formatRate(p.avg_reply_rate)}
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="font-medium">Sample: {p.sample_size.toLocaleString()}</p>
+                                    {p.confidence_interval_lower && p.confidence_interval_upper && (
+                                      <p className="text-xs text-muted-foreground">
+                                        95% CI: {p.confidence_interval_lower.toFixed(1)}% - {p.confidence_interval_upper.toFixed(1)}%
+                                      </p>
+                                    )}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <span className={p.comparison_to_baseline > 0 ? 'text-success font-medium' : 'text-destructive'}>
                                 {p.comparison_to_baseline > 0 ? '+' : ''}{p.comparison_to_baseline.toFixed(0)}%
                               </span>
                             </TableCell>
                             <TableCell className="text-right">
-                              <Badge 
-                                variant="outline" 
-                                className={`text-xs ${
-                                  p.significance === 'high' ? 'bg-success/10 text-success border-success/30' :
-                                  p.significance === 'medium' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30' :
-                                  ''
-                                }`}
-                              >
-                                {p.significance}
-                              </Badge>
+                              <StatisticalConfidenceBadge sampleSize={p.sample_size} size="sm" showTooltip />
                             </TableCell>
                           </TableRow>
                         ))}
@@ -403,7 +434,7 @@ export default function CopyInsights() {
                             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                             <XAxis dataKey="range" fontSize={12} />
                             <YAxis fontSize={12} tickFormatter={(v) => `${v.toFixed(1)}%`} />
-                            <Tooltip
+                            <RechartsTooltip
                               contentStyle={{
                                 backgroundColor: 'hsl(var(--card))',
                                 border: '1px solid hsl(var(--border))',
