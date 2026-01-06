@@ -32,6 +32,8 @@ type SyncProgress = {
   total?: number;
   current?: number;
   // backend function fields
+  campaign_index?: number;
+  batch_index?: number;
   total_campaigns?: number;
   current_campaign?: number;
   campaign_name?: string;
@@ -368,7 +370,8 @@ export default function Connections() {
                             : 'Starting sync...'}
                         </span>
                         <span>
-                          {syncProgress.current_campaign ?? syncProgress.current ?? 0} / {syncProgress.total_campaigns ?? syncProgress.total ?? '?'}
+                          {/* Prefer campaign_index, fallback to current_campaign, then batch_index * 2 */}
+                          {syncProgress.campaign_index ?? syncProgress.current_campaign ?? (syncProgress.batch_index ? syncProgress.batch_index * 2 : 0)} / {syncProgress.total_campaigns ?? syncProgress.total ?? '?'}
                         </span>
                       </div>
                       <Progress value={syncProgress.progress || 0} className="h-2" />

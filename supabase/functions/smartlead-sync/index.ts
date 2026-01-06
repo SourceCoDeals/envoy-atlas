@@ -10,6 +10,7 @@ const corsHeaders = {
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 const RATE_LIMIT_DELAY = 300;
 const BATCH_SIZE = 2; // Reduced from 5 to prevent timeouts
+const TIME_BUDGET_MS = 22000; // 22 seconds - leave buffer before timeout
 
 // Personal email domains for classification
 const PERSONAL_DOMAINS = new Set([
@@ -213,13 +214,18 @@ serve(async (req) => {
     }
 
     // Get sync progress
-    let existingProgress = reset ? { batch_index: 0 } : (connection.sync_progress || { batch_index: 0 });
-    let resumeFrom = typeof existingProgress.batch_index === 'number' ? existingProgress.batch_index : 0;
+    let existingProgress = reset ? { campaign_index: 0, batch_index: 0 } : (connection.sync_progress || { campaign_index: 0, batch_index: 0 });
     
-    // Force advance skips to next batch (useful when stuck on a problematic batch)
-    if (force_advance && resumeFrom > 0) {
-      console.log(`Force advancing from batch ${resumeFrom} to ${resumeFrom + 1}`);
-      resumeFrom += 1;
+    // Prefer campaign_index, fallback to batch_index * BATCH_SIZE
+    let resumeFromCampaign = typeof existingProgress.campaign_index === 'number' 
+      ? existingProgress.campaign_index 
+      : (existingProgress.batch_index || 0) * BATCH_SIZE;
+    
+    // Force advance skips to next campaign (useful when stuck on a problematic campaign)
+    if (force_advance) {
+      console.log(`Force advancing from campaign ${resumeFromCampaign} to ${resumeFromCampaign + 1}`);
+      resumeFromCampaign += 1;
+      existingProgress = { ...existingProgress, campaign_index: resumeFromCampaign, force_advanced: true };
     }
 
     // Update status to syncing
@@ -237,30 +243,83 @@ serve(async (req) => {
       errors: [] as string[],
     };
 
+    // Time budget tracking
+    const startTime = Date.now();
+    const TIME_BUDGET_MS = 22000; // 22 seconds - leave buffer before timeout
+    const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
+
     try {
       console.log('Fetching campaigns...');
       const campaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
       console.log(`Found ${campaigns.length} campaigns`);
 
       const totalCampaigns = campaigns.length;
-      const startIndex = resumeFrom * BATCH_SIZE;
+      const startIndex = resumeFromCampaign;
       const endIndex = Math.min(startIndex + BATCH_SIZE, campaigns.length);
-      const currentBatch = Math.floor(startIndex / BATCH_SIZE);
 
-      console.log(`Processing batch ${currentBatch + 1}/${Math.ceil(totalCampaigns / BATCH_SIZE)} (campaigns ${startIndex + 1}-${endIndex})`);
+      console.log(`Processing campaigns ${startIndex + 1}-${endIndex} of ${totalCampaigns}`);
 
       await supabase.from('api_connections').update({
         sync_progress: { 
-          batch_index: currentBatch, 
+          ...existingProgress,
+          campaign_index: startIndex,
+          batch_index: Math.floor(startIndex / BATCH_SIZE),
           total_campaigns: totalCampaigns,
+          current_campaign: startIndex,
+          campaign_name: campaigns[startIndex]?.name || 'Loading...',
           step: 'campaigns', 
           progress: Math.round((startIndex / Math.max(1, totalCampaigns)) * 90) + 5 
         },
       }).eq('id', connection.id);
 
+      let lastProcessedIndex = startIndex - 1;
+      let lastProcessedName = campaigns[startIndex]?.name || 'Unknown';
+
       for (let i = startIndex; i < endIndex; i++) {
+        // Check time budget before processing each campaign
+        if (isTimeBudgetExceeded()) {
+          console.log(`[smartlead-sync] Time budget exceeded at campaign ${i}, saving progress`);
+          await supabase.from('api_connections').update({
+            sync_progress: {
+              ...existingProgress,
+              campaign_index: i,
+              batch_index: Math.floor(i / BATCH_SIZE),
+              total_campaigns: totalCampaigns,
+              current_campaign: i,
+              campaign_name: lastProcessedName,
+              step: 'campaigns',
+              progress: Math.round((i / Math.max(1, totalCampaigns)) * 90) + 5,
+              time_budget_exit: true,
+              ...progress,
+            },
+          }).eq('id', connection.id);
+
+          return new Response(JSON.stringify({
+            success: true,
+            done: false,
+            message: `Time budget reached at campaign ${i}/${totalCampaigns}. Call again to continue.`,
+            campaign_index: i,
+            total: totalCampaigns,
+            ...progress,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
         const campaign = campaigns[i];
         console.log(`Processing campaign ${i + 1}/${totalCampaigns}: ${campaign.name}`);
+        
+        // Update current campaign in progress immediately
+        await supabase.from('api_connections').update({
+          sync_progress: {
+            ...existingProgress,
+            campaign_index: i,
+            batch_index: Math.floor(i / BATCH_SIZE),
+            total_campaigns: totalCampaigns,
+            current_campaign: i + 1,
+            campaign_name: campaign.name,
+            step: 'campaigns',
+            progress: Math.round(((i + 1) / Math.max(1, totalCampaigns)) * 90) + 5,
+          },
+        }).eq('id', connection.id);
 
         try {
           // 1. Upsert campaign
@@ -453,6 +512,35 @@ serve(async (req) => {
             let hasMore = true;
 
             while (hasMore) {
+              // Check time budget inside leads loop too
+              if (isTimeBudgetExceeded()) {
+                console.log(`[smartlead-sync] Time budget exceeded during leads fetch for campaign ${i}`);
+                await supabase.from('api_connections').update({
+                  sync_progress: {
+                    ...existingProgress,
+                    campaign_index: i,
+                    batch_index: Math.floor(i / BATCH_SIZE),
+                    total_campaigns: totalCampaigns,
+                    current_campaign: i + 1,
+                    campaign_name: campaign.name,
+                    step: 'leads',
+                    progress: Math.round(((i + 1) / Math.max(1, totalCampaigns)) * 90) + 5,
+                    time_budget_exit: true,
+                    leads_offset: offset,
+                    ...progress,
+                  },
+                }).eq('id', connection.id);
+
+                return new Response(JSON.stringify({
+                  success: true,
+                  done: false,
+                  message: `Time budget reached during leads fetch. Call again to continue.`,
+                  campaign_index: i,
+                  total: totalCampaigns,
+                  ...progress,
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+              }
+
               const leadsData = await smartleadRequest(
                 `/campaigns/${campaign.id}/leads-statistics?limit=${pageSize}&offset=${offset}`,
                 apiKey
@@ -606,10 +694,15 @@ serve(async (req) => {
             console.error(`Failed to fetch leads for campaign ${campaign.id}:`, leadsError);
           }
 
-          // Update progress after each campaign
+          // Update progress after each campaign - track last processed
+          lastProcessedIndex = i;
+          lastProcessedName = campaign.name;
+          
           await supabase.from('api_connections').update({
             sync_progress: {
-              batch_index: currentBatch,
+              ...existingProgress,
+              campaign_index: i + 1,
+              batch_index: Math.floor((i + 1) / BATCH_SIZE),
               total_campaigns: totalCampaigns,
               current_campaign: i + 1,
               campaign_name: campaign.name,
@@ -622,36 +715,42 @@ serve(async (req) => {
         } catch (campaignError) {
           console.error(`Error processing campaign ${campaign.id}:`, campaignError);
           progress.errors.push(`Campaign ${campaign.name}: ${String(campaignError)}`);
+          // Still advance campaign_index to avoid getting stuck
+          lastProcessedIndex = i;
+          lastProcessedName = campaign.name;
         }
       }
 
-      const isComplete = endIndex >= campaigns.length;
-      const nextBatchIndex = currentBatch + 1;
+      const nextCampaignIndex = lastProcessedIndex + 1;
+      const isComplete = nextCampaignIndex >= campaigns.length;
 
       await supabase.from('api_connections').update({
         sync_status: isComplete ? 'success' : 'syncing',
         last_sync_at: isComplete ? new Date().toISOString() : undefined,
         last_full_sync_at: isComplete && sync_type === 'full' ? new Date().toISOString() : undefined,
         sync_progress: {
-          batch_index: isComplete ? nextBatchIndex : nextBatchIndex,
+          campaign_index: nextCampaignIndex,
+          batch_index: Math.floor(nextCampaignIndex / BATCH_SIZE),
           total_campaigns: totalCampaigns,
+          current_campaign: isComplete ? totalCampaigns : nextCampaignIndex,
+          campaign_name: lastProcessedName,
           step: isComplete ? 'complete' : 'campaigns',
-          progress: isComplete ? 100 : Math.round((endIndex / Math.max(1, totalCampaigns)) * 90) + 5,
+          progress: isComplete ? 100 : Math.round((nextCampaignIndex / Math.max(1, totalCampaigns)) * 90) + 5,
           completed: isComplete,
           ...progress,
         },
       }).eq('id', connection.id);
 
-      console.log('Batch complete:', { isComplete, processed: endIndex, total: totalCampaigns, ...progress });
+      console.log('Progress:', { isComplete, campaign_index: nextCampaignIndex, total: totalCampaigns, ...progress });
 
       return new Response(JSON.stringify({
         success: true, 
         done: isComplete, 
-        next_index: nextBatchIndex, 
+        campaign_index: nextCampaignIndex,
         total: totalCampaigns,
-        message: isComplete ? 'Sync completed successfully' : 'Batch completed; call again to continue',
+        message: isComplete ? 'Sync completed successfully' : `Processed to campaign ${nextCampaignIndex}; call again to continue`,
         ...progress,
-      }), { 
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
 
