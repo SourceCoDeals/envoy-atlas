@@ -840,15 +840,16 @@ export default function Connections() {
                     </div>
                   )}
 
-                  {/* Errors Display */}
-                  {replyioSyncProgress?.errors && replyioSyncProgress.errors.length > 0 && (
-                    <div className="text-xs text-destructive bg-destructive/10 rounded-lg p-3">
-                      <p className="font-medium mb-1">Errors:</p>
-                      {replyioSyncProgress.errors.slice(-3).map((err, i) => (
-                        <p key={i} className="truncate">{err}</p>
-                      ))}
-                    </div>
-                  )}
+                  {/* Errors Display (only show for active or failed syncs) */}
+                  {(isSyncingReplyioActive || replyioConnection.sync_status === 'error') &&
+                    replyioSyncProgress?.errors && replyioSyncProgress.errors.length > 0 && (
+                      <div className="text-xs text-destructive bg-destructive/10 rounded-lg p-3">
+                        <p className="font-medium mb-1">Errors:</p>
+                        {replyioSyncProgress.errors.slice(-3).map((err, i) => (
+                          <p key={i} className="truncate">{err}</p>
+                        ))}
+                      </div>
+                    )}
 
                   <div className="flex gap-2 pt-2">
                     {isSyncingReplyioActive ? (
