@@ -377,36 +377,67 @@ Deno.serve(async (req) => {
         await updateProgress(supabase, connection.id, progress);
       }
 
-      // Step 2: Sync Sequences (Campaigns)
+      // Step 2: Sync Sequences (Campaigns) + Contacts per sequence
       if (progress.step === 'sequences') {
         console.log('Syncing sequences...');
         
         // Fetch all sequences using v3 API
         let allSequences: ReplyioSequence[] = [];
-        let cursor: string | null = null;
+        let hasMoreSequences = true;
+        let skip = 0;
         
-        do {
-          const endpoint = cursor 
-            ? `/sequences?cursor=${cursor}&limit=100`
-            : '/sequences?limit=100';
+        while (hasMoreSequences) {
+          const endpoint = `/sequences?top=100&skip=${skip}`;
           
           const response = await replyioRequest(endpoint, apiKey);
-          const sequences = response?.sequences || response || [];
           
-          if (Array.isArray(sequences)) {
-            allSequences = allSequences.concat(sequences);
+          // Handle various response formats
+          let sequences: ReplyioSequence[] = [];
+          if (Array.isArray(response)) {
+            sequences = response;
+          } else if (response?.sequences && Array.isArray(response.sequences)) {
+            sequences = response.sequences;
+          } else if (response?.items && Array.isArray(response.items)) {
+            sequences = response.items;
           }
           
-          cursor = response?.nextCursor || null;
+          console.log(`Fetched ${sequences.length} sequences at skip=${skip}`);
+          
+          if (sequences.length === 0) {
+            hasMoreSequences = false;
+          } else {
+            allSequences = allSequences.concat(sequences);
+            skip += sequences.length;
+            
+            // Check if we got less than requested (last page)
+            if (sequences.length < 100) {
+              hasMoreSequences = false;
+            }
+          }
           
           if (checkTimeBudget()) break;
-        } while (cursor);
+        }
         
         // Filter out archived sequences
         allSequences = allSequences.filter(s => !s.isArchived);
         progress.total_sequences = allSequences.length;
         
         console.log(`Found ${allSequences.length} sequences to process`);
+        
+        // If no sequences, check if API returned them differently
+        if (allSequences.length === 0) {
+          console.log('No sequences found. Checking alternate endpoint...');
+          try {
+            // Try alternate endpoint format
+            const altResponse = await replyioRequest('/sequences', apiKey);
+            console.log('Alternate response type:', typeof altResponse, Array.isArray(altResponse) ? 'array' : 'object');
+            if (altResponse) {
+              console.log('Response keys:', Object.keys(altResponse || {}).join(', '));
+            }
+          } catch (e) {
+            console.log('Alternate check failed:', (e as Error).message);
+          }
+        }
         
         // Process sequences from where we left off
         for (let i = progress.sequence_index; i < allSequences.length; i++) {
@@ -509,6 +540,56 @@ Deno.serve(async (req) => {
               console.error(`Error fetching stats for sequence ${sequence.id}:`, statsError);
             }
             
+            // Fetch contacts for this sequence (v3 API requires per-sequence contact fetch)
+            try {
+              let hasMoreContacts = true;
+              let contactSkip = 0;
+              
+              while (hasMoreContacts && !checkTimeBudget()) {
+                const contactsResponse = await replyioRequest(
+                  `/sequences/${sequence.id}/contacts/extended?top=50&skip=${contactSkip}`,
+                  apiKey
+                );
+                
+                const contacts = contactsResponse?.items || contactsResponse || [];
+                
+                if (!Array.isArray(contacts) || contacts.length === 0) {
+                  hasMoreContacts = false;
+                  break;
+                }
+                
+                // Map contacts to leads
+                const leadsToUpsert = contacts.map((contact: any) => ({
+                  workspace_id,
+                  platform: 'replyio',
+                  platform_lead_id: contact.email, // Use email as ID since extended doesn't return ID
+                  email: contact.email,
+                  first_name: contact.firstName || null,
+                  last_name: contact.lastName || null,
+                  title: contact.title || null,
+                  campaign_id: campaignId,
+                  status: contact.status?.status || null,
+                  email_domain: extractEmailDomain(contact.email),
+                  email_type: classifyEmailType(contact.email),
+                  updated_at: new Date().toISOString(),
+                }));
+                
+                await supabase.from('leads').upsert(leadsToUpsert, {
+                  onConflict: 'workspace_id,platform,platform_lead_id',
+                });
+                
+                progress.processed_contacts += contacts.length;
+                contactSkip += contacts.length;
+                
+                hasMoreContacts = contactsResponse?.info?.hasMore || contacts.length >= 50;
+                
+                console.log(`  Synced ${contactSkip} contacts for sequence ${sequence.name}`);
+              }
+            } catch (contactError) {
+              console.error(`Error fetching contacts for sequence ${sequence.id}:`, contactError);
+              // Don't add to errors array for contact issues - continue with other sequences
+            }
+            
           } catch (error) {
             console.error(`Error processing sequence ${sequence.id}:`, error);
             progress.errors.push(`Sequence ${sequence.name}: ${(error as Error).message}`);
@@ -518,79 +599,17 @@ Deno.serve(async (req) => {
           await updateProgress(supabase, connection.id, progress);
         }
         
-        progress.step = 'contacts';
+        // Sequences step complete - skip to complete (no separate contacts step)
+        progress.step = 'complete';
         progress.processed_sequences = progress.total_sequences;
         progress.last_heartbeat = new Date().toISOString();
         await updateProgress(supabase, connection.id, progress);
       }
 
-      // Step 3: Sync Contacts
+      // Step 3: Legacy contacts step - now handled per-sequence, just move to complete
       if (progress.step === 'contacts') {
-        console.log('Syncing contacts...');
-        
-        let hasMore = true;
-        let cursor = progress.contact_cursor;
-        let processedInThisRun = 0;
-        
-        while (hasMore && !checkTimeBudget()) {
-          try {
-            const endpoint = cursor 
-              ? `/contacts?cursor=${cursor}&limit=${BATCH_SIZE}`
-              : `/contacts?limit=${BATCH_SIZE}`;
-            
-            const response = await replyioRequest(endpoint, apiKey);
-            const contacts: ReplyioContact[] = response?.contacts || response || [];
-            
-            if (!Array.isArray(contacts) || contacts.length === 0) {
-              hasMore = false;
-              break;
-            }
-            
-            // Batch upsert contacts as leads
-            const leadsToUpsert = contacts.map(contact => ({
-              workspace_id,
-              platform: 'replyio',
-              platform_lead_id: String(contact.id),
-              email: contact.email,
-              first_name: contact.firstName || null,
-              last_name: contact.lastName || null,
-              title: contact.title || null,
-              company: contact.company || null,
-              location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || null,
-              phone_number: contact.phone || null,
-              linkedin_url: contact.linkedInProfile || null,
-              company_size: contact.companySize || null,
-              industry: contact.industry || null,
-              email_domain: extractEmailDomain(contact.email),
-              email_type: classifyEmailType(contact.email),
-              updated_at: new Date().toISOString(),
-            }));
-            
-            await supabase.from('leads').upsert(leadsToUpsert, {
-              onConflict: 'workspace_id,platform,platform_lead_id',
-            });
-            
-            processedInThisRun += contacts.length;
-            progress.processed_contacts += contacts.length;
-            cursor = response?.nextCursor || null;
-            progress.contact_cursor = cursor;
-            hasMore = !!cursor;
-            
-            progress.last_heartbeat = new Date().toISOString();
-            await updateProgress(supabase, connection.id, progress);
-            
-            console.log(`Processed ${processedInThisRun} contacts (total: ${progress.processed_contacts})`);
-            
-          } catch (error) {
-            console.error('Error syncing contacts:', error);
-            progress.errors.push(`Contacts: ${(error as Error).message}`);
-            hasMore = false;
-          }
-        }
-        
-        if (!hasMore || !cursor) {
-          progress.step = 'complete';
-        }
+        console.log('Contacts step skipped - contacts are now synced per-sequence');
+        progress.step = 'complete';
       }
 
       // Complete
