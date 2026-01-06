@@ -8,7 +8,7 @@ interface SegmentCopyInteraction {
   segment: string;
   segment_type: 'seniority' | 'department' | 'industry';
   pattern: string;
-  pattern_type: 'personalization' | 'format' | 'cta' | 'length';
+  pattern_type: string;
   reply_rate: number;
   segment_avg_reply_rate: number;
   pattern_avg_reply_rate: number;
