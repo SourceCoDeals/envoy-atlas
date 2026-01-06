@@ -737,6 +737,7 @@ export type Database = {
       leads: {
         Row: {
           campaign_id: string | null
+          category: string | null
           company: string | null
           company_size: string | null
           created_at: string
@@ -750,15 +751,18 @@ export type Database = {
           lead_source: string | null
           linkedin_url: string | null
           location: string | null
+          phone_number: string | null
           platform: string
           platform_lead_id: string | null
           status: string | null
           title: string | null
           updated_at: string
+          website: string | null
           workspace_id: string
         }
         Insert: {
           campaign_id?: string | null
+          category?: string | null
           company?: string | null
           company_size?: string | null
           created_at?: string
@@ -772,15 +776,18 @@ export type Database = {
           lead_source?: string | null
           linkedin_url?: string | null
           location?: string | null
+          phone_number?: string | null
           platform: string
           platform_lead_id?: string | null
           status?: string | null
           title?: string | null
           updated_at?: string
+          website?: string | null
           workspace_id: string
         }
         Update: {
           campaign_id?: string | null
+          category?: string | null
           company?: string | null
           company_size?: string | null
           created_at?: string
@@ -794,11 +801,13 @@ export type Database = {
           lead_source?: string | null
           linkedin_url?: string | null
           location?: string | null
+          phone_number?: string | null
           platform?: string
           platform_lead_id?: string | null
           status?: string | null
           title?: string | null
           updated_at?: string
+          website?: string | null
           workspace_id?: string
         }
         Relationships: [
@@ -834,6 +843,7 @@ export type Database = {
           reply_content: string | null
           reply_sentiment: string | null
           segment_id: string | null
+          sent_at: string | null
           sequence_step: number | null
           step_id: string | null
           variant_id: string | null
@@ -854,6 +864,7 @@ export type Database = {
           reply_content?: string | null
           reply_sentiment?: string | null
           segment_id?: string | null
+          sent_at?: string | null
           sequence_step?: number | null
           step_id?: string | null
           variant_id?: string | null
@@ -874,6 +885,7 @@ export type Database = {
           reply_content?: string | null
           reply_sentiment?: string | null
           segment_id?: string | null
+          sent_at?: string | null
           sequence_step?: number | null
           step_id?: string | null
           variant_id?: string | null
