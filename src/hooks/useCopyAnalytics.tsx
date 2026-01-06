@@ -27,7 +27,7 @@ export interface SubjectLineAnalysis {
   reply_rate: number;
   positive_rate: number;
   
-  // Analysis
+  // Analysis (from features table or fallback)
   personalization_type: PersonalizationType;
   format_type: FormatType;
   length_category: LengthCategory;
@@ -35,6 +35,9 @@ export interface SubjectLineAnalysis {
   word_count: number;
   has_question: boolean;
   has_number: boolean;
+  has_emoji: boolean;
+  spam_score: number;
+  capitalization_style: string;
   
   // Statistical
   confidence_level: 'low' | 'medium' | 'high';
@@ -54,7 +57,7 @@ export interface BodyCopyAnalysis {
   reply_rate: number;
   positive_rate: number;
   
-  // Body analysis
+  // Body analysis (from features table or fallback)
   word_count: number;
   personalization_depth: 0 | 1 | 2 | 3 | 4;
   personalization_vars: string[];
@@ -62,6 +65,11 @@ export interface BodyCopyAnalysis {
   has_question: boolean;
   has_cta: boolean;
   cta_type: 'soft' | 'meeting' | 'calendar' | 'permission' | 'info' | 'binary' | 'none';
+  cta_position: string;
+  body_tone: string;
+  reading_grade: number;
+  sentence_count: number;
+  paragraph_count: number;
   
   confidence_level: 'low' | 'medium' | 'high';
 }
@@ -73,20 +81,25 @@ export interface PatternAnalysis {
   avg_reply_rate: number;
   avg_positive_rate: number;
   significance: 'low' | 'medium' | 'high';
-  comparison_to_baseline: number; // percentage difference
+  comparison_to_baseline: number;
+  p_value?: number;
+  confidence_interval_lower?: number;
+  confidence_interval_upper?: number;
+  is_validated?: boolean;
 }
 
 export interface CopyAnalyticsData {
   subjectLines: SubjectLineAnalysis[];
   bodyCopy: BodyCopyAnalysis[];
   patterns: PatternAnalysis[];
+  discoveredPatterns: PatternAnalysis[];
   topPerformers: SubjectLineAnalysis[];
   recommendations: string[];
   loading: boolean;
   error: string | null;
 }
 
-// Helper functions for analysis
+// Helper functions for analysis (fallback when features not extracted)
 function detectPersonalizationType(subject: string): PersonalizationType {
   const lower = subject.toLowerCase();
   if (lower.includes('{{company') || lower.includes('{company')) return 'company';
@@ -117,7 +130,7 @@ function getLengthCategory(length: number): LengthCategory {
 
 function getConfidenceLevel(sampleSize: number): 'low' | 'medium' | 'high' {
   if (sampleSize < 200) return 'low';
-  if (sampleSize < 500) return 'high';
+  if (sampleSize < 500) return 'medium';
   return 'high';
 }
 
@@ -141,12 +154,40 @@ function detectCTAType(body: string): 'soft' | 'meeting' | 'calendar' | 'permiss
   return 'none';
 }
 
+interface VariantFeatures {
+  variant_id: string;
+  subject_char_count: number | null;
+  subject_word_count: number | null;
+  subject_is_question: boolean | null;
+  subject_has_number: boolean | null;
+  subject_has_emoji: boolean | null;
+  subject_personalization_count: number | null;
+  subject_spam_score: number | null;
+  subject_capitalization_style: string | null;
+  subject_first_word_type: string | null;
+  body_word_count: number | null;
+  body_sentence_count: number | null;
+  body_paragraph_count: number | null;
+  body_question_count: number | null;
+  body_has_link: boolean | null;
+  body_link_count: number | null;
+  body_cta_type: string | null;
+  body_cta_position: string | null;
+  body_tone: string | null;
+  body_reading_grade: number | null;
+  body_personalization_density: number | null;
+  body_personalization_types: string[] | null;
+  body_has_calendar_link: boolean | null;
+  body_has_proof: boolean | null;
+}
+
 export function useCopyAnalytics(): CopyAnalyticsData {
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [subjectLines, setSubjectLines] = useState<SubjectLineAnalysis[]>([]);
   const [bodyCopy, setBodyCopy] = useState<BodyCopyAnalysis[]>([]);
+  const [discoveredPatterns, setDiscoveredPatterns] = useState<PatternAnalysis[]>([]);
 
   useEffect(() => {
     if (currentWorkspace?.id) {
@@ -181,6 +222,49 @@ export function useCopyAnalytics(): CopyAnalyticsData {
 
       if (variantsError) throw variantsError;
 
+      // Fetch extracted features from campaign_variant_features
+      const { data: features, error: featuresError } = await supabase
+        .from('campaign_variant_features')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id);
+
+      if (featuresError) {
+        console.warn('Features table query failed, using fallback analysis:', featuresError);
+      }
+
+      // Create features map
+      const featuresMap = new Map<string, VariantFeatures>();
+      (features || []).forEach(f => {
+        featuresMap.set(f.variant_id, f as VariantFeatures);
+      });
+
+      // Fetch discovered patterns from copy_patterns table
+      const { data: dbPatterns, error: patternsError } = await supabase
+        .from('copy_patterns')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .order('reply_rate', { ascending: false });
+
+      if (patternsError) {
+        console.warn('Patterns table query failed:', patternsError);
+      }
+
+      // Transform DB patterns to PatternAnalysis
+      const discovered: PatternAnalysis[] = (dbPatterns || []).map(p => ({
+        pattern: p.pattern_name,
+        description: p.pattern_description || '',
+        sample_size: p.sample_size,
+        avg_reply_rate: p.reply_rate || 0,
+        avg_positive_rate: p.positive_rate || 0,
+        significance: (p.confidence_level as 'low' | 'medium' | 'high') || 'low',
+        comparison_to_baseline: p.reply_rate_lift || 0,
+        p_value: p.p_value || undefined,
+        confidence_interval_lower: p.confidence_interval_lower || undefined,
+        confidence_interval_upper: p.confidence_interval_upper || undefined,
+        is_validated: p.is_validated || false,
+      }));
+      setDiscoveredPatterns(discovered);
+
       // Fetch metrics for all variants
       const { data: metrics, error: metricsError } = await supabase
         .from('daily_metrics')
@@ -204,12 +288,30 @@ export function useCopyAnalytics(): CopyAnalyticsData {
         });
       });
 
-      // Process subject lines
+      // Process subject lines with extracted features
       const subjectAnalysis: SubjectLineAnalysis[] = (variants || [])
         .filter(v => v.subject_line)
         .map(v => {
           const m = metricsMap.get(v.id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
           const subjectLine = v.subject_line || '';
+          const feat = featuresMap.get(v.id);
+          
+          // Use extracted features if available, otherwise fallback
+          const charCount = feat?.subject_char_count ?? subjectLine.length;
+          const wordCount = feat?.subject_word_count ?? subjectLine.split(/\s+/).filter(Boolean).length;
+          const hasQuestion = feat?.subject_is_question ?? subjectLine.includes('?');
+          const hasNumber = feat?.subject_has_number ?? /\d/.test(subjectLine);
+          const hasEmoji = feat?.subject_has_emoji ?? /[\u{1F600}-\u{1F64F}]/u.test(subjectLine);
+          const spamScore = feat?.subject_spam_score ?? 0;
+          const capStyle = feat?.subject_capitalization_style ?? 'normal';
+          
+          // Detect personalization type from features or fallback
+          let persType: PersonalizationType = 'none';
+          if (feat?.subject_personalization_count && feat.subject_personalization_count > 0) {
+            persType = detectPersonalizationType(subjectLine);
+          } else {
+            persType = detectPersonalizationType(subjectLine);
+          }
           
           return {
             variant_id: v.id,
@@ -222,19 +324,22 @@ export function useCopyAnalytics(): CopyAnalyticsData {
             open_count: m.opened,
             reply_count: m.replied,
             positive_count: m.positive,
-            meeting_count: 0, // Would need meeting tracking
+            meeting_count: 0,
             
             open_rate: m.sent > 0 ? (m.opened / m.sent) * 100 : 0,
             reply_rate: m.sent > 0 ? (m.replied / m.sent) * 100 : 0,
             positive_rate: m.sent > 0 ? (m.positive / m.sent) * 100 : 0,
             
-            personalization_type: detectPersonalizationType(subjectLine),
+            personalization_type: persType,
             format_type: detectFormatType(subjectLine),
-            length_category: getLengthCategory(subjectLine.length),
-            char_count: subjectLine.length,
-            word_count: subjectLine.split(/\s+/).filter(Boolean).length,
-            has_question: subjectLine.includes('?'),
-            has_number: /\d/.test(subjectLine),
+            length_category: getLengthCategory(charCount),
+            char_count: charCount,
+            word_count: wordCount,
+            has_question: hasQuestion,
+            has_number: hasNumber,
+            has_emoji: hasEmoji,
+            spam_score: spamScore,
+            capitalization_style: capStyle,
             
             confidence_level: getConfidenceLevel(m.sent),
           };
@@ -242,7 +347,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
 
       setSubjectLines(subjectAnalysis);
 
-      // Process body copy
+      // Process body copy with extracted features
       const bodyAnalysis: BodyCopyAnalysis[] = (variants || [])
         .filter(v => v.body_preview || v.email_body)
         .map(v => {
@@ -251,6 +356,23 @@ export function useCopyAnalytics(): CopyAnalyticsData {
           const vars = Array.isArray(v.personalization_vars) 
             ? (v.personalization_vars as string[]) 
             : [];
+          const feat = featuresMap.get(v.id);
+          
+          // Use extracted features if available
+          const wordCount = feat?.body_word_count ?? v.word_count ?? body.split(/\s+/).filter(Boolean).length;
+          const sentenceCount = feat?.body_sentence_count ?? 0;
+          const paragraphCount = feat?.body_paragraph_count ?? 0;
+          const hasLink = feat?.body_has_link ?? /https?:\/\/|www\./i.test(body);
+          const hasQuestion = feat?.body_question_count ? feat.body_question_count > 0 : body.includes('?');
+          const ctaType = (feat?.body_cta_type as any) ?? detectCTAType(body);
+          const ctaPosition = feat?.body_cta_position ?? 'unknown';
+          const bodyTone = feat?.body_tone ?? 'professional';
+          const readingGrade = feat?.body_reading_grade ?? 0;
+          
+          // Calculate personalization depth from features or vars
+          const persDepth = feat?.body_personalization_density 
+            ? Math.min(4, Math.floor(feat.body_personalization_density * 10)) as 0 | 1 | 2 | 3 | 4
+            : detectPersonalizationDepth(vars);
           
           return {
             variant_id: v.id,
@@ -265,13 +387,18 @@ export function useCopyAnalytics(): CopyAnalyticsData {
             reply_rate: m.sent > 0 ? (m.replied / m.sent) * 100 : 0,
             positive_rate: m.sent > 0 ? (m.positive / m.sent) * 100 : 0,
             
-            word_count: v.word_count || body.split(/\s+/).filter(Boolean).length,
-            personalization_depth: detectPersonalizationDepth(vars),
-            personalization_vars: vars,
-            has_link: /https?:\/\/|www\./i.test(body),
-            has_question: body.includes('?'),
-            has_cta: true, // Assume all have CTA
-            cta_type: detectCTAType(body),
+            word_count: wordCount,
+            personalization_depth: persDepth,
+            personalization_vars: feat?.body_personalization_types || vars,
+            has_link: hasLink,
+            has_question: hasQuestion,
+            has_cta: ctaType !== 'none',
+            cta_type: ctaType,
+            cta_position: ctaPosition,
+            body_tone: bodyTone,
+            reading_grade: readingGrade,
+            sentence_count: sentenceCount,
+            paragraph_count: paragraphCount,
             
             confidence_level: getConfidenceLevel(m.sent),
           };
@@ -286,12 +413,17 @@ export function useCopyAnalytics(): CopyAnalyticsData {
     }
   };
 
-  // Calculate pattern analysis
+  // Calculate pattern analysis (fallback when no discovered patterns)
   const patterns = useMemo((): PatternAnalysis[] => {
+    // If we have discovered patterns from DB, prioritize those
+    if (discoveredPatterns.length > 0) {
+      return discoveredPatterns;
+    }
+    
     if (subjectLines.length === 0) return [];
 
     const baseline = subjectLines.reduce((sum, s) => sum + s.reply_rate, 0) / subjectLines.length;
-    const patterns: PatternAnalysis[] = [];
+    const computedPatterns: PatternAnalysis[] = [];
 
     // Personalization patterns
     const personalizationGroups = subjectLines.reduce((acc, s) => {
@@ -310,7 +442,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
         ? items.reduce((sum, i) => sum + i.positive_rate * i.sent_count, 0) / totalSent
         : 0;
 
-      patterns.push({
+      computedPatterns.push({
         pattern: `Contains {{${type}}}`,
         description: `Subject lines with ${type.replace('_', ' ')} personalization`,
         sample_size: totalSent,
@@ -338,7 +470,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
         ? items.reduce((sum, i) => sum + i.positive_rate * i.sent_count, 0) / totalSent
         : 0;
 
-      patterns.push({
+      computedPatterns.push({
         pattern: `${type.replace('_', ' ')} format`,
         description: `Subject lines using ${type.replace('_', ' ')} format`,
         sample_size: totalSent,
@@ -368,7 +500,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
 
       const charRange = type === 'very_short' ? '1-20' : type === 'short' ? '21-40' : type === 'medium' ? '41-60' : '61+';
 
-      patterns.push({
+      computedPatterns.push({
         pattern: `Length ${charRange} chars`,
         description: `Subject lines with ${type.replace('_', ' ')} length`,
         sample_size: totalSent,
@@ -379,8 +511,8 @@ export function useCopyAnalytics(): CopyAnalyticsData {
       });
     });
 
-    return patterns.sort((a, b) => b.avg_reply_rate - a.avg_reply_rate);
-  }, [subjectLines]);
+    return computedPatterns.sort((a, b) => b.avg_reply_rate - a.avg_reply_rate);
+  }, [subjectLines, discoveredPatterns]);
 
   // Top performers
   const topPerformers = useMemo(() => {
@@ -423,13 +555,21 @@ export function useCopyAnalytics(): CopyAnalyticsData {
       }
     }
 
+    // Add validated pattern recommendations
+    const validatedPatterns = discoveredPatterns.filter(p => p.is_validated && p.significance === 'high');
+    if (validatedPatterns.length > 0) {
+      const top = validatedPatterns[0];
+      recs.push(`✓ Validated: "${top.pattern}" shows ${top.avg_reply_rate.toFixed(1)}% reply rate (statistically significant)`);
+    }
+
     return recs;
-  }, [patterns]);
+  }, [patterns, discoveredPatterns]);
 
   return {
     subjectLines,
     bodyCopy,
     patterns,
+    discoveredPatterns,
     topPerformers,
     recommendations,
     loading,
