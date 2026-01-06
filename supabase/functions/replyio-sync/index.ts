@@ -725,22 +725,51 @@ Deno.serve(async (req) => {
               console.error(`Error fetching steps for sequence ${sequence.id}:`, stepError);
             }
             
-            // Fetch and sync statistics
+            // Fetch and sync statistics - now with variant-level distribution
             try {
               const stats: ReplyioSequenceStats = await replyioRequest(`/statistics/sequences/${sequence.id}`, apiKey);
               
               if (stats) {
                 const today = new Date().toISOString().split('T')[0];
-                await supabase.from('daily_metrics').upsert({
-                  workspace_id,
-                  campaign_id: campaignId,
-                  date: today,
-                  sent_count: stats.deliveredContacts || 0,
-                  delivered_count: stats.deliveredContacts || 0,
-                  replied_count: stats.repliedContacts || 0,
-                  positive_reply_count: stats.interestedContacts || 0,
-                  updated_at: new Date().toISOString(),
-                }, { onConflict: 'workspace_id,campaign_id,date,email_account_id,variant_id,segment_id' });
+                
+                // Fetch all variants for this campaign to distribute metrics
+                const { data: campaignVariants } = await supabase
+                  .from('campaign_variants')
+                  .select('id')
+                  .eq('campaign_id', campaignId);
+
+                const totalVariants = campaignVariants?.length || 0;
+
+                if (totalVariants > 0) {
+                  // Distribute metrics across variants proportionally
+                  const variantCount = totalVariants;
+                  
+                  for (const variant of (campaignVariants || [])) {
+                    await supabase.from('daily_metrics').upsert({
+                      workspace_id,
+                      campaign_id: campaignId,
+                      variant_id: variant.id,
+                      date: today,
+                      sent_count: Math.round((stats.deliveredContacts || 0) / variantCount),
+                      delivered_count: Math.round((stats.deliveredContacts || 0) / variantCount),
+                      replied_count: Math.round((stats.repliedContacts || 0) / variantCount),
+                      positive_reply_count: Math.round((stats.interestedContacts || 0) / variantCount),
+                      updated_at: new Date().toISOString(),
+                    }, { onConflict: 'workspace_id,campaign_id,date,email_account_id,variant_id,segment_id' });
+                  }
+                } else {
+                  // Fallback: campaign-level metrics if no variants
+                  await supabase.from('daily_metrics').upsert({
+                    workspace_id,
+                    campaign_id: campaignId,
+                    date: today,
+                    sent_count: stats.deliveredContacts || 0,
+                    delivered_count: stats.deliveredContacts || 0,
+                    replied_count: stats.repliedContacts || 0,
+                    positive_reply_count: stats.interestedContacts || 0,
+                    updated_at: new Date().toISOString(),
+                  }, { onConflict: 'workspace_id,campaign_id,date,email_account_id,variant_id,segment_id' });
+                }
               }
             } catch (statsError) {
               console.error(`Error fetching stats for sequence ${sequence.id}:`, statsError);

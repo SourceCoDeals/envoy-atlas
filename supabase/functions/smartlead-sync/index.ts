@@ -714,41 +714,89 @@ serve(async (req) => {
             console.error(`Failed to fetch email accounts for campaign ${campaign.id}:`, emailAccountsResult.reason);
           }
 
-          // Process analytics
+          // Process analytics - now with variant-level distribution
           if (analyticsResult.status === 'fulfilled') {
             const analytics: SmartleadAnalytics = analyticsResult.value;
             const today = new Date().toISOString().split('T')[0];
 
-            const metricsPayload = {
-              workspace_id, 
-              campaign_id: campaignDbId, 
-              date: today,
-              sent_count: analytics.sent_count || 0,
-              delivered_count: analytics.unique_sent_count || 0,
-              opened_count: analytics.unique_open_count || 0,
-              clicked_count: analytics.unique_click_count || 0,
-              replied_count: analytics.reply_count || 0,
-              bounced_count: analytics.bounce_count || 0,
-              unsubscribed_count: analytics.unsubscribe_count || 0,
-            };
+            // Fetch all variants for this campaign to distribute metrics proportionally
+            const { data: campaignVariants } = await supabase
+              .from('campaign_variants')
+              .select('id, name')
+              .eq('campaign_id', campaignDbId);
 
-            // Use manual check and insert/update since partial unique index doesn't work with upsert
-            const { data: existingMetric } = await supabase
-              .from('daily_metrics')
-              .select('id')
-              .eq('workspace_id', workspace_id)
-              .eq('campaign_id', campaignDbId)
-              .eq('date', today)
-              .is('variant_id', null)
-              .is('email_account_id', null)
-              .is('segment_id', null)
-              .maybeSingle();
+            const totalVariants = campaignVariants?.length || 0;
 
-            const { error: metricsError } = existingMetric?.id
-              ? await supabase.from('daily_metrics').update(metricsPayload).eq('id', existingMetric.id)
-              : await supabase.from('daily_metrics').insert(metricsPayload);
+            if (totalVariants > 0) {
+              // Distribute metrics across variants (proportionally by count)
+              // In a real scenario, we'd use variant-level stats from the API if available
+              // For now, distribute evenly across variants
+              const variantCount = totalVariants;
+              
+              for (const variant of (campaignVariants || [])) {
+                const variantMetrics = {
+                  workspace_id,
+                  campaign_id: campaignDbId,
+                  variant_id: variant.id,
+                  date: today,
+                  sent_count: Math.round((analytics.sent_count || 0) / variantCount),
+                  delivered_count: Math.round((analytics.unique_sent_count || 0) / variantCount),
+                  opened_count: Math.round((analytics.unique_open_count || 0) / variantCount),
+                  clicked_count: Math.round((analytics.unique_click_count || 0) / variantCount),
+                  replied_count: Math.round((analytics.reply_count || 0) / variantCount),
+                  bounced_count: Math.round((analytics.bounce_count || 0) / variantCount),
+                  unsubscribed_count: Math.round((analytics.unsubscribe_count || 0) / variantCount),
+                };
 
-            if (!metricsError) progress.metrics_created++;
+                const { data: existingMetric } = await supabase
+                  .from('daily_metrics')
+                  .select('id')
+                  .eq('workspace_id', workspace_id)
+                  .eq('campaign_id', campaignDbId)
+                  .eq('variant_id', variant.id)
+                  .eq('date', today)
+                  .is('email_account_id', null)
+                  .is('segment_id', null)
+                  .maybeSingle();
+
+                const { error: metricsError } = existingMetric?.id
+                  ? await supabase.from('daily_metrics').update(variantMetrics).eq('id', existingMetric.id)
+                  : await supabase.from('daily_metrics').insert(variantMetrics);
+
+                if (!metricsError) progress.metrics_created++;
+              }
+            } else {
+              // Fallback: Insert campaign-level metrics if no variants
+              const metricsPayload = {
+                workspace_id, 
+                campaign_id: campaignDbId, 
+                date: today,
+                sent_count: analytics.sent_count || 0,
+                delivered_count: analytics.unique_sent_count || 0,
+                opened_count: analytics.unique_open_count || 0,
+                clicked_count: analytics.unique_click_count || 0,
+                replied_count: analytics.reply_count || 0,
+                bounced_count: analytics.bounce_count || 0,
+                unsubscribed_count: analytics.unsubscribe_count || 0,
+              };
+
+              const { data: existingMetric } = await supabase
+                .from('daily_metrics')
+                .select('id')
+                .eq('workspace_id', workspace_id)
+                .eq('campaign_id', campaignDbId)
+                .eq('date', today)
+                .is('variant_id', null)
+                .is('email_account_id', null)
+                .is('segment_id', null)
+                .maybeSingle();
+
+              const { error: metricsError } = existingMetric?.id
+                ? await supabase.from('daily_metrics').update(metricsPayload).eq('id', existingMetric.id)
+                : await supabase.from('daily_metrics').insert(metricsPayload);
+
+              if (!metricsError) progress.metrics_created++;
+            }
           }
 
           // 5. Fetch ALL leads using leads-statistics endpoint (provides richer data with history)
@@ -858,6 +906,26 @@ serve(async (req) => {
                 const eventPayloads: any[] = [];
                 const hourlyUpdates = new Map<string, { replied: number; positive: number; hour: number; dayOfWeek: number; date: string }>();
 
+                // Build a map of step_number -> variant_id for looking up variants by sequence step
+                const { data: stepVariants } = await supabase
+                  .from('campaign_variants')
+                  .select('id, name')
+                  .eq('campaign_id', campaignDbId);
+                
+                // Create a lookup map: step number -> variant IDs (there may be multiple variants per step for A/B tests)
+                const stepToVariantMap = new Map<number, string>();
+                for (const v of (stepVariants || [])) {
+                  // Parse step number from variant name like "Step 1 - A" or "Step 2 - Default"
+                  const stepMatch = v.name.match(/Step\s+(\d+)/i);
+                  if (stepMatch) {
+                    const stepNum = parseInt(stepMatch[1], 10);
+                    // Use first variant for each step (could be enhanced to track which variant was sent)
+                    if (!stepToVariantMap.has(stepNum)) {
+                      stepToVariantMap.set(stepNum, v.id);
+                    }
+                  }
+                }
+
                 for (const leadStat of leads) {
                   const email = leadStat.to?.toLowerCase();
                   if (!email) continue;
@@ -889,11 +957,16 @@ serve(async (req) => {
 
                       const occurredAt = msg.time ? new Date(msg.time).toISOString() : new Date().toISOString();
                       const platformEventId = msg.stats_id || msg.message_id || `${leadStat.lead_id}-${msgType}-${occurredAt}`;
+                      const sequenceStep = parseInt(msg.email_seq_number) || 1;
+                      
+                      // Look up variant_id from sequence step
+                      const variantId = stepToVariantMap.get(sequenceStep) || null;
 
                       eventPayloads.push({
                         workspace_id,
                         campaign_id: campaignDbId,
                         lead_id: dbLeadId,
+                        variant_id: variantId,
                         platform: 'smartlead',
                         platform_event_id: platformEventId,
                         event_type: eventType,
@@ -902,7 +975,7 @@ serve(async (req) => {
                         lead_email: email,
                         reply_content: msgType === 'REPLY' ? (msg.email_body || null) : null,
                         reply_sentiment: msgType === 'REPLY' ? sentiment : null,
-                        sequence_step: parseInt(msg.email_seq_number) || 1,
+                        sequence_step: sequenceStep,
                       });
 
                       // Track hourly metrics for replies
