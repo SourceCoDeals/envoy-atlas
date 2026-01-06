@@ -76,7 +76,9 @@ export default function Connections() {
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState('');
+  const [replyioApiKey, setReplyioApiKey] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnectingReplyio, setIsConnectingReplyio] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isResumingSync, setIsResumingSync] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -212,6 +214,42 @@ export default function Connections() {
       fetchConnections();
     } catch (err: any) {
       setError(err.message || 'Failed to disconnect');
+    }
+  };
+
+  const handleConnectReplyio = async () => {
+    if (!currentWorkspace || !user || !replyioApiKey.trim()) {
+      setError('Please enter an API key');
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setIsConnectingReplyio(true);
+
+    try {
+      const { error } = await supabase
+        .from('api_connections')
+        .upsert({
+          workspace_id: currentWorkspace.id,
+          platform: 'replyio',
+          api_key_encrypted: replyioApiKey,
+          is_active: true,
+          sync_status: 'pending',
+          created_by: user.id,
+        }, {
+          onConflict: 'workspace_id,platform',
+        });
+
+      if (error) throw error;
+
+      setSuccess('Reply.io connected successfully!');
+      setReplyioApiKey('');
+      fetchConnections();
+    } catch (err: any) {
+      setError(err.message || 'Failed to connect');
+    } finally {
+      setIsConnectingReplyio(false);
     }
   };
 
@@ -551,26 +589,101 @@ export default function Connections() {
             </CardContent>
           </Card>
 
-          {/* Reply.io Connection (Coming Soon) */}
-          <Card className="opacity-60">
+          {/* Reply.io Connection */}
+          <Card className={replyioConnection ? 'border-success/30' : ''}>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                    <Plug className="h-5 w-5 text-muted-foreground" />
+                    <Plug className={`h-5 w-5 ${replyioConnection ? 'text-primary' : 'text-muted-foreground'}`} />
                   </div>
                   <div>
                     <CardTitle className="text-lg">Reply.io</CardTitle>
                     <CardDescription>Secondary outreach platform</CardDescription>
                   </div>
                 </div>
-                <Badge variant="secondary">Coming Soon</Badge>
+                {replyioConnection && (
+                  <Badge variant="outline" className="border-success text-success">
+                    <StatusDot status="healthy" size="sm" className="mr-1" />
+                    Connected
+                  </Badge>
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Reply.io integration will be available after Smartlead MVP is complete.
-              </p>
+              {replyioConnection ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Status</span>
+                    <span className="capitalize">
+                      {replyioConnection.sync_status || 'Active'}
+                    </span>
+                  </div>
+                  
+                  {replyioConnection.last_sync_at && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Last Sync</span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(replyioConnection.last_sync_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => handleDisconnect(replyioConnection.id)}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="replyio-key">API Key</Label>
+                    <div className="relative">
+                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="replyio-key"
+                        type="password"
+                        placeholder="Enter your Reply.io API key"
+                        value={replyioApiKey}
+                        onChange={(e) => setReplyioApiKey(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Button
+                      onClick={() => handleConnectReplyio()}
+                      disabled={isConnectingReplyio || !replyioApiKey.trim()}
+                    >
+                      {isConnectingReplyio ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        'Connect Reply.io'
+                      )}
+                    </Button>
+                    <Button variant="link" size="sm" asChild>
+                      <a 
+                        href="https://app.reply.io/settings/apikey" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                      >
+                        Get API Key
+                        <ExternalLink className="ml-1 h-3 w-3" />
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
