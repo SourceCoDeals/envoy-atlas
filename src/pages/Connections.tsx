@@ -219,8 +219,8 @@ export default function Connections() {
         },
       });
     } catch (e) {
-      // Silent: progress polling + error state in DB will surface
-      console.error('Continue sync error:', e);
+      // Silent: don't show banner for automatic continue calls
+      console.log('Continue sync call completed (may have timed out, will retry)');
     } finally {
       setIsResumingSync(false);
     }
