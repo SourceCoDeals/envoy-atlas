@@ -45,6 +45,29 @@ export function InboxPlacementEstimate({
     return <Badge className="bg-destructive/20 text-destructive border-destructive/30">Poor</Badge>;
   };
 
+  const getISPBenchmark = (ispName: string) => {
+    const benchmarks: Record<string, number> = {
+      'Gmail': 0.85,
+      'Outlook': 0.88,
+      'Yahoo': 0.85,
+      'Corporate': 0.92,
+    };
+    return benchmarks[ispName] || 0.85;
+  };
+
+  const getISPRecommendation = (isp: ISPPlacement) => {
+    const benchmark = getISPBenchmark(isp.name);
+    const gap = benchmark - isp.estimatedInboxRate;
+    if (gap <= 0) return null;
+    if (isp.name === 'Yahoo') {
+      return 'Yahoo is stricter about engagement signals. Clean contacts with no engagement in 90+ days.';
+    }
+    if (isp.name === 'Gmail') {
+      return 'Gmail prioritizes sender reputation. Focus on reducing complaints and improving engagement.';
+    }
+    return 'Review authentication and content for improvement opportunities.';
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -58,10 +81,18 @@ export function InboxPlacementEstimate({
               Where your emails are landing
             </CardDescription>
           </div>
-          <Badge variant="outline" className="flex items-center gap-1">
-            <Info className="h-3 w-3" />
-            {confidence === 'estimated' ? 'Estimated' : 'Measured'}
-          </Badge>
+          <div className="relative group">
+            <Badge variant="outline" className="flex items-center gap-1 cursor-help">
+              <Info className="h-3 w-3" />
+              {confidence === 'estimated' ? 'Estimated' : 'Measured'}
+            </Badge>
+            <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-popover border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+              <p className="text-xs text-muted-foreground">
+                <strong className="text-foreground block mb-1">Estimation Method</strong>
+                Calculated from engagement signals (open rates, reply rates, bounce rates) compared to expected baselines. For precise measurement, consider seed list testing.
+              </p>
+            </div>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
