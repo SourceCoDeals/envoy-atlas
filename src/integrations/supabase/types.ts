@@ -793,6 +793,107 @@ export type Database = {
           },
         ]
       }
+      deal_clients: {
+        Row: {
+          contact_email: string | null
+          created_at: string
+          id: string
+          name: string
+          workspace_id: string
+        }
+        Insert: {
+          contact_email?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          workspace_id: string
+        }
+        Update: {
+          contact_email?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deal_clients_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deals: {
+        Row: {
+          business_description: string | null
+          client_id: string | null
+          client_name: string | null
+          created_at: string
+          created_by: string
+          ebitda: number | null
+          geography: string | null
+          id: string
+          industry: string | null
+          project_name: string
+          revenue: number | null
+          stage: string
+          teaser_url: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          business_description?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          created_at?: string
+          created_by: string
+          ebitda?: number | null
+          geography?: string | null
+          id?: string
+          industry?: string | null
+          project_name: string
+          revenue?: number | null
+          stage?: string
+          teaser_url?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          business_description?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          created_at?: string
+          created_by?: string
+          ebitda?: number | null
+          geography?: string | null
+          id?: string
+          industry?: string | null
+          project_name?: string
+          revenue?: number | null
+          stage?: string
+          teaser_url?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deals_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "deal_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_accounts: {
         Row: {
           created_at: string

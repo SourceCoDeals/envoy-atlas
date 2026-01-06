@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import Dashboard from "./pages/Dashboard";
+import DealHub from "./pages/DealHub";
 import Auth from "./pages/Auth";
 import Connections from "./pages/Connections";
 import Campaigns from "./pages/Campaigns";
@@ -34,6 +35,7 @@ const App = () => (
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/deal-hub" element={<DealHub />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/connections" element={<Connections />} />
               <Route path="/campaigns" element={<Campaigns />} />
