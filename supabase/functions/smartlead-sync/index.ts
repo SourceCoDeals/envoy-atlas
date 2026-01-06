@@ -8,9 +8,10 @@ const corsHeaders = {
 };
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
-const RATE_LIMIT_DELAY = 150; // Reduced from 300ms - Smartlead allows 10 req/2s
-const BATCH_SIZE = 5; // Increased from 2 for faster throughput
-const TIME_BUDGET_MS = 45000; // 45 seconds - increased from 22s
+const RATE_LIMIT_DELAY = 300; // Increased from 150ms to reduce rate limiting errors
+const BATCH_SIZE = 5; // Campaigns per invocation
+const TIME_BUDGET_MS = 45000; // 45 seconds
+const SYNC_LOCK_TIMEOUT_MS = 30000; // 30 seconds - if last heartbeat is older, allow new sync
 
 // Personal email domains for classification
 const PERSONAL_DOMAINS = new Set([
@@ -175,11 +176,40 @@ serve(async (req) => {
     if (memberError || !membership) throw new Error('Access denied to workspace');
 
     const { data: connection, error: connError } = await supabase
-      .from('api_connections').select('id, api_key_encrypted, sync_progress')
+      .from('api_connections').select('id, api_key_encrypted, sync_progress, sync_status')
       .eq('workspace_id', workspace_id).eq('platform', 'smartlead').eq('is_active', true).single();
     if (connError || !connection) throw new Error('No active Smartlead connection found');
 
     const apiKey = connection.api_key_encrypted;
+    const existingSyncProgress = connection.sync_progress as any || {};
+
+    // SYNC LOCK: Check if another sync is currently running
+    if (!reset && !force_advance) {
+      const lastHeartbeat = existingSyncProgress.last_heartbeat;
+      if (lastHeartbeat) {
+        const timeSinceHeartbeat = Date.now() - new Date(lastHeartbeat).getTime();
+        if (timeSinceHeartbeat < SYNC_LOCK_TIMEOUT_MS) {
+          console.log(`[smartlead-sync] Another sync is active (heartbeat ${Math.round(timeSinceHeartbeat / 1000)}s ago). Skipping.`);
+          return new Response(JSON.stringify({
+            success: true,
+            done: false,
+            skipped: true,
+            message: 'Another sync is currently running. Skipping to avoid race condition.',
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+
+      // COMPLETED CHECK: Don't restart a completed sync without explicit reset
+      if (existingSyncProgress.completed === true && connection.sync_status === 'success') {
+        console.log(`[smartlead-sync] Sync already completed. Use reset=true to restart.`);
+        return new Response(JSON.stringify({
+          success: true,
+          done: true,
+          already_complete: true,
+          message: 'Sync already completed. Use reset to re-sync from scratch.',
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    }
 
     // Handle reset - clear all synced data
     if (reset) {
@@ -245,6 +275,15 @@ serve(async (req) => {
 
     // Time budget tracking
     const startTime = Date.now();
+
+    // Update heartbeat immediately to claim the sync lock
+    await supabase.from('api_connections').update({
+      sync_status: 'syncing',
+      sync_progress: {
+        ...existingProgress,
+        last_heartbeat: new Date().toISOString(),
+      },
+    }).eq('id', connection.id);
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
 
     try {
