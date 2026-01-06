@@ -674,6 +674,150 @@ export type Database = {
           },
         ]
       }
+      hourly_metrics: {
+        Row: {
+          campaign_id: string | null
+          clicked_count: number | null
+          created_at: string
+          date: string
+          day_of_week: number
+          hour: number
+          id: string
+          opened_count: number | null
+          positive_reply_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          workspace_id: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          clicked_count?: number | null
+          created_at?: string
+          date: string
+          day_of_week: number
+          hour: number
+          id?: string
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          workspace_id: string
+        }
+        Update: {
+          campaign_id?: string | null
+          clicked_count?: number | null
+          created_at?: string
+          date?: string
+          day_of_week?: number
+          hour?: number
+          id?: string
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hourly_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hourly_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leads: {
+        Row: {
+          campaign_id: string | null
+          company: string | null
+          company_size: string | null
+          created_at: string
+          email: string
+          email_domain: string | null
+          email_type: string | null
+          first_name: string | null
+          id: string
+          industry: string | null
+          last_name: string | null
+          lead_source: string | null
+          linkedin_url: string | null
+          location: string | null
+          platform: string
+          platform_lead_id: string | null
+          status: string | null
+          title: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          company?: string | null
+          company_size?: string | null
+          created_at?: string
+          email: string
+          email_domain?: string | null
+          email_type?: string | null
+          first_name?: string | null
+          id?: string
+          industry?: string | null
+          last_name?: string | null
+          lead_source?: string | null
+          linkedin_url?: string | null
+          location?: string | null
+          platform: string
+          platform_lead_id?: string | null
+          status?: string | null
+          title?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          campaign_id?: string | null
+          company?: string | null
+          company_size?: string | null
+          created_at?: string
+          email?: string
+          email_domain?: string | null
+          email_type?: string | null
+          first_name?: string | null
+          id?: string
+          industry?: string | null
+          last_name?: string | null
+          lead_source?: string | null
+          linkedin_url?: string | null
+          location?: string | null
+          platform?: string
+          platform_lead_id?: string | null
+          status?: string | null
+          title?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       message_events: {
         Row: {
           campaign_id: string | null
@@ -682,11 +826,15 @@ export type Database = {
           event_type: string
           id: string
           lead_email: string | null
+          lead_id: string | null
           metadata: Json | null
           occurred_at: string
           platform: string
           platform_event_id: string | null
+          reply_content: string | null
+          reply_sentiment: string | null
           segment_id: string | null
+          sequence_step: number | null
           step_id: string | null
           variant_id: string | null
           workspace_id: string
@@ -698,11 +846,15 @@ export type Database = {
           event_type: string
           id?: string
           lead_email?: string | null
+          lead_id?: string | null
           metadata?: Json | null
           occurred_at: string
           platform: string
           platform_event_id?: string | null
+          reply_content?: string | null
+          reply_sentiment?: string | null
           segment_id?: string | null
+          sequence_step?: number | null
           step_id?: string | null
           variant_id?: string | null
           workspace_id: string
@@ -714,11 +866,15 @@ export type Database = {
           event_type?: string
           id?: string
           lead_email?: string | null
+          lead_id?: string | null
           metadata?: Json | null
           occurred_at?: string
           platform?: string
           platform_event_id?: string | null
+          reply_content?: string | null
+          reply_sentiment?: string | null
           segment_id?: string | null
+          sequence_step?: number | null
           step_id?: string | null
           variant_id?: string | null
           workspace_id?: string
@@ -736,6 +892,13 @@ export type Database = {
             columns: ["email_account_id"]
             isOneToOne: false
             referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
             referencedColumns: ["id"]
           },
           {
@@ -894,6 +1057,13 @@ export type Database = {
           verified_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "reply_classifications_message_event_id_fkey"
+            columns: ["message_event_id"]
+            isOneToOne: false
+            referencedRelation: "inbox_items"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "reply_classifications_message_event_id_fkey"
             columns: ["message_event_id"]
@@ -1087,6 +1257,32 @@ export type Database = {
       }
     }
     Views: {
+      audience_performance: {
+        Row: {
+          company_size: string | null
+          contacted: number | null
+          email_domain: string | null
+          email_type: string | null
+          industry: string | null
+          opened: number | null
+          positive_replies: number | null
+          positive_reply_rate: number | null
+          replied: number | null
+          reply_rate: number | null
+          title: string | null
+          total_leads: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       copy_performance: {
         Row: {
           body_preview: string | null
@@ -1120,6 +1316,75 @@ export type Database = {
           },
           {
             foreignKeyName: "campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inbox_items: {
+        Row: {
+          campaign_id: string | null
+          campaign_name: string | null
+          company: string | null
+          created_at: string | null
+          email_domain: string | null
+          email_type: string | null
+          event_type: string | null
+          first_name: string | null
+          id: string | null
+          last_name: string | null
+          lead_email: string | null
+          lead_id: string | null
+          occurred_at: string | null
+          reply_content: string | null
+          reply_sentiment: string | null
+          sequence_step: number | null
+          subject_line: string | null
+          title: string | null
+          variant_name: string | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_events_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      time_performance: {
+        Row: {
+          day_of_week: number | null
+          hour: number | null
+          open_rate: number | null
+          reply_rate: number | null
+          total_opened: number | null
+          total_positive: number | null
+          total_replied: number | null
+          total_sent: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hourly_metrics_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"

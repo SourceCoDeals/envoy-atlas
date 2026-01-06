@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
@@ -31,12 +32,14 @@ export function CampaignRow({ campaign }: CampaignRowProps) {
   };
 
   return (
-    <TableRow>
+    <TableRow className="cursor-pointer hover:bg-accent/50">
       <TableCell className="font-medium">
-        <div className="flex flex-col">
-          <span className="truncate max-w-[280px]">{campaign.name}</span>
-          <span className="text-xs text-muted-foreground">{campaign.platform}</span>
-        </div>
+        <Link to={`/campaigns/${campaign.id}`} className="block">
+          <div className="flex flex-col">
+            <span className="truncate max-w-[280px] hover:text-primary">{campaign.name}</span>
+            <span className="text-xs text-muted-foreground">{campaign.platform}</span>
+          </div>
+        </Link>
       </TableCell>
       <TableCell>
         <Badge variant={getStatusVariant(campaign.status)}>
