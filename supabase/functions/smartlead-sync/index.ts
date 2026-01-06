@@ -225,7 +225,7 @@ serve(async (req) => {
     if (force_advance) {
       console.log(`Force advancing from campaign ${resumeFromCampaign} to ${resumeFromCampaign + 1}`);
       resumeFromCampaign += 1;
-      existingProgress = { ...existingProgress, campaign_index: resumeFromCampaign, force_advanced: true };
+      existingProgress = { ...existingProgress, campaign_index: resumeFromCampaign, leads_offset: 0, force_advanced: true };
     }
 
     // Update status to syncing
@@ -507,7 +507,11 @@ serve(async (req) => {
 
           // 5. Fetch ALL leads using leads-statistics endpoint (provides richer data with history)
           try {
-            let offset = 0;
+            const savedOffset = (existingProgress?.campaign_index === i && typeof (existingProgress as any).leads_offset === 'number')
+              ? (existingProgress as any).leads_offset
+              : 0;
+
+            let offset = savedOffset;
             const pageSize = 100;
             let hasMore = true;
 
@@ -708,6 +712,7 @@ serve(async (req) => {
               campaign_name: campaign.name,
               step: 'campaigns',
               progress: Math.round(((i + 1) / Math.max(1, totalCampaigns)) * 90) + 5,
+              leads_offset: 0,
               ...progress,
             },
           }).eq('id', connection.id);
