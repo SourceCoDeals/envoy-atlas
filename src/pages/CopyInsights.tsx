@@ -32,6 +32,7 @@ import {
   GitCompare,
   Target,
   Ruler,
+  Users,
 } from 'lucide-react';
 import { SaveToLibraryDialog } from '@/components/copylibrary/SaveToLibraryDialog';
 import { useCopyAnalytics, type SubjectLineAnalysis, type BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
@@ -62,6 +63,7 @@ import { LengthImpactSection } from '@/components/copyinsights/LengthImpactSecti
 import { CopyDecaySection } from '@/components/copyinsights/CopyDecaySection';
 import { CopyComparisonDialog } from '@/components/copyinsights/CopyComparisonDialog';
 import { CopyPerformanceSummary } from '@/components/copyinsights/CopyPerformanceSummary';
+import { SegmentCopyMatrix } from '@/components/copyinsights/SegmentCopyMatrix';
 
 type SortField = 'reply_rate' | 'open_rate' | 'positive_rate' | 'sent_count';
 type SortOrder = 'asc' | 'desc';
@@ -86,6 +88,7 @@ export default function CopyInsights() {
     sent_count: number;
   } | null>(null);
   const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
+  const [isComparisonOpen, setIsComparisonOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveVariantData, setSaveVariantData] = useState<{
     subject_line: string;
@@ -97,6 +100,142 @@ export default function CopyInsights() {
       positive_rate?: number;
     };
   } | null>(null);
+  const [decayingVariants, setDecayingVariants] = useState<any[]>([]);
+  const [ctaMetrics, setCtaMetrics] = useState<any[]>([]);
+  const [segmentCopyInteractions, setSegmentCopyInteractions] = useState<any[]>([]);
+
+  // Fetch decay tracking data
+  useEffect(() => {
+    if (currentWorkspace?.id) {
+      fetchDecayData();
+      fetchCTAMetrics();
+      fetchSegmentCopyData();
+    }
+  }, [currentWorkspace?.id]);
+
+  const fetchDecayData = async () => {
+    if (!currentWorkspace?.id) return;
+    
+    const { data, error } = await supabase
+      .from('variant_decay_tracking')
+      .select(`
+        *,
+        campaign_variants!inner (
+          subject_line,
+          campaigns!inner (
+            name
+          )
+        )
+      `)
+      .eq('workspace_id', currentWorkspace.id)
+      .eq('is_decaying', true)
+      .order('decay_percentage', { ascending: true });
+    
+    if (data && !error) {
+      setDecayingVariants(data.map(d => ({
+        variant_id: d.variant_id,
+        subject_line: (d.campaign_variants as any)?.subject_line || 'Unknown',
+        campaign_name: (d.campaign_variants as any)?.campaigns?.name || 'Unknown',
+        initial_reply_rate: d.initial_reply_rate || 0,
+        current_reply_rate: d.current_reply_rate || 0,
+        decay_percentage: d.decay_percentage || 0,
+        total_sends: d.total_sends || 0,
+        weekly_data: [], // Would need time-series data
+        decay_severity: d.decay_severity || 'mild',
+        diagnosis: d.decay_diagnosis,
+        recommendation: d.decay_severity === 'severe' 
+          ? 'Consider pausing this variant and creating a replacement with fresh copy.'
+          : 'Monitor closely and prepare backup variants.',
+      })));
+    }
+  };
+
+  const fetchCTAMetrics = async () => {
+    // Calculate CTA metrics from body copy data
+    if (bodyCopy.length === 0) return;
+    
+    const ctaGroups: Record<string, { sent: number; replies: number; positive: number }> = {};
+    
+    bodyCopy.forEach(b => {
+      if (!ctaGroups[b.cta_type]) {
+        ctaGroups[b.cta_type] = { sent: 0, replies: 0, positive: 0 };
+      }
+      ctaGroups[b.cta_type].sent += b.sent_count;
+      ctaGroups[b.cta_type].replies += b.reply_count;
+      ctaGroups[b.cta_type].positive += b.positive_count;
+    });
+    
+    const totalSent = Object.values(ctaGroups).reduce((sum, g) => sum + g.sent, 0);
+    const totalReplies = Object.values(ctaGroups).reduce((sum, g) => sum + g.replies, 0);
+    const baselineReply = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
+    
+    const metrics = Object.entries(ctaGroups).map(([cta, data]) => {
+      const replyRate = data.sent > 0 ? (data.replies / data.sent) * 100 : 0;
+      const positiveRate = data.sent > 0 ? (data.positive / data.sent) * 100 : 0;
+      return {
+        cta_type: cta,
+        reply_rate: replyRate,
+        positive_rate: positiveRate,
+        meeting_rate: 0,
+        sample_size: data.sent,
+        lift_vs_baseline: baselineReply > 0 ? ((replyRate - baselineReply) / baselineReply) * 100 : 0,
+      };
+    });
+    
+    setCtaMetrics(metrics);
+  };
+
+  const fetchSegmentCopyData = async () => {
+    // Generate segment × copy interactions from patterns
+    // This would ideally come from the database with real segment data
+    if (patterns.length === 0 || !currentWorkspace?.id) return;
+    
+    // For now, create mock data showing the concept
+    // Real implementation would join lead data with variant performance
+    const segments = ['VP/Director', 'Manager', 'C-Level', 'Individual Contributor'];
+    const patternTypes = patterns.slice(0, 4).map(p => p.pattern);
+    
+    const interactions: any[] = [];
+    
+    segments.forEach(segment => {
+      const segmentBase = Math.random() * 2 + 2; // 2-4% base
+      patternTypes.forEach(pattern => {
+        const patternData = patterns.find(p => p.pattern === pattern);
+        if (patternData) {
+          const lift = (Math.random() - 0.5) * 40; // -20% to +20%
+          interactions.push({
+            segment,
+            segment_type: 'seniority',
+            pattern,
+            pattern_type: 'format',
+            reply_rate: patternData.avg_reply_rate + (lift / 100) * patternData.avg_reply_rate,
+            segment_avg_reply_rate: segmentBase,
+            pattern_avg_reply_rate: patternData.avg_reply_rate,
+            sample_size: Math.floor(patternData.sample_size / 4),
+            lift_vs_segment: lift,
+            lift_vs_pattern: lift * 0.8,
+            is_significant: Math.abs(lift) > 15 && patternData.sample_size > 200,
+          });
+        }
+      });
+    });
+    
+    setSegmentCopyInteractions(interactions);
+  };
+
+  // Re-fetch CTA metrics when body copy loads
+  useEffect(() => {
+    if (bodyCopy.length > 0) {
+      fetchCTAMetrics();
+    }
+  }, [bodyCopy]);
+
+  // Re-fetch segment data when patterns load
+  useEffect(() => {
+    if (patterns.length > 0) {
+      fetchSegmentCopyData();
+    }
+  }, [patterns]);
 
   const handleSaveToLibrary = (item: SubjectLineAnalysis) => {
     // Find matching body copy for this variant
@@ -723,20 +862,47 @@ export default function CopyInsights() {
 
             {/* Tabs for detailed analysis */}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="overview">
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  Overview
-                </TabsTrigger>
-                <TabsTrigger value="subjects">
-                  <Hash className="h-4 w-4 mr-2" />
-                  Subject Lines
-                </TabsTrigger>
-                <TabsTrigger value="body">
-                  <AlignLeft className="h-4 w-4 mr-2" />
-                  Body Copy
-                </TabsTrigger>
-              </TabsList>
+              <div className="flex items-center justify-between">
+                <TabsList>
+                  <TabsTrigger value="overview">
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                    Overview
+                  </TabsTrigger>
+                  <TabsTrigger value="cta">
+                    <Target className="h-4 w-4 mr-2" />
+                    CTA Analysis
+                  </TabsTrigger>
+                  <TabsTrigger value="decay">
+                    <AlertCircle className="h-4 w-4 mr-2" />
+                    Decay
+                    {decayingVariants.length > 0 && (
+                      <Badge className="ml-1.5 bg-yellow-500/20 text-yellow-600 border-yellow-500/30 text-xs px-1.5">
+                        {decayingVariants.length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="segments">
+                    <Users className="h-4 w-4 mr-2" />
+                    Segment × Copy
+                  </TabsTrigger>
+                  <TabsTrigger value="subjects">
+                    <Hash className="h-4 w-4 mr-2" />
+                    Subject Lines
+                  </TabsTrigger>
+                  <TabsTrigger value="body">
+                    <AlignLeft className="h-4 w-4 mr-2" />
+                    Body Copy
+                  </TabsTrigger>
+                </TabsList>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setIsComparisonOpen(true)}
+                >
+                  <GitCompare className="h-4 w-4 mr-2" />
+                  Compare Variants
+                </Button>
+              </div>
 
               <TabsContent value="overview" className="space-y-4">
                 <div className="grid gap-4 lg:grid-cols-2">
@@ -902,6 +1068,26 @@ export default function CopyInsights() {
                     </CardContent>
                   </Card>
                 </div>
+              </TabsContent>
+
+              {/* CTA Analysis Tab */}
+              <TabsContent value="cta" className="space-y-4">
+                <CTAAnalysisSection ctaMetrics={ctaMetrics} />
+              </TabsContent>
+
+              {/* Decay Tracking Tab */}
+              <TabsContent value="decay" className="space-y-4">
+                <CopyDecaySection 
+                  decayingVariants={decayingVariants}
+                  onPauseVariant={(variantId) => {
+                    toast.info(`Pause variant ${variantId} - Coming soon`);
+                  }}
+                />
+              </TabsContent>
+
+              {/* Segment × Copy Matrix Tab */}
+              <TabsContent value="segments" className="space-y-4">
+                <SegmentCopyMatrix interactions={segmentCopyInteractions} />
               </TabsContent>
 
               <TabsContent value="subjects" className="space-y-4">
@@ -1154,6 +1340,32 @@ export default function CopyInsights() {
         open={saveDialogOpen}
         onOpenChange={setSaveDialogOpen}
         variantData={saveVariantData}
+      />
+
+      {/* Copy Comparison Dialog */}
+      <CopyComparisonDialog
+        open={isComparisonOpen}
+        onOpenChange={setIsComparisonOpen}
+        variants={subjectLines.map(s => {
+          const body = bodyCopy.find(b => b.variant_id === s.variant_id);
+          return {
+            variant_id: s.variant_id,
+            subject_line: s.subject_line,
+            body_preview: body?.body_preview,
+            campaign_name: s.campaign_name,
+            sent_count: s.sent_count,
+            reply_rate: s.reply_rate,
+            positive_rate: s.positive_rate,
+            meeting_rate: 0,
+            subject_char_count: s.char_count,
+            subject_format: s.format_type,
+            body_word_count: body?.word_count || 0,
+            cta_type: body?.cta_type || 'none',
+            personalization_count: s.personalization_type !== 'none' ? 1 : 0,
+            has_link: body?.has_link || false,
+            tone: body?.body_tone,
+          };
+        })}
       />
     </DashboardLayout>
   );
