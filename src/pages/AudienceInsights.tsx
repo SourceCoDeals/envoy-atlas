@@ -8,13 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Users, Building2, Briefcase, Target, TrendingUp, TrendingDown, AlertTriangle, Sparkles } from 'lucide-react';
+import { Loader2, Users, Building2, Briefcase, Target, TrendingUp, TrendingDown, AlertTriangle, Sparkles, Database } from 'lucide-react';
 import { useAudienceAnalytics } from '@/hooks/useAudienceAnalytics';
 import { SegmentPerformanceRanking, createSegmentRankings } from '@/components/audience/SegmentPerformanceRanking';
 import { ICPValidationSection, createICPHypothesis } from '@/components/audience/ICPValidationSection';
 import { FatigueMonitor, calculateSegmentFatigue } from '@/components/audience/FatigueMonitor';
 import { VolumeAllocationRecommendations, generateVolumeRecommendations } from '@/components/audience/VolumeAllocationRecommendations';
-import { SegmentCopyMatrix as CopyInsightsMatrix } from '@/components/copyinsights/SegmentCopyMatrix';
+import { SegmentCopyMatrix } from '@/components/audience/SegmentCopyMatrix';
 
 export default function AudienceInsights() {
   const navigate = useNavigate();
@@ -142,7 +142,7 @@ export default function AudienceInsights() {
               ICP validation and targeting intelligence engine
             </p>
           </div>
-          {dataQuality.issues.length > 0 && (
+          {dataQuality.uniqueTitles > 0 && (
             <Button variant="outline" size="sm" onClick={handleEnrichment} disabled={enriching}>
               {enriching ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
               Enrich Leads
@@ -150,12 +150,24 @@ export default function AudienceInsights() {
           )}
         </div>
 
-        {/* Data Quality Warning */}
-        {dataQuality.issues.length > 0 && (
+        {/* Critical Data Quality Warning - No source data */}
+        {dataQuality.uniqueTitles === 0 && totalLeads > 0 && (
           <Alert variant="destructive" className="bg-destructive/10 border-destructive/30">
-            <AlertTriangle className="h-4 w-4" />
+            <Database className="h-4 w-4" />
             <AlertDescription className="ml-2">
-              <span className="font-medium">Data quality issues detected: </span>
+              <span className="font-medium">Missing lead data: </span>
+              Your {totalLeads.toLocaleString()} leads have no job titles, industries, or company data. 
+              Audience insights require this data from your email platform sync. Check your Smartlead/Reply.io connection to ensure lead fields are being synced.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Partial Data Quality Warning */}
+        {dataQuality.issues.length > 0 && dataQuality.uniqueTitles > 0 && (
+          <Alert variant="default" className="bg-warning/10 border-warning/30">
+            <AlertTriangle className="h-4 w-4 text-warning" />
+            <AlertDescription className="ml-2 text-warning-foreground">
+              <span className="font-medium">Data quality issues: </span>
               {dataQuality.issues.join('. ')}
               {dataQuality.enrichmentPercent < 100 && (
                 <span className="ml-1">Click "Enrich Leads" to classify leads by seniority and department.</span>
@@ -185,11 +197,16 @@ export default function AudienceInsights() {
                     <span className="text-2xl font-bold">{totalLeads.toLocaleString()}</span>
                   </div>
                   <p className="text-xs text-muted-foreground">Total Leads</p>
-                  <p className="text-xs text-muted-foreground mt-1">{totalContacted.toLocaleString()} contacted</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {totalContacted.toLocaleString()} contacted
+                    {dataQuality.uniqueTitles === 0 && (
+                      <Badge variant="destructive" className="ml-2 text-[10px] py-0">No titles</Badge>
+                    )}
+                  </p>
                 </CardContent>
               </Card>
               
-              <Card className={bestSegment ? "border-success/30 bg-success/5" : ""}>
+              <Card className={bestSegment ? "border-success/30 bg-success/5" : "border-dashed"}>
                 <CardContent className="pt-4">
                   {bestSegment ? (
                     <>
@@ -205,17 +222,19 @@ export default function AudienceInsights() {
                   ) : (
                     <>
                       <div className="flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-lg text-muted-foreground">—</span>
+                        <AlertTriangle className="h-4 w-4 text-warning" />
+                        <span className="text-lg text-muted-foreground">No Data</span>
                       </div>
                       <p className="text-xs text-muted-foreground">Best Segment</p>
-                      <p className="text-xs text-muted-foreground mt-1">Need more data</p>
+                      <p className="text-xs text-warning mt-1">
+                        {dataQuality.uniqueTitles === 0 ? 'Needs lead titles' : 'Need more sends'}
+                      </p>
                     </>
                   )}
                 </CardContent>
               </Card>
 
-              <Card className={worstSegment ? "border-destructive/30 bg-destructive/5" : ""}>
+              <Card className={worstSegment ? "border-destructive/30 bg-destructive/5" : "border-dashed"}>
                 <CardContent className="pt-4">
                   {worstSegment ? (
                     <>
@@ -231,11 +250,13 @@ export default function AudienceInsights() {
                   ) : (
                     <>
                       <div className="flex items-center gap-2">
-                        <TrendingDown className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-lg text-muted-foreground">—</span>
+                        <AlertTriangle className="h-4 w-4 text-warning" />
+                        <span className="text-lg text-muted-foreground">No Data</span>
                       </div>
                       <p className="text-xs text-muted-foreground">Worst Segment</p>
-                      <p className="text-xs text-muted-foreground mt-1">Need more data</p>
+                      <p className="text-xs text-warning mt-1">
+                        {dataQuality.uniqueTitles === 0 ? 'Needs lead titles' : 'Need more sends'}
+                      </p>
                     </>
                   )}
                 </CardContent>
@@ -249,7 +270,10 @@ export default function AudienceInsights() {
                   </div>
                   <p className="text-xs text-muted-foreground">Avg Reply Rate</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {dataQuality.uniqueSeniorityLevels} seniority levels tracked
+                    {dataQuality.uniqueSeniorityLevels > 0 
+                      ? `${dataQuality.uniqueSeniorityLevels} seniority levels tracked`
+                      : 'No segments available'
+                    }
                   </p>
                 </CardContent>
               </Card>
@@ -295,20 +319,9 @@ export default function AudienceInsights() {
               </TabsContent>
 
               <TabsContent value="copy" className="space-y-4">
-                <CopyInsightsMatrix 
-                  interactions={segmentCopyInteractions.map(i => ({
-                    segment: i.segment,
-                    segment_type: i.segmentType,
-                    pattern: i.pattern,
-                    pattern_type: i.patternType,
-                    reply_rate: i.replyRate,
-                    segment_avg_reply_rate: i.segmentAvgReplyRate,
-                    pattern_avg_reply_rate: i.patternAvgReplyRate,
-                    sample_size: i.sampleSize,
-                    lift_vs_segment: i.liftVsSegment,
-                    lift_vs_pattern: i.liftVsPattern,
-                    is_significant: i.isSignificant,
-                  }))}
+                <SegmentCopyMatrix 
+                  interactions={segmentCopyInteractions}
+                  minSampleSize={30}
                 />
               </TabsContent>
 
