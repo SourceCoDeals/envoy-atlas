@@ -1342,10 +1342,9 @@ export default function Connections() {
                     const progress = phoneburnerConnection.sync_progress as any;
                     const phase = progress?.phase || 'initializing';
                     const contactsSynced = progress?.contacts_synced || 0;
-                    const sessionsSynced = progress?.sessions_synced || 0;
+                    const activitiesSynced = progress?.activities_synced || 0;
                     const callsSynced = progress?.calls_synced || 0;
-                    const sessionsPage = progress?.sessions_page || 1;
-                    const totalSessions = progress?.total_sessions || 0;
+                    const contactOffset = progress?.contact_offset || 0;
                     const contactsPage = progress?.contacts_page || 1;
                     const totalPages = progress?.total_pages || 1;
                     
@@ -1358,12 +1357,13 @@ export default function Connections() {
                     } else if (phase === 'contacts') {
                       progressPercent = totalPages > 1 ? Math.round((contactsPage / totalPages) * 25) : 15;
                       phaseLabel = `Syncing contacts (page ${contactsPage}/${totalPages})`;
-                    } else if (phase === 'dialsessions') {
-                      const sessionProgress = totalSessions > 0 
-                        ? Math.round((sessionsSynced / totalSessions) * 55) 
-                        : Math.round((sessionsPage / Math.max(totalPages, 1)) * 55);
-                      progressPercent = 25 + Math.min(55, sessionProgress);
-                      phaseLabel = `Syncing dial sessions (page ${sessionsPage}${totalPages > 1 ? `/${totalPages}` : ''}, ${sessionsSynced} sessions, ${callsSynced} calls)`;
+                    } else if (phase === 'activities') {
+                      // Activities phase - iterate through contacts
+                      const activityProgress = contactsSynced > 0 
+                        ? Math.round((contactOffset / contactsSynced) * 55) 
+                        : 30;
+                      progressPercent = 25 + Math.min(55, activityProgress);
+                      phaseLabel = `Fetching call activities (${contactOffset}/${contactsSynced} contacts, ${callsSynced} calls found)`;
                     } else if (phase === 'metrics') {
                       progressPercent = 85;
                       phaseLabel = 'Syncing aggregate metrics';
@@ -1379,11 +1379,11 @@ export default function Connections() {
                           <span className="font-medium">{contactsSynced.toLocaleString()}</span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Dial Sessions</span>
-                          <span className="font-medium">{sessionsSynced.toLocaleString()}</span>
+                          <span className="text-muted-foreground">Activities Scanned</span>
+                          <span className="font-medium">{activitiesSynced.toLocaleString()}</span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Calls</span>
+                          <span className="text-muted-foreground">Calls Found</span>
                           <span className="font-medium">{callsSynced.toLocaleString()}</span>
                         </div>
                         <div className="space-y-1">
@@ -1406,7 +1406,7 @@ export default function Connections() {
                       </div>
                       <div className="flex items-center gap-1">
                         <CheckCircle2 className="h-4 w-4 text-success" />
-                        <span>{(phoneburnerConnection.sync_progress as any).sessions_synced || 0} sessions</span>
+                        <span>{(phoneburnerConnection.sync_progress as any).activities_synced || 0} activities</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <CheckCircle2 className="h-4 w-4 text-success" />
