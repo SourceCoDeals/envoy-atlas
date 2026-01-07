@@ -22,6 +22,7 @@ import Experiments from "./pages/Experiments";
 import Playbook from "./pages/Playbook";
 import Alerts from "./pages/Alerts";
 import Settings from "./pages/Settings";
+import CopywritingStudio from "./pages/CopywritingStudio";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ const App = () => (
               <Route path="/copy-library" element={<CopyLibrary />} />
               <Route path="/experiments" element={<Experiments />} />
               <Route path="/playbook" element={<Playbook />} />
+              <Route path="/copywriting-studio" element={<CopywritingStudio />} />
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/settings" element={<Settings />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

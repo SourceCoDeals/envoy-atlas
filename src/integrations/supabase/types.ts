@@ -507,6 +507,110 @@ export type Database = {
           },
         ]
       }
+      channel_best_practices: {
+        Row: {
+          category: string
+          channel: string
+          config: Json
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          performance_lift: number | null
+          practice_type: string
+          source: string | null
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          channel: string
+          config?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          performance_lift?: number | null
+          practice_type: string
+          source?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          channel?: string
+          config?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          performance_lift?: number | null
+          practice_type?: string
+          source?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      copy_generation_sessions: {
+        Row: {
+          channel: string
+          company_context: string | null
+          created_at: string
+          created_by: string
+          generated_variations: Json | null
+          id: string
+          selected_variation_index: number | null
+          sequence_step: string
+          specific_instructions: string | null
+          target_industry: string | null
+          target_persona: string | null
+          tone: string | null
+          trigger_event: string | null
+          workspace_id: string
+        }
+        Insert: {
+          channel: string
+          company_context?: string | null
+          created_at?: string
+          created_by: string
+          generated_variations?: Json | null
+          id?: string
+          selected_variation_index?: number | null
+          sequence_step: string
+          specific_instructions?: string | null
+          target_industry?: string | null
+          target_persona?: string | null
+          tone?: string | null
+          trigger_event?: string | null
+          workspace_id: string
+        }
+        Update: {
+          channel?: string
+          company_context?: string | null
+          created_at?: string
+          created_by?: string
+          generated_variations?: Json | null
+          id?: string
+          selected_variation_index?: number | null
+          sequence_step?: string
+          specific_instructions?: string | null
+          target_industry?: string | null
+          target_persona?: string | null
+          tone?: string | null
+          trigger_event?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "copy_generation_sessions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       copy_library: {
         Row: {
           ai_tags: string[] | null
@@ -1141,6 +1245,56 @@ export type Database = {
           },
           {
             foreignKeyName: "hourly_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      industry_intelligence: {
+        Row: {
+          content: string
+          context: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          industry: string
+          intel_type: string
+          is_global: boolean | null
+          source_document: string | null
+          updated_at: string
+          workspace_id: string | null
+        }
+        Insert: {
+          content: string
+          context?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          industry: string
+          intel_type: string
+          is_global?: boolean | null
+          source_document?: string | null
+          updated_at?: string
+          workspace_id?: string | null
+        }
+        Update: {
+          content?: string
+          context?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          industry?: string
+          intel_type?: string
+          is_global?: boolean | null
+          source_document?: string | null
+          updated_at?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "industry_intelligence_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
