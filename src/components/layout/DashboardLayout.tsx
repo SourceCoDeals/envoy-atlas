@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   BarChart3,
@@ -152,6 +153,45 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     );
   };
 
+  // Channel Rail - narrow left column
+  const ChannelRail = () => (
+    <div className="flex flex-col items-center py-4 gap-2 border-r border-border bg-sidebar/50">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => handleChannelChange('email')}
+            className={cn(
+              'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+              channel === 'email'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+            )}
+          >
+            <Mail className="h-5 w-5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">Email</TooltipContent>
+      </Tooltip>
+      
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => handleChannelChange('calling')}
+            className={cn(
+              'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+              channel === 'calling'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+            )}
+          >
+            <Phone className="h-5 w-5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">Calling</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+
   const SidebarContent = () => (
     <>
       {/* Logo */}
@@ -173,60 +213,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <ChevronLeft className={cn('h-4 w-4 transition-transform', sidebarCollapsed && 'rotate-180')} />
         </Button>
       </div>
-
-      {/* Channel Toggle */}
-      {!sidebarCollapsed && (
-        <div className="p-4 border-b border-border">
-          <div className="flex rounded-lg bg-muted p-1">
-            <button
-              onClick={() => handleChannelChange('email')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                channel === 'email'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Mail className="h-4 w-4" />
-              Email
-            </button>
-            <button
-              onClick={() => handleChannelChange('calling')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                channel === 'calling'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Phone className="h-4 w-4" />
-              Calling
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Collapsed channel indicator */}
-      {sidebarCollapsed && (
-        <div className="p-2 border-b border-border flex flex-col gap-1">
-          <Button
-            variant={channel === 'email' ? 'default' : 'ghost'}
-            size="icon"
-            onClick={() => handleChannelChange('email')}
-            className="w-full"
-          >
-            <Mail className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={channel === 'calling' ? 'default' : 'ghost'}
-            size="icon"
-            onClick={() => handleChannelChange('calling')}
-            className="w-full"
-          >
-            <Phone className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
 
       {/* Workspace selector */}
       {!sidebarCollapsed && workspaces.length > 0 && (
@@ -353,11 +339,16 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <div className="flex h-screen bg-background">
+      {/* Channel Rail - Desktop */}
+      <div className="hidden lg:flex w-14 flex-col border-r border-border bg-sidebar">
+        <ChannelRail />
+      </div>
+
       {/* Desktop Sidebar */}
       <aside
         className={cn(
           'hidden lg:flex flex-col border-r border-border bg-sidebar transition-all duration-300',
-          sidebarCollapsed ? 'w-16' : 'w-64'
+          sidebarCollapsed ? 'w-16' : 'w-60'
         )}
       >
         <SidebarContent />
@@ -374,11 +365,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Mobile sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-64 flex-col border-r border-border bg-sidebar lg:hidden transition-transform duration-300',
+          'fixed inset-y-0 left-0 z-50 flex lg:hidden transition-transform duration-300',
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        <SidebarContent />
+        {/* Mobile Channel Rail */}
+        <div className="w-14 flex flex-col border-r border-border bg-sidebar">
+          <ChannelRail />
+        </div>
+        {/* Mobile Nav */}
+        <div className="w-60 flex flex-col border-r border-border bg-sidebar">
+          <SidebarContent />
+        </div>
       </aside>
 
       {/* Main content */}
