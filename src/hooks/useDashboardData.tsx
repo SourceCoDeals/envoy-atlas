@@ -173,7 +173,7 @@ export function useDashboardData() {
         .from('message_events')
         .select('occurred_at')
         .eq('workspace_id', currentWorkspace.id)
-        .in('event_type', ['reply', 'positive_reply', 'negative_reply']);
+        .in('event_type', ['reply', 'replied', 'positive_reply', 'negative_reply']);
 
       if (replyEvents) {
         const timeMap = new Map<string, number>();
