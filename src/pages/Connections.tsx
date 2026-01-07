@@ -105,6 +105,8 @@ export default function Connections() {
   const [isSyncingPhoneburner, setIsSyncingPhoneburner] = useState(false);
   const [isResumingPhoneburner, setIsResumingPhoneburner] = useState(false);
   const [isStoppingPhoneburner, setIsStoppingPhoneburner] = useState(false);
+  const [isDiagnosingPhoneburner, setIsDiagnosingPhoneburner] = useState(false);
+  const [phoneburnerDiagnostics, setPhoneburnerDiagnostics] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -700,6 +702,33 @@ export default function Connections() {
       setError(err.message || 'Failed to stop sync');
     } finally {
       setIsStoppingPhoneburner(false);
+    }
+  };
+
+  const runPhoneburnerDiagnostics = async () => {
+    if (!currentWorkspace || isDiagnosingPhoneburner) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setPhoneburnerDiagnostics(null);
+      setIsDiagnosingPhoneburner(true);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated. Please sign in again.');
+
+      const res = await supabase.functions.invoke('phoneburner-sync', {
+        body: { workspaceId: currentWorkspace.id, diagnostic: true },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || 'Diagnostics failed');
+      setPhoneburnerDiagnostics(res.data);
+      setSuccess('PhoneBurner diagnostics complete. See results below.');
+    } catch (e: any) {
+      setError(e.message || 'Failed to run diagnostics');
+    } finally {
+      setIsDiagnosingPhoneburner(false);
     }
   };
 
@@ -1327,6 +1356,67 @@ export default function Connections() {
                     </div>
                   )}
 
+                  {/* Diagnostic Results */}
+                  {phoneburnerDiagnostics && (
+                    <div className="space-y-3 p-3 rounded-lg bg-accent/30 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">Diagnostic Results</span>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 px-2"
+                          onClick={() => setPhoneburnerDiagnostics(null)}
+                        >
+                          <XCircle className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      
+                      {/* Members Test */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {phoneburnerDiagnostics.tests?.members?.success ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span>Members API: {phoneburnerDiagnostics.tests?.members?.count || 0} found</span>
+                        </div>
+                      </div>
+
+                      {/* Sessions Without Filter */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {phoneburnerDiagnostics.tests?.sessions_no_filter?.success ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span>All Sessions: {phoneburnerDiagnostics.tests?.sessions_no_filter?.total_results || 0} total</span>
+                        </div>
+                      </div>
+
+                      {/* Sessions With Date Filter */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {phoneburnerDiagnostics.tests?.sessions_with_date_filter?.success ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span>Last 90 Days: {phoneburnerDiagnostics.tests?.sessions_with_date_filter?.total_results || 0} sessions</span>
+                        </div>
+                      </div>
+
+                      {/* Recommendation */}
+                      {phoneburnerDiagnostics.recommendation && (
+                        <div className="p-2 rounded bg-muted text-muted-foreground">
+                          <span className="font-medium">💡 </span>
+                          {phoneburnerDiagnostics.recommendation}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex gap-2 pt-2">
                     {phoneburnerConnection.sync_status === 'syncing' ? (
                       <Button 
@@ -1384,6 +1474,19 @@ export default function Connections() {
                             </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={runPhoneburnerDiagnostics}
+                          disabled={isDiagnosingPhoneburner}
+                        >
+                          {isDiagnosingPhoneburner ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <AlertCircle className="mr-2 h-4 w-4" />
+                          )}
+                          Diagnose
+                        </Button>
                       </>
                     )}
                     <AlertDialog>

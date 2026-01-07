@@ -107,7 +107,7 @@ serve(async (req) => {
       });
     }
 
-    const { workspaceId, reset = false } = await req.json();
+    const { workspaceId, reset = false, diagnostic = false } = await req.json();
 
     if (!workspaceId) {
       return new Response(JSON.stringify({ error: 'workspaceId is required' }), {
@@ -133,6 +133,111 @@ serve(async (req) => {
     }
 
     const apiKey = connection.api_key_encrypted;
+
+    // ============= DIAGNOSTIC MODE =============
+    if (diagnostic) {
+      console.log('Running PhoneBurner diagnostics...');
+      
+      const diagnosticResults: any = {
+        diagnostic: true,
+        timestamp: new Date().toISOString(),
+        tests: {}
+      };
+
+      // Test 1: Get account/member info
+      try {
+        const membersResponse = await phoneburnerRequest('/members', apiKey);
+        const members = membersResponse.members?.members || membersResponse.members || [];
+        diagnosticResults.tests.members = {
+          success: true,
+          count: Array.isArray(members) ? members.length : 0,
+          data: Array.isArray(members) ? members.slice(0, 3).map((m: any) => ({
+            user_id: m.user_id,
+            name: `${m.first_name || ''} ${m.last_name || ''}`.trim(),
+            email: m.email,
+          })) : [],
+        };
+      } catch (e: any) {
+        diagnosticResults.tests.members = {
+          success: false,
+          error: e.message,
+        };
+      }
+
+      // Test 2: Fetch sessions WITHOUT date filter (to check if any exist at all)
+      try {
+        const noFilterResponse = await phoneburnerRequest('/dialsession?page=1&items_per_page=10', apiKey);
+        const sessionsData = noFilterResponse.dialsessions || {};
+        const sessions = Array.isArray(sessionsData.dialsessions) ? sessionsData.dialsessions : [];
+        diagnosticResults.tests.sessions_no_filter = {
+          success: true,
+          total_results: sessionsData.total_results || 0,
+          total_pages: sessionsData.total_pages || 0,
+          returned_count: sessions.length,
+          first_session: sessions.length > 0 ? {
+            dialsession_id: sessions[0].dialsession_id,
+            start_when: sessions[0].start_when,
+            call_count: sessions[0].call_count,
+          } : null,
+          response_keys: Object.keys(noFilterResponse),
+          response_preview: JSON.stringify(noFilterResponse).substring(0, 500),
+        };
+      } catch (e: any) {
+        diagnosticResults.tests.sessions_no_filter = {
+          success: false,
+          error: e.message,
+        };
+      }
+
+      // Test 3: Fetch sessions with date filter (last 90 days)
+      try {
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 90);
+        const dateStart = startDate.toISOString().split('T')[0];
+        const dateEnd = endDate.toISOString().split('T')[0];
+
+        const filteredResponse = await phoneburnerRequest(
+          `/dialsession?date_start=${dateStart}&date_end=${dateEnd}&page=1&items_per_page=10`,
+          apiKey
+        );
+        const sessionsData = filteredResponse.dialsessions || {};
+        const sessions = Array.isArray(sessionsData.dialsessions) ? sessionsData.dialsessions : [];
+        diagnosticResults.tests.sessions_with_date_filter = {
+          success: true,
+          date_start: dateStart,
+          date_end: dateEnd,
+          total_results: sessionsData.total_results || 0,
+          total_pages: sessionsData.total_pages || 0,
+          returned_count: sessions.length,
+        };
+      } catch (e: any) {
+        diagnosticResults.tests.sessions_with_date_filter = {
+          success: false,
+          error: e.message,
+        };
+      }
+
+      // Generate recommendation
+      const noFilter = diagnosticResults.tests.sessions_no_filter;
+      const withFilter = diagnosticResults.tests.sessions_with_date_filter;
+      
+      if (!noFilter.success) {
+        diagnosticResults.recommendation = 'API key may not have access to dial sessions. Check API permissions.';
+      } else if (noFilter.total_results === 0) {
+        diagnosticResults.recommendation = 'No dial sessions found in this PhoneBurner account. Make sure you have dial session history.';
+      } else if (withFilter.total_results === 0 && noFilter.total_results > 0) {
+        diagnosticResults.recommendation = `Found ${noFilter.total_results} sessions total, but 0 in the last 90 days. Your sessions may be older.`;
+      } else {
+        diagnosticResults.recommendation = `Found ${withFilter.total_results} sessions in the last 90 days. Sync should work correctly.`;
+      }
+
+      console.log('Diagnostic results:', JSON.stringify(diagnosticResults, null, 2));
+
+      return new Response(JSON.stringify(diagnosticResults), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Check sync lock
     const syncProgress = (connection.sync_progress as any) || {};
