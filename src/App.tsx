@@ -27,6 +27,8 @@ import CopywritingStudio from "./pages/CopywritingStudio";
 import CallingDashboard from "./pages/CallingDashboard";
 import CallSessions from "./pages/CallSessions";
 import CallAnalytics from "./pages/CallAnalytics";
+import CallSearch from "./pages/CallSearch";
+import BestWorstCalls from "./pages/BestWorstCalls";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -63,6 +65,8 @@ const App = () => (
                 
                 {/* Calling routes */}
                 <Route path="/calling" element={<CallingDashboard />} />
+                <Route path="/calling/search" element={<CallSearch />} />
+                <Route path="/calling/best-worst" element={<BestWorstCalls />} />
                 <Route path="/calling/sessions" element={<CallSessions />} />
                 <Route path="/calling/analytics" element={<CallAnalytics />} />
                 

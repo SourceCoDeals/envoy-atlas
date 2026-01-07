@@ -81,6 +81,8 @@ const emailExperimentNavItems: NavItem[] = [
 // Calling channel navigation
 const callingMainNavItems: NavItem[] = [
   { title: 'Overview', href: '/calling', icon: LayoutDashboard },
+  { title: 'Call Search', href: '/calling/search', icon: Phone },
+  { title: 'Best/Worst Calls', href: '/calling/best-worst', icon: BarChart3 },
   { title: 'Call Sessions', href: '/calling/sessions', icon: PhoneCall },
 ];
 

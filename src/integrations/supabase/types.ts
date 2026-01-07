@@ -277,6 +277,247 @@ export type Database = {
           },
         ]
       }
+      call_ai_scores: {
+        Row: {
+          buyer_type_preference: string | null
+          call_id: string
+          composite_score: number | null
+          created_at: string
+          engagement_justification: string | null
+          engagement_score: number | null
+          id: string
+          mandatory_questions_adherence: number | null
+          mandatory_questions_asked: Json | null
+          next_step_clarity_justification: string | null
+          next_step_clarity_score: number | null
+          objection_handling_justification: string | null
+          objection_handling_score: number | null
+          objections_list: Json | null
+          opening_type: string | null
+          personal_insights: string | null
+          rapport_building_justification: string | null
+          rapport_building_score: number | null
+          scoring_model: string | null
+          script_adherence_justification: string | null
+          script_adherence_score: number | null
+          seller_interest_justification: string | null
+          seller_interest_score: number | null
+          timeline_to_sell: string | null
+          transcript_id: string | null
+          trigger_events: Json | null
+          valuation_discussion_justification: string | null
+          valuation_discussion_score: number | null
+          value_proposition_justification: string | null
+          value_proposition_score: number | null
+          workspace_id: string
+        }
+        Insert: {
+          buyer_type_preference?: string | null
+          call_id: string
+          composite_score?: number | null
+          created_at?: string
+          engagement_justification?: string | null
+          engagement_score?: number | null
+          id?: string
+          mandatory_questions_adherence?: number | null
+          mandatory_questions_asked?: Json | null
+          next_step_clarity_justification?: string | null
+          next_step_clarity_score?: number | null
+          objection_handling_justification?: string | null
+          objection_handling_score?: number | null
+          objections_list?: Json | null
+          opening_type?: string | null
+          personal_insights?: string | null
+          rapport_building_justification?: string | null
+          rapport_building_score?: number | null
+          scoring_model?: string | null
+          script_adherence_justification?: string | null
+          script_adherence_score?: number | null
+          seller_interest_justification?: string | null
+          seller_interest_score?: number | null
+          timeline_to_sell?: string | null
+          transcript_id?: string | null
+          trigger_events?: Json | null
+          valuation_discussion_justification?: string | null
+          valuation_discussion_score?: number | null
+          value_proposition_justification?: string | null
+          value_proposition_score?: number | null
+          workspace_id: string
+        }
+        Update: {
+          buyer_type_preference?: string | null
+          call_id?: string
+          composite_score?: number | null
+          created_at?: string
+          engagement_justification?: string | null
+          engagement_score?: number | null
+          id?: string
+          mandatory_questions_adherence?: number | null
+          mandatory_questions_asked?: Json | null
+          next_step_clarity_justification?: string | null
+          next_step_clarity_score?: number | null
+          objection_handling_justification?: string | null
+          objection_handling_score?: number | null
+          objections_list?: Json | null
+          opening_type?: string | null
+          personal_insights?: string | null
+          rapport_building_justification?: string | null
+          rapport_building_score?: number | null
+          scoring_model?: string | null
+          script_adherence_justification?: string | null
+          script_adherence_score?: number | null
+          seller_interest_justification?: string | null
+          seller_interest_score?: number | null
+          timeline_to_sell?: string | null
+          transcript_id?: string | null
+          trigger_events?: Json | null
+          valuation_discussion_justification?: string | null
+          valuation_discussion_score?: number | null
+          value_proposition_justification?: string | null
+          value_proposition_score?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_ai_scores_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "phoneburner_calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_ai_scores_transcript_id_fkey"
+            columns: ["transcript_id"]
+            isOneToOne: false
+            referencedRelation: "call_transcripts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_ai_scores_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      call_library_entries: {
+        Row: {
+          added_by: string
+          call_id: string
+          category: string
+          created_at: string
+          description: string | null
+          highlight_end_time: number | null
+          highlight_start_time: number | null
+          id: string
+          tags: string[] | null
+          title: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          added_by: string
+          call_id: string
+          category: string
+          created_at?: string
+          description?: string | null
+          highlight_end_time?: number | null
+          highlight_start_time?: number | null
+          id?: string
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          added_by?: string
+          call_id?: string
+          category?: string
+          created_at?: string
+          description?: string | null
+          highlight_end_time?: number | null
+          highlight_start_time?: number | null
+          id?: string
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_library_entries_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "phoneburner_calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_library_entries_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      call_transcripts: {
+        Row: {
+          call_id: string
+          completed_at: string | null
+          created_at: string
+          duration_seconds: number | null
+          id: string
+          speaker_segments: Json | null
+          transcript_text: string | null
+          transcription_error: string | null
+          transcription_status: string
+          word_count: number | null
+          workspace_id: string
+        }
+        Insert: {
+          call_id: string
+          completed_at?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          speaker_segments?: Json | null
+          transcript_text?: string | null
+          transcription_error?: string | null
+          transcription_status?: string
+          word_count?: number | null
+          workspace_id: string
+        }
+        Update: {
+          call_id?: string
+          completed_at?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          speaker_segments?: Json | null
+          transcript_text?: string | null
+          transcription_error?: string | null
+          transcription_status?: string
+          word_count?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_transcripts_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "phoneburner_calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_transcripts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_variant_features: {
         Row: {
           body_avg_sentence_length: number | null
@@ -1964,6 +2205,66 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "copy_performance"
             referencedColumns: ["variant_id"]
+          },
+        ]
+      }
+      training_assignments: {
+        Row: {
+          assigned_by: string
+          assignee_id: string
+          assignment_type: string
+          call_id: string
+          completed_at: string | null
+          created_at: string
+          due_date: string | null
+          focus_area: string | null
+          id: string
+          notes: string | null
+          rep_feedback: string | null
+          workspace_id: string
+        }
+        Insert: {
+          assigned_by: string
+          assignee_id: string
+          assignment_type?: string
+          call_id: string
+          completed_at?: string | null
+          created_at?: string
+          due_date?: string | null
+          focus_area?: string | null
+          id?: string
+          notes?: string | null
+          rep_feedback?: string | null
+          workspace_id: string
+        }
+        Update: {
+          assigned_by?: string
+          assignee_id?: string
+          assignment_type?: string
+          call_id?: string
+          completed_at?: string | null
+          created_at?: string
+          due_date?: string | null
+          focus_area?: string | null
+          id?: string
+          notes?: string | null
+          rep_feedback?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "training_assignments_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "phoneburner_calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "training_assignments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
           },
         ]
       }
