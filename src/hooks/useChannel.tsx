@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export type Channel = 'email' | 'calling';
+export type Channel = 'email' | 'calling' | 'contacts';
 
 interface ChannelContextType {
   channel: Channel;
