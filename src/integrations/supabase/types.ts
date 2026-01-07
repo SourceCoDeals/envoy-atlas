@@ -1871,6 +1871,7 @@ export type Database = {
       }
       phoneburner_calls: {
         Row: {
+          activity_date: string | null
           contact_id: string | null
           created_at: string
           dial_session_id: string | null
@@ -1880,6 +1881,7 @@ export type Database = {
           email_sent: boolean | null
           end_at: string | null
           external_call_id: string
+          external_contact_id: string | null
           id: string
           is_connected: boolean | null
           is_voicemail: boolean | null
@@ -1892,6 +1894,7 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          activity_date?: string | null
           contact_id?: string | null
           created_at?: string
           dial_session_id?: string | null
@@ -1901,6 +1904,7 @@ export type Database = {
           email_sent?: boolean | null
           end_at?: string | null
           external_call_id: string
+          external_contact_id?: string | null
           id?: string
           is_connected?: boolean | null
           is_voicemail?: boolean | null
@@ -1913,6 +1917,7 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          activity_date?: string | null
           contact_id?: string | null
           created_at?: string
           dial_session_id?: string | null
@@ -1922,6 +1927,7 @@ export type Database = {
           email_sent?: boolean | null
           end_at?: string | null
           external_call_id?: string
+          external_contact_id?: string | null
           id?: string
           is_connected?: boolean | null
           is_voicemail?: boolean | null
@@ -1957,6 +1963,62 @@ export type Database = {
           },
           {
             foreignKeyName: "phoneburner_calls_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      phoneburner_contacts: {
+        Row: {
+          category_id: string | null
+          company: string | null
+          created_at: string
+          date_added: string | null
+          email: string | null
+          external_contact_id: string
+          first_name: string | null
+          id: string
+          last_name: string | null
+          phone: string | null
+          tags: string[] | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          category_id?: string | null
+          company?: string | null
+          created_at?: string
+          date_added?: string | null
+          email?: string | null
+          external_contact_id: string
+          first_name?: string | null
+          id?: string
+          last_name?: string | null
+          phone?: string | null
+          tags?: string[] | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          category_id?: string | null
+          company?: string | null
+          created_at?: string
+          date_added?: string | null
+          email?: string | null
+          external_contact_id?: string
+          first_name?: string | null
+          id?: string
+          last_name?: string | null
+          phone?: string | null
+          tags?: string[] | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phoneburner_contacts_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
