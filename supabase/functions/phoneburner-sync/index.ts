@@ -51,29 +51,28 @@ async function phoneburnerRequest(endpoint: string, apiKey: string, retries = 3)
 
 interface DialSession {
   dialsession_id: string;
-  user_id: string;
-  caller_id: string;
-  start_time: string;
-  end_time: string;
-  call_count: number;
+  member_user_id?: string;
+  callerid?: string;
+  start_when?: string;
+  end_when?: string;
+  call_count?: number;
   member_name?: string;
 }
 
 interface Call {
-  call_id: string;
-  dialsession_id: string;
-  contact_id: string;
-  phone: string;
-  disposition: string;
-  disposition_id: string;
-  duration: number;
-  is_connected: boolean;
+  call_id?: string;
+  dialsession_id?: string;
+  contact_id?: string;
+  phone?: string;
+  disposition?: string;
+  duration?: number;
+  connected?: string; // "0" or "1" string
   voicemail_sent?: string;
-  email_sent?: boolean;
+  email_sent?: string; // "0" or "1" string
   notes?: string;
   recording_url?: string;
-  start_time: string;
-  end_time: string;
+  start_when?: string;
+  end_when?: string;
 }
 
 serve(async (req) => {
@@ -210,8 +209,14 @@ serve(async (req) => {
 
       await delay(RATE_LIMIT_DELAY);
 
-      const sessions = sessionsResponse.dialsessions || [];
-      totalSessions = sessionsResponse.total_results || 0;
+      // PhoneBurner returns nested structure: { dialsessions: { dialsessions: [...], total_results: N } }
+      const sessionsData = sessionsResponse.dialsessions || {};
+      const sessions: DialSession[] = Array.isArray(sessionsData.dialsessions) 
+        ? sessionsData.dialsessions 
+        : (Array.isArray(sessionsData) ? sessionsData : []);
+      totalSessions = sessionsData.total_results || sessions.length;
+      
+      console.log(`PhoneBurner response structure: ${JSON.stringify(Object.keys(sessionsResponse))}, sessions count: ${sessions.length}`);
       
       if (sessions.length === 0) {
         hasMorePages = false;
@@ -226,17 +231,17 @@ serve(async (req) => {
           break;
         }
 
-        // Upsert dial session
+        // Upsert dial session - use correct field names from API
         const { error: sessionError } = await supabase
           .from('phoneburner_dial_sessions')
           .upsert({
             workspace_id: workspaceId,
             external_session_id: session.dialsession_id.toString(),
-            member_id: session.user_id?.toString(),
+            member_id: session.member_user_id?.toString(),
             member_name: session.member_name || null,
-            caller_id: session.caller_id,
-            start_at: session.start_time,
-            end_at: session.end_time,
+            caller_id: session.callerid,
+            start_at: session.start_when,
+            end_at: session.end_when,
             call_count: session.call_count || 0,
           }, {
             onConflict: 'workspace_id,external_session_id'
@@ -248,7 +253,7 @@ serve(async (req) => {
 
         // Fetch calls for this session
         try {
-          const sessionDetail = await phoneburnerRequest(
+          const sessionDetailResponse = await phoneburnerRequest(
             `/dialsession/${session.dialsession_id}`,
             apiKey
           );
@@ -262,9 +267,15 @@ serve(async (req) => {
             .eq('external_session_id', session.dialsession_id.toString())
             .single();
 
-          const calls = sessionDetail.calls || [];
+          // Session detail also has nested structure
+          const sessionDetail = sessionDetailResponse.dialsessions?.dialsessions || sessionDetailResponse.dialsessions || {};
+          const calls: Call[] = sessionDetail.calls || [];
           
           for (const call of calls) {
+            // Parse connected field - API may return "0"/"1" string or number
+            const isConnected = String(call.connected) === '1';
+            const emailSent = String(call.email_sent) === '1';
+            
             const { error: callError } = await supabase
               .from('phoneburner_calls')
               .upsert({
@@ -273,16 +284,15 @@ serve(async (req) => {
                 external_call_id: call.call_id?.toString() || `${session.dialsession_id}-${callsProcessed}`,
                 phone_number: call.phone,
                 disposition: call.disposition,
-                disposition_id: call.disposition_id?.toString(),
                 duration_seconds: call.duration || 0,
-                is_connected: call.is_connected || false,
+                is_connected: isConnected,
                 is_voicemail: call.disposition?.toLowerCase().includes('voicemail') || false,
                 voicemail_sent: call.voicemail_sent,
-                email_sent: call.email_sent || false,
+                email_sent: emailSent,
                 notes: call.notes,
                 recording_url: call.recording_url,
-                start_at: call.start_time,
-                end_at: call.end_time,
+                start_at: call.start_when,
+                end_at: call.end_when,
               }, {
                 onConflict: 'workspace_id,external_call_id'
               });
@@ -299,9 +309,9 @@ serve(async (req) => {
         sessionsProcessed++;
       }
 
-      // Check if more pages
-      const totalPages = Math.ceil(totalSessions / 50);
-      if (currentPage >= totalPages) {
+      // Check if more pages - use total_pages from API if available
+      const totalPages = sessionsData.total_pages || Math.ceil(totalSessions / 50);
+      if (currentPage >= totalPages || sessions.length < 50) {
         hasMorePages = false;
       } else {
         currentPage++;
