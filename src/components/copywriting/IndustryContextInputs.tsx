@@ -3,9 +3,25 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, FileText, X, Loader2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Upload, FileText, X, Loader2, Sparkles, Brain, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+
+export interface UploadedDocument {
+  name: string;
+  path: string;
+  size: number;
+}
+
+export interface ExtractedIntelligence {
+  painPoints: { content: string; context: string }[];
+  terminology: { content: string; context: string }[];
+  buyingTriggers: { content: string; context: string }[];
+  objections: { content: string; context: string }[];
+  languagePatterns: { content: string; context: string }[];
+  competitorMentions: { content: string; context: string }[];
+}
 
 interface IndustryContextInputsProps {
   callTranscript: string;
@@ -13,12 +29,9 @@ interface IndustryContextInputsProps {
   uploadedDocuments: UploadedDocument[];
   setUploadedDocuments: (docs: UploadedDocument[]) => void;
   workspaceId: string | undefined;
-}
-
-export interface UploadedDocument {
-  name: string;
-  path: string;
-  size: number;
+  targetIndustry?: string;
+  extractedIntelligence?: ExtractedIntelligence | null;
+  setExtractedIntelligence?: (intel: ExtractedIntelligence | null) => void;
 }
 
 export function IndustryContextInputs({
@@ -27,8 +40,12 @@ export function IndustryContextInputs({
   uploadedDocuments,
   setUploadedDocuments,
   workspaceId,
+  targetIndustry,
+  extractedIntelligence,
+  setExtractedIntelligence,
 }: IndustryContextInputsProps) {
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,7 +57,6 @@ export function IndustryContextInputs({
 
     try {
       for (const file of Array.from(files)) {
-        // Validate file type
         const allowedTypes = ['application/pdf', 'text/plain', 'application/msword', 
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
         if (!allowedTypes.includes(file.type)) {
@@ -48,7 +64,6 @@ export function IndustryContextInputs({
           continue;
         }
 
-        // Validate size (10MB max)
         if (file.size > 10 * 1024 * 1024) {
           toast.error(`${file.name}: File too large (max 10MB)`);
           continue;
@@ -101,16 +116,77 @@ export function IndustryContextInputs({
     }
   };
 
+  const processDocuments = async () => {
+    if (!workspaceId || (!uploadedDocuments.length && !callTranscript)) {
+      toast.error('Upload documents or paste a transcript first');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('process-industry-documents', {
+        body: {
+          documentPaths: uploadedDocuments.map(d => d.path),
+          callTranscript,
+          targetIndustry: targetIndustry || 'general',
+          workspaceId,
+        },
+      });
+
+      if (error) {
+        if (error.message?.includes('429')) {
+          toast.error('Rate limit exceeded. Please try again in a moment.');
+        } else if (error.message?.includes('402')) {
+          toast.error('Credits depleted. Please add credits to continue.');
+        } else {
+          throw error;
+        }
+        return;
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      if (data?.extracted && setExtractedIntelligence) {
+        setExtractedIntelligence(data.extracted);
+        toast.success(`Extracted ${data.stored_count} insights from your content`);
+      }
+    } catch (error) {
+      console.error('Processing error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to process documents');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const getTotalInsights = () => {
+    if (!extractedIntelligence) return 0;
+    return (
+      (extractedIntelligence.painPoints?.length || 0) +
+      (extractedIntelligence.terminology?.length || 0) +
+      (extractedIntelligence.buyingTriggers?.length || 0) +
+      (extractedIntelligence.objections?.length || 0) +
+      (extractedIntelligence.languagePatterns?.length || 0) +
+      (extractedIntelligence.competitorMentions?.length || 0)
+    );
+  };
+
+  const hasContent = uploadedDocuments.length > 0 || callTranscript.trim().length > 0;
+
   return (
     <Card className="bg-card/50 border-border/50">
       <CardHeader className="pb-4">
-        <CardTitle className="text-lg">Industry Context</CardTitle>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Brain className="h-5 w-5 text-primary" />
+          Industry Context
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         {/* Document Upload */}
@@ -150,7 +226,6 @@ export function IndustryContextInputs({
             )}
           </Button>
 
-          {/* Uploaded files list */}
           {uploadedDocuments.length > 0 && (
             <div className="space-y-2 mt-2">
               {uploadedDocuments.map((doc) => (
@@ -195,7 +270,7 @@ Example:
 ..."
             value={callTranscript}
             onChange={(e) => setCallTranscript(e.target.value)}
-            className="resize-none h-40 font-mono text-xs"
+            className="resize-none h-32 font-mono text-xs"
           />
           {callTranscript && (
             <p className="text-xs text-muted-foreground">
@@ -203,7 +278,136 @@ Example:
             </p>
           )}
         </div>
+
+        {/* Process Button */}
+        {hasContent && (
+          <Button
+            type="button"
+            onClick={processDocuments}
+            disabled={isProcessing || !workspaceId}
+            className="w-full"
+            variant={extractedIntelligence ? "outline" : "default"}
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Extracting Intelligence...
+              </>
+            ) : extractedIntelligence ? (
+              <>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Re-process Documents
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Extract Intelligence with AI
+              </>
+            )}
+          </Button>
+        )}
+
+        {/* Extracted Intelligence Preview */}
+        {extractedIntelligence && (
+          <div className="space-y-3 pt-2 border-t border-border/50">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <span className="text-sm font-medium">
+                {getTotalInsights()} insights extracted
+              </span>
+            </div>
+
+            <div className="grid gap-2">
+              {extractedIntelligence.painPoints?.length > 0 && (
+                <IntelligenceSection 
+                  label="Pain Points" 
+                  items={extractedIntelligence.painPoints} 
+                  variant="destructive"
+                />
+              )}
+              {extractedIntelligence.terminology?.length > 0 && (
+                <IntelligenceSection 
+                  label="Terminology" 
+                  items={extractedIntelligence.terminology} 
+                  variant="secondary"
+                />
+              )}
+              {extractedIntelligence.buyingTriggers?.length > 0 && (
+                <IntelligenceSection 
+                  label="Buying Triggers" 
+                  items={extractedIntelligence.buyingTriggers} 
+                  variant="default"
+                />
+              )}
+              {extractedIntelligence.objections?.length > 0 && (
+                <IntelligenceSection 
+                  label="Objections" 
+                  items={extractedIntelligence.objections} 
+                  variant="outline"
+                />
+              )}
+              {extractedIntelligence.languagePatterns?.length > 0 && (
+                <IntelligenceSection 
+                  label="Language Patterns" 
+                  items={extractedIntelligence.languagePatterns} 
+                  variant="secondary"
+                />
+              )}
+              {extractedIntelligence.competitorMentions?.length > 0 && (
+                <IntelligenceSection 
+                  label="Competitors" 
+                  items={extractedIntelligence.competitorMentions} 
+                  variant="outline"
+                />
+              )}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+function IntelligenceSection({ 
+  label, 
+  items, 
+  variant 
+}: { 
+  label: string; 
+  items: { content: string; context: string }[];
+  variant: "default" | "secondary" | "destructive" | "outline";
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const displayItems = expanded ? items : items.slice(0, 2);
+  
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <Badge variant={variant} className="text-xs">
+          {label} ({items.length})
+        </Badge>
+        {items.length > 2 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs px-2"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? 'Show less' : `+${items.length - 2} more`}
+          </Button>
+        )}
+      </div>
+      <div className="space-y-1">
+        {displayItems.map((item, i) => (
+          <div key={i} className="text-xs p-2 bg-muted/30 rounded">
+            <p className="font-medium">{item.content}</p>
+            {item.context && (
+              <p className="text-muted-foreground mt-0.5 italic">"{item.context}"</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

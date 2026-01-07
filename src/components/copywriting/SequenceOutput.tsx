@@ -4,7 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Copy, Save, Check, Mail, Linkedin, Phone, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Copy, Save, Check, Mail, Linkedin, Phone, MessageSquare, ChevronDown, ChevronUp, AlertTriangle, AlertCircle, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { CopyVariation } from '@/hooks/useCopywritingStudio';
 
@@ -41,6 +42,18 @@ const getChannelLabel = (channel: string) => {
   return labels[channel] || channel;
 };
 
+const getScoreColor = (score: number) => {
+  if (score >= 80) return 'text-green-500';
+  if (score >= 60) return 'text-yellow-500';
+  return 'text-red-500';
+};
+
+const getScoreBg = (score: number) => {
+  if (score >= 80) return 'bg-green-500/10 border-green-500/30';
+  if (score >= 60) return 'bg-yellow-500/10 border-yellow-500/30';
+  return 'bg-red-500/10 border-red-500/30';
+};
+
 function VariationCard({ 
   variation, 
   stepIndex,
@@ -65,19 +78,74 @@ function VariationCard({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const hasIssues = variation.validation?.issues?.length > 0;
+  const hasWarnings = variation.validation?.warnings?.length > 0;
+
   return (
-    <div className="border border-border/50 rounded-lg overflow-hidden bg-card/30">
+    <div className={`border rounded-lg overflow-hidden bg-card/30 ${hasIssues ? 'border-red-500/50' : hasWarnings ? 'border-yellow-500/30' : 'border-border/50'}`}>
       <div 
         className="flex items-center justify-between p-3 bg-muted/20 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Badge variant="outline" className="text-xs">
             {variation.variation_style}
           </Badge>
           <span className="text-xs text-muted-foreground">
-            {variation.word_count} words • Score: {variation.quality_score}/100
+            {variation.word_count} words
           </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className={`text-xs border ${getScoreBg(variation.quality_score)}`}>
+                  <span className={getScoreColor(variation.quality_score)}>
+                    {variation.quality_score}/100
+                  </span>
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                <p className="text-xs font-medium mb-1">Quality Breakdown</p>
+                <div className="text-xs space-y-0.5">
+                  <div>Constraints: {(variation as any).quality_breakdown?.constraints || 0}/40</div>
+                  <div>Patterns: {(variation as any).quality_breakdown?.patterns || 0}/30</div>
+                  <div>Spam check: {(variation as any).quality_breakdown?.spam || 0}/15</div>
+                  <div>Readability: {(variation as any).quality_breakdown?.readability || 0}/15</div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {hasIssues && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <ul className="text-xs list-disc pl-3">
+                    {variation.validation.issues.map((issue, i) => (
+                      <li key={i}>{issue}</li>
+                    ))}
+                  </ul>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {!hasIssues && hasWarnings && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <ul className="text-xs list-disc pl-3">
+                    {variation.validation.warnings.map((warn, i) => (
+                      <li key={i}>{warn}</li>
+                    ))}
+                  </ul>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -129,19 +197,60 @@ function VariationCard({
 
 export function SequenceOutput({ sequenceOutput, onSaveToLibrary }: SequenceOutputProps) {
   const [activeStep, setActiveStep] = useState('0');
+  const [copiedAll, setCopiedAll] = useState(false);
 
   if (!sequenceOutput.length) {
     return null;
   }
+
+  const handleCopyAll = async () => {
+    const fullSequence = sequenceOutput.map((step, idx) => {
+      const channelLabel = getChannelLabel(step.channel);
+      const bestVariation = step.variations[0];
+      const delay = idx === 0 ? 'Day 1' : `+${step.delayDays} days`;
+      
+      let text = `--- Step ${idx + 1}: ${channelLabel} (${delay}) ---\n`;
+      if (bestVariation?.subject_line) {
+        text += `Subject: ${bestVariation.subject_line}\n\n`;
+      }
+      text += bestVariation?.body || '';
+      return text;
+    }).join('\n\n');
+
+    await navigator.clipboard.writeText(fullSequence);
+    setCopiedAll(true);
+    toast.success('Copied entire sequence to clipboard');
+    setTimeout(() => setCopiedAll(false), 2000);
+  };
 
   return (
     <Card className="bg-card/50 border-border/50 h-full">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">Generated Sequence</CardTitle>
-          <Badge variant="default" className="text-xs">
-            {sequenceOutput.length} steps
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyAll}
+              className="text-xs"
+            >
+              {copiedAll ? (
+                <>
+                  <Check className="h-3.5 w-3.5 mr-1.5 text-green-500" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <ClipboardList className="h-3.5 w-3.5 mr-1.5" />
+                  Copy All
+                </>
+              )}
+            </Button>
+            <Badge variant="default" className="text-xs">
+              {sequenceOutput.length} steps
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">
