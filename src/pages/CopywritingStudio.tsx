@@ -8,19 +8,24 @@ import { GeneratorInputs } from '@/components/copywriting/GeneratorInputs';
 import { IndustryContextInputs, UploadedDocument } from '@/components/copywriting/IndustryContextInputs';
 import { GeneratedVariations } from '@/components/copywriting/GeneratedVariations';
 import { BestPracticesPanel } from '@/components/copywriting/BestPracticesPanel';
+import { SequenceBuilder, SequenceStep } from '@/components/copywriting/SequenceBuilder';
+import { SequenceOutput } from '@/components/copywriting/SequenceOutput';
 
 export default function CopywritingStudio() {
   const { currentWorkspace } = useWorkspace();
   
-  // Form state
-  const [channel, setChannel] = useState('email');
-  const [sequenceStep, setSequenceStep] = useState('first_touch');
+  // Context inputs (shared across sequence)
   const [buyerName, setBuyerName] = useState('');
   const [buyerWebsite, setBuyerWebsite] = useState('');
   const [industry, setIndustry] = useState('');
   const [painPoints, setPainPoints] = useState('');
   const [emailGoal, setEmailGoal] = useState('');
   const [tone, setTone] = useState('conversational');
+  
+  // Sequence builder state
+  const [sequenceSteps, setSequenceSteps] = useState<SequenceStep[]>([
+    { id: crypto.randomUUID(), channel: 'email', stepType: 'first_touch', delayDays: 0 },
+  ]);
   
   // Industry context state
   const [callTranscript, setCallTranscript] = useState('');
@@ -29,6 +34,7 @@ export default function CopywritingStudio() {
   const { 
     isGenerating, 
     result, 
+    sequenceResult,
     bestPractices, 
     isLoadingPractices,
     generateCopy, 
@@ -39,8 +45,12 @@ export default function CopywritingStudio() {
 
   const handleGenerate = () => {
     generateCopy({
-      channel,
-      sequenceStep,
+      sequenceSteps: sequenceSteps.map(s => ({
+        id: s.id,
+        channel: s.channel,
+        stepType: s.stepType,
+        delayDays: s.delayDays,
+      })),
       buyerName: buyerName || undefined,
       buyerWebsite: buyerWebsite || undefined,
       targetIndustry: industry || undefined,
@@ -49,9 +59,12 @@ export default function CopywritingStudio() {
       callTranscript: callTranscript || undefined,
       documentPaths: uploadedDocuments.length ? uploadedDocuments.map(d => d.path) : undefined,
       tone,
-      variationCount: 3,
+      variationCount: 2,
     });
   };
+
+  // Get unique channels from sequence for best practices
+  const uniqueChannels = [...new Set(sequenceSteps.map(s => s.channel))];
 
   return (
     <DashboardLayout>
@@ -65,7 +78,7 @@ export default function CopywritingStudio() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Copywriting Studio</h1>
               <p className="text-muted-foreground text-sm">
-                AI-powered copy generation using your proven patterns and best practices
+                AI-powered multi-channel sequence generation
               </p>
             </div>
           </div>
@@ -75,11 +88,12 @@ export default function CopywritingStudio() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left Panel - Inputs */}
           <div className="lg:col-span-4 space-y-4">
+            <SequenceBuilder
+              steps={sequenceSteps}
+              setSteps={setSequenceSteps}
+            />
+
             <GeneratorInputs
-              channel={channel}
-              setChannel={setChannel}
-              sequenceStep={sequenceStep}
-              setSequenceStep={setSequenceStep}
               buyerName={buyerName}
               setBuyerName={setBuyerName}
               buyerWebsite={buyerWebsite}
@@ -104,19 +118,19 @@ export default function CopywritingStudio() {
 
             <Button 
               onClick={handleGenerate} 
-              disabled={isGenerating}
+              disabled={isGenerating || sequenceSteps.length === 0}
               className="w-full"
               size="lg"
             >
               {isGenerating ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Generating...
+                  Generating {sequenceSteps.length} step{sequenceSteps.length !== 1 ? 's' : ''}...
                 </>
               ) : (
                 <>
                   <Wand2 className="h-4 w-4 mr-2" />
-                  Generate Copy
+                  Generate Sequence ({sequenceSteps.length} step{sequenceSteps.length !== 1 ? 's' : ''})
                 </>
               )}
             </Button>
@@ -124,7 +138,12 @@ export default function CopywritingStudio() {
 
           {/* Center Panel - Generated Output */}
           <div className="lg:col-span-5">
-            {result?.variations?.length ? (
+            {sequenceResult?.steps?.length ? (
+              <SequenceOutput
+                sequenceOutput={sequenceResult.steps}
+                onSaveToLibrary={saveToLibrary}
+              />
+            ) : result?.variations?.length ? (
               <GeneratedVariations
                 variations={result.variations}
                 contextUsed={result.context_used}
@@ -134,11 +153,11 @@ export default function CopywritingStudio() {
               <div className="bg-card/30 border border-dashed border-border/50 rounded-lg p-8 h-full flex flex-col items-center justify-center text-center">
                 <Wand2 className="h-12 w-12 text-muted-foreground/30 mb-4" />
                 <h3 className="text-lg font-medium text-muted-foreground mb-2">
-                  No copy generated yet
+                  No sequence generated yet
                 </h3>
                 <p className="text-sm text-muted-foreground/70 max-w-sm">
-                  Fill in the inputs on the left and click "Generate Copy" to create 
-                  AI-powered variations based on your best practices and winning patterns.
+                  Build your sequence steps, add buyer context, and click "Generate Sequence" 
+                  to create AI-powered copy for each touchpoint.
                 </p>
               </div>
             )}
@@ -147,7 +166,7 @@ export default function CopywritingStudio() {
           {/* Right Panel - Best Practices */}
           <div className="lg:col-span-3">
             <BestPracticesPanel
-              channel={channel}
+              channel={uniqueChannels[0] || 'email'}
               bestPractices={bestPractices}
               isLoading={isLoadingPractices}
               onRefresh={fetchBestPractices}

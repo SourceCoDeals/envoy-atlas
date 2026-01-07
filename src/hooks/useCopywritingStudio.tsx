@@ -30,9 +30,20 @@ export interface GenerationResult {
   context_used: GenerationContext;
 }
 
-export interface GenerationRequest {
+export interface SequenceStepInput {
+  id: string;
   channel: string;
-  sequenceStep: string;
+  stepType: string;
+  delayDays: number;
+}
+
+export interface GenerationRequest {
+  // Single step mode (legacy)
+  channel?: string;
+  sequenceStep?: string;
+  // Sequence mode
+  sequenceSteps?: SequenceStepInput[];
+  // Common fields
   buyerName?: string;
   buyerWebsite?: string;
   targetIndustry?: string;
@@ -42,6 +53,19 @@ export interface GenerationRequest {
   documentPaths?: string[];
   tone: string;
   variationCount?: number;
+}
+
+export interface SequenceStepOutput {
+  stepIndex: number;
+  channel: string;
+  stepType: string;
+  delayDays: number;
+  variations: CopyVariation[];
+}
+
+export interface SequenceGenerationResult {
+  steps: SequenceStepOutput[];
+  context_used: GenerationContext;
 }
 
 export interface BestPractice {
@@ -60,6 +84,7 @@ export function useCopywritingStudio() {
   const { currentWorkspace } = useWorkspace();
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
+  const [sequenceResult, setSequenceResult] = useState<SequenceGenerationResult | null>(null);
   const [bestPractices, setBestPractices] = useState<BestPractice[]>([]);
   const [isLoadingPractices, setIsLoadingPractices] = useState(false);
 
@@ -101,6 +126,7 @@ export function useCopywritingStudio() {
 
     setIsGenerating(true);
     setResult(null);
+    setSequenceResult(null);
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-copy', {
@@ -111,7 +137,6 @@ export function useCopywritingStudio() {
       });
 
       if (error) {
-        // Handle specific error types
         if (error.message?.includes('429')) {
           toast.error('Rate limit exceeded. Please try again in a moment.');
         } else if (error.message?.includes('402')) {
@@ -126,8 +151,15 @@ export function useCopywritingStudio() {
         throw new Error(data.error);
       }
 
-      setResult(data);
-      toast.success(`Generated ${data.variations?.length || 0} variations`);
+      // Check if it's a sequence result or single result
+      if (data?.steps) {
+        setSequenceResult(data);
+        const totalVariations = data.steps.reduce((acc: number, s: SequenceStepOutput) => acc + (s.variations?.length || 0), 0);
+        toast.success(`Generated ${data.steps.length} steps with ${totalVariations} variations`);
+      } else {
+        setResult(data);
+        toast.success(`Generated ${data.variations?.length || 0} variations`);
+      }
       return data;
     } catch (error) {
       console.error('Error generating copy:', error);
@@ -176,11 +208,12 @@ export function useCopywritingStudio() {
   return {
     isGenerating,
     result,
+    sequenceResult,
     bestPractices,
     isLoadingPractices,
     generateCopy,
     fetchBestPractices,
     saveToLibrary,
-    clearResult: () => setResult(null),
+    clearResult: () => { setResult(null); setSequenceResult(null); },
   };
 }
