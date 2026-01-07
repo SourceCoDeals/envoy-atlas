@@ -9,21 +9,27 @@ const corsHeaders = {
 
 // PhoneBurner API Configuration
 const PHONEBURNER_BASE_URL = 'https://www.phoneburner.com/rest/1';
-const RATE_LIMIT_DELAY = 500; // 500ms between requests
-const BATCH_SIZE = 100; // Contacts per page
-const TIME_BUDGET_MS = 50000; // 50 seconds
+const RATE_LIMIT_DELAY = 500;
+const BATCH_SIZE = 100;
+const TIME_BUDGET_MS = 50000;
 
 interface PhoneBurnerContact {
-  id: number;
-  user_id: number;
+  contact_id?: number;
+  id?: number;
+  user_id?: number;
+  contact_user_id?: number;
+  owner_id?: number;
   first_name?: string;
   last_name?: string;
   email?: string;
+  primary_email?: string;
+  primary_phone?: string;
   phone_work?: string;
   phone_mobile?: string;
   phone_home?: string;
   company?: string;
   title?: string;
+  job_title?: string;
   address1?: string;
   address2?: string;
   city?: string;
@@ -32,35 +38,18 @@ interface PhoneBurnerContact {
   country?: string;
   notes?: string;
   date_created?: string;
+  date_added?: string;
   date_modified?: string;
   category_id?: number;
   category_name?: string;
   custom_fields?: Record<string, string>;
 }
 
-interface PhoneBurnerDialSession {
-  id: number;
+interface PhoneBurnerMember {
   user_id: number;
-  start_time: string;
-  end_time?: string;
-  total_calls: number;
-  total_duration: number;
-  live_answers: number;
-  voicemails: number;
-}
-
-interface PhoneBurnerCall {
-  id: number;
-  contact_id: number;
-  user_id: number;
-  dial_session_id?: number;
-  phone_number: string;
-  call_type: string; // 'live_answer', 'voicemail', 'no_answer', 'busy', 'failed'
-  duration: number;
-  disposition?: string;
-  notes?: string;
-  recording_url?: string;
-  date_created: string;
+  email: string;
+  first_name?: string;
+  last_name?: string;
 }
 
 async function delay(ms: number) {
@@ -75,15 +64,18 @@ async function phoneBurnerRequest(
   for (let i = 0; i < retries; i++) {
     await delay(RATE_LIMIT_DELAY);
     const url = `${PHONEBURNER_BASE_URL}${endpoint}`;
-    console.log(`Fetching: ${endpoint}`);
+    console.log(`Fetching: ${url}`);
 
     try {
       const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
+
+      console.log(`Response status: ${response.status}`);
 
       if (response.status === 429) {
         console.log(`Rate limited, waiting ${(i + 1) * 3} seconds...`);
@@ -92,6 +84,8 @@ async function phoneBurnerRequest(
       }
 
       if (response.status === 401) {
+        const errorText = await response.text();
+        console.error('Auth error response:', errorText);
         throw new Error('PhoneBurner authentication failed - check your access token');
       }
 
@@ -102,10 +96,13 @@ async function phoneBurnerRequest(
         continue;
       }
 
-      return await response.json();
+      const data = await response.json();
+      console.log(`Response keys: ${Object.keys(data || {}).join(', ')}`);
+      return data;
     } catch (error) {
+      console.error(`Request error:`, error);
       if (i === retries - 1) throw error;
-      console.log(`Retry ${i + 1}/${retries} after error:`, error);
+      console.log(`Retry ${i + 1}/${retries} after error`);
       await delay(1000 * (i + 1));
     }
   }
@@ -121,7 +118,6 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      console.error('phoneburner-sync: Missing authorization header');
       return new Response(JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
@@ -138,7 +134,9 @@ serve(async (req) => {
 
     if (authError || !user) throw new Error('Unauthorized');
 
-    const { workspace_id, sync_type = 'full', reset = false } = await req.json();
+    const body = await req.json();
+    const { workspace_id, sync_type = 'full', reset = false, diagnostic = false } = body;
+
     if (!workspace_id) throw new Error('workspace_id is required');
 
     // Verify workspace membership
@@ -156,35 +154,93 @@ serve(async (req) => {
     }
 
     const accessToken = connection.api_key_encrypted;
+
+    // ========== DIAGNOSTIC MODE ==========
+    if (diagnostic) {
+      console.log('Running PhoneBurner diagnostics...');
+      const results: any = {
+        token_prefix: accessToken.substring(0, 10) + '...',
+        endpoints_tested: [],
+      };
+
+      // Test 1: Get members (to see account structure)
+      try {
+        const membersResponse = await phoneBurnerRequest('/members', accessToken);
+        results.members = {
+          success: true,
+          response_keys: Object.keys(membersResponse || {}),
+          data: membersResponse,
+        };
+        results.endpoints_tested.push('/members');
+      } catch (e: any) {
+        results.members = { success: false, error: e.message };
+      }
+
+      // Test 2: Get contacts (page 1)
+      try {
+        const contactsResponse = await phoneBurnerRequest('/contacts?page=1&page_size=5', accessToken);
+        results.contacts = {
+          success: true,
+          response_keys: Object.keys(contactsResponse || {}),
+          sample_data: contactsResponse,
+          contact_count: Array.isArray(contactsResponse?.contacts) ? contactsResponse.contacts.length :
+            (Array.isArray(contactsResponse?.data) ? contactsResponse.data.length :
+            (Array.isArray(contactsResponse) ? contactsResponse.length : 'unknown')),
+        };
+        results.endpoints_tested.push('/contacts');
+      } catch (e: any) {
+        results.contacts = { success: false, error: e.message };
+      }
+
+      // Test 3: Get dial sessions
+      try {
+        const sessionsResponse = await phoneBurnerRequest('/dialsession?page=1&page_size=5', accessToken);
+        results.dial_sessions = {
+          success: true,
+          response_keys: Object.keys(sessionsResponse || {}),
+          sample_data: sessionsResponse,
+        };
+        results.endpoints_tested.push('/dialsession');
+      } catch (e: any) {
+        results.dial_sessions = { success: false, error: e.message };
+      }
+
+      // Test 4: Get dial session usage
+      try {
+        const usageResponse = await phoneBurnerRequest('/dialsession/usage', accessToken);
+        results.dial_usage = {
+          success: true,
+          response_keys: Object.keys(usageResponse || {}),
+          sample_data: usageResponse,
+        };
+        results.endpoints_tested.push('/dialsession/usage');
+      } catch (e: any) {
+        results.dial_usage = { success: false, error: e.message };
+      }
+
+      return new Response(JSON.stringify({ diagnostic: true, results }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ========== NORMAL SYNC MODE ==========
     const existingSyncProgress = connection.sync_progress as any || {};
 
     // Handle reset
     if (reset) {
       console.log('Resetting PhoneBurner sync data for workspace:', workspace_id);
-
-      // Delete PhoneBurner-specific data
       await supabase.from('message_events').delete()
-        .eq('workspace_id', workspace_id)
-        .eq('platform', 'phoneburner');
+        .eq('workspace_id', workspace_id).eq('platform', 'phoneburner');
       await supabase.from('leads').delete()
-        .eq('workspace_id', workspace_id)
-        .eq('platform', 'phoneburner');
-
+        .eq('workspace_id', workspace_id).eq('platform', 'phoneburner');
       await supabase.from('api_connections').update({
         sync_status: 'syncing',
         sync_progress: { page: 1, step: 'contacts' },
       }).eq('id', connection.id);
-
-      console.log('Reset complete');
     }
 
-    // Update status to syncing
     await supabase.from('api_connections').update({
       sync_status: 'syncing',
-      sync_progress: {
-        ...existingSyncProgress,
-        last_heartbeat: new Date().toISOString(),
-      },
+      sync_progress: { ...existingSyncProgress, last_heartbeat: new Date().toISOString() },
     }).eq('id', connection.id);
 
     const progress = {
@@ -206,95 +262,94 @@ serve(async (req) => {
 
       while (hasMoreContacts && !isTimeBudgetExceeded()) {
         await supabase.from('api_connections').update({
-          sync_progress: {
-            page: currentPage,
-            step: 'contacts',
-            progress: Math.min(50, currentPage * 5),
-            ...progress,
-          },
+          sync_progress: { page: currentPage, step: 'contacts', progress: Math.min(50, currentPage * 5), ...progress },
         }).eq('id', connection.id);
 
-        // PhoneBurner contacts endpoint with pagination
+        // PhoneBurner API - try different pagination params
         const contactsResponse = await phoneBurnerRequest(
           `/contacts?page=${currentPage}&page_size=${BATCH_SIZE}`,
           accessToken
         );
 
-        const contacts: PhoneBurnerContact[] = contactsResponse?.contacts || contactsResponse?.data || [];
+        // Handle various response formats
+        let contacts: PhoneBurnerContact[] = [];
+        if (contactsResponse?.contacts && Array.isArray(contactsResponse.contacts)) {
+          contacts = contactsResponse.contacts;
+        } else if (contactsResponse?.data && Array.isArray(contactsResponse.data)) {
+          contacts = contactsResponse.data;
+        } else if (Array.isArray(contactsResponse)) {
+          contacts = contactsResponse;
+        }
 
-        if (!Array.isArray(contacts) || contacts.length === 0) {
-          console.log(`No more contacts at page ${currentPage}`);
+        console.log(`Page ${currentPage}: Found ${contacts.length} contacts`);
+        console.log(`Sample contact keys: ${contacts[0] ? Object.keys(contacts[0]).join(', ') : 'none'}`);
+
+        if (contacts.length === 0) {
+          console.log('No more contacts');
           hasMoreContacts = false;
           break;
         }
 
-        console.log(`Fetched ${contacts.length} contacts from page ${currentPage}`);
-
-        // Process contacts
         for (const contact of contacts) {
-          const email = contact.email?.toLowerCase();
-          const phone = contact.phone_work || contact.phone_mobile || contact.phone_home;
+          // Handle various field names PhoneBurner might use
+          const contactId = contact.contact_id || contact.id;
+          const email = (contact.primary_email || contact.email)?.toLowerCase();
+          const phone = contact.primary_phone || contact.phone_work || contact.phone_mobile || contact.phone_home;
+          const firstName = contact.first_name;
+          const lastName = contact.last_name;
+          const company = contact.company;
+          const title = contact.job_title || contact.title;
 
-          if (!email && !phone) continue;
+          if (!contactId) {
+            console.log('Skipping contact without ID:', JSON.stringify(contact).substring(0, 200));
+            continue;
+          }
 
           const leadPayload = {
             workspace_id,
             platform: 'phoneburner',
-            platform_lead_id: String(contact.id),
+            platform_lead_id: String(contactId),
             email: email || null,
-            first_name: contact.first_name || null,
-            last_name: contact.last_name || null,
-            company: contact.company || null,
-            title: contact.title || null,
+            first_name: firstName || null,
+            last_name: lastName || null,
+            company: company || null,
+            title: title || null,
             phone: phone || null,
             city: contact.city || null,
             state: contact.state || null,
             status: 'active',
             metadata: {
+              owner_id: contact.owner_id || contact.user_id || contact.contact_user_id,
               category_name: contact.category_name,
               custom_fields: contact.custom_fields,
-              address1: contact.address1,
-              address2: contact.address2,
-              zip: contact.zip,
-              country: contact.country,
+              raw_data: contact,
             },
           };
 
           const { error: leadError } = await supabase
             .from('leads')
-            .upsert(leadPayload, {
-              onConflict: 'workspace_id,platform,platform_lead_id',
-            });
+            .upsert(leadPayload, { onConflict: 'workspace_id,platform,platform_lead_id' });
 
           if (leadError) {
-            console.error(`Failed to upsert contact ${contact.id}:`, leadError.message);
-            progress.errors.push(`Contact ${contact.id}: ${leadError.message}`);
+            console.error(`Lead upsert error for ${contactId}:`, leadError.message);
+            progress.errors.push(`Contact ${contactId}: ${leadError.message}`);
           } else {
             progress.contacts_synced++;
           }
         }
 
-        // Check if there are more pages
         hasMoreContacts = contacts.length === BATCH_SIZE;
         currentPage++;
       }
 
-      // Check time budget before dial sessions
       if (isTimeBudgetExceeded()) {
         console.log('Time budget exceeded during contacts sync');
         await supabase.from('api_connections').update({
-          sync_progress: {
-            page: currentPage,
-            step: 'contacts',
-            progress: 50,
-            time_budget_exit: true,
-            ...progress,
-          },
+          sync_progress: { page: currentPage, step: 'contacts', progress: 50, ...progress },
         }).eq('id', connection.id);
 
         return new Response(JSON.stringify({
-          success: true,
-          done: false,
+          success: true, done: false,
           message: `Synced ${progress.contacts_synced} contacts. Call again to continue.`,
           ...progress,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -304,26 +359,28 @@ serve(async (req) => {
       console.log('Fetching PhoneBurner dial sessions...');
 
       await supabase.from('api_connections').update({
-        sync_progress: {
-          page: 1,
-          step: 'dial_sessions',
-          progress: 60,
-          ...progress,
-        },
+        sync_progress: { page: 1, step: 'dial_sessions', progress: 60, ...progress },
       }).eq('id', connection.id);
 
-      // Fetch dial sessions
-      const sessionsResponse = await phoneBurnerRequest(
-        '/dialsession?page=1&page_size=100',
-        accessToken
-      );
+      // Try dial session usage endpoint first (shows all sessions)
+      const usageResponse = await phoneBurnerRequest('/dialsession/usage', accessToken);
+      console.log('Dial usage response keys:', Object.keys(usageResponse || {}));
 
-      const dialSessions: PhoneBurnerDialSession[] = sessionsResponse?.dial_sessions ||
-        sessionsResponse?.data || [];
+      // Also try regular dial sessions
+      const sessionsResponse = await phoneBurnerRequest('/dialsession?page=1&page_size=100', accessToken);
+
+      let dialSessions: any[] = [];
+      if (sessionsResponse?.dial_sessions && Array.isArray(sessionsResponse.dial_sessions)) {
+        dialSessions = sessionsResponse.dial_sessions;
+      } else if (sessionsResponse?.data && Array.isArray(sessionsResponse.data)) {
+        dialSessions = sessionsResponse.data;
+      } else if (Array.isArray(sessionsResponse)) {
+        dialSessions = sessionsResponse;
+      }
 
       console.log(`Found ${dialSessions.length} dial sessions`);
 
-      // Get all leads for mapping
+      // Get leads for mapping
       const { data: allLeads } = await supabase
         .from('leads')
         .select('id, platform_lead_id')
@@ -335,72 +392,84 @@ serve(async (req) => {
         leadIdMap.set(lead.platform_lead_id, lead.id);
       }
 
-      // Process dial sessions and their calls
       for (const session of dialSessions) {
         if (isTimeBudgetExceeded()) break;
 
+        const sessionId = session.dial_session_id || session.id;
+        if (!sessionId) continue;
+
         progress.dial_sessions_synced++;
 
-        // Fetch calls for this dial session
+        // Try to get calls for this session
         try {
           const callsResponse = await phoneBurnerRequest(
-            `/dialsession/${session.id}/calls`,
+            `/dialsession/call?dial_session_id=${sessionId}`,
             accessToken
           );
 
-          const calls: PhoneBurnerCall[] = callsResponse?.calls || callsResponse?.data || [];
+          let calls: any[] = [];
+          if (callsResponse?.calls && Array.isArray(callsResponse.calls)) {
+            calls = callsResponse.calls;
+          } else if (callsResponse?.data && Array.isArray(callsResponse.data)) {
+            calls = callsResponse.data;
+          } else if (Array.isArray(callsResponse)) {
+            calls = callsResponse;
+          }
+
+          console.log(`Session ${sessionId}: ${calls.length} calls`);
 
           for (const call of calls) {
-            const leadDbId = leadIdMap.get(String(call.contact_id));
+            const callId = call.call_id || call.id;
+            const contactId = call.contact_id;
+            const leadDbId = contactId ? leadIdMap.get(String(contactId)) : null;
 
-            // Map PhoneBurner call types to event types
+            // Map call disposition to event type
             let eventType = 'call_attempted';
-            if (call.call_type === 'live_answer') {
+            const disposition = (call.disposition || call.call_result || '').toLowerCase();
+            if (disposition.includes('live') || disposition.includes('answer') || disposition.includes('connected')) {
               eventType = 'call_connected';
-            } else if (call.call_type === 'voicemail') {
+            } else if (disposition.includes('voicemail') || disposition.includes('vm')) {
               eventType = 'voicemail_left';
-            } else if (call.call_type === 'no_answer') {
+            } else if (disposition.includes('no answer') || disposition.includes('noanswer')) {
               eventType = 'call_no_answer';
             }
 
             const eventPayload = {
               workspace_id,
               platform: 'phoneburner',
-              platform_event_id: String(call.id),
+              platform_event_id: String(callId || `${sessionId}-${call.phone_number}-${call.call_time || Date.now()}`),
               lead_id: leadDbId || null,
               event_type: eventType,
-              occurred_at: call.date_created,
-              lead_email: null, // Calls don't have email directly
+              occurred_at: call.call_time || call.date_created || call.created_at || new Date().toISOString(),
+              lead_email: null,
               metadata: {
-                phone_number: call.phone_number,
-                duration: call.duration,
-                disposition: call.disposition,
+                phone_number: call.phone_number || call.phone,
+                duration: call.duration || call.call_duration,
+                disposition: call.disposition || call.call_result,
                 notes: call.notes,
-                recording_url: call.recording_url,
-                dial_session_id: call.dial_session_id,
-                call_type: call.call_type,
+                recording_url: call.recording_url || call.recording,
+                dial_session_id: sessionId,
+                raw_data: call,
               },
             };
 
             const { error: eventError } = await supabase
               .from('message_events')
-              .upsert(eventPayload, {
-                onConflict: 'workspace_id,platform,platform_event_id',
-              });
+              .upsert(eventPayload, { onConflict: 'workspace_id,platform,platform_event_id' });
 
             if (!eventError) {
               progress.calls_synced++;
             } else if (eventError.code !== '23505') {
-              console.error(`Failed to upsert call ${call.id}:`, eventError.message);
+              console.error(`Call upsert error:`, eventError.message);
             }
           }
         } catch (callError) {
-          console.error(`Failed to fetch calls for session ${session.id}:`, callError);
-          progress.errors.push(`Session ${session.id} calls: ${String(callError)}`);
+          console.error(`Failed to fetch calls for session ${sessionId}:`, callError);
+          progress.errors.push(`Session ${sessionId}: ${String(callError)}`);
         }
       }
 
-      // Mark sync as complete
+      // Mark sync complete
       const isComplete = !hasMoreContacts && !isTimeBudgetExceeded();
 
       await supabase.from('api_connections').update({
@@ -430,11 +499,7 @@ serve(async (req) => {
       console.error('PhoneBurner sync error:', syncError);
       await supabase.from('api_connections').update({
         sync_status: 'error',
-        sync_progress: {
-          step: 'error',
-          error: String(syncError),
-          ...progress
-        },
+        sync_progress: { step: 'error', error: String(syncError), ...progress },
       }).eq('id', connection.id);
       throw syncError;
     }

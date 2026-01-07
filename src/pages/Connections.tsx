@@ -93,6 +93,8 @@ export default function Connections() {
   const [isConnectingPhoneburner, setIsConnectingPhoneburner] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncingPhoneburner, setIsSyncingPhoneburner] = useState(false);
+  const [isDiagnosingPhoneburner, setIsDiagnosingPhoneburner] = useState(false);
+  const [phoneburnerDiagnostics, setPhoneburnerDiagnostics] = useState<any>(null);
   const [isResumingSync, setIsResumingSync] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isSyncingReplyio, setIsSyncingReplyio] = useState(false);
@@ -618,6 +620,33 @@ export default function Connections() {
       console.error('PhoneBurner sync error:', err);
       setError(err.message || 'Failed to sync PhoneBurner');
       setIsSyncingPhoneburner(false);
+    }
+  };
+
+  const runPhoneburnerDiagnostics = async () => {
+    if (!currentWorkspace || isDiagnosingPhoneburner) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setPhoneburnerDiagnostics(null);
+      setIsDiagnosingPhoneburner(true);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated. Please sign in again.');
+
+      const res = await supabase.functions.invoke('phoneburner-sync', {
+        body: { workspace_id: currentWorkspace.id, diagnostic: true },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || 'Diagnostics failed');
+      setPhoneburnerDiagnostics(res.data?.results || res.data);
+      setSuccess('PhoneBurner diagnostics captured below.');
+    } catch (e: any) {
+      setError(e.message || 'Failed to run diagnostics');
+    } finally {
+      setIsDiagnosingPhoneburner(false);
     }
   };
 
@@ -1239,6 +1268,20 @@ export default function Connections() {
                     </div>
                   )}
 
+                  {/* Diagnostics Results */}
+                  {phoneburnerDiagnostics && (
+                    <Alert>
+                      <AlertDescription>
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium">PhoneBurner API Diagnostics</p>
+                          <pre className="max-h-56 overflow-auto rounded-md bg-accent/40 p-3 text-xs text-foreground">
+                            {JSON.stringify(phoneburnerDiagnostics, null, 2)}
+                          </pre>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
                   <div className="flex gap-2 pt-2">
                     <Button
                       variant="outline"
@@ -1257,6 +1300,19 @@ export default function Connections() {
                           <Download className="mr-2 h-4 w-4" />
                           Sync Data
                         </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={runPhoneburnerDiagnostics}
+                      disabled={isDiagnosingPhoneburner}
+                      title="Run API diagnostics to debug connection"
+                    >
+                      {isDiagnosingPhoneburner ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4" />
                       )}
                     </Button>
                     <AlertDialog>
