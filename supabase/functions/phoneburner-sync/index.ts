@@ -10,6 +10,7 @@ const PHONEBURNER_BASE_URL = 'https://www.phoneburner.com/rest/1';
 const RATE_LIMIT_DELAY = 500;
 const TIME_BUDGET_MS = 45000;
 const SYNC_LOCK_TIMEOUT_MS = 30000;
+const FUNCTION_VERSION = '2026-01-07.v2';
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -118,6 +119,7 @@ serve(async (req) => {
   }
 
   const startTime = Date.now();
+  console.log(`[phoneburner-sync] boot ${FUNCTION_VERSION}`);
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -485,6 +487,10 @@ serve(async (req) => {
             await delay(RATE_LIMIT_DELAY);
 
             const activities: PhoneBurnerActivity[] = extractActivities(activitiesResponse);
+            if (contactOffset === 0) {
+              console.log('[activities] sample response keys:', Object.keys(activitiesResponse));
+              console.log('[activities] extracted activities:', activities.length);
+            }
             
             // Filter for call-related activities
             const callActivities = activities.filter(a => 
