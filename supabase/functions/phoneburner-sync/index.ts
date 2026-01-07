@@ -12,6 +12,50 @@ const PHONEBURNER_BASE_URL = 'https://www.phoneburner.com/rest/1';
 const RATE_LIMIT_DELAY = 500;
 const BATCH_SIZE = 100;
 const TIME_BUDGET_MS = 50000;
+const DAYS_TO_SYNC = 180; // Pull last 180 days of data
+const MAX_USAGE_RANGE_DAYS = 90; // PhoneBurner API limit for dialsession/usage
+
+// Helper function to format date as YYYY-MM-DD
+function formatDateYMD(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+// Helper function to format date as ISO string for API
+function formatDateISO(date: Date): string {
+  return date.toISOString();
+}
+
+// Get date ranges for syncing
+function getDateRanges(totalDays: number, maxRangePerCall: number): Array<{ start: string; end: string }> {
+  const ranges: Array<{ start: string; end: string }> = [];
+  const now = new Date();
+
+  let daysRemaining = totalDays;
+  let endDate = new Date(now);
+
+  while (daysRemaining > 0) {
+    const daysInThisRange = Math.min(daysRemaining, maxRangePerCall);
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - daysInThisRange);
+
+    ranges.push({
+      start: formatDateYMD(startDate),
+      end: formatDateYMD(endDate),
+    });
+
+    endDate = new Date(startDate);
+    daysRemaining -= daysInThisRange;
+  }
+
+  return ranges;
+}
+
+// Get the date from X days ago
+function getDaysAgo(days: number): Date {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date;
+}
 
 interface PhoneBurnerContact {
   contact_id?: number;
@@ -158,64 +202,153 @@ serve(async (req) => {
     // ========== DIAGNOSTIC MODE ==========
     if (diagnostic) {
       console.log('Running PhoneBurner diagnostics...');
+
+      // Calculate date ranges for testing
+      const syncFromDate = getDaysAgo(DAYS_TO_SYNC);
+      const dateRanges = getDateRanges(DAYS_TO_SYNC, MAX_USAGE_RANGE_DAYS);
+      const today = formatDateYMD(new Date());
+      const dateFrom180Days = formatDateYMD(syncFromDate);
+
       const results: any = {
         token_prefix: accessToken.substring(0, 10) + '...',
+        date_range: {
+          sync_from: dateFrom180Days,
+          sync_to: today,
+          total_days: DAYS_TO_SYNC,
+          usage_ranges: dateRanges, // Shows how we split for 90-day max
+        },
         endpoints_tested: [],
       };
 
-      // Test 1: Get members (to see account structure)
+      // Test 1: Get members with entire_team=1 (to see all team members)
       try {
-        const membersResponse = await phoneBurnerRequest('/members', accessToken);
+        const membersResponse = await phoneBurnerRequest('/members?entire_team=1', accessToken);
+        const membersList = membersResponse?.members || membersResponse?.data || [];
         results.members = {
           success: true,
           response_keys: Object.keys(membersResponse || {}),
+          member_count: Array.isArray(membersList) ? membersList.length : 'unknown',
           data: membersResponse,
         };
-        results.endpoints_tested.push('/members');
+        results.endpoints_tested.push('/members?entire_team=1');
       } catch (e: any) {
         results.members = { success: false, error: e.message };
       }
 
-      // Test 2: Get contacts (page 1)
+      // Test 2: Get contacts with updated_from date filter (180 days)
       try {
-        const contactsResponse = await phoneBurnerRequest('/contacts?page=1&page_size=5', accessToken);
+        const updatedFrom = formatDateISO(syncFromDate);
+        const contactsUrl = `/contacts?page=1&page_size=5&updated_from=${encodeURIComponent(updatedFrom)}`;
+        console.log(`Testing contacts with date filter: ${contactsUrl}`);
+
+        const contactsResponse = await phoneBurnerRequest(contactsUrl, accessToken);
+
+        let contacts: any[] = [];
+        if (contactsResponse?.contacts && Array.isArray(contactsResponse.contacts)) {
+          contacts = contactsResponse.contacts;
+        } else if (contactsResponse?.data && Array.isArray(contactsResponse.data)) {
+          contacts = contactsResponse.data;
+        } else if (Array.isArray(contactsResponse)) {
+          contacts = contactsResponse;
+        }
+
         results.contacts = {
           success: true,
+          url_tested: contactsUrl,
           response_keys: Object.keys(contactsResponse || {}),
-          sample_data: contactsResponse,
-          contact_count: Array.isArray(contactsResponse?.contacts) ? contactsResponse.contacts.length :
-            (Array.isArray(contactsResponse?.data) ? contactsResponse.data.length :
-            (Array.isArray(contactsResponse) ? contactsResponse.length : 'unknown')),
+          contact_count: contacts.length,
+          total_available: contactsResponse?.total || contactsResponse?.total_count || 'unknown',
+          sample_contact: contacts[0] ? Object.keys(contacts[0]) : 'none',
+          data: contactsResponse,
         };
-        results.endpoints_tested.push('/contacts');
+        results.endpoints_tested.push(contactsUrl);
       } catch (e: any) {
         results.contacts = { success: false, error: e.message };
       }
 
-      // Test 3: Get dial sessions
+      // Test 2b: Also test contacts WITHOUT date filter to compare
       try {
-        const sessionsResponse = await phoneBurnerRequest('/dialsession?page=1&page_size=5', accessToken);
+        const contactsNoFilterResponse = await phoneBurnerRequest('/contacts?page=1&page_size=5', accessToken);
+        let contacts: any[] = [];
+        if (contactsNoFilterResponse?.contacts && Array.isArray(contactsNoFilterResponse.contacts)) {
+          contacts = contactsNoFilterResponse.contacts;
+        } else if (contactsNoFilterResponse?.data && Array.isArray(contactsNoFilterResponse.data)) {
+          contacts = contactsNoFilterResponse.data;
+        } else if (Array.isArray(contactsNoFilterResponse)) {
+          contacts = contactsNoFilterResponse;
+        }
+
+        results.contacts_no_filter = {
+          success: true,
+          contact_count: contacts.length,
+          total_available: contactsNoFilterResponse?.total || contactsNoFilterResponse?.total_count || 'unknown',
+          data: contactsNoFilterResponse,
+        };
+        results.endpoints_tested.push('/contacts?page=1&page_size=5');
+      } catch (e: any) {
+        results.contacts_no_filter = { success: false, error: e.message };
+      }
+
+      // Test 3: Get dial sessions with date_start/date_end
+      try {
+        const sessionsUrl = `/dialsession?page=1&page_size=5&date_start=${dateFrom180Days}&date_end=${today}`;
+        console.log(`Testing dialsession with date filter: ${sessionsUrl}`);
+
+        const sessionsResponse = await phoneBurnerRequest(sessionsUrl, accessToken);
+
+        let sessions: any[] = [];
+        if (sessionsResponse?.dial_sessions && Array.isArray(sessionsResponse.dial_sessions)) {
+          sessions = sessionsResponse.dial_sessions;
+        } else if (sessionsResponse?.dialsessions && Array.isArray(sessionsResponse.dialsessions)) {
+          sessions = sessionsResponse.dialsessions;
+        } else if (sessionsResponse?.data && Array.isArray(sessionsResponse.data)) {
+          sessions = sessionsResponse.data;
+        } else if (Array.isArray(sessionsResponse)) {
+          sessions = sessionsResponse;
+        }
+
         results.dial_sessions = {
           success: true,
+          url_tested: sessionsUrl,
           response_keys: Object.keys(sessionsResponse || {}),
-          sample_data: sessionsResponse,
+          session_count: sessions.length,
+          sample_session: sessions[0] ? Object.keys(sessions[0]) : 'none',
+          data: sessionsResponse,
         };
-        results.endpoints_tested.push('/dialsession');
+        results.endpoints_tested.push(sessionsUrl);
       } catch (e: any) {
         results.dial_sessions = { success: false, error: e.message };
       }
 
-      // Test 4: Get dial session usage
+      // Test 4: Get dial session usage (requires date_start and date_end, max 90 days)
       try {
-        const usageResponse = await phoneBurnerRequest('/dialsession/usage', accessToken);
+        // Use first 90-day range for testing
+        const usageRange = dateRanges[0];
+        const usageUrl = `/dialsession/usage?date_start=${usageRange.start}&date_end=${usageRange.end}`;
+        console.log(`Testing dialsession/usage with required date filter: ${usageUrl}`);
+
+        const usageResponse = await phoneBurnerRequest(usageUrl, accessToken);
         results.dial_usage = {
           success: true,
+          url_tested: usageUrl,
           response_keys: Object.keys(usageResponse || {}),
-          sample_data: usageResponse,
+          data: usageResponse,
         };
-        results.endpoints_tested.push('/dialsession/usage');
+        results.endpoints_tested.push(usageUrl);
       } catch (e: any) {
         results.dial_usage = { success: false, error: e.message };
+      }
+
+      // Test 5: Try the /user endpoint to see current user info
+      try {
+        const userResponse = await phoneBurnerRequest('/user', accessToken);
+        results.current_user = {
+          success: true,
+          data: userResponse,
+        };
+        results.endpoints_tested.push('/user');
+      } catch (e: any) {
+        results.current_user = { success: false, error: e.message };
       }
 
       return new Response(JSON.stringify({ diagnostic: true, results }),
@@ -253,23 +386,31 @@ serve(async (req) => {
     const startTime = Date.now();
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
 
+    // Calculate date range for 180 days of data
+    const syncFromDate = getDaysAgo(DAYS_TO_SYNC);
+    const syncFromDateISO = formatDateISO(syncFromDate);
+    const syncFromDateYMD = formatDateYMD(syncFromDate);
+    const todayYMD = formatDateYMD(new Date());
+    const dateRanges = getDateRanges(DAYS_TO_SYNC, MAX_USAGE_RANGE_DAYS);
+
+    console.log(`Syncing PhoneBurner data from ${syncFromDateYMD} to ${todayYMD} (${DAYS_TO_SYNC} days)`);
+
     let currentPage = reset ? 1 : (existingSyncProgress.page || 1);
     let hasMoreContacts = true;
 
     try {
       // ========== SYNC CONTACTS ==========
-      console.log('Fetching PhoneBurner contacts...');
+      console.log('Fetching PhoneBurner contacts with updated_from filter...');
 
       while (hasMoreContacts && !isTimeBudgetExceeded()) {
         await supabase.from('api_connections').update({
           sync_progress: { page: currentPage, step: 'contacts', progress: Math.min(50, currentPage * 5), ...progress },
         }).eq('id', connection.id);
 
-        // PhoneBurner API - try different pagination params
-        const contactsResponse = await phoneBurnerRequest(
-          `/contacts?page=${currentPage}&page_size=${BATCH_SIZE}`,
-          accessToken
-        );
+        // PhoneBurner API - use updated_from for date filtering
+        const contactsUrl = `/contacts?page=${currentPage}&page_size=${BATCH_SIZE}&updated_from=${encodeURIComponent(syncFromDateISO)}`;
+        console.log(`Fetching: ${contactsUrl}`);
+        const contactsResponse = await phoneBurnerRequest(contactsUrl, accessToken);
 
         // Handle various response formats
         let contacts: PhoneBurnerContact[] = [];
@@ -356,29 +497,60 @@ serve(async (req) => {
       }
 
       // ========== SYNC DIAL SESSIONS & CALLS ==========
-      console.log('Fetching PhoneBurner dial sessions...');
+      console.log('Fetching PhoneBurner dial sessions with date filtering...');
 
       await supabase.from('api_connections').update({
         sync_progress: { page: 1, step: 'dial_sessions', progress: 60, ...progress },
       }).eq('id', connection.id);
 
-      // Try dial session usage endpoint first (shows all sessions)
-      const usageResponse = await phoneBurnerRequest('/dialsession/usage', accessToken);
-      console.log('Dial usage response keys:', Object.keys(usageResponse || {}));
-
-      // Also try regular dial sessions
-      const sessionsResponse = await phoneBurnerRequest('/dialsession?page=1&page_size=100', accessToken);
-
-      let dialSessions: any[] = [];
-      if (sessionsResponse?.dial_sessions && Array.isArray(sessionsResponse.dial_sessions)) {
-        dialSessions = sessionsResponse.dial_sessions;
-      } else if (sessionsResponse?.data && Array.isArray(sessionsResponse.data)) {
-        dialSessions = sessionsResponse.data;
-      } else if (Array.isArray(sessionsResponse)) {
-        dialSessions = sessionsResponse;
+      // Fetch dial session usage for each 90-day range (API limit)
+      // This gives us an overview of session activity
+      console.log(`Fetching dial session usage for ${dateRanges.length} date ranges (90-day max each)...`);
+      for (const range of dateRanges) {
+        try {
+          const usageUrl = `/dialsession/usage?date_start=${range.start}&date_end=${range.end}`;
+          console.log(`Fetching usage: ${usageUrl}`);
+          const usageResponse = await phoneBurnerRequest(usageUrl, accessToken);
+          console.log(`Usage for ${range.start} to ${range.end}:`, JSON.stringify(usageResponse).substring(0, 200));
+        } catch (usageError) {
+          console.error(`Failed to fetch usage for range ${range.start}-${range.end}:`, usageError);
+        }
       }
 
-      console.log(`Found ${dialSessions.length} dial sessions`);
+      // Fetch dial sessions with date filtering - paginate through all
+      let dialSessions: any[] = [];
+      let sessionPage = 1;
+      let hasMoreSessions = true;
+
+      while (hasMoreSessions && !isTimeBudgetExceeded()) {
+        const sessionsUrl = `/dialsession?page=${sessionPage}&page_size=${BATCH_SIZE}&date_start=${syncFromDateYMD}&date_end=${todayYMD}`;
+        console.log(`Fetching dial sessions: ${sessionsUrl}`);
+
+        const sessionsResponse = await phoneBurnerRequest(sessionsUrl, accessToken);
+
+        let pageSessions: any[] = [];
+        if (sessionsResponse?.dial_sessions && Array.isArray(sessionsResponse.dial_sessions)) {
+          pageSessions = sessionsResponse.dial_sessions;
+        } else if (sessionsResponse?.dialsessions && Array.isArray(sessionsResponse.dialsessions)) {
+          pageSessions = sessionsResponse.dialsessions;
+        } else if (sessionsResponse?.data && Array.isArray(sessionsResponse.data)) {
+          pageSessions = sessionsResponse.data;
+        } else if (Array.isArray(sessionsResponse)) {
+          pageSessions = sessionsResponse;
+        }
+
+        console.log(`Dial sessions page ${sessionPage}: found ${pageSessions.length} sessions`);
+
+        if (pageSessions.length === 0) {
+          hasMoreSessions = false;
+        } else {
+          dialSessions = dialSessions.concat(pageSessions);
+          hasMoreSessions = pageSessions.length === BATCH_SIZE;
+          sessionPage++;
+        }
+      }
+
+      console.log(`Total dial sessions found: ${dialSessions.length}`);
 
       // Get leads for mapping
       const { data: allLeads } = await supabase
@@ -400,20 +572,25 @@ serve(async (req) => {
 
         progress.dial_sessions_synced++;
 
-        // Try to get calls for this session
+        // Get session details with calls - use correct API endpoint format
+        // Per API docs: GET /dialsession/{dialsession_id} returns session with calls array
         try {
-          const callsResponse = await phoneBurnerRequest(
-            `/dialsession/call?dial_session_id=${sessionId}`,
-            accessToken
-          );
+          const sessionDetailsUrl = `/dialsession/${sessionId}?include_recording=1`;
+          console.log(`Fetching session details: ${sessionDetailsUrl}`);
+          const sessionDetailsResponse = await phoneBurnerRequest(sessionDetailsUrl, accessToken);
 
+          // Extract calls from session details response
           let calls: any[] = [];
-          if (callsResponse?.calls && Array.isArray(callsResponse.calls)) {
-            calls = callsResponse.calls;
-          } else if (callsResponse?.data && Array.isArray(callsResponse.data)) {
-            calls = callsResponse.data;
-          } else if (Array.isArray(callsResponse)) {
-            calls = callsResponse;
+          if (sessionDetailsResponse?.dial_session?.calls && Array.isArray(sessionDetailsResponse.dial_session.calls)) {
+            calls = sessionDetailsResponse.dial_session.calls;
+          } else if (sessionDetailsResponse?.calls && Array.isArray(sessionDetailsResponse.calls)) {
+            calls = sessionDetailsResponse.calls;
+          } else if (sessionDetailsResponse?.data?.calls && Array.isArray(sessionDetailsResponse.data.calls)) {
+            calls = sessionDetailsResponse.data.calls;
+          } else if (Array.isArray(sessionDetailsResponse?.data)) {
+            calls = sessionDetailsResponse.data;
+          } else if (Array.isArray(sessionDetailsResponse)) {
+            calls = sessionDetailsResponse;
           }
 
           console.log(`Session ${sessionId}: ${calls.length} calls`);
