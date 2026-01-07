@@ -61,7 +61,6 @@ interface NavItem {
 const emailMainNavItems: NavItem[] = [
   { title: 'Overview', href: '/', icon: LayoutDashboard },
   { title: 'Deal Hub', href: '/deal-hub', icon: Briefcase },
-  { title: 'Contacts', href: '/contacts', icon: Users },
   { title: 'Inbox', href: '/inbox', icon: Inbox },
   { title: 'Campaigns', href: '/campaigns', icon: Mail },
   { title: 'Copy Insights', href: '/copy-insights', icon: FileText },
@@ -83,7 +82,6 @@ const emailExperimentNavItems: NavItem[] = [
 // Calling channel navigation
 const callingMainNavItems: NavItem[] = [
   { title: 'Overview', href: '/calling', icon: LayoutDashboard },
-  { title: 'Contacts', href: '/contacts', icon: Users },
   { title: 'Call Search', href: '/calling/search', icon: Phone },
   { title: 'Best/Worst Calls', href: '/calling/best-worst', icon: BarChart3 },
   { title: 'Call Sessions', href: '/calling/sessions', icon: PhoneCall },
@@ -91,6 +89,11 @@ const callingMainNavItems: NavItem[] = [
   { title: 'Call Library', href: '/calling/library', icon: Library },
   { title: 'Pattern Analysis', href: '/calling/patterns', icon: FlaskConical },
   { title: 'Timing Insights', href: '/calling/timing', icon: CalendarDays },
+];
+
+// Contacts channel navigation
+const contactsMainNavItems: NavItem[] = [
+  { title: 'All Contacts', href: '/contacts', icon: Users },
 ];
 
 const callingCoachingNavItems: NavItem[] = [
@@ -132,15 +135,21 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     // Navigate to the overview of the selected channel
     if (newChannel === 'calling') {
       navigate('/calling');
+    } else if (newChannel === 'contacts') {
+      navigate('/contacts');
     } else {
       navigate('/');
     }
   };
 
   // Get nav items based on current channel
-  const mainNavItems = channel === 'calling' ? callingMainNavItems : emailMainNavItems;
-  const reportsNavItems = channel === 'calling' ? callingReportsNavItems : emailReportsNavItems;
-  const experimentNavItems = channel === 'email' ? emailExperimentNavItems : callingCoachingNavItems;
+  const mainNavItems = channel === 'calling' 
+    ? callingMainNavItems 
+    : channel === 'contacts' 
+      ? contactsMainNavItems 
+      : emailMainNavItems;
+  const reportsNavItems = channel === 'calling' ? callingReportsNavItems : channel === 'contacts' ? [] : emailReportsNavItems;
+  const experimentNavItems = channel === 'email' ? emailExperimentNavItems : channel === 'calling' ? callingCoachingNavItems : [];
 
   const NavLink = ({ item }: { item: NavItem }) => {
     const isActive = location.pathname === item.href;
@@ -203,6 +212,23 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         </TooltipTrigger>
         <TooltipContent side="right">Calling</TooltipContent>
       </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => handleChannelChange('contacts')}
+            className={cn(
+              'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+              channel === 'contacts'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+            )}
+          >
+            <Users className="h-5 w-5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">Contacts</TooltipContent>
+      </Tooltip>
     </div>
   );
 
@@ -210,7 +236,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     <>
       {/* Logo */}
       <div className="flex h-14 items-center border-b border-border px-4">
-        <Link to={channel === 'calling' ? '/calling' : '/'} className="flex items-center gap-3">
+        <Link to={channel === 'calling' ? '/calling' : channel === 'contacts' ? '/contacts' : '/'} className="flex items-center gap-3">
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
             <BarChart3 className="h-5 w-5 text-primary-foreground" />
           </div>
