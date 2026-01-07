@@ -43,6 +43,7 @@ import {
   Library,
   Briefcase,
   CalendarDays,
+  Sparkles,
 } from 'lucide-react';
 
 interface NavItem {
@@ -59,6 +60,7 @@ const mainNavItems: NavItem[] = [
   { title: 'Campaigns', href: '/campaigns', icon: Mail },
   { title: 'Copy Insights', href: '/copy-insights', icon: FileText },
   { title: 'Copy Library', href: '/copy-library', icon: Library },
+  { title: 'Copywriting Studio', href: '/copywriting-studio', icon: Sparkles },
   { title: 'Audience Insights', href: '/audience-insights', icon: PieChart },
   { title: 'Deliverability', href: '/deliverability', icon: Shield },
 ];
