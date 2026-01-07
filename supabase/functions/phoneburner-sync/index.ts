@@ -73,6 +73,45 @@ interface PhoneBurnerActivity {
   recording_url?: string;
 }
 
+// Helper to extract activities array from various response shapes
+function extractActivities(response: any): PhoneBurnerActivity[] {
+  if (!response) return [];
+  
+  const contactActivities = response.contact_activities;
+  
+  // If it's already an array, return it
+  if (Array.isArray(contactActivities)) {
+    return contactActivities;
+  }
+  
+  // If it's an object, try common nested patterns
+  if (contactActivities && typeof contactActivities === 'object') {
+    // Try nested .contact_activities
+    if (Array.isArray(contactActivities.contact_activities)) {
+      return contactActivities.contact_activities;
+    }
+    // Try singular .contact_activity (might be array or single object)
+    if (contactActivities.contact_activity) {
+      const activity = contactActivities.contact_activity;
+      return Array.isArray(activity) ? activity : [activity];
+    }
+    // Try .activities
+    if (Array.isArray(contactActivities.activities)) {
+      return contactActivities.activities;
+    }
+    // Log unexpected shape for debugging
+    console.log('Unexpected contact_activities shape:', Object.keys(contactActivities));
+  }
+  
+  // Try top-level .activities
+  if (Array.isArray(response.activities)) {
+    return response.activities;
+  }
+  
+  console.log('Could not extract activities. Response keys:', Object.keys(response));
+  return [];
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -193,13 +232,21 @@ serve(async (req) => {
               `/contacts/${contactId}/activities?days=180`,
               apiKey
             );
-            console.log('Raw /contacts/activities response:', JSON.stringify(activitiesResponse, null, 2));
+            console.log('Raw /contacts/activities response keys:', Object.keys(activitiesResponse));
+            if (activitiesResponse.contact_activities) {
+              console.log('contact_activities type:', typeof activitiesResponse.contact_activities);
+              if (typeof activitiesResponse.contact_activities === 'object' && !Array.isArray(activitiesResponse.contact_activities)) {
+                console.log('contact_activities keys:', Object.keys(activitiesResponse.contact_activities));
+              }
+            }
             
-            const activities = activitiesResponse.contact_activities || [];
+            const activities = extractActivities(activitiesResponse);
             const callActivities = activities.filter((a: any) => 
               a.activity?.toLowerCase().includes('call') || 
               a.activity_id === '41' ||
-              a.duration !== undefined
+              a.duration !== undefined ||
+              a.disposition !== undefined ||
+              a.recording_url !== undefined
             );
             
             diagnosticResults.tests.contact_activities = {
@@ -437,14 +484,16 @@ serve(async (req) => {
             );
             await delay(RATE_LIMIT_DELAY);
 
-            const activities: PhoneBurnerActivity[] = activitiesResponse.contact_activities || [];
+            const activities: PhoneBurnerActivity[] = extractActivities(activitiesResponse);
             
             // Filter for call-related activities
             const callActivities = activities.filter(a => 
               a.activity?.toLowerCase().includes('call') || 
               a.activity_id === '41' || // Called a Prospect
               a.activity_id === '42' || // Received Call
-              a.duration !== undefined
+              a.duration !== undefined ||
+              a.disposition !== undefined ||
+              a.recording_url !== undefined
             );
 
             if (callActivities.length > 0) {
