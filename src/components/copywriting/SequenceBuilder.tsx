@@ -137,65 +137,27 @@ export function SequenceBuilder({ steps, setSteps }: SequenceBuilderProps) {
                     {index + 1}
                   </div>
                   
-                  <div className="flex-1 grid grid-cols-3 gap-2">
-                    {/* Channel */}
-                    <Select
-                      value={step.channel}
-                      onValueChange={(val) => updateStep(step.id, { channel: val })}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <Icon className="h-3 w-3" />
-                          <span className="truncate">{getChannelLabel(step.channel)}</span>
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CHANNELS.map(ch => (
-                          <SelectItem key={ch.value} value={ch.value}>
-                            <div className="flex items-center gap-2">
-                              <ch.icon className="h-3.5 w-3.5" />
-                              {ch.label}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    {/* Step Type */}
-                    <Select
-                      value={step.stepType}
-                      onValueChange={(val) => updateStep(step.id, { stepType: val })}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {stepTypes.map(st => (
-                          <SelectItem key={st.value} value={st.value}>
-                            {st.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    {/* Delay */}
-                    <Select
-                      value={String(step.delayDays)}
-                      onValueChange={(val) => updateStep(step.id, { delayDays: parseInt(val) })}
-                      disabled={index === 0}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DELAY_OPTIONS.map(d => (
-                          <SelectItem key={d.value} value={String(d.value)}>
-                            {index === 0 ? 'Day 1' : `+${d.label}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Select
+                    value={step.channel}
+                    onValueChange={(val) => updateStep(step.id, { channel: val })}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-auto min-w-[140px]">
+                      <div className="flex items-center gap-1.5">
+                        <Icon className="h-3 w-3" />
+                        <span className="truncate">{getChannelLabel(step.channel)}</span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHANNELS.map(ch => (
+                        <SelectItem key={ch.value} value={ch.value}>
+                          <div className="flex items-center gap-2">
+                            <ch.icon className="h-3.5 w-3.5" />
+                            {ch.label}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
                   <Button
                     variant="ghost"
