@@ -793,6 +793,58 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_notes: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          lead_id: string
+          note_text: string
+          note_type: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          id?: string
+          lead_id: string
+          note_text: string
+          note_type?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          lead_id?: string
+          note_text?: string
+          note_type?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "contact_engagement_summary"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "contact_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_notes_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       copy_generation_sessions: {
         Row: {
           channel: string
@@ -1545,13 +1597,17 @@ export type Database = {
       }
       leads: {
         Row: {
+          assigned_to: string | null
           campaign_id: string | null
           category: string | null
           company: string | null
           company_size: string | null
           company_size_category: string | null
+          contact_status: string | null
           created_at: string
           department: string | null
+          do_not_call: boolean | null
+          do_not_email: boolean | null
           email: string
           email_domain: string | null
           email_type: string | null
@@ -1559,28 +1615,41 @@ export type Database = {
           first_name: string | null
           id: string
           industry: string | null
+          last_call_at: string | null
+          last_contact_at: string | null
+          last_email_at: string | null
           last_name: string | null
           lead_source: string | null
           linkedin_url: string | null
           location: string | null
+          next_action_date: string | null
+          next_action_type: string | null
           phone_number: string | null
+          phoneburner_contact_id: string | null
           platform: string
           platform_lead_id: string | null
+          seller_interest_score: number | null
+          seller_interest_summary: string | null
           seniority_level: string | null
           status: string | null
+          tags: string[] | null
           title: string | null
           updated_at: string
           website: string | null
           workspace_id: string
         }
         Insert: {
+          assigned_to?: string | null
           campaign_id?: string | null
           category?: string | null
           company?: string | null
           company_size?: string | null
           company_size_category?: string | null
+          contact_status?: string | null
           created_at?: string
           department?: string | null
+          do_not_call?: boolean | null
+          do_not_email?: boolean | null
           email: string
           email_domain?: string | null
           email_type?: string | null
@@ -1588,28 +1657,41 @@ export type Database = {
           first_name?: string | null
           id?: string
           industry?: string | null
+          last_call_at?: string | null
+          last_contact_at?: string | null
+          last_email_at?: string | null
           last_name?: string | null
           lead_source?: string | null
           linkedin_url?: string | null
           location?: string | null
+          next_action_date?: string | null
+          next_action_type?: string | null
           phone_number?: string | null
+          phoneburner_contact_id?: string | null
           platform: string
           platform_lead_id?: string | null
+          seller_interest_score?: number | null
+          seller_interest_summary?: string | null
           seniority_level?: string | null
           status?: string | null
+          tags?: string[] | null
           title?: string | null
           updated_at?: string
           website?: string | null
           workspace_id: string
         }
         Update: {
+          assigned_to?: string | null
           campaign_id?: string | null
           category?: string | null
           company?: string | null
           company_size?: string | null
           company_size_category?: string | null
+          contact_status?: string | null
           created_at?: string
           department?: string | null
+          do_not_call?: boolean | null
+          do_not_email?: boolean | null
           email?: string
           email_domain?: string | null
           email_type?: string | null
@@ -1617,15 +1699,24 @@ export type Database = {
           first_name?: string | null
           id?: string
           industry?: string | null
+          last_call_at?: string | null
+          last_contact_at?: string | null
+          last_email_at?: string | null
           last_name?: string | null
           lead_source?: string | null
           linkedin_url?: string | null
           location?: string | null
+          next_action_date?: string | null
+          next_action_type?: string | null
           phone_number?: string | null
+          phoneburner_contact_id?: string | null
           platform?: string
           platform_lead_id?: string | null
+          seller_interest_score?: number | null
+          seller_interest_summary?: string | null
           seniority_level?: string | null
           status?: string | null
+          tags?: string[] | null
           title?: string | null
           updated_at?: string
           website?: string | null
@@ -1726,6 +1817,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "email_accounts"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "contact_engagement_summary"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "message_events_lead_id_fkey"
@@ -1836,6 +1934,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "phoneburner_calls_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contact_engagement_summary"
+            referencedColumns: ["lead_id"]
+          },
           {
             foreignKeyName: "phoneburner_calls_contact_id_fkey"
             columns: ["contact_id"]
@@ -2464,6 +2569,44 @@ export type Database = {
           },
         ]
       }
+      contact_engagement_summary: {
+        Row: {
+          assigned_to: string | null
+          avg_ai_score: number | null
+          calls_connected: number | null
+          company: string | null
+          contact_status: string | null
+          email: string | null
+          emails_bounced: number | null
+          emails_clicked: number | null
+          emails_opened: number | null
+          emails_replied: number | null
+          emails_sent: number | null
+          first_contact_date: string | null
+          first_name: string | null
+          industry: string | null
+          last_contact_at: string | null
+          last_contact_date: string | null
+          last_name: string | null
+          lead_id: string | null
+          seller_interest_score: number | null
+          tags: string[] | null
+          title: string | null
+          total_calls: number | null
+          total_talk_time_seconds: number | null
+          voicemails_left: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       copy_performance: {
         Row: {
           body_preview: string | null
@@ -2534,6 +2677,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "campaigns"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "contact_engagement_summary"
+            referencedColumns: ["lead_id"]
           },
           {
             foreignKeyName: "message_events_lead_id_fkey"
