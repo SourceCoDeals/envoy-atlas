@@ -4,25 +4,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useCallsWithScores } from '@/hooks/useCallIntelligence';
-import { TrendingUp, TrendingDown, Lightbulb, Target, MessageSquare, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from 'recharts';
+import { Lightbulb, Target, MessageSquare, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 
 const OPENING_TYPES = [
   { value: 'trigger', label: 'Trigger-Based', description: 'References specific event or timing' },
   { value: 'permission', label: 'Permission-Based', description: 'Asks for time upfront' },
   { value: 'value_first', label: 'Value-First', description: 'Leads with benefit or result' },
   { value: 'generic', label: 'Generic', description: 'Standard introduction' },
-];
-
-const OBJECTION_TYPES = [
-  'Not interested',
-  'Already have someone',
-  'Bad timing',
-  'Just curious',
-  'Price concerns',
-  'Need to think about it',
-  'Spouse/partner decision',
-  'Not the decision maker',
 ];
 
 const CHART_COLORS = [
@@ -147,7 +136,7 @@ export default function PatternAnalysis() {
                call?.disposition?.toLowerCase().includes('interested'));
     });
 
-    const avgForGroup = (group: typeof aiScores, key: keyof typeof aiScores[0]) => {
+    const avgForGroup = (group: typeof aiScores, key: 'next_step_clarity_score' | 'seller_interest_score' | 'rapport_building_score' | 'objection_handling_score' | 'value_proposition_score') => {
       const values = group.map(s => s[key]).filter((v): v is number => typeof v === 'number');
       return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
     };
