@@ -57,18 +57,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       setWorkspaces(workspacesWithRoles);
 
-      // Set current workspace from localStorage or find the main one (with slug 'sourceco'), or first available
+      // Set current workspace from localStorage, but always prefer the canonical workspace (slug === 'sourceco')
+      // because duplicate workspaces can be created during onboarding/testing.
       const storedWorkspaceId = localStorage.getItem('currentWorkspaceId');
       const storedWorkspace = workspacesWithRoles.find(w => w.id === storedWorkspaceId);
-      
-      if (storedWorkspace) {
+      const canonicalWorkspace = workspacesWithRoles.find(w => w.slug === 'sourceco');
+
+      if (canonicalWorkspace) {
+        setCurrentWorkspace(canonicalWorkspace);
+        localStorage.setItem('currentWorkspaceId', canonicalWorkspace.id);
+      } else if (storedWorkspace) {
         setCurrentWorkspace(storedWorkspace);
       } else {
-        // Prioritize the main workspace (slug without random suffix) or first available
-        const mainWorkspace = workspacesWithRoles.find(w => w.slug === 'sourceco') || workspacesWithRoles[0];
-        if (mainWorkspace) {
-          setCurrentWorkspace(mainWorkspace);
-          localStorage.setItem('currentWorkspaceId', mainWorkspace.id);
+        const firstWorkspace = workspacesWithRoles[0];
+        if (firstWorkspace) {
+          setCurrentWorkspace(firstWorkspace);
+          localStorage.setItem('currentWorkspaceId', firstWorkspace.id);
         }
       }
     } catch (err) {
