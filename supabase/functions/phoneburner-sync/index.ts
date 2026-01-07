@@ -216,7 +216,43 @@ serve(async (req) => {
         };
       }
 
-      // Test 3: Fetch sessions per member (for company-wide API keys)
+      // Test 3: Try /dialsession/call endpoint (direct call access)
+      try {
+        const callsResponse = await phoneburnerRequest('/dialsession/call?page=1&items_per_page=10', apiKey);
+        console.log('Raw /dialsession/call response:', JSON.stringify(callsResponse, null, 2));
+        
+        diagnosticResults.tests.dialsession_call_endpoint = {
+          success: true,
+          raw_keys: Object.keys(callsResponse || {}),
+          http_status: callsResponse.http_status,
+          has_calls: !!callsResponse.calls,
+          sample: callsResponse.calls?.calls?.[0] || callsResponse.calls?.[0] || null,
+        };
+      } catch (e: any) {
+        diagnosticResults.tests.dialsession_call_endpoint = {
+          success: false,
+          error: e.message,
+        };
+      }
+
+      // Test 4: Try /dialsession/usage endpoint
+      try {
+        const usageResponse = await phoneburnerRequest('/dialsession/usage', apiKey);
+        console.log('Raw /dialsession/usage response:', JSON.stringify(usageResponse, null, 2));
+        
+        diagnosticResults.tests.dialsession_usage = {
+          success: true,
+          raw_keys: Object.keys(usageResponse || {}),
+          usage: usageResponse.usage || usageResponse,
+        };
+      } catch (e: any) {
+        diagnosticResults.tests.dialsession_usage = {
+          success: false,
+          error: e.message,
+        };
+      }
+
+      // Test 5: Fetch sessions per member (for company-wide API keys)
       const memberIds = diagnosticResults.tests.members?.data?.map((m: any) => m.user_id).filter(Boolean) || [];
       diagnosticResults.tests.sessions_per_member = [];
       
@@ -255,7 +291,7 @@ serve(async (req) => {
       if (!globalEndpoint?.success) {
         diagnosticResults.recommendation = 'API key may not have access to dial sessions. Check API permissions.';
       } else if (globalEndpoint.total_results === 0 && totalMemberSessions === 0) {
-        diagnosticResults.recommendation = 'No dial sessions found for any team member. Make sure your team has dial session history in PhoneBurner.';
+        diagnosticResults.recommendation = 'No dial sessions found via standard endpoints. Check /dialsession/call and /dialsession/usage results for alternative data access.';
       } else if (globalEndpoint.total_results === 0 && totalMemberSessions > 0) {
         diagnosticResults.recommendation = `Global endpoint shows 0, but found ${totalMemberSessions} sessions across team members. Sync will iterate over each member.`;
       } else {
@@ -266,6 +302,8 @@ serve(async (req) => {
         total_members: diagnosticResults.tests.members?.count || 0,
         global_sessions: globalEndpoint?.total_results || 0,
         member_sessions_total: totalMemberSessions,
+        call_endpoint_success: diagnosticResults.tests.dialsession_call_endpoint?.success || false,
+        usage_endpoint_success: diagnosticResults.tests.dialsession_usage?.success || false,
       };
 
       console.log('Diagnostic results:', JSON.stringify(diagnosticResults, null, 2));
@@ -453,18 +491,20 @@ serve(async (req) => {
               // Parse connected field - API may return "0"/"1" string or number
               const isConnected = String(call.connected) === '1';
               const emailSent = String(call.email_sent) === '1';
-              
+
               const { error: callError } = await supabase
                 .from('phoneburner_calls')
                 .upsert({
                   workspace_id: workspaceId,
-                  dial_session_id: dbSession?.id,
                   external_call_id: call.call_id?.toString() || `${session.dialsession_id}-${callsProcessed}`,
+                  dial_session_id: dbSession?.id,
+                  contact_id: null,
                   phone_number: call.phone,
                   disposition: call.disposition,
+                  disposition_id: null,
                   duration_seconds: call.duration || 0,
                   is_connected: isConnected,
-                  is_voicemail: call.disposition?.toLowerCase().includes('voicemail') || false,
+                  is_voicemail: call.voicemail_sent === '1' || call.voicemail_sent === 'yes',
                   voicemail_sent: call.voicemail_sent,
                   email_sent: emailSent,
                   notes: call.notes,
@@ -477,22 +517,23 @@ serve(async (req) => {
 
               if (callError) {
                 console.error('Call upsert error:', callError);
+              } else {
+                callsProcessed++;
               }
-              callsProcessed++;
             }
-          } catch (detailError) {
-            console.error(`Error fetching session ${session.dialsession_id} details:`, detailError);
-          }
 
-          sessionsProcessed++;
+            sessionsProcessed++;
+          } catch (e) {
+            console.error(`Failed to fetch calls for session ${session.dialsession_id}:`, e);
+          }
         }
 
-        // Check if more pages
-        const totalPages = sessionsData.total_pages || Math.ceil((sessionsData.total_results || sessions.length) / 50);
-        if (currentPage >= totalPages || sessions.length < 50) {
+        currentPage++;
+        
+        // Check if we've processed all pages
+        const totalPages = sessionsData.total_pages || 1;
+        if (currentPage > totalPages) {
           hasMorePages = false;
-        } else {
-          currentPage++;
         }
       }
     }
