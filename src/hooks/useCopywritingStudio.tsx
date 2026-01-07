@@ -76,7 +76,13 @@ export function useCopywritingStudio() {
       const { data, error } = await query;
 
       if (error) throw error;
-      setBestPractices(data || []);
+      setBestPractices((data || []).map(item => ({
+        ...item,
+        config: (item.config as Record<string, unknown>) || {},
+        description: item.description ?? null,
+        performance_lift: item.performance_lift ?? null,
+        source: item.source ?? null,
+      })));
     } catch (error) {
       console.error('Error fetching best practices:', error);
       toast.error('Failed to load best practices');
