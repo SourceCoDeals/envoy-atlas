@@ -321,16 +321,23 @@ serve(async (req) => {
     const startYmd = formatDateYMD(daysAgo(DAYS_TO_SYNC));
 
     // ================== PHASE 1: DIAL SESSIONS ==================
+    console.log(`Starting dial sessions sync from ${startYmd} to ${endYmd}`);
+
     while (phase === "dialsessions" && Date.now() - startedAt < TIME_BUDGET_MS) {
       const list = await phoneburnerRequest(
         `/dialsession?page=${sessionPage}&page_size=${DIALSESSION_PAGE_SIZE}&date_start=${startYmd}&date_end=${endYmd}`,
         apiKey
       );
 
+      console.log(`Dial sessions response keys: ${Object.keys(list || {}).join(", ")}`);
+
       const sessions = list?.dialsessions?.dialsessions ?? list?.dialsessions ?? list?.dial_sessions ?? [];
       const sessionArr: any[] = Array.isArray(sessions) ? sessions : [];
 
+      console.log(`Dial sessions page ${sessionPage}: ${sessionArr.length} sessions found`);
+
       if (sessionArr.length === 0) {
+        console.log("No more dial sessions, moving to contacts phase");
         phase = "contacts";
         await persistProgress({ phase });
         break;
@@ -424,8 +431,12 @@ serve(async (req) => {
         apiKey
       );
 
-      const contacts = list?.contacts ?? list?.contacts?.contacts ?? [];
+      // PhoneBurner returns { contacts: { contacts: [...], total_results, total_pages } }
+      const contactsData = list?.contacts ?? {};
+      const contacts = contactsData?.contacts ?? [];
       const contactArr: any[] = Array.isArray(contacts) ? contacts : [];
+
+      console.log(`Contacts page ${contactsPage}: ${contactArr.length} contacts found`);
 
       if (contactArr.length === 0) {
         phase = "metrics";
