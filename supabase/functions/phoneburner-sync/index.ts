@@ -10,8 +10,9 @@ const PHONEBURNER_BASE_URL = 'https://www.phoneburner.com/rest/1';
 const RATE_LIMIT_DELAY = 500;
 const TIME_BUDGET_MS = 45000;
 const SYNC_LOCK_TIMEOUT_MS = 30000;
-const FUNCTION_VERSION = '2026-01-07.v7-dialsessions';
-const DIALSESSION_PAGE_SIZE = 50;
+const FUNCTION_VERSION = '2026-01-07.v8-contact-activities';
+const CONTACT_PAGE_SIZE = 100;
+const ACTIVITIES_DAYS = 180; // Fetch up to 6 months of activities
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -60,78 +61,28 @@ interface PhoneBurnerContact {
   company?: string;
   category_id?: string;
   date_added?: string;
+  primary_phone?: {
+    raw_phone?: string;
+    phone?: string;
+  };
+  primary_email?: {
+    email_address?: string;
+  };
 }
 
-interface PhoneBurnerDialSession {
-  dialsession_id: string;
-  callerid?: string;
-  start_when?: string;
-  end_when?: string;
-  connected_when?: string;
-  disconnected_when?: string;
-  call_count?: number;
-  member_user_id?: string;
-}
-
-interface PhoneBurnerCall {
-  call_id: string;
-  phone?: string;
-  start_when?: string;
-  end_when?: string;
-  connected?: string;
-  voicemail?: string;
-  voicemail_sent?: string;
-  email_sent?: string;
-  hangup_status?: string;
-  note?: string;
+interface ContactActivity {
+  user_activity_id: string;
+  activity_id: string;
+  activity: string;
+  date: string;
+  // Additional fields we'll try to extract
+  call_id?: string;
+  duration?: number;
   disposition?: string;
   recording_url?: string;
-  contact_user_id?: string;
-}
-
-// Helper to extract dial sessions from response
-function extractDialSessions(response: any): PhoneBurnerDialSession[] {
-  if (!response) return [];
-  
-  const wrapper = response.dialsessions;
-  if (!wrapper) return [];
-  
-  // Handle array or nested structure
-  let sessions = wrapper.dialsessions;
-  if (!sessions) return [];
-  
-  if (Array.isArray(sessions)) {
-    // Sometimes it's [[{...}]] double-nested
-    if (sessions.length > 0 && Array.isArray(sessions[0])) {
-      sessions = sessions[0];
-    }
-    return sessions;
-  }
-  
-  // Single session object
-  if (typeof sessions === 'object') {
-    return [sessions];
-  }
-  
-  return [];
-}
-
-// Helper to extract calls from a single dial session response
-function extractCallsFromSession(response: any): PhoneBurnerCall[] {
-  if (!response) return [];
-  
-  const wrapper = response.dialsessions;
-  if (!wrapper) return [];
-  
-  const session = wrapper.dialsessions;
-  if (!session) return [];
-  
-  const calls = session.calls;
-  if (Array.isArray(calls)) {
-    return calls;
-  }
-  
-  return [];
+  connected?: boolean;
+  voicemail?: boolean;
+  note?: string;
 }
 
 serve(async (req) => {
@@ -228,17 +179,22 @@ serve(async (req) => {
       await delay(RATE_LIMIT_DELAY);
 
       // Test 2: Contacts endpoint
+      let sampleContactId: string | null = null;
       try {
         const contactsResponse = await phoneburnerRequest('/contacts?page=1&page_size=5', apiKey);
         const contactsData = contactsResponse.contacts || {};
         const contacts = contactsData.contacts || [];
+        
+        if (contacts.length > 0) {
+          sampleContactId = contacts[0].contact_user_id || contacts[0].user_id;
+        }
         
         diagnosticResults.tests.contacts = {
           success: true,
           total_contacts: contactsData.total_results || contacts.length,
           total_pages: contactsData.total_pages || 1,
           sample: contacts.slice(0, 2).map((c: any) => ({
-            contact_user_id: c.contact_user_id,
+            contact_user_id: c.contact_user_id || c.user_id,
             name: `${c.first_name || ''} ${c.last_name || ''}`.trim(),
           })),
         };
@@ -248,67 +204,51 @@ serve(async (req) => {
 
       await delay(RATE_LIMIT_DELAY);
 
-      // Test 3: Dial sessions endpoint (THE KEY TEST)
-      try {
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30);
-
-        const dateStart = startDate.toISOString().split('T')[0];
-        const dateEnd = endDate.toISOString().split('T')[0];
-
-        const sessionsResponse = await phoneburnerRequest(
-          `/dialsession?page=1&page_size=${DIALSESSION_PAGE_SIZE}&date_start=${dateStart}&date_end=${dateEnd}`,
-          apiKey
-        );
-        
-        const wrapper = sessionsResponse.dialsessions || {};
-        const sessions = extractDialSessions(sessionsResponse);
-        
-        diagnosticResults.tests.dial_sessions_list = {
-          success: true,
-          total_results: wrapper.total_results || sessions.length,
-          total_pages: wrapper.total_pages || 1,
-          sessions_on_page: sessions.length,
-          sample: sessions.slice(0, 2).map((s: any) => ({
-            dialsession_id: s.dialsession_id,
-            start_when: s.start_when,
-            call_count: s.call_count,
-          })),
-        };
-
-        // Test 4: Fetch a single session with calls
-        if (sessions.length > 0) {
-          await delay(RATE_LIMIT_DELAY);
-          
-          const sessionId = sessions[0].dialsession_id;
-          const sessionDetail = await phoneburnerRequest(
-            `/dialsession/${sessionId}?include_recording=1`,
+      // Test 3: Contact activities endpoint (KEY TEST)
+      if (sampleContactId) {
+        try {
+          const activitiesResponse = await phoneburnerRequest(
+            `/contacts/${sampleContactId}/activities?days=${ACTIVITIES_DAYS}&page=1&page_size=25`,
             apiKey
           );
           
-          const calls = extractCallsFromSession(sessionDetail);
+          console.log('Activities response keys:', Object.keys(activitiesResponse));
           
-          diagnosticResults.tests.dial_session_detail = {
+          const activitiesData = activitiesResponse.contact_activities || {};
+          const activities = activitiesData.contact_activities || [];
+          
+          // Count call-related activities
+          const callActivities = activities.filter((a: any) => 
+            a.activity?.toLowerCase().includes('call') || 
+            a.activity_id === '41' ||
+            a.activity_id === '42' ||
+            a.activity_id === '43'
+          );
+          
+          diagnosticResults.tests.contact_activities = {
             success: true,
-            session_id: sessionId,
-            calls_count: calls.length,
-            sample_calls: calls.slice(0, 3).map((c: any) => ({
-              call_id: c.call_id,
-              phone: c.phone,
-              disposition: c.disposition,
-              connected: c.connected,
-              recording_url: c.recording_url ? 'present' : 'none',
+            contact_id: sampleContactId,
+            total_activities: activitiesData.total_results || activities.length,
+            activities_on_page: activities.length,
+            call_activities_count: callActivities.length,
+            sample: activities.slice(0, 5).map((a: any) => ({
+              activity_id: a.activity_id,
+              activity: a.activity,
+              date: a.date,
             })),
           };
+        } catch (e: any) {
+          diagnosticResults.tests.contact_activities = { 
+            success: false, 
+            error: e.message,
+            contact_id: sampleContactId,
+          };
         }
-      } catch (e: any) {
-        diagnosticResults.tests.dial_sessions_list = { success: false, error: e.message };
       }
 
       await delay(RATE_LIMIT_DELAY);
 
-      // Test 5: Usage stats
+      // Test 4: Usage stats (aggregate)
       try {
         const endDate = new Date();
         const startDate = new Date();
@@ -340,21 +280,17 @@ serve(async (req) => {
       }
 
       // Generate recommendation
-      const sessionsTest = diagnosticResults.tests.dial_sessions_list;
-      const detailTest = diagnosticResults.tests.dial_session_detail;
+      const activitiesTest = diagnosticResults.tests.contact_activities;
       const usageTest = diagnosticResults.tests.usage;
 
-      if (sessionsTest?.success && sessionsTest.sessions_on_page > 0) {
-        diagnosticResults.recommendation = `Found ${sessionsTest.total_results} dial sessions. `;
-        if (detailTest?.success && detailTest.calls_count > 0) {
-          diagnosticResults.recommendation += `Successfully fetched ${detailTest.calls_count} calls from session ${detailTest.session_id}. Ready to sync!`;
-        } else {
-          diagnosticResults.recommendation += `Could not fetch call details from session. Check API permissions.`;
-        }
+      if (activitiesTest?.success && activitiesTest.call_activities_count > 0) {
+        diagnosticResults.recommendation = `Contact activities working! Found ${activitiesTest.call_activities_count} call activities for sample contact. Ready to sync via contact-based approach.`;
+      } else if (activitiesTest?.success && activitiesTest.activities_on_page > 0) {
+        diagnosticResults.recommendation = `Found ${activitiesTest.activities_on_page} activities but no calls yet. May need to iterate through more contacts.`;
       } else if (usageTest?.success && usageTest.total_calls > 0) {
-        diagnosticResults.recommendation = `Usage shows ${usageTest.total_calls} calls but dial sessions list is empty. This may be a permissions issue - the API key may not have access to dial session details.`;
+        diagnosticResults.recommendation = `Usage shows ${usageTest.total_calls} calls. Activities endpoint returned ${activitiesTest?.activities_on_page || 0} items. Will sync what's available.`;
       } else {
-        diagnosticResults.recommendation = 'No dial sessions found. Ensure calling has occurred in PhoneBurner.';
+        diagnosticResults.recommendation = 'Limited data available. Will sync contacts and available metrics.';
       }
 
       return new Response(JSON.stringify(diagnosticResults), {
@@ -397,10 +333,9 @@ serve(async (req) => {
     // Initialize sync state
     let currentPhase = syncProgress.phase || 'contacts';
     let contactsPage = syncProgress.contacts_page || 1;
-    let sessionsPage = syncProgress.sessions_page || 1;
-    let sessionOffset = syncProgress.session_offset || 0;
+    let contactOffset = syncProgress.contact_offset || 0;
     let totalContactsSynced = syncProgress.contacts_synced || 0;
-    let totalSessionsSynced = syncProgress.sessions_synced || 0;
+    let totalActivitiesSynced = syncProgress.activities_synced || 0;
     let totalCallsSynced = syncProgress.calls_synced || 0;
 
     // Update sync status
@@ -426,7 +361,7 @@ serve(async (req) => {
       while (hasMorePages && (Date.now() - startTime) < TIME_BUDGET_MS) {
         try {
           const contactsResponse = await phoneburnerRequest(
-            `/contacts?page=${contactsPage}&page_size=100`,
+            `/contacts?page=${contactsPage}&page_size=${CONTACT_PAGE_SIZE}`,
             apiKey
           );
           await delay(RATE_LIMIT_DELAY);
@@ -443,8 +378,8 @@ serve(async (req) => {
               external_contact_id: contact.contact_user_id,
               first_name: contact.first_name || null,
               last_name: contact.last_name || null,
-              email: contact.email || null,
-              phone: contact.phone || null,
+              email: contact.primary_email?.email_address || contact.email || null,
+              phone: contact.primary_phone?.raw_phone || contact.phone || null,
               company: contact.company || null,
               category_id: contact.category_id || null,
               date_added: contact.date_added ? new Date(contact.date_added).toISOString() : null,
@@ -471,7 +406,7 @@ serve(async (req) => {
               contacts_page: contactsPage,
               total_pages: totalPages,
               contacts_synced: totalContactsSynced,
-              sessions_synced: totalSessionsSynced,
+              activities_synced: totalActivitiesSynced,
               calls_synced: totalCallsSynced,
             },
           }).eq('id', connection.id);
@@ -484,169 +419,144 @@ serve(async (req) => {
         }
       }
 
-      // If all contacts synced, move to dial sessions phase
+      // If all contacts synced, move to activities phase
       if (!hasMorePages) {
-        currentPhase = 'dialsessions';
-        sessionsPage = 1;
+        currentPhase = 'activities';
+        contactOffset = 0;
         
         await supabase.from('api_connections').update({
           sync_progress: {
             heartbeat: new Date().toISOString(),
-            phase: 'dialsessions',
-            sessions_page: 1,
-            session_offset: 0,
+            phase: 'activities',
+            contact_offset: 0,
             contacts_synced: totalContactsSynced,
-            sessions_synced: totalSessionsSynced,
+            activities_synced: totalActivitiesSynced,
             calls_synced: totalCallsSynced,
           },
         }).eq('id', connection.id);
       }
     }
 
-    // ============= PHASE 2: SYNC DIAL SESSIONS + CALLS =============
-    if (currentPhase === 'dialsessions' && (Date.now() - startTime) < TIME_BUDGET_MS) {
-      console.log(`Syncing dial sessions starting from page ${sessionsPage}...`);
+    // ============= PHASE 2: FETCH ACTIVITIES FOR EACH CONTACT =============
+    if (currentPhase === 'activities' && (Date.now() - startTime) < TIME_BUDGET_MS) {
+      console.log(`Fetching contact activities starting from offset ${contactOffset}...`);
       
-      // Calculate date range (90 days back)
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 90);
-      const dateStart = startDate.toISOString().split('T')[0];
-      const dateEnd = endDate.toISOString().split('T')[0];
+      // Get list of synced contacts
+      const { data: dbContacts, error: contactsError } = await supabase
+        .from('phoneburner_contacts')
+        .select('id, external_contact_id, phone, email')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: true })
+        .range(contactOffset, contactOffset + 49); // Process 50 contacts per invocation
       
-      let hasMorePages = true;
-      
-      while (hasMorePages && (Date.now() - startTime) < TIME_BUDGET_MS) {
-        try {
-          // Fetch page of dial sessions
-          const sessionsResponse = await phoneburnerRequest(
-            `/dialsession?page=${sessionsPage}&page_size=${DIALSESSION_PAGE_SIZE}&date_start=${dateStart}&date_end=${dateEnd}`,
-            apiKey
-          );
-          await delay(RATE_LIMIT_DELAY);
+      if (contactsError) {
+        console.error('Error fetching contacts from DB:', contactsError);
+      } else if (dbContacts && dbContacts.length > 0) {
+        console.log(`Processing activities for ${dbContacts.length} contacts`);
+        
+        for (const contact of dbContacts) {
+          if ((Date.now() - startTime) >= TIME_BUDGET_MS) {
+            console.log('Time budget exceeded, will continue on next invocation');
+            break;
+          }
           
-          const wrapper = sessionsResponse.dialsessions || {};
-          const sessions = extractDialSessions(sessionsResponse);
-          const totalPages = wrapper.total_pages || 1;
-          const totalResults = wrapper.total_results || sessions.length;
-          
-          console.log(`Dial sessions page ${sessionsPage}/${totalPages}: ${sessions.length} sessions (total: ${totalResults})`);
-          
-          // Process each session on this page
-          for (const session of sessions) {
-            if ((Date.now() - startTime) >= TIME_BUDGET_MS) {
-              console.log('Time budget exceeded, will continue on next invocation');
-              break;
-            }
+          try {
+            const activitiesResponse = await phoneburnerRequest(
+              `/contacts/${contact.external_contact_id}/activities?days=${ACTIVITIES_DAYS}&page=1&page_size=100`,
+              apiKey
+            );
+            await delay(RATE_LIMIT_DELAY);
             
-            // Save the dial session
-            const sessionRecord = {
-              workspace_id: workspaceId,
-              external_session_id: session.dialsession_id,
-              caller_id: session.callerid || null,
-              start_at: session.start_when ? new Date(session.start_when).toISOString() : null,
-              end_at: session.end_when ? new Date(session.end_when).toISOString() : null,
-              call_count: session.call_count || 0,
-              member_id: session.member_user_id || null,
-            };
+            const activitiesData = activitiesResponse.contact_activities || {};
+            const activities: ContactActivity[] = activitiesData.contact_activities || [];
             
-            const { data: upsertedSession, error: sessionUpsertError } = await supabase
-              .from('phoneburner_dial_sessions')
-              .upsert(sessionRecord, { 
-                onConflict: 'workspace_id,external_session_id',
-              })
-              .select('id')
-              .single();
+            // Filter for call-related activities
+            // Activity IDs: 41 = "Called a Prospect", 42 = various call types
+            const callActivities = activities.filter(a => 
+              a.activity?.toLowerCase().includes('call') ||
+              a.activity_id === '41' ||
+              a.activity_id === '42' ||
+              a.activity_id === '43' ||
+              a.activity_id === '44'
+            );
             
-            if (sessionUpsertError) {
-              console.error(`Session upsert error for ${session.dialsession_id}:`, sessionUpsertError);
-              continue;
-            }
-            
-            totalSessionsSynced++;
-            const internalSessionId = upsertedSession?.id;
-            
-            // Fetch call details for this session
-            if (session.call_count && session.call_count > 0) {
-              try {
-                const detailResponse = await phoneburnerRequest(
-                  `/dialsession/${session.dialsession_id}?include_recording=1`,
-                  apiKey
-                );
-                await delay(RATE_LIMIT_DELAY);
-                
-                const calls = extractCallsFromSession(detailResponse);
-                console.log(`  Session ${session.dialsession_id}: ${calls.length} calls`);
-                
-                if (calls.length > 0) {
-                  const callRecords = calls.map(call => ({
-                    workspace_id: workspaceId,
-                    external_call_id: call.call_id,
-                    external_contact_id: call.contact_user_id || null,
-                    dial_session_id: internalSessionId || null,
-                    phone_number: call.phone || null,
-                    start_at: call.start_when ? new Date(call.start_when).toISOString() : null,
-                    end_at: call.end_when ? new Date(call.end_when).toISOString() : null,
-                    is_connected: call.connected === '1',
-                    is_voicemail: call.voicemail === '1',
-                    voicemail_sent: call.voicemail_sent || null,
-                    email_sent: !!call.email_sent,
-                    disposition: call.disposition || null,
-                    notes: call.note || null,
-                    recording_url: call.recording_url || null,
-                    activity_date: call.start_when ? new Date(call.start_when).toISOString() : null,
-                    duration_seconds: call.start_when && call.end_when 
-                      ? Math.round((new Date(call.end_when).getTime() - new Date(call.start_when).getTime()) / 1000)
-                      : null,
-                  }));
-                  
-                  const { error: callsUpsertError } = await supabase
-                    .from('phoneburner_calls')
-                    .upsert(callRecords, {
-                      onConflict: 'workspace_id,external_call_id',
-                    });
-                  
-                  if (callsUpsertError) {
-                    console.error(`Calls upsert error for session ${session.dialsession_id}:`, callsUpsertError);
-                  } else {
-                    totalCallsSynced += callRecords.length;
-                  }
-                }
-              } catch (detailError) {
-                console.error(`Error fetching details for session ${session.dialsession_id}:`, detailError);
+            if (callActivities.length > 0) {
+              console.log(`  Contact ${contact.external_contact_id}: ${callActivities.length} call activities`);
+              
+              // Create call records from activities
+              const callRecords = callActivities.map(activity => ({
+                workspace_id: workspaceId,
+                external_call_id: activity.user_activity_id, // Use activity ID as call ID
+                external_contact_id: contact.external_contact_id,
+                contact_id: contact.id, // Link directly to our contact
+                phone_number: contact.phone || null,
+                activity_date: activity.date ? new Date(activity.date).toISOString() : null,
+                start_at: activity.date ? new Date(activity.date).toISOString() : null,
+                disposition: activity.activity || 'Called',
+                notes: activity.activity || null,
+                is_connected: activity.activity?.toLowerCase().includes('interested') || 
+                              activity.activity?.toLowerCase().includes('connected') ||
+                              activity.activity?.toLowerCase().includes('spoke') ||
+                              false,
+                is_voicemail: activity.activity?.toLowerCase().includes('voicemail') ||
+                              activity.activity?.toLowerCase().includes('message') ||
+                              false,
+              }));
+              
+              const { error: callsError } = await supabase
+                .from('phoneburner_calls')
+                .upsert(callRecords, {
+                  onConflict: 'workspace_id,external_call_id',
+                });
+              
+              if (callsError) {
+                console.error(`Calls upsert error for contact ${contact.external_contact_id}:`, callsError);
+              } else {
+                totalCallsSynced += callRecords.length;
               }
             }
             
-            sessionOffset++;
+            totalActivitiesSynced += activities.length;
+            contactOffset++;
+            
+          } catch (e) {
+            console.error(`Error fetching activities for contact ${contact.external_contact_id}:`, e);
+            contactOffset++; // Skip to next contact
           }
           
-          // Update progress after each page
-          await supabase.from('api_connections').update({
-            sync_progress: {
-              heartbeat: new Date().toISOString(),
-              phase: 'dialsessions',
-              sessions_page: sessionsPage,
-              session_offset: sessionOffset,
-              total_sessions: totalResults,
-              total_pages: totalPages,
-              contacts_synced: totalContactsSynced,
-              sessions_synced: totalSessionsSynced,
-              calls_synced: totalCallsSynced,
-            },
-          }).eq('id', connection.id);
-          
-          // Check if more pages
-          sessionsPage++;
-          hasMorePages = sessionsPage <= totalPages;
-          
-        } catch (e) {
-          console.error('Error fetching dial sessions:', e);
-          hasMorePages = false;
+          // Update progress periodically
+          if (contactOffset % 10 === 0) {
+            await supabase.from('api_connections').update({
+              sync_progress: {
+                heartbeat: new Date().toISOString(),
+                phase: 'activities',
+                contact_offset: contactOffset,
+                contacts_synced: totalContactsSynced,
+                activities_synced: totalActivitiesSynced,
+                calls_synced: totalCallsSynced,
+              },
+            }).eq('id', connection.id);
+          }
         }
-      }
-      
-      // If all sessions processed, move to metrics phase
-      if (!hasMorePages) {
+        
+        // Update progress after batch
+        await supabase.from('api_connections').update({
+          sync_progress: {
+            heartbeat: new Date().toISOString(),
+            phase: 'activities',
+            contact_offset: contactOffset,
+            contacts_synced: totalContactsSynced,
+            activities_synced: totalActivitiesSynced,
+            calls_synced: totalCallsSynced,
+          },
+        }).eq('id', connection.id);
+        
+        // Check if we're done with all contacts
+        if (dbContacts.length < 50) {
+          currentPhase = 'metrics';
+        }
+      } else {
+        // No more contacts to process
         currentPhase = 'metrics';
       }
     }
@@ -700,39 +610,11 @@ serve(async (req) => {
       currentPhase = 'linking';
     }
 
-    // ============= PHASE 4: LINK CALLS TO CONTACTS =============
+    // ============= PHASE 4: LINK CONTACTS TO LEADS =============
     if (currentPhase === 'linking' && (Date.now() - startTime) < TIME_BUDGET_MS) {
-      console.log('Linking PhoneBurner calls to contacts and leads...');
+      console.log('Linking PhoneBurner contacts to leads...');
       
       try {
-        // Link calls to their contacts via external_contact_id
-        const { data: callsWithContacts } = await supabase
-          .from('phoneburner_calls')
-          .select('id, external_contact_id')
-          .eq('workspace_id', workspaceId)
-          .not('external_contact_id', 'is', null)
-          .is('contact_id', null)
-          .limit(500);
-        
-        if (callsWithContacts && callsWithContacts.length > 0) {
-          for (const call of callsWithContacts) {
-            // Find the internal contact ID
-            const { data: contact } = await supabase
-              .from('phoneburner_contacts')
-              .select('id')
-              .eq('workspace_id', workspaceId)
-              .eq('external_contact_id', call.external_contact_id)
-              .single();
-            
-            if (contact) {
-              await supabase
-                .from('phoneburner_calls')
-                .update({ contact_id: contact.id })
-                .eq('id', call.id);
-            }
-          }
-        }
-
         // Link contacts to leads by email
         const { data: pbContacts } = await supabase
           .from('phoneburner_contacts')
@@ -769,28 +651,27 @@ serve(async (req) => {
         last_full_sync_at: isComplete ? new Date().toISOString() : connection.last_full_sync_at,
         sync_progress: isComplete ? {
           contacts_synced: totalContactsSynced,
-          sessions_synced: totalSessionsSynced,
+          activities_synced: totalActivitiesSynced,
           calls_synced: totalCallsSynced,
           completed_at: new Date().toISOString(),
         } : {
           heartbeat: new Date().toISOString(),
           phase: currentPhase,
-          sessions_page: sessionsPage,
-          session_offset: sessionOffset,
+          contact_offset: contactOffset,
           contacts_synced: totalContactsSynced,
-          sessions_synced: totalSessionsSynced,
+          activities_synced: totalActivitiesSynced,
           calls_synced: totalCallsSynced,
         }
       })
       .eq('id', connection.id);
 
-    console.log(`Sync ${isComplete ? 'complete' : 'in progress'}. Phase: ${currentPhase}, Contacts: ${totalContactsSynced}, Sessions: ${totalSessionsSynced}, Calls: ${totalCallsSynced}`);
+    console.log(`Sync ${isComplete ? 'complete' : 'in progress'}. Phase: ${currentPhase}, Contacts: ${totalContactsSynced}, Activities: ${totalActivitiesSynced}, Calls: ${totalCallsSynced}`);
 
     return new Response(JSON.stringify({
       status: isComplete ? 'complete' : 'in_progress',
       phase: currentPhase,
       contacts_synced: totalContactsSynced,
-      sessions_synced: totalSessionsSynced,
+      activities_synced: totalActivitiesSynced,
       calls_synced: totalCallsSynced,
       needsContinuation: !isComplete,
     }), {
