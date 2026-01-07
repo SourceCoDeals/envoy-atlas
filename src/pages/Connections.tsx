@@ -1,74 +1,33 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
-import { useWorkspace } from '@/hooks/useWorkspace';
-import { useChannel } from '@/hooks/useChannel';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { StatusDot } from '@/components/dashboard/StatusDot';
-import { Progress } from '@/components/ui/progress';
-import { 
-  Loader2, 
-  Plug, 
-  CheckCircle2, 
-  XCircle, 
-  RefreshCw, 
-  ExternalLink,
-  Key,
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { useAuth } from "@/hooks/useAuth";
+import { useWorkspace } from "@/hooks/useWorkspace";
+import { useChannel } from "@/hooks/useChannel";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+
+import {
+  AlertCircle,
+  CheckCircle2,
   Clock,
   Download,
-  AlertCircle,
-  FastForward,
-  AlertTriangle,
+  ExternalLink,
+  Loader2,
   Phone,
-} from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { supabase } from '@/integrations/supabase/client';
+  Plug,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
 
-type SyncProgress = {
-  step?: string;
-  progress?: number;
-  total?: number;
-  current?: number;
-  // Smartlead fields
-  campaign_index?: number;
-  batch_index?: number;
-  total_campaigns?: number;
-  current_campaign?: number;
-  campaign_name?: string;
-  campaigns_synced?: number;
-  email_accounts_synced?: number;
-  variants_synced?: number;
-  metrics_created?: number;
-  leads_synced?: number;
-  events_created?: number;
-  error?: string;
-  // Reply.io v3 fields
-  sequence_index?: number;
-  contact_cursor?: number | null;
-  total_sequences?: number;
-  processed_sequences?: number;
-  total_contacts?: number;
-  processed_contacts?: number;
-  current_sequence_name?: string;
-  last_heartbeat?: string;
-  errors?: string[];
-};
+type SyncProgress = Record<string, any> | null;
 
 type ApiConnection = {
   id: string;
@@ -77,710 +36,220 @@ type ApiConnection = {
   last_sync_at: string | null;
   last_full_sync_at: string | null;
   sync_status: string | null;
-  sync_progress: SyncProgress | null;
+  sync_progress: SyncProgress;
   created_at: string;
 };
+
+async function getAccessToken(): Promise<string> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not authenticated. Please sign in again.");
+  return token;
+}
 
 export default function Connections() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { channel } = useChannel();
+
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [loading, setLoading] = useState(true);
-  const [apiKey, setApiKey] = useState('');
-  const [replyioApiKey, setReplyioApiKey] = useState('');
-  const [phoneburnerApiKey, setPhoneburnerApiKey] = useState('');
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [isConnectingReplyio, setIsConnectingReplyio] = useState(false);
-  const [isConnectingPhoneburner, setIsConnectingPhoneburner] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isSyncingPhoneburner, setIsSyncingPhoneburner] = useState(false);
-  const [isDiagnosingPhoneburner, setIsDiagnosingPhoneburner] = useState(false);
-  const [phoneburnerDiagnostics, setPhoneburnerDiagnostics] = useState<any>(null);
-  const [isResumingSync, setIsResumingSync] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const [isSyncingReplyio, setIsSyncingReplyio] = useState(false);
-  const [isResumingReplyio, setIsResumingReplyio] = useState(false);
-  const [isStoppingReplyio, setIsStoppingReplyio] = useState(false);
-  const [isDiagnosingReplyio, setIsDiagnosingReplyio] = useState(false);
-  const [replyioDiagnostics, setReplyioDiagnostics] = useState<any>(null);
-  const [isSyncingPhoneburner, setIsSyncingPhoneburner] = useState(false);
-  const [isResumingPhoneburner, setIsResumingPhoneburner] = useState(false);
-  const [isStoppingPhoneburner, setIsStoppingPhoneburner] = useState(false);
-  const [isDiagnosingPhoneburner, setIsDiagnosingPhoneburner] = useState(false);
-  const [phoneburnerDiagnostics, setPhoneburnerDiagnostics] = useState<any>(null);
+
+  const [smartleadApiKey, setSmartleadApiKey] = useState("");
+  const [replyioApiKey, setReplyioApiKey] = useState("");
+  const [phoneburnerToken, setPhoneburnerToken] = useState("");
+
+  const [isConnecting, setIsConnecting] = useState<{ [k: string]: boolean }>({});
+  const [isSyncing, setIsSyncing] = useState<{ [k: string]: boolean }>({});
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
-
-  useEffect(() => {
-    if (currentWorkspace) {
-      fetchConnections();
-    }
-  }, [currentWorkspace]);
-
-  // Auto-continue Reply.io sync when in progress
-  useEffect(() => {
-    const replyioConnection = connections.find(c => c.platform === 'replyio');
-    if (!replyioConnection || replyioConnection.sync_status !== 'syncing') return;
-    if (!currentWorkspace?.id) return;
-
-    console.log('Reply.io sync in progress, setting up polling...');
-    
-    const pollInterval = window.setInterval(() => {
-      fetchConnections();
-    }, 2000);
-
-    const resumeInterval = window.setInterval(() => {
-      void continueReplyioSync();
-    }, 60000);
-
-    // Initial resume call
-    void continueReplyioSync();
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-      if (resumeInterval) clearInterval(resumeInterval);
-    };
-  }, [connections.find(c => c.platform === 'replyio')?.sync_status, currentWorkspace?.id]);
-
-  // Auto-continue Smartlead sync when in progress
-  useEffect(() => {
-    const smartleadConnection = connections.find(c => c.platform === 'smartlead');
-    if (!smartleadConnection || smartleadConnection.sync_status !== 'syncing') return;
-    if (!currentWorkspace?.id) return;
-
-    let pollInterval: number | undefined;
-    let resumeInterval: number | undefined;
-
-    const start = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        setError('Your session expired while a sync is in progress. Please sign in again to resume the Smartlead sync.');
-        return;
-      }
-
-      pollInterval = window.setInterval(fetchConnections, 2000);
-      resumeInterval = window.setInterval(() => {
-        void continueSmartleadSync();
-      }, 60000);
-
-      void continueSmartleadSync();
-    };
-
-    void start();
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-      if (resumeInterval) clearInterval(resumeInterval);
-    };
-  }, [connections.find(c => c.platform === 'smartlead')?.sync_status, currentWorkspace?.id]);
-
-  // Auto-continue PhoneBurner sync when in progress
-  useEffect(() => {
-    const pbConnection = connections.find(c => c.platform === 'phoneburner');
-    if (!pbConnection || pbConnection.sync_status !== 'syncing') return;
-    if (!currentWorkspace?.id) return;
-
-    console.log('PhoneBurner sync in progress, setting up polling...');
-    
-    const pollInterval = window.setInterval(() => {
-      fetchConnections();
-    }, 2000);
-
-    const resumeInterval = window.setInterval(() => {
-      void continuePhoneburnerSync();
-    }, 60000);
-
-    // Initial resume call
-    void continuePhoneburnerSync();
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-      if (resumeInterval) clearInterval(resumeInterval);
-    };
-  }, [connections.find(c => c.platform === 'phoneburner')?.sync_status, currentWorkspace?.id]);
+  const smartleadConnection = useMemo(
+    () => connections.find((c) => c.platform === "smartlead"),
+    [connections]
+  );
+  const replyioConnection = useMemo(
+    () => connections.find((c) => c.platform === "replyio"),
+    [connections]
+  );
+  const phoneburnerConnection = useMemo(
+    () => connections.find((c) => c.platform === "phoneburner"),
+    [connections]
+  );
 
   const fetchConnections = async () => {
     if (!currentWorkspace) return;
 
     try {
+      setLoading(true);
       const { data, error } = await supabase
-        .from('api_connections')
-        .select('id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at')
-        .eq('workspace_id', currentWorkspace.id);
+        .from("api_connections")
+        .select("id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at")
+        .eq("workspace_id", currentWorkspace.id)
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
-      
-      const parsedData = (data || []).map(conn => ({
-        ...conn,
-        sync_progress: conn.sync_progress as SyncProgress | null,
-      }));
-      
-      setConnections(parsedData);
-      
-      // Check if Smartlead sync just completed
-      const prevSmartlead = connections.find(c => c.platform === 'smartlead');
-      const currSmartlead = parsedData.find(c => c.platform === 'smartlead');
-      if (prevSmartlead?.sync_status === 'syncing' && currSmartlead?.sync_status === 'success') {
-        setIsSyncing(false);
-        const progress = currSmartlead.sync_progress;
-        setSuccess(
-          `Sync complete! Synced ${progress?.campaigns_synced || 0} campaigns, ` +
-          `${progress?.variants_synced || 0} email variants, ` +
-          `${progress?.email_accounts_synced || 0} email accounts.`
-        );
-      }
-
-      // Check if Reply.io sync just completed
-      const prevReplyio = connections.find(c => c.platform === 'replyio');
-      const currReplyio = parsedData.find(c => c.platform === 'replyio');
-      if (prevReplyio?.sync_status === 'syncing' && currReplyio?.sync_status === 'completed') {
-        setIsSyncingReplyio(false);
-        const progress = currReplyio.sync_progress;
-        setSuccess(
-          `Reply.io sync complete! Synced ${progress?.processed_sequences || 0} sequences, ` +
-          `${progress?.processed_contacts || 0} contacts.`
-        );
-      }
-    } catch (err) {
-      console.error('Error fetching connections:', err);
+      setConnections((data as any) ?? []);
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to load connections");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleConnect = async (platform: 'smartlead' | 'replyio') => {
-    if (!currentWorkspace || !user || !apiKey.trim()) {
-      setError('Please enter an API key');
+  useEffect(() => {
+    if (!authLoading && !user) navigate("/auth");
+  }, [authLoading, user, navigate]);
+
+  useEffect(() => {
+    if (currentWorkspace?.id) void fetchConnections();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentWorkspace?.id]);
+
+  // light polling when any sync is running
+  useEffect(() => {
+    const anySyncing = connections.some((c) => c.sync_status === "syncing");
+    if (!anySyncing) return;
+
+    const t = window.setInterval(() => {
+      void fetchConnections();
+    }, 2000);
+
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connections.map((c) => c.sync_status).join("|")]);
+
+  const handleConnect = async (platform: "smartlead" | "replyio" | "phoneburner") => {
+    if (!currentWorkspace || !user) return;
+
+    const apiKey =
+      platform === "smartlead"
+        ? smartleadApiKey.trim()
+        : platform === "replyio"
+          ? replyioApiKey.trim()
+          : phoneburnerToken.trim();
+
+    if (!apiKey) {
+      setError(platform === "phoneburner" ? "Please enter a PhoneBurner access token" : "Please enter an API key");
       return;
     }
 
     setError(null);
     setSuccess(null);
-    setIsConnecting(true);
+    setIsConnecting((s) => ({ ...s, [platform]: true }));
 
     try {
-      const { error } = await supabase
-        .from('api_connections')
-        .upsert({
+      const { error } = await supabase.from("api_connections").upsert(
+        {
           workspace_id: currentWorkspace.id,
           platform,
           api_key_encrypted: apiKey,
           is_active: true,
-          sync_status: 'pending',
+          sync_status: "pending",
           created_by: user.id,
-        }, {
-          onConflict: 'workspace_id,platform',
-        });
-
-      if (error) throw error;
-
-      setSuccess(`${platform === 'smartlead' ? 'Smartlead' : 'Reply.io'} connected successfully!`);
-      setApiKey('');
-      fetchConnections();
-    } catch (err: any) {
-      setError(err.message || 'Failed to connect');
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const handleDisconnect = async (connectionId: string) => {
-    try {
-      const { error } = await supabase
-        .from('api_connections')
-        .delete()
-        .eq('id', connectionId);
-
-      if (error) throw error;
-      fetchConnections();
-    } catch (err: any) {
-      setError(err.message || 'Failed to disconnect');
-    }
-  };
-
-  const handleConnectReplyio = async () => {
-    if (!currentWorkspace || !user || !replyioApiKey.trim()) {
-      setError('Please enter an API key');
-      return;
-    }
-
-    setError(null);
-    setSuccess(null);
-    setIsConnectingReplyio(true);
-
-    try {
-      const { error } = await supabase
-        .from('api_connections')
-        .upsert({
-          workspace_id: currentWorkspace.id,
-          platform: 'replyio',
-          api_key_encrypted: replyioApiKey,
-          is_active: true,
-          sync_status: 'pending',
-          created_by: user.id,
-        }, {
-          onConflict: 'workspace_id,platform',
-        });
-
-      if (error) throw error;
-
-      setSuccess('Reply.io connected successfully!');
-      setReplyioApiKey('');
-      fetchConnections();
-    } catch (err: any) {
-      setError(err.message || 'Failed to connect');
-    } finally {
-      setIsConnectingReplyio(false);
-    }
-  };
-
-  const continueSmartleadSync = async () => {
-    if (!currentWorkspace || isResumingSync) return;
-
-    try {
-      setIsResumingSync(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) return;
-
-      await supabase.functions.invoke('smartlead-sync', {
-        body: {
-          workspace_id: currentWorkspace.id,
-          sync_type: 'full',
         },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-    } catch (e) {
-      console.log('Continue sync call completed (may have timed out, will retry)');
-    } finally {
-      setIsResumingSync(false);
-    }
-  };
+        { onConflict: "workspace_id,platform" }
+      );
 
-  const continueReplyioSync = async () => {
-    if (!currentWorkspace || isResumingReplyio) return;
-    
-    const replyioConnection = connections.find(c => c.platform === 'replyio');
-    if (!replyioConnection || replyioConnection.sync_status !== 'syncing') return;
+      if (error) throw error;
 
-    try {
-      setIsResumingReplyio(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) return;
+      setSuccess(`${platform === "phoneburner" ? "PhoneBurner" : platform === "replyio" ? "Reply.io" : "Smartlead"} connected successfully!`);
+      if (platform === "smartlead") setSmartleadApiKey("");
+      if (platform === "replyio") setReplyioApiKey("");
+      if (platform === "phoneburner") setPhoneburnerToken("");
 
-      await supabase.functions.invoke('replyio-sync', {
-        body: { workspace_id: currentWorkspace.id, sync_type: 'full' },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      
       await fetchConnections();
-    } catch (error) {
-      console.log('Continue Reply.io sync call completed (may have timed out, will retry)');
-    } finally {
-      setIsResumingReplyio(false);
-    }
-  };
-
-  const runReplyioDiagnostics = async () => {
-    if (!currentWorkspace || isDiagnosingReplyio) return;
-
-    try {
-      setError(null);
-      setSuccess(null);
-      setReplyioDiagnostics(null);
-      setIsDiagnosingReplyio(true);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error('Not authenticated. Please sign in again.');
-
-      const res = await supabase.functions.invoke('replyio-sync', {
-        body: { workspace_id: currentWorkspace.id, diagnostic: true },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-
-      if (res.error) throw new Error(res.error.message || 'Diagnostics failed');
-      setReplyioDiagnostics(res.data?.results || res.data);
-      setSuccess('Reply.io diagnostics captured below.');
     } catch (e: any) {
-      setError(e.message || 'Failed to run diagnostics');
+      console.error(e);
+      setError(e?.message || `Failed to connect ${platform}`);
     } finally {
-      setIsDiagnosingReplyio(false);
+      setIsConnecting((s) => ({ ...s, [platform]: false }));
     }
   };
 
-  const handlePullFullHistory = async (reset = false, forceAdvance = false) => {
-    if (!currentWorkspace) return;
+  const invokeSync = async (fn: string, body: Record<string, any>) => {
+    const token = await getAccessToken();
+    const res = await supabase.functions.invoke(fn, {
+      body,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.error) throw new Error(res.error.message || "Sync failed");
+    return res.data as any;
+  };
 
+  const handleSyncPhoneburner = async (reset = false) => {
+    if (!currentWorkspace) return;
     setError(null);
     setSuccess(null);
-    setIsSyncing(true);
+    setIsSyncing((s) => ({ ...s, phoneburner: true }));
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Not authenticated. Please sign in again.');
-      }
-
-      const response = await supabase.functions.invoke('smartlead-sync', {
-        body: {
-          workspace_id: currentWorkspace.id,
-          sync_type: 'full',
-          reset,
-          force_advance: forceAdvance,
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
+      const data = await invokeSync("phoneburner-sync", {
+        workspace_id: currentWorkspace.id,
+        reset,
       });
 
-      if (response.error) {
-        throw new Error(response.error.message || 'Sync failed');
-      }
-
-      void continueSmartleadSync();
-    } catch (err: any) {
-      console.error('Sync error:', err);
-      setError(err.message || 'Failed to start sync');
-      setIsSyncing(false);
-    }
-  };
-
-  const handleStopSync = async () => {
-    if (!currentWorkspace) return;
-    
-    setIsStopping(true);
-    setError(null);
-    
-    try {
-      const { error } = await supabase
-        .from('api_connections')
-        .update({ sync_status: 'stopped' })
-        .eq('workspace_id', currentWorkspace.id)
-        .eq('platform', 'smartlead');
-      
-      if (error) throw error;
-      
-      setSuccess('Sync stopped. You can reset and restart when ready.');
-      setIsSyncing(false);
-      fetchConnections();
-    } catch (err: any) {
-      setError(err.message || 'Failed to stop sync');
-    } finally {
-      setIsStopping(false);
-    }
-  };
-
-  const handleStopReplyioSync = async () => {
-    if (!currentWorkspace) return;
-    
-    setIsStoppingReplyio(true);
-    setError(null);
-    
-    try {
-      const { error } = await supabase
-        .from('api_connections')
-        .update({ sync_status: 'stopped' })
-        .eq('workspace_id', currentWorkspace.id)
-        .eq('platform', 'replyio');
-      
-      if (error) throw error;
-      
-      setSuccess('Reply.io sync stopped.');
-      setIsSyncingReplyio(false);
-      fetchConnections();
-    } catch (err: any) {
-      setError(err.message || 'Failed to stop sync');
-    } finally {
-      setIsStoppingReplyio(false);
-    }
-  };
-
-  const handleForceAdvanceReplyio = async () => {
-    if (!currentWorkspace) return;
-    
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) return;
-
-      await supabase.functions.invoke('replyio-sync', {
-        body: { workspace_id: currentWorkspace.id, force_advance: true },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      
-      await fetchConnections();
-      setSuccess('Forced advance to next sequence');
-    } catch (error) {
-      console.error('Error force advancing Reply.io sync:', error);
-    }
-  };
-
-  const handleReplyioSync = async (reset = false) => {
-    if (!currentWorkspace) return;
-
-    setError(null);
-    setSuccess(null);
-    setIsSyncingReplyio(true);
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Not authenticated. Please sign in again.');
-      }
-
-      const response = await supabase.functions.invoke('replyio-sync', {
-        body: {
-          workspace_id: currentWorkspace.id,
-          sync_type: 'full',
-          reset,
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (response.error) {
-        throw new Error(response.error.message || 'Sync failed');
-      }
-
-      const data = response.data;
-      if (data?.complete) {
+      if (data?.status === "complete") {
         setSuccess(
-          `Reply.io sync complete! Synced ${data.progress?.processed_sequences || 0} sequences, ` +
-          `${data.progress?.processed_contacts || 0} contacts.`
+          `PhoneBurner sync complete! Synced ${data.contacts_synced || 0} contacts, ${data.sessions_synced || 0} sessions, ${data.calls_synced || 0} calls.`
         );
-        setIsSyncingReplyio(false);
-      } else if (data?.skipped) {
-        setSuccess('Sync already in progress...');
       } else {
-        setSuccess('Reply.io sync started, processing in background...');
-      }
-      
-      fetchConnections();
-    } catch (err: any) {
-      console.error('Reply.io sync error:', err);
-      setError(err.message || 'Failed to sync Reply.io');
-      setIsSyncingReplyio(false);
-    }
-  };
-
-  // PhoneBurner handlers
-  const handleConnectPhoneburner = async () => {
-    if (!currentWorkspace || !user || !phoneburnerApiKey.trim()) {
-      setError('Please enter a PhoneBurner access token');
-  const handleConnectPhoneburner = async () => {
-    if (!currentWorkspace || !user || !phoneburnerApiKey.trim()) {
-      setError('Please enter an API key');
-      return;
-    }
-
-    setError(null);
-    setSuccess(null);
-    setIsConnectingPhoneburner(true);
-
-    try {
-      const { error } = await supabase
-        .from('api_connections')
-        .upsert({
-          workspace_id: currentWorkspace.id,
-          platform: 'phoneburner',
-          api_key_encrypted: phoneburnerApiKey,
-          is_active: true,
-          sync_status: 'pending',
-          created_by: user.id,
-        }, {
-          onConflict: 'workspace_id,platform',
-        });
-
-      if (error) throw error;
-
-      setSuccess('PhoneBurner connected successfully!');
-      setPhoneburnerApiKey('');
-      fetchConnections();
-    } catch (err: any) {
-      setError(err.message || 'Failed to connect PhoneBurner');
-      setError(err.message || 'Failed to connect');
-    } finally {
-      setIsConnectingPhoneburner(false);
-    }
-  };
-
-  const handlePhoneburnerSync = async (reset = false) => {
-    if (!currentWorkspace) return;
-
-    setError(null);
-    setSuccess(null);
-    setIsSyncingPhoneburner(true);
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Not authenticated. Please sign in again.');
+        setSuccess("PhoneBurner sync started, processing in background...");
       }
 
-      const response = await supabase.functions.invoke('phoneburner-sync', {
-        body: {
-          workspace_id: currentWorkspace.id,
-          sync_type: 'full',
-          workspaceId: currentWorkspace.id,
-          reset,
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (response.error) {
-        throw new Error(response.error.message || 'PhoneBurner sync failed');
-      }
-
-      const data = response.data;
-      if (data?.done) {
-        throw new Error(response.error.message || 'Sync failed');
-      }
-
-      const data = response.data;
-      if (data?.status === 'complete') {
-        setSuccess(
-          `PhoneBurner sync complete! Synced ${data.contacts_synced || 0} contacts, ` +
-          `${data.calls_synced || 0} calls.`
-        );
-        setIsSyncingPhoneburner(false);
-      } else {
-        setSuccess('PhoneBurner sync started, processing in background...');
-      }
-
-      } else if (data?.status === 'already_syncing') {
-        setSuccess('Sync already in progress...');
-      } else if (data?.needsContinuation || data?.status === 'in_progress') {
-        setSuccess('PhoneBurner sync started, processing in background...');
-        void continuePhoneburnerSync();
-      } else {
-        setSuccess('PhoneBurner sync started!');
-      }
-      
-      fetchConnections();
-    } catch (err: any) {
-      console.error('PhoneBurner sync error:', err);
-      setError(err.message || 'Failed to sync PhoneBurner');
-      setIsSyncingPhoneburner(false);
-    }
-  };
-
-  const continuePhoneburnerSync = async () => {
-    if (!currentWorkspace || isResumingPhoneburner) return;
-    
-    const pbConnection = connections.find(c => c.platform === 'phoneburner');
-    if (!pbConnection || pbConnection.sync_status !== 'syncing') return;
-
-    try {
-      setIsResumingPhoneburner(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) return;
-
-      await supabase.functions.invoke('phoneburner-sync', {
-        body: { workspaceId: currentWorkspace.id },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      
       await fetchConnections();
-    } catch (error) {
-      console.log('Continue PhoneBurner sync call completed (may have timed out, will retry)');
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to sync PhoneBurner");
     } finally {
-      setIsResumingPhoneburner(false);
+      setIsSyncing((s) => ({ ...s, phoneburner: false }));
     }
   };
 
   const handleStopPhoneburnerSync = async () => {
     if (!currentWorkspace) return;
-    
-    setIsStoppingPhoneburner(true);
+
     setError(null);
-    
+    setSuccess(null);
+    setIsSyncing((s) => ({ ...s, phoneburner_stop: true }));
+
     try {
       const { error } = await supabase
-        .from('api_connections')
-        .update({ sync_status: 'stopped' })
-        .eq('workspace_id', currentWorkspace.id)
-        .eq('platform', 'phoneburner');
-      
+        .from("api_connections")
+        .update({ sync_status: "stopped" })
+        .eq("workspace_id", currentWorkspace.id)
+        .eq("platform", "phoneburner");
+
       if (error) throw error;
-      
-      setSuccess('PhoneBurner sync stopped.');
-      setIsSyncingPhoneburner(false);
-      fetchConnections();
-    } catch (err: any) {
-      setError(err.message || 'Failed to stop sync');
-    } finally {
-      setIsStoppingPhoneburner(false);
-    }
-  };
-
-  const runPhoneburnerDiagnostics = async () => {
-    if (!currentWorkspace || isDiagnosingPhoneburner) return;
-
-    try {
-      setError(null);
-      setSuccess(null);
-      setPhoneburnerDiagnostics(null);
-      setIsDiagnosingPhoneburner(true);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error('Not authenticated. Please sign in again.');
-
-      const res = await supabase.functions.invoke('phoneburner-sync', {
-        body: { workspace_id: currentWorkspace.id, diagnostic: true },
-        body: { workspaceId: currentWorkspace.id, diagnostic: true },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-
-      if (res.error) throw new Error(res.error.message || 'Diagnostics failed');
-      setPhoneburnerDiagnostics(res.data?.results || res.data);
-      setSuccess('PhoneBurner diagnostics captured below.');
-      setPhoneburnerDiagnostics(res.data);
-      setSuccess('PhoneBurner diagnostics complete. See results below.');
+      setSuccess("PhoneBurner sync stopped.");
+      await fetchConnections();
     } catch (e: any) {
-      setError(e.message || 'Failed to run diagnostics');
+      console.error(e);
+      setError(e?.message || "Failed to stop sync");
     } finally {
-      setIsDiagnosingPhoneburner(false);
+      setIsSyncing((s) => ({ ...s, phoneburner_stop: false }));
     }
   };
 
-  const smartleadConnection = connections.find(c => c.platform === 'smartlead');
-  const replyioConnection = connections.find(c => c.platform === 'replyio');
-  const phoneburnerConnection = connections.find(c => c.platform === 'phoneburner');
-  const isSyncingSmartlead = smartleadConnection?.sync_status === 'syncing' || isSyncing;
-  const isSyncingReplyioActive = replyioConnection?.sync_status === 'syncing' || isSyncingReplyio;
-  const isSyncingPhoneburnerActive = phoneburnerConnection?.sync_status === 'syncing' || isSyncingPhoneburner;
-  const syncProgress = smartleadConnection?.sync_progress;
-  const replyioSyncProgress = replyioConnection?.sync_progress;
-  const phoneburnerSyncProgress = phoneburnerConnection?.sync_progress;
+  const phoneburnerProgress = (phoneburnerConnection?.sync_progress as any) || null;
+  const pbPhase = phoneburnerProgress?.phase;
+  const pbCalls = phoneburnerProgress?.calls_synced || 0;
+  const pbContacts = phoneburnerProgress?.contacts_synced || 0;
+  const pbSessions = phoneburnerProgress?.sessions_synced || 0;
 
-  // Calculate Reply.io progress percentage
-  const getReplyioProgress = () => {
-    if (!replyioSyncProgress) return 0;
-    const step = replyioSyncProgress.step;
-    if (step === 'email_accounts') return 5;
-    if (step === 'sequences') {
-      const total = replyioSyncProgress.total_sequences || 1;
-      const processed = replyioSyncProgress.processed_sequences || 0;
-      return 5 + (processed / total) * 70;
-    }
-    if (step === 'contacts') {
-      const processed = replyioSyncProgress.processed_contacts || 0;
-      return 75 + Math.min(processed / 100, 1) * 20;
-    }
-    if (step === 'complete') return 100;
-    return 0;
-  };
+  const pbProgressPercent = useMemo(() => {
+    if (!phoneburnerConnection || phoneburnerConnection.sync_status !== "syncing") return 0;
+    if (!pbPhase) return 5;
+    if (pbPhase === "dialsessions") return 35;
+    if (pbPhase === "contacts") return 65;
+    if (pbPhase === "metrics") return 85;
+    if (pbPhase === "linking") return 95;
+    return 10;
+  }, [phoneburnerConnection, pbPhase]);
 
   if (authLoading || !user) {
     return (
@@ -794,14 +263,11 @@ export default function Connections() {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {channel === 'email' ? 'Email Connections' : 'Calling Connections'}
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">{channel === "email" ? "Email Connections" : "Calling Connections"}</h1>
           <p className="text-muted-foreground">
-            {channel === 'email' 
-              ? 'Connect your email outreach platforms to import campaign data'
-              : 'Connect your cold calling platforms to import dial session data'
-            }
+            {channel === "email"
+              ? "Connect your email outreach platforms to import campaign data"
+              : "Connect your cold calling platforms to import dial session data"}
           </p>
         </div>
 
@@ -815,1041 +281,291 @@ export default function Connections() {
         {success && (
           <Alert>
             <CheckCircle2 className="h-4 w-4" />
-            <AlertDescription className="text-success">{success}</AlertDescription>
+            <AlertDescription>{success}</AlertDescription>
           </Alert>
         )}
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {/* Smartlead Connection */}
-          <Card className={smartleadConnection ? 'border-success/30' : ''}>
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Email Channel Connections */}
-          {channel === 'email' && (
-            <>
-              {/* Smartlead Connection */}
-              <Card className={smartleadConnection ? 'border-success/30' : ''}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                    <Plug className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Smartlead</CardTitle>
-                    <CardDescription>Primary outreach platform</CardDescription>
-                  </div>
-                </div>
-                {smartleadConnection && (
-                  <Badge variant="outline" className="border-success text-success">
-                    <StatusDot status="healthy" size="sm" className="mr-1" />
-                    Connected
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {smartleadConnection ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Status</span>
-                    <span className="capitalize">
-                      {isSyncingSmartlead ? 'Syncing...' : (smartleadConnection.sync_status || 'Active')}
-                    </span>
-                  </div>
-                  
-                  {isSyncingSmartlead && syncProgress && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          {syncProgress.campaign_name 
-                            ? `Syncing: ${syncProgress.campaign_name}` 
-                            : 'Starting sync...'}
-                        </span>
-                        <span>
-                          {syncProgress.campaign_index ?? syncProgress.current_campaign ?? (syncProgress.batch_index ? syncProgress.batch_index * 2 : 0)} / {syncProgress.total_campaigns ?? syncProgress.total ?? '?'}
-                        </span>
+        {loading ? (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading connections...
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {channel === "email" && (
+              <>
+                {/* Smartlead */}
+                <Card className={smartleadConnection ? "border-success/30" : ""}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
+                          <Plug className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">Smartlead</CardTitle>
+                          <CardDescription>Primary outreach platform</CardDescription>
+                        </div>
                       </div>
-                      <Progress value={syncProgress.progress || 0} className="h-2" />
+                      {smartleadConnection && (
+                        <Badge variant="outline" className="border-success text-success">
+                          Connected
+                        </Badge>
+                      )}
                     </div>
-                  )}
-
-                  {smartleadConnection.last_sync_at && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Last Sync</span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {new Date(smartleadConnection.last_sync_at).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-                  
-                  {smartleadConnection.last_full_sync_at && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Last Full Sync</span>
-                      <span className="flex items-center gap-1">
-                        <Download className="h-3 w-3" />
-                        {new Date(smartleadConnection.last_full_sync_at).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-
-                  {syncProgress?.step === 'complete' && (
-                    <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
-                      <p className="font-medium mb-1">Last sync results:</p>
-                      <p>{syncProgress.campaigns_synced} campaigns, {syncProgress.variants_synced} variants, {syncProgress.leads_synced || 0} leads, {syncProgress.events_created || 0} events</p>
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 pt-2">
-                    {isSyncingSmartlead ? (
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {!smartleadConnection ? (
                       <>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handlePullFullHistory(false, true)}
-                          title="Skip to next batch if sync is stuck"
-                        >
-                          <FastForward className="mr-2 h-4 w-4" />
-                          Skip Batch
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="text-destructive hover:text-destructive"
-                          onClick={handleStopSync}
-                          disabled={isStopping}
-                        >
-                          {isStopping ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Stopping...
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="mr-2 h-4 w-4" />
-                              Stop Sync
-                            </>
-                          )}
-                        </Button>
+                        <div className="space-y-2">
+                          <Label htmlFor="smartlead-key">API Key</Label>
+                          <Input
+                            id="smartlead-key"
+                            value={smartleadApiKey}
+                            onChange={(e) => setSmartleadApiKey(e.target.value)}
+                            placeholder="Paste Smartlead API key"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button onClick={() => handleConnect("smartlead")} disabled={!!isConnecting.smartlead} className="flex-1">
+                            {isConnecting.smartlead ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Connecting...
+                              </>
+                            ) : (
+                              "Connect Smartlead"
+                            )}
+                          </Button>
+                        </div>
                       </>
                     ) : (
-                      <>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="flex-1"
-                          onClick={() => handlePullFullHistory(false)}
-                        >
-                          <Download className="mr-2 h-4 w-4" />
-                          Continue Sync
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              title="Reset and re-sync from scratch"
-                            >
-                              <RefreshCw className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="flex items-center gap-2">
-                                <AlertTriangle className="h-5 w-5 text-destructive" />
-                                Reset Sync Data?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will delete all synced data and start a full re-sync from scratch.
-                                This may take a long time for accounts with many campaigns.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handlePullFullHistory(true)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Reset & Full Sync
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                            >
-                              Disconnect
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="flex items-center gap-2">
-                                <AlertTriangle className="h-5 w-5 text-destructive" />
-                                Disconnect Smartlead?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will remove your Smartlead API key and stop all syncing. 
-                                You'll need to re-enter your API key to reconnect.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleDisconnect(smartleadConnection.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Disconnect
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="smartlead-key">API Key</Label>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="smartlead-key"
-                        type="password"
-                        placeholder="Enter your Smartlead API key"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Button
-                      onClick={() => handleConnect('smartlead')}
-                      disabled={isConnecting || !apiKey.trim()}
-                    >
-                      {isConnecting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Connecting...
-                        </>
-                      ) : (
-                        'Connect Smartlead'
-                      )}
-                    </Button>
-                    <Button variant="link" size="sm" asChild>
-                      <a 
-                        href="https://app.smartlead.ai/settings/api" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                      >
-                        Get API Key
-                        <ExternalLink className="ml-1 h-3 w-3" />
-                      </a>
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Reply.io Connection */}
-          <Card className={replyioConnection ? 'border-success/30' : ''}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                    <Plug className={`h-5 w-5 ${replyioConnection ? 'text-primary' : 'text-muted-foreground'}`} />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Reply.io</CardTitle>
-                    <CardDescription>Secondary outreach platform</CardDescription>
-                  </div>
-                </div>
-                {replyioConnection && (
-                  <Badge variant="outline" className="border-success text-success">
-                    <StatusDot status="healthy" size="sm" className="mr-1" />
-                    Connected
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {replyioConnection ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Status</span>
-                    <span className="capitalize">
-                      {isSyncingReplyioActive ? 'Syncing...' : (replyioConnection.sync_status || 'Active')}
-                    </span>
-                  </div>
-                  
-                  {/* Sync Progress */}
-                  {isSyncingReplyioActive && replyioSyncProgress && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          {replyioSyncProgress.step === 'email_accounts' && 'Syncing email accounts...'}
-                          {replyioSyncProgress.step === 'sequences' && (replyioSyncProgress.current_sequence_name 
-                            ? `Syncing: ${replyioSyncProgress.current_sequence_name}` 
-                            : 'Syncing sequences...')}
-                          {replyioSyncProgress.step === 'contacts' && `Syncing contacts (${replyioSyncProgress.processed_contacts || 0} processed)`}
-                        </span>
-                        <span>
-                          {replyioSyncProgress.step === 'sequences' && (
-                            `${replyioSyncProgress.processed_sequences || 0} / ${replyioSyncProgress.total_sequences || '?'}`
-                          )}
-                        </span>
-                      </div>
-                      <Progress value={getReplyioProgress()} className="h-2" />
-                    </div>
-                  )}
-                  
-                  {replyioConnection.last_sync_at && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Last Sync</span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {new Date(replyioConnection.last_sync_at).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Sync Results */}
-                  {replyioSyncProgress?.step === 'complete' && (
-                    <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
-                      <p className="font-medium mb-1">Last sync results:</p>
-                      <p>{replyioSyncProgress.processed_sequences || 0} sequences, {replyioSyncProgress.processed_contacts || 0} contacts</p>
-                    </div>
-                  )}
-
-                  {/* Errors Display (only show for active or failed syncs) */}
-                  {(isSyncingReplyioActive || replyioConnection.sync_status === 'error') &&
-                    replyioSyncProgress?.errors && replyioSyncProgress.errors.length > 0 && (
-                      <div className="text-xs text-destructive bg-destructive/10 rounded-lg p-3">
-                        <p className="font-medium mb-1">Errors:</p>
-                        {replyioSyncProgress.errors.slice(-3).map((err, i) => (
-                          <p key={i} className="truncate">{err}</p>
-                        ))}
-                      </div>
-                    )}
-
-                  {replyioDiagnostics && (
-                    <Alert>
-                      <AlertDescription>
-                        <div className="space-y-2">
-                          <p className="text-sm font-medium">Reply.io diagnostics</p>
-                          <pre className="max-h-56 overflow-auto rounded-md bg-accent/40 p-3 text-xs text-foreground">
-                            {JSON.stringify(replyioDiagnostics, null, 2)}
-                          </pre>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Status</span>
+                          <span className="capitalize">{smartleadConnection.sync_status || "active"}</span>
                         </div>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  <div className="flex gap-2 pt-2">
-                    {isSyncingReplyioActive ? (
-                      <>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={handleForceAdvanceReplyio}
-                          title="Skip to next sequence if sync is stuck"
-                        >
-                          <FastForward className="mr-2 h-4 w-4" />
-                          Skip
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="text-destructive hover:text-destructive"
-                          onClick={handleStopReplyioSync}
-                          disabled={isStoppingReplyio}
-                        >
-                          {isStoppingReplyio ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Stopping...
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="mr-2 h-4 w-4" />
-                              Stop Sync
-                            </>
-                          )}
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="flex-1"
-                          onClick={() => handleReplyioSync(false)}
-                        >
-                          <Download className="mr-2 h-4 w-4" />
-                          Sync Data
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={runReplyioDiagnostics}
-                          disabled={isDiagnosingReplyio}
-                          title="Run a quick API sanity-check (no data changes)"
-                        >
-                          {isDiagnosingReplyio ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <AlertCircle className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              title="Reset and re-sync from scratch"
-                            >
-                              <RefreshCw className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="flex items-center gap-2">
-                                <AlertTriangle className="h-5 w-5 text-destructive" />
-                                Reset Reply.io Sync Data?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will delete all synced Reply.io data and start a full re-sync from scratch.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleReplyioSync(true)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Reset & Full Sync
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                            >
-                              Disconnect
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="flex items-center gap-2">
-                                <AlertTriangle className="h-5 w-5 text-destructive" />
-                                Disconnect Reply.io?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will remove your Reply.io API key and stop all syncing. 
-                                You'll need to re-enter your API key to reconnect.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleDisconnect(replyioConnection.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Disconnect
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="replyio-key">API Key</Label>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="replyio-key"
-                        type="password"
-                        placeholder="Enter your Reply.io API key"
-                        value={replyioApiKey}
-                        onChange={(e) => setReplyioApiKey(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Button
-                      onClick={() => handleConnectReplyio()}
-                      disabled={isConnectingReplyio || !replyioApiKey.trim()}
-                    >
-                      {isConnectingReplyio ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Connecting...
-                        </>
-                      ) : (
-                        'Connect Reply.io'
-                      )}
-                    </Button>
-                    <Button variant="link" size="sm" asChild>
-                      <a 
-                        href="https://app.reply.io/settings/apikey" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                      >
-                        Get API Key
-                        <ExternalLink className="ml-1 h-3 w-3" />
-                      </a>
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* PhoneBurner Connection */}
-          <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
-            </>
-          )}
-
-          {/* Calling Channel Connections */}
-          {channel === 'calling' && (
-            <>
-              {/* PhoneBurner Connection */}
-              <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                    <Plug className={`h-5 w-5 ${phoneburnerConnection ? 'text-primary' : 'text-muted-foreground'}`} />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">PhoneBurner</CardTitle>
-                    <CardDescription>Power dialer & call tracking</CardDescription>
-                    <Phone className={`h-5 w-5 ${phoneburnerConnection ? 'text-primary' : 'text-muted-foreground'}`} />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">PhoneBurner</CardTitle>
-                    <CardDescription>Cold calling platform</CardDescription>
-                  </div>
-                </div>
-                {phoneburnerConnection && (
-                  <Badge variant="outline" className="border-success text-success">
-                    <StatusDot status="healthy" size="sm" className="mr-1" />
-                    Connected
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {phoneburnerConnection ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Status</span>
-                    <span className="capitalize">
-                      {isSyncingPhoneburnerActive ? 'Syncing...' : (phoneburnerConnection.sync_status || 'Active')}
-                    </span>
-                  </div>
-
-                  {/* Sync Progress */}
-                  {isSyncingPhoneburnerActive && phoneburnerSyncProgress && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          {phoneburnerSyncProgress.step === 'contacts' && 'Syncing contacts...'}
-                          {phoneburnerSyncProgress.step === 'dial_sessions' && 'Syncing dial sessions & calls...'}
-                          {phoneburnerSyncProgress.step === 'complete' && 'Complete'}
-                        </span>
-                      </div>
-                      <Progress value={phoneburnerSyncProgress.progress || 0} className="h-2" />
-                    </div>
-                  )}
-
-                    <span className="capitalize">{phoneburnerConnection.sync_status || 'Active'}</span>
-                  </div>
-                  
-                  {phoneburnerConnection.last_sync_at && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Last Sync</span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {new Date(phoneburnerConnection.last_sync_at).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Sync Results */}
-                  {phoneburnerSyncProgress?.step === 'complete' && (
-                    <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
-                      <p className="font-medium mb-1">Last sync results:</p>
-                      <p>{phoneburnerSyncProgress.contacts_synced || 0} contacts, {phoneburnerSyncProgress.calls_synced || 0} calls</p>
-                    </div>
-                  )}
-
-                  {/* Diagnostics Results */}
-                  {phoneburnerDiagnostics && (
-                    <Alert>
-                      <AlertDescription>
-                        <div className="space-y-2">
-                          <p className="text-sm font-medium">PhoneBurner API Diagnostics</p>
-                          <pre className="max-h-56 overflow-auto rounded-md bg-accent/40 p-3 text-xs text-foreground">
-                            {JSON.stringify(phoneburnerDiagnostics, null, 2)}
-                          </pre>
-                        </div>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  <div className="flex gap-2 pt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => handlePhoneburnerSync(false)}
-                      disabled={isSyncingPhoneburnerActive}
-                    >
-                      {isSyncingPhoneburnerActive ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Syncing...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="mr-2 h-4 w-4" />
-                          Sync Data
-                        </>
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={runPhoneburnerDiagnostics}
-                      disabled={isDiagnosingPhoneburner}
-                      title="Run API diagnostics to debug connection"
-                    >
-                      {isDiagnosingPhoneburner ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <AlertCircle className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          title="Reset and re-sync from scratch"
-                        >
-                          <RefreshCw className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle className="flex items-center gap-2">
-                            <AlertTriangle className="h-5 w-5 text-destructive" />
-                            Reset PhoneBurner Sync Data?
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will delete all synced PhoneBurner data and start a full re-sync from scratch.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handlePhoneburnerSync(true)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Reset & Full Sync
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                  {/* Sync Progress - Show when syncing OR when isSyncingPhoneburner is true (button just clicked) */}
-                  {(phoneburnerConnection.sync_status === 'syncing' || isSyncingPhoneburner) && (() => {
-                    const progress = phoneburnerConnection.sync_progress as any;
-                    const phase = progress?.phase || 'initializing';
-                    const contactsSynced = progress?.contacts_synced || 0;
-                    const sessionsSynced = progress?.sessions_synced || 0;
-                    const callsSynced = progress?.calls_synced || 0;
-                    const sessionPage = progress?.session_page || 1;
-                    const totalSessionPages = progress?.total_session_pages || 1;
-                    const contactsPage = progress?.contacts_page || 1;
-                    const totalPages = progress?.total_pages || 1;
-                    
-                    // Calculate progress percentage based on phase
-                    let progressPercent = 0;
-                    let phaseLabel = '';
-                    if (phase === 'initializing' || !progress) {
-                      progressPercent = 5;
-                      phaseLabel = 'Initializing sync...';
-                    } else if (phase === 'dialsessions') {
-                      progressPercent = totalSessionPages > 1 ? Math.round((sessionPage / totalSessionPages) * 40) : 20;
-                      phaseLabel = `Syncing dial sessions (page ${sessionPage}/${totalSessionPages}, ${callsSynced} calls)`;
-                    } else if (phase === 'contacts') {
-                      progressPercent = 40 + (totalPages > 1 ? Math.round((contactsPage / totalPages) * 30) : 15);
-                      phaseLabel = `Syncing contacts (page ${contactsPage}/${totalPages})`;
-                    } else if (phase === 'metrics') {
-                      progressPercent = 80;
-                      phaseLabel = 'Syncing aggregate metrics';
-                    } else if (phase === 'linking') {
-                      progressPercent = 95;
-                      phaseLabel = 'Linking contacts to leads';
-                    }
-                    
-                    return (
-                      <div className="space-y-3 p-3 rounded-lg bg-accent/20">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Dial Sessions</span>
-                          <span className="font-medium">{sessionsSynced.toLocaleString()}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Contacts</span>
-                          <span className="font-medium">{contactsSynced.toLocaleString()}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Calls</span>
-                          <span className="font-medium">{callsSynced.toLocaleString()}</span>
-                        </div>
-                        <div className="space-y-1">
-                          <Progress value={progressPercent} className="h-2" />
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            {phaseLabel}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  
-                  {/* Completed Sync Summary */}
-                  {phoneburnerConnection.sync_status === 'complete' && phoneburnerConnection.sync_progress && (
-                    <div className="flex items-center gap-4 text-sm p-2 rounded-lg bg-success/10 flex-wrap">
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2 className="h-4 w-4 text-success" />
-                        <span>{(phoneburnerConnection.sync_progress as any).sessions_synced || 0} sessions</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2 className="h-4 w-4 text-success" />
-                        <span>{(phoneburnerConnection.sync_progress as any).contacts_synced || 0} contacts</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <CheckCircle2 className="h-4 w-4 text-success" />
-                        <span>{(phoneburnerConnection.sync_progress as any).calls_synced || 0} calls</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Diagnostic Results */}
-                  {phoneburnerDiagnostics && (
-                    <div className="space-y-3 p-3 rounded-lg bg-accent/30 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">Diagnostic Results</span>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-6 px-2"
-                          onClick={() => setPhoneburnerDiagnostics(null)}
-                        >
-                          <XCircle className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      
-                      {/* Members Test */}
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          {phoneburnerDiagnostics.tests?.members?.success ? (
-                            <CheckCircle2 className="h-4 w-4 text-success" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          )}
-                          <span>Members: {phoneburnerDiagnostics.tests?.members?.count || 0} found</span>
-                        </div>
-                      </div>
-
-                      {/* Contacts Test */}
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          {phoneburnerDiagnostics.tests?.contacts?.success ? (
-                            <CheckCircle2 className="h-4 w-4 text-success" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          )}
-                          <span>Contacts: {phoneburnerDiagnostics.tests?.contacts?.total_contacts?.toLocaleString() || 0} total</span>
-                        </div>
-                      </div>
-
-                      {/* Dial Sessions Test */}
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          {phoneburnerDiagnostics.tests?.dial_sessions?.success ? (
-                            <CheckCircle2 className="h-4 w-4 text-success" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          )}
-                          <span>Dial Sessions: {phoneburnerDiagnostics.tests?.dial_sessions?.total_results?.toLocaleString() || 0} found</span>
-                        </div>
-                      </div>
-
-                      {/* Usage Stats Test */}
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          {phoneburnerDiagnostics.tests?.usage?.success ? (
-                            <CheckCircle2 className="h-4 w-4 text-success" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          )}
-                          <span>Team Stats: {phoneburnerDiagnostics.tests?.usage?.total_calls?.toLocaleString() || 0} calls (90 days)</span>
-                        </div>
-                      </div>
-
-                      {/* Recommendation */}
-                      {phoneburnerDiagnostics.recommendation && (
-                        <div className="p-2 rounded bg-muted text-muted-foreground">
-                          <span className="font-medium">💡 </span>
-                          {phoneburnerDiagnostics.recommendation}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 pt-2">
-                    {phoneburnerConnection.sync_status === 'syncing' ? (
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="flex-1"
-                        onClick={handleStopPhoneburnerSync}
-                        disabled={isStoppingPhoneburner}
-                      >
-                        {isStoppingPhoneburner ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <XCircle className="mr-2 h-4 w-4" />
+                        {smartleadConnection.last_sync_at && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Last Sync</span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {new Date(smartleadConnection.last_sync_at).toLocaleString()}
+                            </span>
+                          </div>
                         )}
-                        Stop Sync
-                      </Button>
-                    ) : (
+                        {smartleadConnection.last_full_sync_at && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Last Full Sync</span>
+                            <span className="flex items-center gap-1">
+                              <Download className="h-3 w-3" />
+                              {new Date(smartleadConnection.last_full_sync_at).toLocaleString()}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Reply.io */}
+                <Card className={replyioConnection ? "border-success/30" : ""}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
+                          <Plug className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">Reply.io</CardTitle>
+                          <CardDescription>Email sequences & engagement</CardDescription>
+                        </div>
+                      </div>
+                      {replyioConnection && (
+                        <Badge variant="outline" className="border-success text-success">
+                          Connected
+                        </Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {!replyioConnection ? (
                       <>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="flex-1"
-                          onClick={() => handlePhoneburnerSync(false)}
-                          disabled={isSyncingPhoneburner}
-                        >
-                          {isSyncingPhoneburner ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <div className="space-y-2">
+                          <Label htmlFor="replyio-key">API Key</Label>
+                          <Input
+                            id="replyio-key"
+                            value={replyioApiKey}
+                            onChange={(e) => setReplyioApiKey(e.target.value)}
+                            placeholder="Paste Reply.io API key"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button onClick={() => handleConnect("replyio")} disabled={!!isConnecting.replyio} className="flex-1">
+                            {isConnecting.replyio ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Connecting...
+                              </>
+                            ) : (
+                              "Connect Reply.io"
+                            )}
+                          </Button>
+                          <Button variant="link" size="sm" asChild>
+                            <a href="https://app.reply.io/settings/apikey" target="_blank" rel="noopener noreferrer">
+                              Get API Key
+                              <ExternalLink className="ml-1 h-3 w-3" />
+                            </a>
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Status</span>
+                          <span className="capitalize">{replyioConnection.sync_status || "active"}</span>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            )}
+
+            {channel === "calling" && (
+              <>
+                {/* PhoneBurner */}
+                <Card className={phoneburnerConnection ? "border-success/30" : ""}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
+                          <Phone className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">PhoneBurner</CardTitle>
+                          <CardDescription>Power dialer & call tracking</CardDescription>
+                        </div>
+                      </div>
+                      {phoneburnerConnection && (
+                        <Badge variant="outline" className="border-success text-success">
+                          Connected
+                        </Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {!phoneburnerConnection ? (
+                      <>
+                        <div className="space-y-2">
+                          <Label htmlFor="pb-token">Personal Access Token</Label>
+                          <Input
+                            id="pb-token"
+                            value={phoneburnerToken}
+                            onChange={(e) => setPhoneburnerToken(e.target.value)}
+                            placeholder="Paste PhoneBurner PAT"
+                          />
+                        </div>
+                        <Button onClick={() => handleConnect("phoneburner")} disabled={!!isConnecting.phoneburner} className="w-full">
+                          {isConnecting.phoneburner ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Connecting...
+                            </>
                           ) : (
-                            <Download className="mr-2 h-4 w-4" />
+                            "Connect PhoneBurner"
                           )}
-                          Sync Data
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              <RefreshCw className="mr-2 h-4 w-4" />
-                              Reset & Sync
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="flex items-center gap-2">
-                                <AlertTriangle className="h-5 w-5 text-warning" />
-                                Reset PhoneBurner Data?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will delete all existing PhoneBurner data and re-sync from scratch.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handlePhoneburnerSync(true)}>
-                                Reset & Sync
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={runPhoneburnerDiagnostics}
-                          disabled={isDiagnosingPhoneburner}
-                        >
-                          {isDiagnosingPhoneburner ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <AlertCircle className="mr-2 h-4 w-4" />
-                          )}
-                          Diagnose
                         </Button>
                       </>
-                    )}
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                        >
-                          Disconnect
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle className="flex items-center gap-2">
-                            <AlertTriangle className="h-5 w-5 text-destructive" />
-                            Disconnect PhoneBurner?
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will remove your PhoneBurner access token and stop all syncing.
-                            You'll need to re-enter your token to reconnect.
-                            This will remove your PhoneBurner API key and stop all syncing.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleDisconnect(phoneburnerConnection.id)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Disconnect
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="phoneburner-key">Access Token</Label>
-                    <Label htmlFor="phoneburner-key">API Key</Label>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="phoneburner-key"
-                        type="password"
-                        placeholder="Enter your PhoneBurner access token"
-                        placeholder="Enter your PhoneBurner API key"
-                        value={phoneburnerApiKey}
-                        onChange={(e) => setPhoneburnerApiKey(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Generate a Personal Access Token in PhoneBurner under My Account → Integration Settings
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Button
-                      onClick={handleConnectPhoneburner}
-                      disabled={isConnectingPhoneburner || !phoneburnerApiKey.trim()}
-                    >
-                      {isConnectingPhoneburner ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Connecting...
-                        </>
-                      ) : (
-                        'Connect PhoneBurner'
-                      )}
-                    </Button>
-                    <Button variant="link" size="sm" asChild>
-                      <a
-                        href="https://www.phoneburner.com/developer/getting_started"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        API Docs
-                      <a 
-                        href="https://www.phoneburner.com/developer/index" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                      >
-                        Get API Key
-                        <ExternalLink className="ml-1 h-3 w-3" />
-                      </a>
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-            </>
-          )}
-        </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Status</span>
+                            <span className="capitalize">{phoneburnerConnection.sync_status || "active"}</span>
+                          </div>
+                          {phoneburnerConnection.last_sync_at && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Last Sync</span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {new Date(phoneburnerConnection.last_sync_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                        </div>
 
-        {/* Data Sync Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Data Sync</CardTitle>
-            <CardDescription>
-              How your data is imported and synced
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {channel === 'email' ? (
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="p-4 rounded-lg bg-accent/30">
-                  <h4 className="font-medium mb-1">Historical Backfill</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Click "Sync Data" to import all campaigns, email variants, and metrics
-                  </p>
-                </div>
-                <div className="p-4 rounded-lg bg-accent/30">
-                  <h4 className="font-medium mb-1">Email Copy Analytics</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Subject lines and body copy are synced with performance metrics
-                  </p>
-                </div>
-                <div className="p-4 rounded-lg bg-accent/30">
-                  <h4 className="font-medium mb-1">Copy Insights</h4>
-                  <p className="text-sm text-muted-foreground">
-                    View your synced copy analytics on the Copy Insights page
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="p-4 rounded-lg bg-accent/30">
-                  <h4 className="font-medium mb-1">Dial Sessions</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Import dial sessions with call counts, duration, and member info
-                  </p>
-                </div>
-                <div className="p-4 rounded-lg bg-accent/30">
-                  <h4 className="font-medium mb-1">Call Analytics</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Dispositions, connect rates, and talk time are automatically tracked
-                  </p>
-                </div>
-                <div className="p-4 rounded-lg bg-accent/30">
-                  <h4 className="font-medium mb-1">Daily Metrics</h4>
-                  <p className="text-sm text-muted-foreground">
-                    View aggregated calling performance on the Calling Dashboard
-                  </p>
-                </div>
-              </div>
+                        {(phoneburnerConnection.sync_status === "syncing" || isSyncing.phoneburner) && (
+                          <div className="space-y-2 rounded-lg bg-accent/20 p-3">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-muted-foreground">Dial Sessions</span>
+                              <span className="font-medium">{Number(pbSessions).toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-muted-foreground">Contacts</span>
+                              <span className="font-medium">{Number(pbContacts).toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-muted-foreground">Calls</span>
+                              <span className="font-medium">{Number(pbCalls).toLocaleString()}</span>
+                            </div>
+                            <Progress value={pbProgressPercent} className="h-2" />
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              {pbPhase ? `Phase: ${pbPhase}` : "Starting..."}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="flex gap-2">
+                          {phoneburnerConnection.sync_status === "syncing" ? (
+                            <Button
+                              variant="outline"
+                              className="flex-1 text-destructive hover:text-destructive"
+                              onClick={handleStopPhoneburnerSync}
+                              disabled={!!isSyncing.phoneburner_stop}
+                            >
+                              {isSyncing.phoneburner_stop ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Stopping...
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle className="mr-2 h-4 w-4" />
+                                  Stop
+                                </>
+                              )}
+                            </Button>
+                          ) : (
+                            <>
+                              <Button variant="outline" className="flex-1" onClick={() => handleSyncPhoneburner(false)} disabled={!!isSyncing.phoneburner}>
+                                {isSyncing.phoneburner ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Syncing...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Sync
+                                  </>
+                                )}
+                              </Button>
+                              <Button variant="outline" className="flex-1" onClick={() => handleSyncPhoneburner(true)} disabled={!!isSyncing.phoneburner}>
+                                Reset & Sync
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
