@@ -461,64 +461,88 @@ serve(async (req) => {
           }
           
           try {
-            const activitiesResponse = await phoneburnerRequest(
-              `/contacts/${contact.external_contact_id}/activities?days=${ACTIVITIES_DAYS}&page=1&page_size=100`,
-              apiKey
-            );
-            await delay(RATE_LIMIT_DELAY);
-            
-            const activitiesData = activitiesResponse.contact_activities || {};
-            const activities: ContactActivity[] = activitiesData.contact_activities || [];
-            
-            // Filter for call-related activities
-            // Activity IDs: 41 = "Called a Prospect", 42 = various call types
-            const callActivities = activities.filter(a => 
-              a.activity?.toLowerCase().includes('call') ||
-              a.activity_id === '41' ||
-              a.activity_id === '42' ||
-              a.activity_id === '43' ||
-              a.activity_id === '44'
-            );
-            
-            if (callActivities.length > 0) {
-              console.log(`  Contact ${contact.external_contact_id}: ${callActivities.length} call activities`);
-              
-              // Create call records from activities
-              const callRecords = callActivities.map(activity => ({
-                workspace_id: workspaceId,
-                external_call_id: activity.user_activity_id, // Use activity ID as call ID
-                external_contact_id: contact.external_contact_id,
-                contact_id: contact.id, // Link directly to our contact
-                phone_number: contact.phone || null,
-                activity_date: activity.date ? new Date(activity.date).toISOString() : null,
-                start_at: activity.date ? new Date(activity.date).toISOString() : null,
-                disposition: activity.activity || 'Called',
-                notes: activity.activity || null,
-                is_connected: activity.activity?.toLowerCase().includes('interested') || 
-                              activity.activity?.toLowerCase().includes('connected') ||
-                              activity.activity?.toLowerCase().includes('spoke') ||
-                              false,
-                is_voicemail: activity.activity?.toLowerCase().includes('voicemail') ||
-                              activity.activity?.toLowerCase().includes('message') ||
-                              false,
-              }));
-              
-              const { error: callsError } = await supabase
-                .from('phoneburner_calls')
-                .upsert(callRecords, {
-                  onConflict: 'workspace_id,external_call_id',
-                });
-              
-              if (callsError) {
-                console.error(`Calls upsert error for contact ${contact.external_contact_id}:`, callsError);
-              } else {
-                totalCallsSynced += callRecords.length;
+            // Paginate through activities (calls may not be on page 1)
+            let page = 1;
+            let totalPages = 1;
+            let contactActivitiesCount = 0;
+            let contactCallsCount = 0;
+
+            while (page <= totalPages && (Date.now() - startTime) < TIME_BUDGET_MS) {
+              const activitiesResponse = await phoneburnerRequest(
+                `/contacts/${contact.external_contact_id}/activities?days=${ACTIVITIES_DAYS}&page=${page}&page_size=100`,
+                apiKey
+              );
+              await delay(RATE_LIMIT_DELAY);
+
+              const activitiesData = activitiesResponse.contact_activities || {};
+              const activities: ContactActivity[] = activitiesData.contact_activities || [];
+              totalPages = Number(activitiesData.total_pages || totalPages || 1);
+
+              contactActivitiesCount += activities.length;
+
+              // Filter for call-related activities
+              // Per docs: activity_id is a type (e.g., 41 = "Called a Prospect")
+              const callActivities = activities.filter((a: any) => {
+                const activityId = String(a.activity_id ?? '');
+                const activityText = String(a.activity ?? '').toLowerCase();
+                return (
+                  activityId === '41' ||
+                  activityId === '42' ||
+                  activityId === '43' ||
+                  activityId === '44' ||
+                  activityText.includes('call')
+                );
+              });
+
+              if (callActivities.length > 0) {
+                // Create call records from activities
+                const callRecords = callActivities.map((activity: any) => ({
+                  workspace_id: workspaceId,
+                  external_call_id: String(activity.user_activity_id), // unique per activity per docs
+                  external_contact_id: String(contact.external_contact_id),
+                  contact_id: contact.id, // Link directly to our contact
+                  phone_number: contact.phone || null,
+                  activity_date: activity.date ? new Date(activity.date).toISOString() : null,
+                  start_at: activity.date ? new Date(activity.date).toISOString() : null,
+                  disposition: activity.activity || 'Called a Prospect',
+                  notes: activity.activity || null,
+                  is_connected:
+                    String(activity.activity || '').toLowerCase().includes('interested') ||
+                    String(activity.activity || '').toLowerCase().includes('connected') ||
+                    String(activity.activity || '').toLowerCase().includes('spoke') ||
+                    false,
+                  is_voicemail:
+                    String(activity.activity || '').toLowerCase().includes('voicemail') ||
+                    String(activity.activity || '').toLowerCase().includes('message') ||
+                    false,
+                }));
+
+                const { error: callsError } = await supabase
+                  .from('phoneburner_calls')
+                  .upsert(callRecords, {
+                    onConflict: 'workspace_id,external_call_id',
+                  });
+
+                if (callsError) {
+                  console.error(`Calls upsert error for contact ${contact.external_contact_id} (page ${page}):`, callsError);
+                } else {
+                  contactCallsCount += callRecords.length;
+                  totalCallsSynced += callRecords.length;
+                }
               }
+
+              page++;
             }
-            
-            totalActivitiesSynced += activities.length;
+
+            if (contactCallsCount > 0) {
+              console.log(
+                `  Contact ${contact.external_contact_id}: activities=${contactActivitiesCount}, calls=${contactCallsCount}`
+              );
+            }
+
+            totalActivitiesSynced += contactActivitiesCount;
             contactOffset++;
-            
+
           } catch (e) {
             console.error(`Error fetching activities for contact ${contact.external_contact_id}:`, e);
             contactOffset++; // Skip to next contact
