@@ -135,34 +135,131 @@ serve(async (req) => {
     const apiKey: string = connection.api_key_encrypted;
 
     if (diagnostic) {
+      console.log("Running PhoneBurner diagnostics...");
+
       const end = formatDateYMD(new Date());
       const start = formatDateYMD(daysAgo(DAYS_TO_SYNC));
+      const usageStart = formatDateYMD(daysAgo(90)); // 90-day max for usage API
 
-      let sessionsFound = 0;
+      const results: any = {
+        diagnostic: true,
+        timestamp: new Date().toISOString(),
+        date_range: { sync_from: start, sync_to: end, total_days: DAYS_TO_SYNC },
+        tests: {},
+      };
+
+      // Test 1: Members endpoint
       try {
-        const list = await phoneburnerRequest(
+        const membersRes = await phoneburnerRequest("/members", apiKey);
+        const rawMembers = membersRes?.members?.members ?? membersRes?.members ?? [];
+        const members = Array.isArray(rawMembers) ? (Array.isArray(rawMembers[0]) ? rawMembers[0] : rawMembers) : [];
+
+        results.tests.members = {
+          success: true,
+          count: members.length,
+          sample: members.slice(0, 3).map((m: any) => ({
+            user_id: m.user_id || m.member_user_id,
+            name: `${m.first_name || ""} ${m.last_name || ""}`.trim(),
+          })),
+        };
+      } catch (e: any) {
+        results.tests.members = { success: false, error: e.message };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 2: Contacts endpoint
+      try {
+        const contactsRes = await phoneburnerRequest("/contacts?page=1&page_size=5", apiKey);
+        const contactsData = contactsRes?.contacts ?? {};
+        const contacts = contactsData?.contacts ?? [];
+
+        results.tests.contacts = {
+          success: true,
+          total_contacts: contactsData.total_results || contacts.length,
+          total_pages: contactsData.total_pages || 1,
+          sample: contacts.slice(0, 2).map((c: any) => ({
+            contact_user_id: c.contact_user_id || c.id,
+            name: `${c.first_name || ""} ${c.last_name || ""}`.trim(),
+          })),
+        };
+      } catch (e: any) {
+        results.tests.contacts = { success: false, error: e.message };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 3: Dial Sessions with date filtering
+      try {
+        const sessionsRes = await phoneburnerRequest(
           `/dialsession?page=1&page_size=5&date_start=${start}&date_end=${end}`,
           apiKey
         );
-        const arr = list?.dialsessions?.dialsessions ?? list?.dialsessions ?? list?.dial_sessions ?? [];
-        sessionsFound = Array.isArray(arr) ? arr.length : 0;
-      } catch (_e) {
-        sessionsFound = 0;
+        const sessionsData = sessionsRes?.dialsessions ?? {};
+        const sessions = sessionsData?.dialsessions ?? sessionsRes?.dial_sessions ?? [];
+        const sessionArr = Array.isArray(sessions) ? sessions : [];
+
+        results.tests.dial_sessions = {
+          success: true,
+          total_results: sessionsData.total_results || sessionArr.length,
+          total_pages: sessionsData.total_pages || 1,
+          sessions_on_page: sessionArr.length,
+          sample: sessionArr.slice(0, 2).map((s: any) => ({
+            dialsession_id: s.dialsession_id || s.id,
+            start_when: s.start_when,
+            call_count: s.calls?.length || s.call_count || 0,
+          })),
+        };
+      } catch (e: any) {
+        results.tests.dial_sessions = { success: false, error: e.message };
       }
 
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          auth: "ok",
-          scope_days: DAYS_TO_SYNC,
-          dialsession_list_sample_count: sessionsFound,
-          note:
-            sessionsFound === 0
-              ? "No dial sessions returned for this token in the date range. If you expect team-wide sessions, a PAT may not have access."
-              : "Dial sessions endpoint returned data for this token.",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 4: Usage stats (90-day max per API)
+      try {
+        const usageRes = await phoneburnerRequest(
+          `/dialsession/usage?date_start=${usageStart}&date_end=${end}`,
+          apiKey
+        );
+        const usage = usageRes?.usage ?? {};
+        const memberIds = Object.keys(usage);
+        let totalCalls = 0;
+        let totalSessions = 0;
+
+        for (const id of memberIds) {
+          totalCalls += usage[id]?.calls || 0;
+          totalSessions += usage[id]?.sessions || 0;
+        }
+
+        results.tests.usage = {
+          success: true,
+          date_range: { start: usageStart, end },
+          member_count: memberIds.length,
+          total_calls: totalCalls,
+          total_sessions: totalSessions,
+        };
+      } catch (e: any) {
+        results.tests.usage = { success: false, error: e.message };
+      }
+
+      // Generate recommendation
+      const dialTest = results.tests.dial_sessions;
+      const usageTest = results.tests.usage;
+
+      if (dialTest?.success && dialTest.sessions_on_page > 0) {
+        results.recommendation = `Found ${dialTest.total_results || dialTest.sessions_on_page} dial sessions! Will sync individual calls from session data.`;
+      } else if (dialTest?.success && dialTest.sessions_on_page === 0) {
+        results.recommendation = "No dial sessions found for this token (PAT limitation). Will use aggregate metrics from /dialsession/usage.";
+      } else if (usageTest?.success && usageTest.total_calls > 0) {
+        results.recommendation = `Usage shows ${usageTest.total_calls} calls across ${usageTest.member_count} members. Dial sessions not accessible with PAT.`;
+      } else {
+        results.recommendation = "Limited data available. Will sync contacts and available metrics.";
+      }
+
+      return new Response(JSON.stringify(results), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Locking: if another run is active and fresh heartbeat, bail
