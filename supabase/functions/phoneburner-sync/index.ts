@@ -147,15 +147,36 @@ serve(async (req) => {
       // Test 1: Get account/member info
       try {
         const membersResponse = await phoneburnerRequest('/members', apiKey);
-        const members = membersResponse.members?.members || membersResponse.members || [];
+        console.log('Raw /members response:', JSON.stringify(membersResponse, null, 2));
+        
+        // PhoneBurner returns members in nested structure: members.members = [[...members...]]
+        // The inner members array is wrapped in another array
+        let members: any[] = [];
+        const rawMembers = membersResponse.members?.members;
+        if (rawMembers && Array.isArray(rawMembers)) {
+          // Check if it's a nested array [[{...}]] vs flat array [{...}]
+          if (rawMembers.length > 0 && Array.isArray(rawMembers[0])) {
+            members = rawMembers[0]; // Unwrap the nested array
+          } else {
+            members = rawMembers;
+          }
+        } else if (membersResponse.members && Array.isArray(membersResponse.members)) {
+          members = membersResponse.members;
+        } else if (membersResponse.member) {
+          members = [membersResponse.member];
+        } else if (membersResponse.user) {
+          members = [membersResponse.user];
+        }
+        
         diagnosticResults.tests.members = {
           success: true,
-          count: Array.isArray(members) ? members.length : 0,
-          data: Array.isArray(members) ? members.slice(0, 3).map((m: any) => ({
-            user_id: m.user_id,
+          count: members.length,
+          total_results: membersResponse.members?.total_results || members.length,
+          data: members.slice(0, 5).map((m: any) => ({
+            user_id: m.user_id || m.member_user_id,
             name: `${m.first_name || ''} ${m.last_name || ''}`.trim(),
-            email: m.email,
-          })) : [],
+            email: m.email_address || m.email,
+          })),
         };
       } catch (e: any) {
         diagnosticResults.tests.members = {
@@ -167,13 +188,25 @@ serve(async (req) => {
       // Test 2: Fetch sessions WITHOUT date filter for the global endpoint
       try {
         const noFilterResponse = await phoneburnerRequest('/dialsession?page=1&items_per_page=10', apiKey);
+        console.log('Raw /dialsession response:', JSON.stringify(noFilterResponse, null, 2));
+        
         const sessionsData = noFilterResponse.dialsessions || {};
-        const sessions = Array.isArray(sessionsData.dialsessions) ? sessionsData.dialsessions : [];
+        // Handle nested array structure similar to members
+        let sessions: any[] = [];
+        if (sessionsData.dialsessions) {
+          if (Array.isArray(sessionsData.dialsessions) && sessionsData.dialsessions.length > 0 && Array.isArray(sessionsData.dialsessions[0])) {
+            sessions = sessionsData.dialsessions[0]; // Unwrap nested array
+          } else if (Array.isArray(sessionsData.dialsessions)) {
+            sessions = sessionsData.dialsessions;
+          }
+        }
+        
         diagnosticResults.tests.sessions_global_endpoint = {
           success: true,
           total_results: sessionsData.total_results || 0,
           total_pages: sessionsData.total_pages || 0,
           returned_count: sessions.length,
+          sample_session: sessions.length > 0 ? sessions[0] : null,
           note: 'Global endpoint - may only show your sessions, not all team members',
         };
       } catch (e: any) {
@@ -296,12 +329,25 @@ serve(async (req) => {
     let allMembers: { user_id: string; name: string }[] = [];
     try {
       const membersResponse = await phoneburnerRequest('/members', apiKey);
-      const members = membersResponse.members?.members || membersResponse.members || [];
-      allMembers = Array.isArray(members) ? members.map((m: any) => ({
-        user_id: m.user_id?.toString(),
+      // PhoneBurner returns members in nested structure: members.members = [[...members...]]
+      let members: any[] = [];
+      const rawMembers = membersResponse.members?.members;
+      if (rawMembers && Array.isArray(rawMembers)) {
+        // Check if it's a nested array [[{...}]] vs flat array [{...}]
+        if (rawMembers.length > 0 && Array.isArray(rawMembers[0])) {
+          members = rawMembers[0]; // Unwrap the nested array
+        } else {
+          members = rawMembers;
+        }
+      } else if (membersResponse.members && Array.isArray(membersResponse.members)) {
+        members = membersResponse.members;
+      }
+      
+      allMembers = members.map((m: any) => ({
+        user_id: (m.user_id || m.member_user_id)?.toString(),
         name: `${m.first_name || ''} ${m.last_name || ''}`.trim(),
-      })).filter((m: any) => m.user_id) : [];
-      console.log(`Found ${allMembers.length} team members`);
+      })).filter((m: any) => m.user_id);
+      console.log(`Found ${allMembers.length} team members:`, allMembers.map(m => m.name).join(', '));
     } catch (e) {
       console.error('Failed to fetch members, falling back to global endpoint:', e);
     }
