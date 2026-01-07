@@ -1342,12 +1342,12 @@ export default function Connections() {
                     const progress = phoneburnerConnection.sync_progress as any;
                     const phase = progress?.phase || 'initializing';
                     const contactsSynced = progress?.contacts_synced || 0;
+                    const sessionsSynced = progress?.sessions_synced || 0;
                     const callsSynced = progress?.calls_synced || 0;
-                    const contactOffset = progress?.contact_offset || 0;
-                    const totalContacts = progress?.total_contacts || contactsSynced || 1;
+                    const sessionsPage = progress?.sessions_page || 1;
+                    const totalSessions = progress?.total_sessions || 0;
                     const contactsPage = progress?.contacts_page || 1;
                     const totalPages = progress?.total_pages || 1;
-                    const activityPage = progress?.activity_page || 1;
                     
                     // Calculate progress percentage based on phase
                     let progressPercent = 0;
@@ -1356,11 +1356,14 @@ export default function Connections() {
                       progressPercent = 5;
                       phaseLabel = 'Initializing sync...';
                     } else if (phase === 'contacts') {
-                      progressPercent = totalPages > 1 ? Math.round((contactsPage / totalPages) * 35) : 20;
+                      progressPercent = totalPages > 1 ? Math.round((contactsPage / totalPages) * 25) : 15;
                       phaseLabel = `Syncing contacts (page ${contactsPage}/${totalPages})`;
-                    } else if (phase === 'activities') {
-                      progressPercent = 35 + Math.min(45, Math.round((contactOffset / Math.max(totalContacts, 1)) * 45));
-                      phaseLabel = `Fetching call history (${contactOffset}/${totalContacts} contacts, page ${activityPage})`;
+                    } else if (phase === 'dialsessions') {
+                      const sessionProgress = totalSessions > 0 
+                        ? Math.round((sessionsSynced / totalSessions) * 55) 
+                        : Math.round((sessionsPage / Math.max(totalPages, 1)) * 55);
+                      progressPercent = 25 + Math.min(55, sessionProgress);
+                      phaseLabel = `Syncing dial sessions (page ${sessionsPage}${totalPages > 1 ? `/${totalPages}` : ''}, ${sessionsSynced} sessions, ${callsSynced} calls)`;
                     } else if (phase === 'metrics') {
                       progressPercent = 85;
                       phaseLabel = 'Syncing aggregate metrics';
@@ -1374,6 +1377,10 @@ export default function Connections() {
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Contacts</span>
                           <span className="font-medium">{contactsSynced.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Dial Sessions</span>
+                          <span className="font-medium">{sessionsSynced.toLocaleString()}</span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Calls</span>
@@ -1392,10 +1399,14 @@ export default function Connections() {
                   
                   {/* Completed Sync Summary */}
                   {phoneburnerConnection.sync_status === 'complete' && phoneburnerConnection.sync_progress && (
-                    <div className="flex items-center gap-4 text-sm p-2 rounded-lg bg-success/10">
+                    <div className="flex items-center gap-4 text-sm p-2 rounded-lg bg-success/10 flex-wrap">
                       <div className="flex items-center gap-1">
                         <CheckCircle2 className="h-4 w-4 text-success" />
                         <span>{(phoneburnerConnection.sync_progress as any).contacts_synced || 0} contacts</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        <span>{(phoneburnerConnection.sync_progress as any).sessions_synced || 0} sessions</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <CheckCircle2 className="h-4 w-4 text-success" />
