@@ -10,11 +10,21 @@ export interface CopyVariation {
   patterns_used: string[];
   quality_score: number;
   word_count: number;
+  char_count?: number;
+  you_i_ratio?: number;
   variation_style: string;
   validation: {
     is_valid: boolean;
     issues: string[];
     warnings: string[];
+  };
+  quality_breakdown?: {
+    constraints: number;
+    patterns: number;
+    guideAlignment: number;
+    spam: number;
+    readability: number;
+    youIRatio: number;
   };
 }
 
