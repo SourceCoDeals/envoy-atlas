@@ -106,10 +106,12 @@ function VariationCard({
               <TooltipContent side="top" className="max-w-xs">
                 <p className="text-xs font-medium mb-1">Quality Breakdown</p>
                 <div className="text-xs space-y-0.5">
-                  <div>Constraints: {(variation as any).quality_breakdown?.constraints || 0}/40</div>
-                  <div>Patterns: {(variation as any).quality_breakdown?.patterns || 0}/30</div>
-                  <div>Spam check: {(variation as any).quality_breakdown?.spam || 0}/15</div>
-                  <div>Readability: {(variation as any).quality_breakdown?.readability || 0}/15</div>
+                  <div>Constraints: {variation.quality_breakdown?.constraints || 0}/30</div>
+                  <div>Patterns: {variation.quality_breakdown?.patterns || 0}/20</div>
+                  <div>Guide Alignment: {variation.quality_breakdown?.guideAlignment || 0}/20</div>
+                  <div>Spam Check: {variation.quality_breakdown?.spam || 0}/10</div>
+                  <div>Readability: {variation.quality_breakdown?.readability || 0}/10</div>
+                  <div>You:I Ratio: {variation.quality_breakdown?.youIRatio || 0}/10</div>
                 </div>
               </TooltipContent>
             </Tooltip>
