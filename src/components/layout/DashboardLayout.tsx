@@ -45,10 +45,12 @@ import {
   Briefcase,
   CalendarDays,
   Sparkles,
+  HelpCircle,
   Phone,
   PhoneCall,
   Users,
 } from 'lucide-react';
+import { HelpButton } from '@/components/onboarding';
 
 interface NavItem {
   title: string;
@@ -426,12 +428,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <Button variant="ghost" size="icon" onClick={() => setMobileMenuOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1">
             <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
               <BarChart3 className="h-5 w-5 text-primary-foreground" />
             </div>
             <span className="font-semibold">Analytics</span>
           </div>
+          <HelpButton />
+        </header>
+
+        {/* Desktop header */}
+        <header className="hidden lg:flex h-14 items-center justify-end gap-4 border-b border-border px-6">
+          <HelpButton />
         </header>
 
         {/* Page content */}

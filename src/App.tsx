@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
+import { OnboardingProvider } from "@/hooks/useOnboarding";
+import { OnboardingModal, HelpSidebar } from "@/components/onboarding";
 import { ChannelProvider } from "@/hooks/useChannel";
 import Dashboard from "./pages/Dashboard";
 import DealHub from "./pages/DealHub";
@@ -45,6 +47,13 @@ const App = () => (
     <TooltipProvider>
       <AuthProvider>
         <WorkspaceProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <OnboardingProvider>
+              <OnboardingModal />
+              <HelpSidebar />
+              <Routes>
           <ChannelProvider>
             <Toaster />
             <Sonner />
@@ -69,6 +78,11 @@ const App = () => (
                 <Route path="/copywriting-studio" element={<CopywritingStudio />} />
                 <Route path="/alerts" element={<Alerts />} />
                 <Route path="/settings" element={<Settings />} />
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </OnboardingProvider>
+          </BrowserRouter>
                 
                 {/* Calling routes */}
                 <Route path="/calling" element={<CallingDashboard />} />
