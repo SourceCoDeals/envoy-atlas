@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
+import { ChannelProvider } from "@/hooks/useChannel";
 import Dashboard from "./pages/Dashboard";
 import DealHub from "./pages/DealHub";
 import MonthlyReport from "./pages/MonthlyReport";
@@ -23,6 +24,9 @@ import Playbook from "./pages/Playbook";
 import Alerts from "./pages/Alerts";
 import Settings from "./pages/Settings";
 import CopywritingStudio from "./pages/CopywritingStudio";
+import CallingDashboard from "./pages/CallingDashboard";
+import CallSessions from "./pages/CallSessions";
+import CallAnalytics from "./pages/CallAnalytics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,32 +36,41 @@ const App = () => (
     <TooltipProvider>
       <AuthProvider>
         <WorkspaceProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/deal-hub" element={<DealHub />} />
-              <Route path="/monthly-report" element={<MonthlyReport />} />
-              <Route path="/auth" element={<Auth />} />
-              <Route path="/connections" element={<Connections />} />
-              <Route path="/campaigns" element={<Campaigns />} />
-              <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
-              <Route path="/inbox" element={<Inbox />} />
-              <Route path="/deliverability" element={<Deliverability />} />
-              <Route path="/audience" element={<Audience />} />
-              <Route path="/audience-insights" element={<AudienceInsights />} />
-              <Route path="/copy-insights" element={<CopyInsights />} />
-              <Route path="/copy-library" element={<CopyLibrary />} />
-              <Route path="/experiments" element={<Experiments />} />
-              <Route path="/playbook" element={<Playbook />} />
-              <Route path="/copywriting-studio" element={<CopywritingStudio />} />
-              <Route path="/alerts" element={<Alerts />} />
-              <Route path="/settings" element={<Settings />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </BrowserRouter>
+          <ChannelProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <Routes>
+                {/* Email routes */}
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/deal-hub" element={<DealHub />} />
+                <Route path="/monthly-report" element={<MonthlyReport />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/connections" element={<Connections />} />
+                <Route path="/campaigns" element={<Campaigns />} />
+                <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
+                <Route path="/inbox" element={<Inbox />} />
+                <Route path="/deliverability" element={<Deliverability />} />
+                <Route path="/audience" element={<Audience />} />
+                <Route path="/audience-insights" element={<AudienceInsights />} />
+                <Route path="/copy-insights" element={<CopyInsights />} />
+                <Route path="/copy-library" element={<CopyLibrary />} />
+                <Route path="/experiments" element={<Experiments />} />
+                <Route path="/playbook" element={<Playbook />} />
+                <Route path="/copywriting-studio" element={<CopywritingStudio />} />
+                <Route path="/alerts" element={<Alerts />} />
+                <Route path="/settings" element={<Settings />} />
+                
+                {/* Calling routes */}
+                <Route path="/calling" element={<CallingDashboard />} />
+                <Route path="/calling/sessions" element={<CallSessions />} />
+                <Route path="/calling/analytics" element={<CallAnalytics />} />
+                
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </ChannelProvider>
         </WorkspaceProvider>
       </AuthProvider>
     </TooltipProvider>

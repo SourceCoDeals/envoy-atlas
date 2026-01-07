@@ -1530,6 +1530,203 @@ export type Database = {
           },
         ]
       }
+      phoneburner_calls: {
+        Row: {
+          contact_id: string | null
+          created_at: string
+          dial_session_id: string | null
+          disposition: string | null
+          disposition_id: string | null
+          duration_seconds: number | null
+          email_sent: boolean | null
+          end_at: string | null
+          external_call_id: string
+          id: string
+          is_connected: boolean | null
+          is_voicemail: boolean | null
+          notes: string | null
+          phone_number: string | null
+          recording_url: string | null
+          start_at: string | null
+          updated_at: string
+          voicemail_sent: string | null
+          workspace_id: string
+        }
+        Insert: {
+          contact_id?: string | null
+          created_at?: string
+          dial_session_id?: string | null
+          disposition?: string | null
+          disposition_id?: string | null
+          duration_seconds?: number | null
+          email_sent?: boolean | null
+          end_at?: string | null
+          external_call_id: string
+          id?: string
+          is_connected?: boolean | null
+          is_voicemail?: boolean | null
+          notes?: string | null
+          phone_number?: string | null
+          recording_url?: string | null
+          start_at?: string | null
+          updated_at?: string
+          voicemail_sent?: string | null
+          workspace_id: string
+        }
+        Update: {
+          contact_id?: string | null
+          created_at?: string
+          dial_session_id?: string | null
+          disposition?: string | null
+          disposition_id?: string | null
+          duration_seconds?: number | null
+          email_sent?: boolean | null
+          end_at?: string | null
+          external_call_id?: string
+          id?: string
+          is_connected?: boolean | null
+          is_voicemail?: boolean | null
+          notes?: string | null
+          phone_number?: string | null
+          recording_url?: string | null
+          start_at?: string | null
+          updated_at?: string
+          voicemail_sent?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phoneburner_calls_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "phoneburner_calls_dial_session_id_fkey"
+            columns: ["dial_session_id"]
+            isOneToOne: false
+            referencedRelation: "phoneburner_dial_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "phoneburner_calls_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      phoneburner_daily_metrics: {
+        Row: {
+          calls_connected: number | null
+          created_at: string
+          date: string
+          emails_sent: number | null
+          id: string
+          interested_count: number | null
+          member_id: string | null
+          not_interested_count: number | null
+          total_calls: number | null
+          total_sessions: number | null
+          total_talk_time_seconds: number | null
+          updated_at: string
+          voicemails_left: number | null
+          workspace_id: string
+        }
+        Insert: {
+          calls_connected?: number | null
+          created_at?: string
+          date: string
+          emails_sent?: number | null
+          id?: string
+          interested_count?: number | null
+          member_id?: string | null
+          not_interested_count?: number | null
+          total_calls?: number | null
+          total_sessions?: number | null
+          total_talk_time_seconds?: number | null
+          updated_at?: string
+          voicemails_left?: number | null
+          workspace_id: string
+        }
+        Update: {
+          calls_connected?: number | null
+          created_at?: string
+          date?: string
+          emails_sent?: number | null
+          id?: string
+          interested_count?: number | null
+          member_id?: string | null
+          not_interested_count?: number | null
+          total_calls?: number | null
+          total_sessions?: number | null
+          total_talk_time_seconds?: number | null
+          updated_at?: string
+          voicemails_left?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phoneburner_daily_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      phoneburner_dial_sessions: {
+        Row: {
+          call_count: number | null
+          caller_id: string | null
+          created_at: string
+          end_at: string | null
+          external_session_id: string
+          id: string
+          member_id: string | null
+          member_name: string | null
+          start_at: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          call_count?: number | null
+          caller_id?: string | null
+          created_at?: string
+          end_at?: string | null
+          external_session_id: string
+          id?: string
+          member_id?: string | null
+          member_name?: string | null
+          start_at?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          call_count?: number | null
+          caller_id?: string | null
+          created_at?: string
+          end_at?: string | null
+          external_session_id?: string
+          id?: string
+          member_id?: string | null
+          member_name?: string | null
+          start_at?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phoneburner_dial_sessions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       playbook_entries: {
         Row: {
           context: string | null
