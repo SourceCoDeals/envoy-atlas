@@ -66,6 +66,7 @@ export default function Connections() {
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
 
   const smartleadConnection = useMemo(
     () => connections.find((c) => c.platform === "smartlead"),
@@ -232,6 +233,27 @@ export default function Connections() {
       setError(e?.message || "Failed to stop sync");
     } finally {
       setIsSyncing((s) => ({ ...s, phoneburner_stop: false }));
+    }
+  };
+
+  const handleDiagnosePhoneburner = async () => {
+    if (!currentWorkspace) return;
+    setError(null);
+    setSuccess(null);
+    setDiagnosticResult(null);
+    setIsSyncing((s) => ({ ...s, phoneburner_diagnose: true }));
+
+    try {
+      const data = await invokeSync("phoneburner-sync", {
+        workspace_id: currentWorkspace.id,
+        diagnostic: true,
+      });
+      setDiagnosticResult(data);
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to run diagnostics");
+    } finally {
+      setIsSyncing((s) => ({ ...s, phoneburner_diagnose: false }));
     }
   };
 
@@ -558,6 +580,70 @@ export default function Connections() {
                             </>
                           )}
                         </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full text-muted-foreground"
+                          onClick={handleDiagnosePhoneburner}
+                          disabled={!!isSyncing.phoneburner_diagnose}
+                        >
+                          {isSyncing.phoneburner_diagnose ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Running Diagnostics...
+                            </>
+                          ) : (
+                            <>
+                              <AlertCircle className="mr-2 h-4 w-4" />
+                              Run Diagnostics
+                            </>
+                          )}
+                        </Button>
+
+                        {diagnosticResult && (
+                          <div className="mt-2 space-y-2 rounded-lg bg-accent/30 p-3 text-xs">
+                            <p className="font-semibold">Diagnostic Results:</p>
+                            {diagnosticResult.tests?.members && (
+                              <div className="flex justify-between">
+                                <span>Members:</span>
+                                <span className={diagnosticResult.tests.members.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.members.success ? `${diagnosticResult.tests.members.count} found` : "Failed"}
+                                </span>
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.contacts && (
+                              <div className="flex justify-between">
+                                <span>Contacts:</span>
+                                <span className={diagnosticResult.tests.contacts.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.contacts.success ? `${diagnosticResult.tests.contacts.total_contacts} total` : "Failed"}
+                                </span>
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.dial_sessions && (
+                              <div className="flex justify-between">
+                                <span>Dial Sessions:</span>
+                                <span className={diagnosticResult.tests.dial_sessions.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.dial_sessions.success
+                                    ? `${diagnosticResult.tests.dial_sessions.total_results} found`
+                                    : "Failed"}
+                                </span>
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.usage && (
+                              <div className="flex justify-between">
+                                <span>Usage (90 days):</span>
+                                <span className={diagnosticResult.tests.usage.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.usage.success
+                                    ? `${diagnosticResult.tests.usage.total_calls} calls`
+                                    : "Failed"}
+                                </span>
+                              </div>
+                            )}
+                            {diagnosticResult.recommendation && (
+                              <p className="mt-2 text-muted-foreground italic">{diagnosticResult.recommendation}</p>
+                            )}
+                          </div>
+                        )}
                       </>
                     )}
                   </CardContent>
