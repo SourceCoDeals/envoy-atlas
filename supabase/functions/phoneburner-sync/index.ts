@@ -10,7 +10,8 @@ const PHONEBURNER_BASE_URL = 'https://www.phoneburner.com/rest/1';
 const RATE_LIMIT_DELAY = 500;
 const TIME_BUDGET_MS = 45000;
 const SYNC_LOCK_TIMEOUT_MS = 30000;
-const FUNCTION_VERSION = '2026-01-07.v2';
+const FUNCTION_VERSION = '2026-01-07.v3';
+const ACTIVITIES_PAGE_SIZE = 100;
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -225,27 +226,35 @@ serve(async (req) => {
           })),
         };
 
-        // Test 3: Contact activities for first contact (if available)
+        // Test 3: Contact activities for first contact (if available) - WITH PAGINATION
         if (contacts.length > 0) {
           await delay(RATE_LIMIT_DELAY);
           try {
             const contactId = contacts[0].contact_user_id;
+            // Request with explicit pagination params
             const activitiesResponse = await phoneburnerRequest(
-              `/contacts/${contactId}/activities?days=180`,
+              `/contacts/${contactId}/activities?days=180&page=1&page_size=${ACTIVITIES_PAGE_SIZE}`,
               apiKey
             );
             console.log('Raw /contacts/activities response keys:', Object.keys(activitiesResponse));
-            if (activitiesResponse.contact_activities) {
-              console.log('contact_activities type:', typeof activitiesResponse.contact_activities);
-              if (typeof activitiesResponse.contact_activities === 'object' && !Array.isArray(activitiesResponse.contact_activities)) {
-                console.log('contact_activities keys:', Object.keys(activitiesResponse.contact_activities));
-              }
+            
+            // Log pagination info from response
+            const contactActivitiesWrapper = activitiesResponse.contact_activities;
+            let totalPages = 1;
+            let totalResults = 0;
+            
+            if (contactActivitiesWrapper && typeof contactActivitiesWrapper === 'object' && !Array.isArray(contactActivitiesWrapper)) {
+              console.log('contact_activities keys:', Object.keys(contactActivitiesWrapper));
+              totalPages = contactActivitiesWrapper.total_pages || 1;
+              totalResults = contactActivitiesWrapper.total_results || 0;
+              console.log(`Pagination: page 1/${totalPages}, total_results: ${totalResults}`);
             }
             
             const activities = extractActivities(activitiesResponse);
             const callActivities = activities.filter((a: any) => 
               a.activity?.toLowerCase().includes('call') || 
               a.activity_id === '41' ||
+              a.activity_id === '42' ||
               a.duration !== undefined ||
               a.disposition !== undefined ||
               a.recording_url !== undefined
@@ -255,8 +264,11 @@ serve(async (req) => {
               success: true,
               contact_id: contactId,
               total_activities: activities.length,
+              total_pages: totalPages,
+              total_results: totalResults,
               call_activities: callActivities.length,
               sample: activities.slice(0, 5),
+              raw_response_keys: Object.keys(activitiesResponse),
             };
           } catch (e: any) {
             diagnosticResults.tests.contact_activities = { success: false, error: e.message };
@@ -354,6 +366,7 @@ serve(async (req) => {
     let currentPhase = syncProgress.phase || 'contacts';
     let contactsPage = syncProgress.contacts_page || 1;
     let contactOffset = syncProgress.contact_offset || 0;
+    let activityPage = syncProgress.activity_page || 1;
     let totalContactsSynced = syncProgress.contacts_synced || 0;
     let totalCallsSynced = syncProgress.calls_synced || 0;
 
@@ -454,43 +467,54 @@ serve(async (req) => {
       }
     }
 
-    // ============= PHASE 2: SYNC ACTIVITIES PER CONTACT =============
+    // ============= PHASE 2: SYNC ACTIVITIES PER CONTACT (WITH PAGINATION) =============
     if (currentPhase === 'activities' && (Date.now() - startTime) < TIME_BUDGET_MS) {
-      console.log(`Syncing activities starting from offset ${contactOffset}...`);
+      console.log(`Syncing activities starting from offset ${contactOffset}, activity page ${activityPage}...`);
       
-      const batchSize = 20; // Process 20 contacts per batch
+      // Fetch total contacts count
+      const { count: totalContacts } = await supabase
+        .from('phoneburner_contacts')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId);
       
-      // Fetch contacts that need activity sync
+      const contactTotal = totalContacts || 0;
+      
+      // Fetch current contact to process
       const { data: contactsToProcess, error: fetchError } = await supabase
         .from('phoneburner_contacts')
         .select('id, external_contact_id, first_name, last_name')
         .eq('workspace_id', workspaceId)
         .order('created_at', { ascending: true })
-        .range(contactOffset, contactOffset + batchSize - 1);
+        .range(contactOffset, contactOffset);
 
       if (fetchError) {
         console.error('Error fetching contacts for activities:', fetchError);
       } else if (contactsToProcess && contactsToProcess.length > 0) {
-        console.log(`Processing activities for ${contactsToProcess.length} contacts`);
+        const contact = contactsToProcess[0];
+        console.log(`Processing contact ${contactOffset + 1}/${contactTotal}: ${contact.external_contact_id}`);
         
-        for (const contact of contactsToProcess) {
-          if ((Date.now() - startTime) >= TIME_BUDGET_MS) {
-            console.log('Time budget exceeded during activities sync');
-            break;
-          }
-
+        let hasMorePages = true;
+        
+        while (hasMorePages && (Date.now() - startTime) < TIME_BUDGET_MS) {
           try {
             const activitiesResponse = await phoneburnerRequest(
-              `/contacts/${contact.external_contact_id}/activities?days=180`,
+              `/contacts/${contact.external_contact_id}/activities?days=180&page=${activityPage}&page_size=${ACTIVITIES_PAGE_SIZE}`,
               apiKey
             );
             await delay(RATE_LIMIT_DELAY);
 
-            const activities: PhoneBurnerActivity[] = extractActivities(activitiesResponse);
-            if (contactOffset === 0) {
-              console.log('[activities] sample response keys:', Object.keys(activitiesResponse));
-              console.log('[activities] extracted activities:', activities.length);
+            // Get pagination info
+            const wrapper = activitiesResponse.contact_activities;
+            let totalPages = 1;
+            if (wrapper && typeof wrapper === 'object' && !Array.isArray(wrapper)) {
+              totalPages = wrapper.total_pages || 1;
             }
+            
+            if (activityPage === 1 && contactOffset === 0) {
+              console.log(`[activities] Contact ${contact.external_contact_id}: total_pages=${totalPages}`);
+            }
+
+            const activities: PhoneBurnerActivity[] = extractActivities(activitiesResponse);
             
             // Filter for call-related activities
             const callActivities = activities.filter(a => 
@@ -532,37 +556,48 @@ serve(async (req) => {
                 console.error('Call upsert error:', callUpsertError);
               } else {
                 totalCallsSynced += callRecords.length;
+                console.log(`[activities] Page ${activityPage}/${totalPages}: ${callRecords.length} calls saved (total: ${totalCallsSynced})`);
               }
             }
 
-            contactOffset++;
+            // Check if more pages for this contact
+            if (activityPage >= totalPages) {
+              // Done with this contact, move to next
+              hasMorePages = false;
+              activityPage = 1;
+              contactOffset++;
+            } else {
+              activityPage++;
+            }
+
+            // Update progress after each page
+            await supabase.from('api_connections').update({
+              sync_progress: {
+                heartbeat: new Date().toISOString(),
+                phase: 'activities',
+                contact_offset: contactOffset,
+                activity_page: activityPage,
+                total_contacts: contactTotal,
+                contacts_synced: totalContactsSynced,
+                calls_synced: totalCallsSynced,
+              },
+            }).eq('id', connection.id);
+
           } catch (activityError) {
-            console.error(`Error fetching activities for contact ${contact.external_contact_id}:`, activityError);
+            console.error(`Error fetching activities for contact ${contact.external_contact_id} page ${activityPage}:`, activityError);
+            // Skip to next contact on error
+            hasMorePages = false;
+            activityPage = 1;
             contactOffset++;
           }
-
-          // Update progress after each contact
-          await supabase.from('api_connections').update({
-            sync_progress: {
-              heartbeat: new Date().toISOString(),
-              phase: 'activities',
-              contact_offset: contactOffset,
-              contacts_synced: totalContactsSynced,
-              calls_synced: totalCallsSynced,
-            },
-          }).eq('id', connection.id);
         }
 
-        // Check if more contacts to process
-        const { count } = await supabase
-          .from('phoneburner_contacts')
-          .select('*', { count: 'exact', head: true })
-          .eq('workspace_id', workspaceId);
-
-        if (contactOffset >= (count || 0)) {
+        // Check if all contacts processed
+        if (contactOffset >= contactTotal) {
           currentPhase = 'metrics';
         }
       } else {
+        // No more contacts
         currentPhase = 'metrics';
       }
     }

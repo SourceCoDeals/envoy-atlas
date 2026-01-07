@@ -635,13 +635,13 @@ export default function Connections() {
       const data = response.data;
       if (data?.status === 'complete') {
         setSuccess(
-          `PhoneBurner sync complete! Synced ${data.sessionsProcessed || 0} sessions, ` +
-          `${data.callsProcessed || 0} calls.`
+          `PhoneBurner sync complete! Synced ${data.contacts_synced || 0} contacts, ` +
+          `${data.calls_synced || 0} calls.`
         );
         setIsSyncingPhoneburner(false);
       } else if (data?.status === 'already_syncing') {
         setSuccess('Sync already in progress...');
-      } else if (data?.needsContinuation) {
+      } else if (data?.needsContinuation || data?.status === 'in_progress') {
         setSuccess('PhoneBurner sync started, processing in background...');
         void continuePhoneburnerSync();
       } else {
@@ -1337,25 +1337,30 @@ export default function Connections() {
                     </div>
                   )}
 
-                  {/* Sync Progress */}
-                  {phoneburnerConnection.sync_status === 'syncing' && phoneburnerConnection.sync_progress && (() => {
+                  {/* Sync Progress - Show when syncing OR when isSyncingPhoneburner is true (button just clicked) */}
+                  {(phoneburnerConnection.sync_status === 'syncing' || isSyncingPhoneburner) && (() => {
                     const progress = phoneburnerConnection.sync_progress as any;
-                    const phase = progress.phase || 'contacts';
-                    const contactsSynced = progress.contacts_synced || 0;
-                    const callsSynced = progress.calls_synced || 0;
-                    const contactOffset = progress.contact_offset || 0;
-                    const contactsPage = progress.contacts_page || 1;
-                    const totalPages = progress.total_pages || 1;
+                    const phase = progress?.phase || 'initializing';
+                    const contactsSynced = progress?.contacts_synced || 0;
+                    const callsSynced = progress?.calls_synced || 0;
+                    const contactOffset = progress?.contact_offset || 0;
+                    const totalContacts = progress?.total_contacts || contactsSynced || 1;
+                    const contactsPage = progress?.contacts_page || 1;
+                    const totalPages = progress?.total_pages || 1;
+                    const activityPage = progress?.activity_page || 1;
                     
                     // Calculate progress percentage based on phase
                     let progressPercent = 0;
                     let phaseLabel = '';
-                    if (phase === 'contacts') {
-                      progressPercent = totalPages > 1 ? Math.round((contactsPage / totalPages) * 40) : 20;
+                    if (phase === 'initializing' || !progress) {
+                      progressPercent = 5;
+                      phaseLabel = 'Initializing sync...';
+                    } else if (phase === 'contacts') {
+                      progressPercent = totalPages > 1 ? Math.round((contactsPage / totalPages) * 35) : 20;
                       phaseLabel = `Syncing contacts (page ${contactsPage}/${totalPages})`;
                     } else if (phase === 'activities') {
-                      progressPercent = 40 + Math.min(40, Math.round((contactOffset / Math.max(contactsSynced, 1)) * 40));
-                      phaseLabel = `Fetching call history (${contactOffset}/${contactsSynced} contacts)`;
+                      progressPercent = 35 + Math.min(45, Math.round((contactOffset / Math.max(totalContacts, 1)) * 45));
+                      phaseLabel = `Fetching call history (${contactOffset}/${totalContacts} contacts, page ${activityPage})`;
                     } else if (phase === 'metrics') {
                       progressPercent = 85;
                       phaseLabel = 'Syncing aggregate metrics';
