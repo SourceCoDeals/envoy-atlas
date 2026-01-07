@@ -3,11 +3,15 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Loader2, Wand2, Sparkles } from 'lucide-react';
 import { useCopywritingStudio } from '@/hooks/useCopywritingStudio';
+import { useWorkspace } from '@/hooks/useWorkspace';
 import { GeneratorInputs } from '@/components/copywriting/GeneratorInputs';
+import { IndustryContextInputs, UploadedDocument } from '@/components/copywriting/IndustryContextInputs';
 import { GeneratedVariations } from '@/components/copywriting/GeneratedVariations';
 import { BestPracticesPanel } from '@/components/copywriting/BestPracticesPanel';
 
 export default function CopywritingStudio() {
+  const { currentWorkspace } = useWorkspace();
+  
   // Form state
   const [channel, setChannel] = useState('email');
   const [sequenceStep, setSequenceStep] = useState('first_touch');
@@ -17,6 +21,10 @@ export default function CopywritingStudio() {
   const [painPoints, setPainPoints] = useState('');
   const [emailGoal, setEmailGoal] = useState('');
   const [tone, setTone] = useState('conversational');
+  
+  // Industry context state
+  const [callTranscript, setCallTranscript] = useState('');
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
 
   const { 
     isGenerating, 
@@ -38,6 +46,8 @@ export default function CopywritingStudio() {
       targetIndustry: industry || undefined,
       painPoints: painPoints || undefined,
       emailGoal: emailGoal || undefined,
+      callTranscript: callTranscript || undefined,
+      documentPaths: uploadedDocuments.length ? uploadedDocuments.map(d => d.path) : undefined,
       tone,
       variationCount: 3,
     });
@@ -82,6 +92,14 @@ export default function CopywritingStudio() {
               setEmailGoal={setEmailGoal}
               tone={tone}
               setTone={setTone}
+            />
+
+            <IndustryContextInputs
+              callTranscript={callTranscript}
+              setCallTranscript={setCallTranscript}
+              uploadedDocuments={uploadedDocuments}
+              setUploadedDocuments={setUploadedDocuments}
+              workspaceId={currentWorkspace?.id}
             />
 
             <Button 
