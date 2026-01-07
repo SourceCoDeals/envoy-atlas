@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.process-industry-documents]
 verify_jwt = false
+
+[functions.phoneburner-sync]
+verify_jwt = false
