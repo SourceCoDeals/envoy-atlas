@@ -84,6 +84,15 @@ const callingMainNavItems: NavItem[] = [
   { title: 'Call Search', href: '/calling/search', icon: Phone },
   { title: 'Best/Worst Calls', href: '/calling/best-worst', icon: BarChart3 },
   { title: 'Call Sessions', href: '/calling/sessions', icon: PhoneCall },
+  { title: 'Rep Insights', href: '/calling/reps', icon: PieChart },
+  { title: 'Call Library', href: '/calling/library', icon: Library },
+  { title: 'Pattern Analysis', href: '/calling/patterns', icon: FlaskConical },
+  { title: 'Timing Insights', href: '/calling/timing', icon: CalendarDays },
+];
+
+const callingCoachingNavItems: NavItem[] = [
+  { title: 'Training Queue', href: '/calling/training', icon: BookOpen },
+  { title: 'Onboarding', href: '/calling/onboarding', icon: Sparkles },
 ];
 
 const callingReportsNavItems: NavItem[] = [
@@ -128,7 +137,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   // Get nav items based on current channel
   const mainNavItems = channel === 'calling' ? callingMainNavItems : emailMainNavItems;
   const reportsNavItems = channel === 'calling' ? callingReportsNavItems : emailReportsNavItems;
-  const experimentNavItems = channel === 'email' ? emailExperimentNavItems : [];
+  const experimentNavItems = channel === 'email' ? emailExperimentNavItems : callingCoachingNavItems;
 
   const NavLink = ({ item }: { item: NavItem }) => {
     const isActive = location.pathname === item.href;

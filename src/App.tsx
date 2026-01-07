@@ -29,6 +29,12 @@ import CallSessions from "./pages/CallSessions";
 import CallAnalytics from "./pages/CallAnalytics";
 import CallSearch from "./pages/CallSearch";
 import BestWorstCalls from "./pages/BestWorstCalls";
+import RepInsights from "./pages/RepInsights";
+import CallLibrary from "./pages/CallLibrary";
+import PatternAnalysis from "./pages/PatternAnalysis";
+import TimingInsights from "./pages/TimingInsights";
+import TrainingQueue from "./pages/TrainingQueue";
+import OnboardingProgress from "./pages/OnboardingProgress";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -69,6 +75,12 @@ const App = () => (
                 <Route path="/calling/best-worst" element={<BestWorstCalls />} />
                 <Route path="/calling/sessions" element={<CallSessions />} />
                 <Route path="/calling/analytics" element={<CallAnalytics />} />
+                <Route path="/calling/reps" element={<RepInsights />} />
+                <Route path="/calling/library" element={<CallLibrary />} />
+                <Route path="/calling/patterns" element={<PatternAnalysis />} />
+                <Route path="/calling/timing" element={<TimingInsights />} />
+                <Route path="/calling/training" element={<TrainingQueue />} />
+                <Route path="/calling/onboarding" element={<OnboardingProgress />} />
                 
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />

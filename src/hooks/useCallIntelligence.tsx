@@ -30,7 +30,12 @@ export interface CallWithScores {
     seller_interest_score: number | null;
     objection_handling_score: number | null;
     rapport_building_score: number | null;
+    value_proposition_score: number | null;
+    engagement_score: number | null;
+    script_adherence_score: number | null;
     next_step_clarity_score: number | null;
+    valuation_discussion_score: number | null;
+    mandatory_questions_adherence: number | null;
     opening_type: string | null;
     trigger_events: unknown;
     objections_list: unknown;
@@ -180,7 +185,7 @@ export function useCallsWithScores(options?: {
       // Fetch scores
       const { data: scores } = await supabase
         .from('call_ai_scores')
-        .select('id, call_id, composite_score, seller_interest_score, objection_handling_score, rapport_building_score, next_step_clarity_score, opening_type, trigger_events, objections_list, personal_insights, timeline_to_sell')
+        .select('id, call_id, composite_score, seller_interest_score, objection_handling_score, rapport_building_score, value_proposition_score, engagement_score, script_adherence_score, next_step_clarity_score, valuation_discussion_score, mandatory_questions_adherence, opening_type, trigger_events, objections_list, personal_insights, timeline_to_sell')
         .in('call_id', callIds);
 
       // Map transcripts and scores to calls

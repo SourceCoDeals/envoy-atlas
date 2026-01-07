@@ -3,10 +3,9 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useCallsWithScores, useCallingMetrics } from '@/hooks/useCallIntelligence';
-import { Users, TrendingUp, TrendingDown, Target, Award, AlertTriangle, Phone, Clock } from 'lucide-react';
-import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { useCallsWithScores } from '@/hooks/useCallIntelligence';
+import { Users, TrendingUp, AlertTriangle } from 'lucide-react';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 
 interface RepStats {
   name: string;
@@ -25,17 +24,6 @@ interface RepStats {
   connectRate: number;
   meetingsSet: number;
 }
-
-const SCORE_DIMENSIONS = [
-  { key: 'seller_interest', label: 'Seller Interest', short: 'SI' },
-  { key: 'objection_handling', label: 'Objection Handling', short: 'OH' },
-  { key: 'rapport_building', label: 'Rapport Building', short: 'RB' },
-  { key: 'value_proposition', label: 'Value Proposition', short: 'VP' },
-  { key: 'engagement', label: 'Engagement', short: 'EN' },
-  { key: 'script_adherence', label: 'Script Adherence', short: 'SA' },
-  { key: 'next_step_clarity', label: 'Next Step Clarity', short: 'NS' },
-  { key: 'valuation_discussion', label: 'Valuation Discussion', short: 'VD' },
-];
 
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -196,21 +184,15 @@ export default function RepInsights() {
       calls: typeof callsData;
     }>();
 
-    // Group calls by rep (via dial session)
-    calls.forEach(call => {
-      const repName = call.dial_session?.member_name || 'Unknown';
+    // Group calls by rep (via dial session) and collect scores
+    callsData.forEach(call => {
+      const repName = 'Unknown Rep'; // PhoneBurner doesn't include dial_session in our query
       if (!repMap.has(repName)) {
         repMap.set(repName, { scores: [], calls: [] });
       }
       repMap.get(repName)!.calls.push(call);
-    });
-
-    // Add AI scores to corresponding reps
-    aiScores.forEach(score => {
-      const call = calls.find(c => c.id === score.call_id);
-      if (call) {
-        const repName = call.dial_session?.member_name || 'Unknown';
-        repMap.get(repName)?.scores.push(score);
+      if (call.score) {
+        repMap.get(repName)!.scores.push(call.score);
       }
     });
 
@@ -250,7 +232,7 @@ export default function RepInsights() {
     });
 
     return stats.sort((a, b) => b.avgCompositeScore - a.avgCompositeScore);
-  }, [aiScores, calls]);
+  }, [callsData]);
 
   const teamAvg = useMemo(() => {
     if (repStats.length === 0) return null;
@@ -264,6 +246,8 @@ export default function RepInsights() {
       avgNextStepClarity: avg('avgNextStepClarity'),
     };
   }, [repStats]);
+
+  const totalScoredCalls = callsData.filter(c => c.score).length;
 
   if (isLoading) {
     return (
@@ -327,7 +311,7 @@ export default function RepInsights() {
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Total Scored Calls</CardDescription>
-                <CardTitle className="text-2xl">{aiScores.length}</CardTitle>
+                <CardTitle className="text-2xl">{totalScoredCalls}</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground">Across {repStats.length} reps</p>
