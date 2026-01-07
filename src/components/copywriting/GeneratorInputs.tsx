@@ -1,9 +1,10 @@
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Mail, Linkedin, Phone, MessageSquare, FileText } from 'lucide-react';
+import { Mail, Linkedin, Phone, MessageSquare } from 'lucide-react';
 
 interface GeneratorInputsProps {
   channel: string;
@@ -12,12 +13,8 @@ interface GeneratorInputsProps {
   setSequenceStep: (value: string) => void;
   targetIndustry: string;
   setTargetIndustry: (value: string) => void;
-  targetPersona: string;
-  setTargetPersona: (value: string) => void;
   companyContext: string;
   setCompanyContext: (value: string) => void;
-  triggerEvent: string;
-  setTriggerEvent: (value: string) => void;
   tone: string;
   setTone: (value: string) => void;
   specificInstructions: string;
@@ -65,20 +62,6 @@ const SEQUENCE_STEPS = {
   ],
 };
 
-const INDUSTRIES = [
-  'SaaS', 'FinTech', 'HealthTech', 'E-commerce', 'Manufacturing', 
-  'Professional Services', 'Real Estate', 'Construction', 'Logistics',
-  'EdTech', 'MarTech', 'HRTech', 'CyberSecurity', 'AI/ML', 'Other'
-];
-
-const PERSONAS = [
-  'CEO', 'CTO', 'CFO', 'COO', 'CMO', 'CRO',
-  'VP Sales', 'VP Marketing', 'VP Engineering', 'VP Operations', 'VP Finance',
-  'Director Sales', 'Director Marketing', 'Director Engineering', 'Director HR',
-  'Head of Growth', 'Head of Partnerships', 'Head of Product',
-  'Sales Manager', 'Marketing Manager', 'Operations Manager',
-  'Founder', 'Owner', 'Other'
-];
 
 export function GeneratorInputs({
   channel,
@@ -87,12 +70,8 @@ export function GeneratorInputs({
   setSequenceStep,
   targetIndustry,
   setTargetIndustry,
-  targetPersona,
-  setTargetPersona,
   companyContext,
   setCompanyContext,
-  triggerEvent,
-  setTriggerEvent,
   tone,
   setTone,
   specificInstructions,
@@ -153,35 +132,11 @@ export function GeneratorInputs({
         {/* Target Industry */}
         <div className="space-y-2">
           <Label>Target Industry</Label>
-          <Select value={targetIndustry} onValueChange={setTargetIndustry}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select industry..." />
-            </SelectTrigger>
-            <SelectContent>
-              {INDUSTRIES.map(ind => (
-                <SelectItem key={ind} value={ind.toLowerCase()}>
-                  {ind}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Target Persona */}
-        <div className="space-y-2">
-          <Label>Target Persona</Label>
-          <Select value={targetPersona} onValueChange={setTargetPersona}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select persona..." />
-            </SelectTrigger>
-            <SelectContent>
-              {PERSONAS.map(persona => (
-                <SelectItem key={persona} value={persona.toLowerCase()}>
-                  {persona}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input
+            placeholder="e.g., SaaS, FinTech, Healthcare..."
+            value={targetIndustry}
+            onChange={(e) => setTargetIndustry(e.target.value)}
+          />
         </div>
 
         {/* Company Context */}
@@ -192,17 +147,6 @@ export function GeneratorInputs({
             value={companyContext}
             onChange={(e) => setCompanyContext(e.target.value)}
             className="resize-none h-20"
-          />
-        </div>
-
-        {/* Trigger Event */}
-        <div className="space-y-2">
-          <Label>Trigger Event (optional)</Label>
-          <Textarea
-            placeholder="e.g., Just raised Series B, New VP of Sales hire, Product launch..."
-            value={triggerEvent}
-            onChange={(e) => setTriggerEvent(e.target.value)}
-            className="resize-none h-16"
           />
         </div>
 

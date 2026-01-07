@@ -12,9 +12,7 @@ export default function CopywritingStudio() {
   const [channel, setChannel] = useState('email');
   const [sequenceStep, setSequenceStep] = useState('first_touch');
   const [targetIndustry, setTargetIndustry] = useState('');
-  const [targetPersona, setTargetPersona] = useState('');
   const [companyContext, setCompanyContext] = useState('');
-  const [triggerEvent, setTriggerEvent] = useState('');
   const [tone, setTone] = useState('conversational');
   const [specificInstructions, setSpecificInstructions] = useState('');
 
@@ -34,9 +32,7 @@ export default function CopywritingStudio() {
       channel,
       sequenceStep,
       targetIndustry: targetIndustry || undefined,
-      targetPersona: targetPersona || undefined,
       companyContext: companyContext || undefined,
-      triggerEvent: triggerEvent || undefined,
       tone,
       specificInstructions: specificInstructions || undefined,
       variationCount: 3,
@@ -72,12 +68,8 @@ export default function CopywritingStudio() {
               setSequenceStep={setSequenceStep}
               targetIndustry={targetIndustry}
               setTargetIndustry={setTargetIndustry}
-              targetPersona={targetPersona}
-              setTargetPersona={setTargetPersona}
               companyContext={companyContext}
               setCompanyContext={setCompanyContext}
-              triggerEvent={triggerEvent}
-              setTriggerEvent={setTriggerEvent}
               tone={tone}
               setTone={setTone}
               specificInstructions={specificInstructions}
