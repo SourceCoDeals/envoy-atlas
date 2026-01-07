@@ -47,62 +47,56 @@ const App = () => (
     <TooltipProvider>
       <AuthProvider>
         <WorkspaceProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <OnboardingProvider>
-              <OnboardingModal />
-              <HelpSidebar />
-              <Routes>
           <ChannelProvider>
-            <Toaster />
-            <Sonner />
             <BrowserRouter>
-              <Routes>
-                {/* Email routes */}
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/deal-hub" element={<DealHub />} />
-                <Route path="/monthly-report" element={<MonthlyReport />} />
-                <Route path="/auth" element={<Auth />} />
-                <Route path="/connections" element={<Connections />} />
-                <Route path="/campaigns" element={<Campaigns />} />
-                <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
-                <Route path="/inbox" element={<Inbox />} />
-                <Route path="/deliverability" element={<Deliverability />} />
-                <Route path="/audience" element={<Audience />} />
-                <Route path="/audience-insights" element={<AudienceInsights />} />
-                <Route path="/copy-insights" element={<CopyInsights />} />
-                <Route path="/copy-library" element={<CopyLibrary />} />
-                <Route path="/experiments" element={<Experiments />} />
-                <Route path="/playbook" element={<Playbook />} />
-                <Route path="/copywriting-studio" element={<CopywritingStudio />} />
-                <Route path="/alerts" element={<Alerts />} />
-                <Route path="/settings" element={<Settings />} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </OnboardingProvider>
-          </BrowserRouter>
-                
-                {/* Calling routes */}
-                <Route path="/calling" element={<CallingDashboard />} />
-                <Route path="/calling/search" element={<CallSearch />} />
-                <Route path="/calling/best-worst" element={<BestWorstCalls />} />
-                <Route path="/calling/sessions" element={<CallSessions />} />
-                <Route path="/calling/analytics" element={<CallAnalytics />} />
-                <Route path="/calling/reps" element={<RepInsights />} />
-                <Route path="/calling/library" element={<CallLibrary />} />
-                <Route path="/calling/patterns" element={<PatternAnalysis />} />
-                <Route path="/calling/timing" element={<TimingInsights />} />
-                <Route path="/calling/training" element={<TrainingQueue />} />
-                <Route path="/calling/onboarding" element={<OnboardingProgress />} />
-                
-                {/* Shared routes */}
-                <Route path="/contacts" element={<Contacts />} />
-                
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
+              <OnboardingProvider>
+                <OnboardingModal />
+                <HelpSidebar />
+
+                <Toaster />
+                <Sonner />
+
+                <Routes>
+                  {/* Email routes */}
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/deal-hub" element={<DealHub />} />
+                  <Route path="/monthly-report" element={<MonthlyReport />} />
+                  <Route path="/auth" element={<Auth />} />
+                  <Route path="/connections" element={<Connections />} />
+                  <Route path="/campaigns" element={<Campaigns />} />
+                  <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
+                  <Route path="/inbox" element={<Inbox />} />
+                  <Route path="/deliverability" element={<Deliverability />} />
+                  <Route path="/audience" element={<Audience />} />
+                  <Route path="/audience-insights" element={<AudienceInsights />} />
+                  <Route path="/copy-insights" element={<CopyInsights />} />
+                  <Route path="/copy-library" element={<CopyLibrary />} />
+                  <Route path="/experiments" element={<Experiments />} />
+                  <Route path="/playbook" element={<Playbook />} />
+                  <Route path="/copywriting-studio" element={<CopywritingStudio />} />
+                  <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/settings" element={<Settings />} />
+
+                  {/* Calling routes */}
+                  <Route path="/calling" element={<CallingDashboard />} />
+                  <Route path="/calling/search" element={<CallSearch />} />
+                  <Route path="/calling/best-worst" element={<BestWorstCalls />} />
+                  <Route path="/calling/sessions" element={<CallSessions />} />
+                  <Route path="/calling/analytics" element={<CallAnalytics />} />
+                  <Route path="/calling/reps" element={<RepInsights />} />
+                  <Route path="/calling/library" element={<CallLibrary />} />
+                  <Route path="/calling/patterns" element={<PatternAnalysis />} />
+                  <Route path="/calling/timing" element={<TimingInsights />} />
+                  <Route path="/calling/training" element={<TrainingQueue />} />
+                  <Route path="/calling/onboarding" element={<OnboardingProgress />} />
+
+                  {/* Shared routes */}
+                  <Route path="/contacts" element={<Contacts />} />
+
+                  {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </OnboardingProvider>
             </BrowserRouter>
           </ChannelProvider>
         </WorkspaceProvider>
