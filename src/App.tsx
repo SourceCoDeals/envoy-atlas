@@ -7,6 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { OnboardingProvider } from "@/hooks/useOnboarding";
 import { OnboardingModal, HelpSidebar } from "@/components/onboarding";
+import { ChannelProvider } from "@/hooks/useChannel";
 import Dashboard from "./pages/Dashboard";
 import DealHub from "./pages/DealHub";
 import MonthlyReport from "./pages/MonthlyReport";
@@ -25,6 +26,18 @@ import Playbook from "./pages/Playbook";
 import Alerts from "./pages/Alerts";
 import Settings from "./pages/Settings";
 import CopywritingStudio from "./pages/CopywritingStudio";
+import CallingDashboard from "./pages/CallingDashboard";
+import CallSessions from "./pages/CallSessions";
+import CallAnalytics from "./pages/CallAnalytics";
+import CallSearch from "./pages/CallSearch";
+import BestWorstCalls from "./pages/BestWorstCalls";
+import RepInsights from "./pages/RepInsights";
+import CallLibrary from "./pages/CallLibrary";
+import PatternAnalysis from "./pages/PatternAnalysis";
+import TimingInsights from "./pages/TimingInsights";
+import TrainingQueue from "./pages/TrainingQueue";
+import OnboardingProgress from "./pages/OnboardingProgress";
+import Contacts from "./pages/Contacts";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -41,6 +54,12 @@ const App = () => (
               <OnboardingModal />
               <HelpSidebar />
               <Routes>
+          <ChannelProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <Routes>
+                {/* Email routes */}
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/deal-hub" element={<DealHub />} />
                 <Route path="/monthly-report" element={<MonthlyReport />} />
@@ -64,6 +83,28 @@ const App = () => (
               </Routes>
             </OnboardingProvider>
           </BrowserRouter>
+                
+                {/* Calling routes */}
+                <Route path="/calling" element={<CallingDashboard />} />
+                <Route path="/calling/search" element={<CallSearch />} />
+                <Route path="/calling/best-worst" element={<BestWorstCalls />} />
+                <Route path="/calling/sessions" element={<CallSessions />} />
+                <Route path="/calling/analytics" element={<CallAnalytics />} />
+                <Route path="/calling/reps" element={<RepInsights />} />
+                <Route path="/calling/library" element={<CallLibrary />} />
+                <Route path="/calling/patterns" element={<PatternAnalysis />} />
+                <Route path="/calling/timing" element={<TimingInsights />} />
+                <Route path="/calling/training" element={<TrainingQueue />} />
+                <Route path="/calling/onboarding" element={<OnboardingProgress />} />
+                
+                {/* Shared routes */}
+                <Route path="/contacts" element={<Contacts />} />
+                
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </ChannelProvider>
         </WorkspaceProvider>
       </AuthProvider>
     </TooltipProvider>

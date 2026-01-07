@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useChannel } from '@/hooks/useChannel';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +25,7 @@ import {
   AlertCircle,
   FastForward,
   AlertTriangle,
+  Phone,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -83,6 +85,7 @@ export default function Connections() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
+  const { channel } = useChannel();
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState('');
@@ -102,6 +105,11 @@ export default function Connections() {
   const [isStoppingReplyio, setIsStoppingReplyio] = useState(false);
   const [isDiagnosingReplyio, setIsDiagnosingReplyio] = useState(false);
   const [replyioDiagnostics, setReplyioDiagnostics] = useState<any>(null);
+  const [isSyncingPhoneburner, setIsSyncingPhoneburner] = useState(false);
+  const [isResumingPhoneburner, setIsResumingPhoneburner] = useState(false);
+  const [isStoppingPhoneburner, setIsStoppingPhoneburner] = useState(false);
+  const [isDiagnosingPhoneburner, setIsDiagnosingPhoneburner] = useState(false);
+  const [phoneburnerDiagnostics, setPhoneburnerDiagnostics] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -173,6 +181,31 @@ export default function Connections() {
       if (resumeInterval) clearInterval(resumeInterval);
     };
   }, [connections.find(c => c.platform === 'smartlead')?.sync_status, currentWorkspace?.id]);
+
+  // Auto-continue PhoneBurner sync when in progress
+  useEffect(() => {
+    const pbConnection = connections.find(c => c.platform === 'phoneburner');
+    if (!pbConnection || pbConnection.sync_status !== 'syncing') return;
+    if (!currentWorkspace?.id) return;
+
+    console.log('PhoneBurner sync in progress, setting up polling...');
+    
+    const pollInterval = window.setInterval(() => {
+      fetchConnections();
+    }, 2000);
+
+    const resumeInterval = window.setInterval(() => {
+      void continuePhoneburnerSync();
+    }, 60000);
+
+    // Initial resume call
+    void continuePhoneburnerSync();
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      if (resumeInterval) clearInterval(resumeInterval);
+    };
+  }, [connections.find(c => c.platform === 'phoneburner')?.sync_status, currentWorkspace?.id]);
 
   const fetchConnections = async () => {
     if (!currentWorkspace) return;
@@ -543,6 +576,9 @@ export default function Connections() {
   const handleConnectPhoneburner = async () => {
     if (!currentWorkspace || !user || !phoneburnerApiKey.trim()) {
       setError('Please enter a PhoneBurner access token');
+  const handleConnectPhoneburner = async () => {
+    if (!currentWorkspace || !user || !phoneburnerApiKey.trim()) {
+      setError('Please enter an API key');
       return;
     }
 
@@ -571,6 +607,7 @@ export default function Connections() {
       fetchConnections();
     } catch (err: any) {
       setError(err.message || 'Failed to connect PhoneBurner');
+      setError(err.message || 'Failed to connect');
     } finally {
       setIsConnectingPhoneburner(false);
     }
@@ -593,6 +630,7 @@ export default function Connections() {
         body: {
           workspace_id: currentWorkspace.id,
           sync_type: 'full',
+          workspaceId: currentWorkspace.id,
           reset,
         },
         headers: {
@@ -606,6 +644,11 @@ export default function Connections() {
 
       const data = response.data;
       if (data?.done) {
+        throw new Error(response.error.message || 'Sync failed');
+      }
+
+      const data = response.data;
+      if (data?.status === 'complete') {
         setSuccess(
           `PhoneBurner sync complete! Synced ${data.contacts_synced || 0} contacts, ` +
           `${data.calls_synced || 0} calls.`
@@ -615,11 +658,69 @@ export default function Connections() {
         setSuccess('PhoneBurner sync started, processing in background...');
       }
 
+      } else if (data?.status === 'already_syncing') {
+        setSuccess('Sync already in progress...');
+      } else if (data?.needsContinuation || data?.status === 'in_progress') {
+        setSuccess('PhoneBurner sync started, processing in background...');
+        void continuePhoneburnerSync();
+      } else {
+        setSuccess('PhoneBurner sync started!');
+      }
+      
       fetchConnections();
     } catch (err: any) {
       console.error('PhoneBurner sync error:', err);
       setError(err.message || 'Failed to sync PhoneBurner');
       setIsSyncingPhoneburner(false);
+    }
+  };
+
+  const continuePhoneburnerSync = async () => {
+    if (!currentWorkspace || isResumingPhoneburner) return;
+    
+    const pbConnection = connections.find(c => c.platform === 'phoneburner');
+    if (!pbConnection || pbConnection.sync_status !== 'syncing') return;
+
+    try {
+      setIsResumingPhoneburner(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      await supabase.functions.invoke('phoneburner-sync', {
+        body: { workspaceId: currentWorkspace.id },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      
+      await fetchConnections();
+    } catch (error) {
+      console.log('Continue PhoneBurner sync call completed (may have timed out, will retry)');
+    } finally {
+      setIsResumingPhoneburner(false);
+    }
+  };
+
+  const handleStopPhoneburnerSync = async () => {
+    if (!currentWorkspace) return;
+    
+    setIsStoppingPhoneburner(true);
+    setError(null);
+    
+    try {
+      const { error } = await supabase
+        .from('api_connections')
+        .update({ sync_status: 'stopped' })
+        .eq('workspace_id', currentWorkspace.id)
+        .eq('platform', 'phoneburner');
+      
+      if (error) throw error;
+      
+      setSuccess('PhoneBurner sync stopped.');
+      setIsSyncingPhoneburner(false);
+      fetchConnections();
+    } catch (err: any) {
+      setError(err.message || 'Failed to stop sync');
+    } finally {
+      setIsStoppingPhoneburner(false);
     }
   };
 
@@ -637,12 +738,15 @@ export default function Connections() {
 
       const res = await supabase.functions.invoke('phoneburner-sync', {
         body: { workspace_id: currentWorkspace.id, diagnostic: true },
+        body: { workspaceId: currentWorkspace.id, diagnostic: true },
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
       if (res.error) throw new Error(res.error.message || 'Diagnostics failed');
       setPhoneburnerDiagnostics(res.data?.results || res.data);
       setSuccess('PhoneBurner diagnostics captured below.');
+      setPhoneburnerDiagnostics(res.data);
+      setSuccess('PhoneBurner diagnostics complete. See results below.');
     } catch (e: any) {
       setError(e.message || 'Failed to run diagnostics');
     } finally {
@@ -690,9 +794,14 @@ export default function Connections() {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Connections</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {channel === 'email' ? 'Email Connections' : 'Calling Connections'}
+          </h1>
           <p className="text-muted-foreground">
-            Connect your email outreach platforms to import campaign data
+            {channel === 'email' 
+              ? 'Connect your email outreach platforms to import campaign data'
+              : 'Connect your cold calling platforms to import dial session data'
+            }
           </p>
         </div>
 
@@ -713,6 +822,12 @@ export default function Connections() {
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {/* Smartlead Connection */}
           <Card className={smartleadConnection ? 'border-success/30' : ''}>
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Email Channel Connections */}
+          {channel === 'email' && (
+            <>
+              {/* Smartlead Connection */}
+              <Card className={smartleadConnection ? 'border-success/30' : ''}>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1207,6 +1322,14 @@ export default function Connections() {
 
           {/* PhoneBurner Connection */}
           <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
+            </>
+          )}
+
+          {/* Calling Channel Connections */}
+          {channel === 'calling' && (
+            <>
+              {/* PhoneBurner Connection */}
+              <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1216,6 +1339,11 @@ export default function Connections() {
                   <div>
                     <CardTitle className="text-lg">PhoneBurner</CardTitle>
                     <CardDescription>Power dialer & call tracking</CardDescription>
+                    <Phone className={`h-5 w-5 ${phoneburnerConnection ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">PhoneBurner</CardTitle>
+                    <CardDescription>Cold calling platform</CardDescription>
                   </div>
                 </div>
                 {phoneburnerConnection && (
@@ -1250,6 +1378,9 @@ export default function Connections() {
                     </div>
                   )}
 
+                    <span className="capitalize">{phoneburnerConnection.sync_status || 'Active'}</span>
+                  </div>
+                  
                   {phoneburnerConnection.last_sync_at && (
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">Last Sync</span>
@@ -1350,6 +1481,230 @@ export default function Connections() {
                       <AlertDialogTrigger asChild>
                         <Button
                           variant="outline"
+                  {/* Sync Progress - Show when syncing OR when isSyncingPhoneburner is true (button just clicked) */}
+                  {(phoneburnerConnection.sync_status === 'syncing' || isSyncingPhoneburner) && (() => {
+                    const progress = phoneburnerConnection.sync_progress as any;
+                    const phase = progress?.phase || 'initializing';
+                    const contactsSynced = progress?.contacts_synced || 0;
+                    const sessionsSynced = progress?.sessions_synced || 0;
+                    const callsSynced = progress?.calls_synced || 0;
+                    const sessionPage = progress?.session_page || 1;
+                    const totalSessionPages = progress?.total_session_pages || 1;
+                    const contactsPage = progress?.contacts_page || 1;
+                    const totalPages = progress?.total_pages || 1;
+                    
+                    // Calculate progress percentage based on phase
+                    let progressPercent = 0;
+                    let phaseLabel = '';
+                    if (phase === 'initializing' || !progress) {
+                      progressPercent = 5;
+                      phaseLabel = 'Initializing sync...';
+                    } else if (phase === 'dialsessions') {
+                      progressPercent = totalSessionPages > 1 ? Math.round((sessionPage / totalSessionPages) * 40) : 20;
+                      phaseLabel = `Syncing dial sessions (page ${sessionPage}/${totalSessionPages}, ${callsSynced} calls)`;
+                    } else if (phase === 'contacts') {
+                      progressPercent = 40 + (totalPages > 1 ? Math.round((contactsPage / totalPages) * 30) : 15);
+                      phaseLabel = `Syncing contacts (page ${contactsPage}/${totalPages})`;
+                    } else if (phase === 'metrics') {
+                      progressPercent = 80;
+                      phaseLabel = 'Syncing aggregate metrics';
+                    } else if (phase === 'linking') {
+                      progressPercent = 95;
+                      phaseLabel = 'Linking contacts to leads';
+                    }
+                    
+                    return (
+                      <div className="space-y-3 p-3 rounded-lg bg-accent/20">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Dial Sessions</span>
+                          <span className="font-medium">{sessionsSynced.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Contacts</span>
+                          <span className="font-medium">{contactsSynced.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Calls</span>
+                          <span className="font-medium">{callsSynced.toLocaleString()}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <Progress value={progressPercent} className="h-2" />
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            {phaseLabel}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {/* Completed Sync Summary */}
+                  {phoneburnerConnection.sync_status === 'complete' && phoneburnerConnection.sync_progress && (
+                    <div className="flex items-center gap-4 text-sm p-2 rounded-lg bg-success/10 flex-wrap">
+                      <div className="flex items-center gap-1">
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        <span>{(phoneburnerConnection.sync_progress as any).sessions_synced || 0} sessions</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        <span>{(phoneburnerConnection.sync_progress as any).contacts_synced || 0} contacts</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        <span>{(phoneburnerConnection.sync_progress as any).calls_synced || 0} calls</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Diagnostic Results */}
+                  {phoneburnerDiagnostics && (
+                    <div className="space-y-3 p-3 rounded-lg bg-accent/30 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">Diagnostic Results</span>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 px-2"
+                          onClick={() => setPhoneburnerDiagnostics(null)}
+                        >
+                          <XCircle className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      
+                      {/* Members Test */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {phoneburnerDiagnostics.tests?.members?.success ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span>Members: {phoneburnerDiagnostics.tests?.members?.count || 0} found</span>
+                        </div>
+                      </div>
+
+                      {/* Contacts Test */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {phoneburnerDiagnostics.tests?.contacts?.success ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span>Contacts: {phoneburnerDiagnostics.tests?.contacts?.total_contacts?.toLocaleString() || 0} total</span>
+                        </div>
+                      </div>
+
+                      {/* Dial Sessions Test */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {phoneburnerDiagnostics.tests?.dial_sessions?.success ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span>Dial Sessions: {phoneburnerDiagnostics.tests?.dial_sessions?.total_results?.toLocaleString() || 0} found</span>
+                        </div>
+                      </div>
+
+                      {/* Usage Stats Test */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          {phoneburnerDiagnostics.tests?.usage?.success ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          )}
+                          <span>Team Stats: {phoneburnerDiagnostics.tests?.usage?.total_calls?.toLocaleString() || 0} calls (90 days)</span>
+                        </div>
+                      </div>
+
+                      {/* Recommendation */}
+                      {phoneburnerDiagnostics.recommendation && (
+                        <div className="p-2 rounded bg-muted text-muted-foreground">
+                          <span className="font-medium">💡 </span>
+                          {phoneburnerDiagnostics.recommendation}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    {phoneburnerConnection.sync_status === 'syncing' ? (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={handleStopPhoneburnerSync}
+                        disabled={isStoppingPhoneburner}
+                      >
+                        {isStoppingPhoneburner ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <XCircle className="mr-2 h-4 w-4" />
+                        )}
+                        Stop Sync
+                      </Button>
+                    ) : (
+                      <>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => handlePhoneburnerSync(false)}
+                          disabled={isSyncingPhoneburner}
+                        >
+                          {isSyncingPhoneburner ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="mr-2 h-4 w-4" />
+                          )}
+                          Sync Data
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                              Reset & Sync
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="flex items-center gap-2">
+                                <AlertTriangle className="h-5 w-5 text-warning" />
+                                Reset PhoneBurner Data?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will delete all existing PhoneBurner data and re-sync from scratch.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handlePhoneburnerSync(true)}>
+                                Reset & Sync
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={runPhoneburnerDiagnostics}
+                          disabled={isDiagnosingPhoneburner}
+                        >
+                          {isDiagnosingPhoneburner ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <AlertCircle className="mr-2 h-4 w-4" />
+                          )}
+                          Diagnose
+                        </Button>
+                      </>
+                    )}
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          variant="outline" 
                           size="sm"
                           className="text-destructive hover:text-destructive"
                         >
@@ -1365,6 +1720,7 @@ export default function Connections() {
                           <AlertDialogDescription>
                             This will remove your PhoneBurner access token and stop all syncing.
                             You'll need to re-enter your token to reconnect.
+                            This will remove your PhoneBurner API key and stop all syncing.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
@@ -1384,12 +1740,14 @@ export default function Connections() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="phoneburner-key">Access Token</Label>
+                    <Label htmlFor="phoneburner-key">API Key</Label>
                     <div className="relative">
                       <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="phoneburner-key"
                         type="password"
                         placeholder="Enter your PhoneBurner access token"
+                        placeholder="Enter your PhoneBurner API key"
                         value={phoneburnerApiKey}
                         onChange={(e) => setPhoneburnerApiKey(e.target.value)}
                         className="pl-10"
@@ -1420,6 +1778,12 @@ export default function Connections() {
                         rel="noopener noreferrer"
                       >
                         API Docs
+                      <a 
+                        href="https://www.phoneburner.com/developer/index" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                      >
+                        Get API Key
                         <ExternalLink className="ml-1 h-3 w-3" />
                       </a>
                     </Button>
@@ -1428,6 +1792,8 @@ export default function Connections() {
               )}
             </CardContent>
           </Card>
+            </>
+          )}
         </div>
 
         {/* Data Sync Info */}
@@ -1439,26 +1805,49 @@ export default function Connections() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Historical Backfill</h4>
-                <p className="text-sm text-muted-foreground">
-                  Click "Pull Full History" to import all campaigns, email variants, and metrics
-                </p>
+            {channel === 'email' ? (
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Historical Backfill</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Click "Sync Data" to import all campaigns, email variants, and metrics
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Email Copy Analytics</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Subject lines and body copy are synced with performance metrics
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Copy Insights</h4>
+                  <p className="text-sm text-muted-foreground">
+                    View your synced copy analytics on the Copy Insights page
+                  </p>
+                </div>
               </div>
-              <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Email Copy Analytics</h4>
-                <p className="text-sm text-muted-foreground">
-                  Subject lines and body copy are synced with performance metrics
-                </p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Dial Sessions</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Import dial sessions with call counts, duration, and member info
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Call Analytics</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Dispositions, connect rates, and talk time are automatically tracked
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Daily Metrics</h4>
+                  <p className="text-sm text-muted-foreground">
+                    View aggregated calling performance on the Calling Dashboard
+                  </p>
+                </div>
               </div>
-              <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Copy Insights</h4>
-                <p className="text-sm text-muted-foreground">
-                  View your synced copy analytics on the Copy Insights page
-                </p>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>

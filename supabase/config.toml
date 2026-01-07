@@ -32,3 +32,15 @@ verify_jwt = false
 
 [functions.process-industry-documents]
 verify_jwt = false
+
+[functions.phoneburner-sync]
+verify_jwt = false
+
+[functions.transcribe-call]
+verify_jwt = false
+
+[functions.score-call]
+verify_jwt = false
+
+[functions.process-calls-batch]
+verify_jwt = false
