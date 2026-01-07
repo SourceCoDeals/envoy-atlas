@@ -57,15 +57,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       setWorkspaces(workspacesWithRoles);
 
-      // Set current workspace from localStorage or first available
+      // Set current workspace from localStorage or find the main one (with slug 'sourceco'), or first available
       const storedWorkspaceId = localStorage.getItem('currentWorkspaceId');
       const storedWorkspace = workspacesWithRoles.find(w => w.id === storedWorkspaceId);
       
       if (storedWorkspace) {
         setCurrentWorkspace(storedWorkspace);
-      } else if (workspacesWithRoles.length > 0) {
-        setCurrentWorkspace(workspacesWithRoles[0]);
-        localStorage.setItem('currentWorkspaceId', workspacesWithRoles[0].id);
+      } else {
+        // Prioritize the main workspace (slug without random suffix) or first available
+        const mainWorkspace = workspacesWithRoles.find(w => w.slug === 'sourceco') || workspacesWithRoles[0];
+        if (mainWorkspace) {
+          setCurrentWorkspace(mainWorkspace);
+          localStorage.setItem('currentWorkspaceId', mainWorkspace.id);
+        }
       }
     } catch (err) {
       console.error('Error fetching workspaces:', err);
