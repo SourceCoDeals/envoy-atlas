@@ -5,7 +5,7 @@ import { Loader2, Wand2, Sparkles } from 'lucide-react';
 import { useCopywritingStudio } from '@/hooks/useCopywritingStudio';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { GeneratorInputs } from '@/components/copywriting/GeneratorInputs';
-import { IndustryContextInputs, UploadedDocument } from '@/components/copywriting/IndustryContextInputs';
+import { IndustryContextInputs, UploadedDocument, ExtractedIntelligence } from '@/components/copywriting/IndustryContextInputs';
 import { GeneratedVariations } from '@/components/copywriting/GeneratedVariations';
 import { BestPracticesPanel } from '@/components/copywriting/BestPracticesPanel';
 import { SequenceBuilder, SequenceStep } from '@/components/copywriting/SequenceBuilder';
@@ -30,6 +30,7 @@ export default function CopywritingStudio() {
   // Industry context state
   const [callTranscript, setCallTranscript] = useState('');
   const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
+  const [extractedIntelligence, setExtractedIntelligence] = useState<ExtractedIntelligence | null>(null);
 
   const { 
     isGenerating, 
@@ -114,6 +115,9 @@ export default function CopywritingStudio() {
               uploadedDocuments={uploadedDocuments}
               setUploadedDocuments={setUploadedDocuments}
               workspaceId={currentWorkspace?.id}
+              targetIndustry={industry}
+              extractedIntelligence={extractedIntelligence}
+              setExtractedIntelligence={setExtractedIntelligence}
             />
 
             <Button 
