@@ -10,7 +10,7 @@ const PHONEBURNER_BASE_URL = 'https://www.phoneburner.com/rest/1';
 const RATE_LIMIT_DELAY = 500;
 const TIME_BUDGET_MS = 45000;
 const SYNC_LOCK_TIMEOUT_MS = 30000;
-const FUNCTION_VERSION = '2026-01-07.v3';
+const FUNCTION_VERSION = '2026-01-07.v6';
 const ACTIVITIES_PAGE_SIZE = 100;
 
 function delay(ms: number): Promise<void> {
@@ -311,16 +311,90 @@ serve(async (req) => {
         diagnosticResults.tests.usage = { success: false, error: e.message };
       }
 
+      await delay(RATE_LIMIT_DELAY);
+
+      // Test 5: Dial session endpoints (to pull full call logs when contact activities are empty)
+      try {
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 7);
+
+        const dateStart = startDate.toISOString().split('T')[0];
+        const dateEnd = endDate.toISOString().split('T')[0];
+
+        // Try both "current user" sessions and explicit member sessions (if supported)
+        const firstMemberId = diagnosticResults.tests.members?.data?.[0]?.user_id;
+
+        const candidates = [
+          // No filters (lets API choose defaults)
+          `/dialsession?page=1&page_size=5`,
+          // Days filter variants
+          `/dialsession?days=7&page=1&page_size=5`,
+          `/dialsession?days=30&page=1&page_size=5`,
+          // Date filter variants
+          `/dialsession?date_start=${dateStart}&date_end=${dateEnd}&page=1&page_size=5`,
+          `/dialsession?start_date=${dateStart}&end_date=${dateEnd}&page=1&page_size=5`,
+          // Explicit member filter variants
+          firstMemberId ? `/dialsession?member_user_id=${firstMemberId}&page=1&page_size=5` : null,
+          firstMemberId ? `/dialsession?member_user_id=${firstMemberId}&days=30&page=1&page_size=5` : null,
+          firstMemberId ? `/dialsession?member_user_id=${firstMemberId}&date_start=${dateStart}&date_end=${dateEnd}&page=1&page_size=5` : null,
+        ].filter(Boolean) as string[];
+
+        const results: any[] = [];
+        for (const endpoint of candidates) {
+          try {
+            const res = await phoneburnerRequest(endpoint, apiKey);
+            const dsWrapper = res?.dialsessions;
+            const dsArr = Array.isArray(dsWrapper?.dialsessions)
+              ? (Array.isArray(dsWrapper.dialsessions[0]) ? dsWrapper.dialsessions[0] : dsWrapper.dialsessions)
+              : [];
+
+            results.push({
+              endpoint,
+              success: true,
+              keys: Object.keys(res || {}),
+              dialsessions_keys: dsWrapper && typeof dsWrapper === 'object' ? Object.keys(dsWrapper) : null,
+              page: dsWrapper?.page,
+              total_pages: dsWrapper?.total_pages,
+              total_results: dsWrapper?.total_results,
+              count_on_page: dsArr.length,
+              sample_item_keys: dsArr[0] ? Object.keys(dsArr[0]) : [],
+            });
+          } catch (e: any) {
+            results.push({ endpoint, success: false, error: e.message });
+          }
+          await delay(RATE_LIMIT_DELAY);
+        }
+
+        diagnosticResults.tests.dial_sessions = {
+          success: results.some(r => r.success),
+          attempted: results,
+        };
+      } catch (e: any) {
+        diagnosticResults.tests.dial_sessions = { success: false, error: e.message };
+      }
+
       // Generate recommendation
       const contactsTest = diagnosticResults.tests.contacts;
       const activitiesTest = diagnosticResults.tests.contact_activities;
-      
+      const usageTest = diagnosticResults.tests.usage;
+      const dialSessionsTest = diagnosticResults.tests.dial_sessions;
+
       if (contactsTest?.success && contactsTest.total_contacts > 0) {
-        diagnosticResults.recommendation = `SUCCESS! Found ${contactsTest.total_contacts} contacts. `;
-        if (activitiesTest?.success) {
-          diagnosticResults.recommendation += `Sample contact has ${activitiesTest.total_activities} activities (${activitiesTest.call_activities} calls).`;
+        diagnosticResults.recommendation = `Found ${contactsTest.total_contacts} contacts. `;
+
+        const callCount = activitiesTest?.success ? (activitiesTest.call_activities || 0) : 0;
+        const activityCount = activitiesTest?.success ? (activitiesTest.total_activities || 0) : 0;
+        const usageCalls = usageTest?.success ? (usageTest.total_calls || 0) : 0;
+
+        if (activityCount === 0 && usageCalls > 0) {
+          diagnosticResults.recommendation += `However, contact activities returned 0 results while usage shows ${usageCalls} calls. This usually means call logs are not available via the contact activities endpoint for this API key/account. `;
+          diagnosticResults.recommendation += dialSessionsTest?.success
+            ? 'Dial session endpoints appear available; we should switch the sync to ingest dial sessions/calls instead of contact activities.'
+            : 'Dial session endpoints were not found with our candidate paths; next step is to confirm the correct endpoint paths supported by your PhoneBurner account/API permissions.';
+        } else {
+          diagnosticResults.recommendation += `Sample contact has ${activityCount} activities (${callCount} calls). Ready to sync call history via activities.`;
         }
-        diagnosticResults.recommendation += ' Ready to sync using contact-based call history.';
       } else {
         diagnosticResults.recommendation = 'No contacts found. Ensure your PhoneBurner account has contact data.';
       }
