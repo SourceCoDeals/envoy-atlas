@@ -35,6 +35,7 @@ import PatternAnalysis from "./pages/PatternAnalysis";
 import TimingInsights from "./pages/TimingInsights";
 import TrainingQueue from "./pages/TrainingQueue";
 import OnboardingProgress from "./pages/OnboardingProgress";
+import Contacts from "./pages/Contacts";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -81,6 +82,9 @@ const App = () => (
                 <Route path="/calling/timing" element={<TimingInsights />} />
                 <Route path="/calling/training" element={<TrainingQueue />} />
                 <Route path="/calling/onboarding" element={<OnboardingProgress />} />
+                
+                {/* Shared routes */}
+                <Route path="/contacts" element={<Contacts />} />
                 
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />

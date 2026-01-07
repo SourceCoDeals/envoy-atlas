@@ -47,6 +47,7 @@ import {
   Sparkles,
   Phone,
   PhoneCall,
+  Users,
 } from 'lucide-react';
 
 interface NavItem {
@@ -60,6 +61,7 @@ interface NavItem {
 const emailMainNavItems: NavItem[] = [
   { title: 'Overview', href: '/', icon: LayoutDashboard },
   { title: 'Deal Hub', href: '/deal-hub', icon: Briefcase },
+  { title: 'Contacts', href: '/contacts', icon: Users },
   { title: 'Inbox', href: '/inbox', icon: Inbox },
   { title: 'Campaigns', href: '/campaigns', icon: Mail },
   { title: 'Copy Insights', href: '/copy-insights', icon: FileText },
@@ -81,6 +83,7 @@ const emailExperimentNavItems: NavItem[] = [
 // Calling channel navigation
 const callingMainNavItems: NavItem[] = [
   { title: 'Overview', href: '/calling', icon: LayoutDashboard },
+  { title: 'Contacts', href: '/contacts', icon: Users },
   { title: 'Call Search', href: '/calling/search', icon: Phone },
   { title: 'Best/Worst Calls', href: '/calling/best-worst', icon: BarChart3 },
   { title: 'Call Sessions', href: '/calling/sessions', icon: PhoneCall },
