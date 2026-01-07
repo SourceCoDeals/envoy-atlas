@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
+import { OnboardingProvider } from "@/hooks/useOnboarding";
+import { OnboardingModal, HelpSidebar } from "@/components/onboarding";
 import Dashboard from "./pages/Dashboard";
 import DealHub from "./pages/DealHub";
 import MonthlyReport from "./pages/MonthlyReport";
@@ -35,28 +37,32 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/deal-hub" element={<DealHub />} />
-              <Route path="/monthly-report" element={<MonthlyReport />} />
-              <Route path="/auth" element={<Auth />} />
-              <Route path="/connections" element={<Connections />} />
-              <Route path="/campaigns" element={<Campaigns />} />
-              <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
-              <Route path="/inbox" element={<Inbox />} />
-              <Route path="/deliverability" element={<Deliverability />} />
-              <Route path="/audience" element={<Audience />} />
-              <Route path="/audience-insights" element={<AudienceInsights />} />
-              <Route path="/copy-insights" element={<CopyInsights />} />
-              <Route path="/copy-library" element={<CopyLibrary />} />
-              <Route path="/experiments" element={<Experiments />} />
-              <Route path="/playbook" element={<Playbook />} />
-              <Route path="/copywriting-studio" element={<CopywritingStudio />} />
-              <Route path="/alerts" element={<Alerts />} />
-              <Route path="/settings" element={<Settings />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <OnboardingProvider>
+              <OnboardingModal />
+              <HelpSidebar />
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/deal-hub" element={<DealHub />} />
+                <Route path="/monthly-report" element={<MonthlyReport />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/connections" element={<Connections />} />
+                <Route path="/campaigns" element={<Campaigns />} />
+                <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
+                <Route path="/inbox" element={<Inbox />} />
+                <Route path="/deliverability" element={<Deliverability />} />
+                <Route path="/audience" element={<Audience />} />
+                <Route path="/audience-insights" element={<AudienceInsights />} />
+                <Route path="/copy-insights" element={<CopyInsights />} />
+                <Route path="/copy-library" element={<CopyLibrary />} />
+                <Route path="/experiments" element={<Experiments />} />
+                <Route path="/playbook" element={<Playbook />} />
+                <Route path="/copywriting-studio" element={<CopywritingStudio />} />
+                <Route path="/alerts" element={<Alerts />} />
+                <Route path="/settings" element={<Settings />} />
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </OnboardingProvider>
           </BrowserRouter>
         </WorkspaceProvider>
       </AuthProvider>
