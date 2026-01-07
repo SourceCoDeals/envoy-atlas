@@ -100,6 +100,9 @@ export default function Connections() {
   const [isStoppingReplyio, setIsStoppingReplyio] = useState(false);
   const [isDiagnosingReplyio, setIsDiagnosingReplyio] = useState(false);
   const [replyioDiagnostics, setReplyioDiagnostics] = useState<any>(null);
+  const [isSyncingPhoneburner, setIsSyncingPhoneburner] = useState(false);
+  const [isResumingPhoneburner, setIsResumingPhoneburner] = useState(false);
+  const [isStoppingPhoneburner, setIsStoppingPhoneburner] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -171,6 +174,31 @@ export default function Connections() {
       if (resumeInterval) clearInterval(resumeInterval);
     };
   }, [connections.find(c => c.platform === 'smartlead')?.sync_status, currentWorkspace?.id]);
+
+  // Auto-continue PhoneBurner sync when in progress
+  useEffect(() => {
+    const pbConnection = connections.find(c => c.platform === 'phoneburner');
+    if (!pbConnection || pbConnection.sync_status !== 'syncing') return;
+    if (!currentWorkspace?.id) return;
+
+    console.log('PhoneBurner sync in progress, setting up polling...');
+    
+    const pollInterval = window.setInterval(() => {
+      fetchConnections();
+    }, 2000);
+
+    const resumeInterval = window.setInterval(() => {
+      void continuePhoneburnerSync();
+    }, 60000);
+
+    // Initial resume call
+    void continuePhoneburnerSync();
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      if (resumeInterval) clearInterval(resumeInterval);
+    };
+  }, [connections.find(c => c.platform === 'phoneburner')?.sync_status, currentWorkspace?.id]);
 
   const fetchConnections = async () => {
     if (!currentWorkspace) return;
@@ -570,6 +598,106 @@ export default function Connections() {
       setError(err.message || 'Failed to connect');
     } finally {
       setIsConnectingPhoneburner(false);
+    }
+  };
+
+  const handlePhoneburnerSync = async (reset = false) => {
+    if (!currentWorkspace) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncingPhoneburner(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.');
+      }
+
+      const response = await supabase.functions.invoke('phoneburner-sync', {
+        body: {
+          workspaceId: currentWorkspace.id,
+          reset,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Sync failed');
+      }
+
+      const data = response.data;
+      if (data?.status === 'complete') {
+        setSuccess(
+          `PhoneBurner sync complete! Synced ${data.sessionsProcessed || 0} sessions, ` +
+          `${data.callsProcessed || 0} calls.`
+        );
+        setIsSyncingPhoneburner(false);
+      } else if (data?.status === 'already_syncing') {
+        setSuccess('Sync already in progress...');
+      } else if (data?.needsContinuation) {
+        setSuccess('PhoneBurner sync started, processing in background...');
+        void continuePhoneburnerSync();
+      } else {
+        setSuccess('PhoneBurner sync started!');
+      }
+      
+      fetchConnections();
+    } catch (err: any) {
+      console.error('PhoneBurner sync error:', err);
+      setError(err.message || 'Failed to sync PhoneBurner');
+      setIsSyncingPhoneburner(false);
+    }
+  };
+
+  const continuePhoneburnerSync = async () => {
+    if (!currentWorkspace || isResumingPhoneburner) return;
+    
+    const pbConnection = connections.find(c => c.platform === 'phoneburner');
+    if (!pbConnection || pbConnection.sync_status !== 'syncing') return;
+
+    try {
+      setIsResumingPhoneburner(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      await supabase.functions.invoke('phoneburner-sync', {
+        body: { workspaceId: currentWorkspace.id },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      
+      await fetchConnections();
+    } catch (error) {
+      console.log('Continue PhoneBurner sync call completed (may have timed out, will retry)');
+    } finally {
+      setIsResumingPhoneburner(false);
+    }
+  };
+
+  const handleStopPhoneburnerSync = async () => {
+    if (!currentWorkspace) return;
+    
+    setIsStoppingPhoneburner(true);
+    setError(null);
+    
+    try {
+      const { error } = await supabase
+        .from('api_connections')
+        .update({ sync_status: 'stopped' })
+        .eq('workspace_id', currentWorkspace.id)
+        .eq('platform', 'phoneburner');
+      
+      if (error) throw error;
+      
+      setSuccess('PhoneBurner sync stopped.');
+      setIsSyncingPhoneburner(false);
+      fetchConnections();
+    } catch (err: any) {
+      setError(err.message || 'Failed to stop sync');
+    } finally {
+      setIsStoppingPhoneburner(false);
     }
   };
 
@@ -1165,11 +1293,84 @@ export default function Connections() {
                     </div>
                   )}
 
+                  {/* Sync Progress */}
+                  {phoneburnerConnection.sync_status === 'syncing' && phoneburnerConnection.sync_progress && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Sessions</span>
+                        <span>{(phoneburnerConnection.sync_progress as any).sessionsProcessed || 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Calls</span>
+                        <span>{(phoneburnerConnection.sync_progress as any).callsProcessed || 0}</span>
+                      </div>
+                      <Progress value={50} className="h-2" />
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Syncing dial sessions and calls...
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex gap-2 pt-2">
-                    <Button variant="outline" size="sm" className="flex-1" disabled>
-                      <Download className="mr-2 h-4 w-4" />
-                      Sync Data (Coming Soon)
-                    </Button>
+                    {phoneburnerConnection.sync_status === 'syncing' ? (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={handleStopPhoneburnerSync}
+                        disabled={isStoppingPhoneburner}
+                      >
+                        {isStoppingPhoneburner ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <XCircle className="mr-2 h-4 w-4" />
+                        )}
+                        Stop Sync
+                      </Button>
+                    ) : (
+                      <>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => handlePhoneburnerSync(false)}
+                          disabled={isSyncingPhoneburner}
+                        >
+                          {isSyncingPhoneburner ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="mr-2 h-4 w-4" />
+                          )}
+                          Sync Data
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                              Reset & Sync
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="flex items-center gap-2">
+                                <AlertTriangle className="h-5 w-5 text-warning" />
+                                Reset PhoneBurner Data?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will delete all existing PhoneBurner data and re-sync from scratch.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handlePhoneburnerSync(true)}>
+                                Reset & Sync
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </>
+                    )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button 
