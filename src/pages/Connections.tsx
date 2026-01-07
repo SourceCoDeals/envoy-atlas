@@ -87,9 +87,12 @@ export default function Connections() {
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState('');
   const [replyioApiKey, setReplyioApiKey] = useState('');
+  const [phoneburnerApiKey, setPhoneburnerApiKey] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnectingReplyio, setIsConnectingReplyio] = useState(false);
+  const [isConnectingPhoneburner, setIsConnectingPhoneburner] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingPhoneburner, setIsSyncingPhoneburner] = useState(false);
   const [isResumingSync, setIsResumingSync] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isSyncingReplyio, setIsSyncingReplyio] = useState(false);
@@ -534,12 +537,99 @@ export default function Connections() {
     }
   };
 
+  // PhoneBurner handlers
+  const handleConnectPhoneburner = async () => {
+    if (!currentWorkspace || !user || !phoneburnerApiKey.trim()) {
+      setError('Please enter a PhoneBurner access token');
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setIsConnectingPhoneburner(true);
+
+    try {
+      const { error } = await supabase
+        .from('api_connections')
+        .upsert({
+          workspace_id: currentWorkspace.id,
+          platform: 'phoneburner',
+          api_key_encrypted: phoneburnerApiKey,
+          is_active: true,
+          sync_status: 'pending',
+          created_by: user.id,
+        }, {
+          onConflict: 'workspace_id,platform',
+        });
+
+      if (error) throw error;
+
+      setSuccess('PhoneBurner connected successfully!');
+      setPhoneburnerApiKey('');
+      fetchConnections();
+    } catch (err: any) {
+      setError(err.message || 'Failed to connect PhoneBurner');
+    } finally {
+      setIsConnectingPhoneburner(false);
+    }
+  };
+
+  const handlePhoneburnerSync = async (reset = false) => {
+    if (!currentWorkspace) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncingPhoneburner(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in again.');
+      }
+
+      const response = await supabase.functions.invoke('phoneburner-sync', {
+        body: {
+          workspace_id: currentWorkspace.id,
+          sync_type: 'full',
+          reset,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'PhoneBurner sync failed');
+      }
+
+      const data = response.data;
+      if (data?.done) {
+        setSuccess(
+          `PhoneBurner sync complete! Synced ${data.contacts_synced || 0} contacts, ` +
+          `${data.calls_synced || 0} calls.`
+        );
+        setIsSyncingPhoneburner(false);
+      } else {
+        setSuccess('PhoneBurner sync started, processing in background...');
+      }
+
+      fetchConnections();
+    } catch (err: any) {
+      console.error('PhoneBurner sync error:', err);
+      setError(err.message || 'Failed to sync PhoneBurner');
+      setIsSyncingPhoneburner(false);
+    }
+  };
+
   const smartleadConnection = connections.find(c => c.platform === 'smartlead');
   const replyioConnection = connections.find(c => c.platform === 'replyio');
+  const phoneburnerConnection = connections.find(c => c.platform === 'phoneburner');
   const isSyncingSmartlead = smartleadConnection?.sync_status === 'syncing' || isSyncing;
   const isSyncingReplyioActive = replyioConnection?.sync_status === 'syncing' || isSyncingReplyio;
+  const isSyncingPhoneburnerActive = phoneburnerConnection?.sync_status === 'syncing' || isSyncingPhoneburner;
   const syncProgress = smartleadConnection?.sync_progress;
   const replyioSyncProgress = replyioConnection?.sync_progress;
+  const phoneburnerSyncProgress = phoneburnerConnection?.sync_progress;
 
   // Calculate Reply.io progress percentage
   const getReplyioProgress = () => {
@@ -591,7 +681,7 @@ export default function Connections() {
           </Alert>
         )}
 
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {/* Smartlead Connection */}
           <Card className={smartleadConnection ? 'border-success/30' : ''}>
             <CardHeader>
@@ -1077,6 +1167,203 @@ export default function Connections() {
                         rel="noopener noreferrer"
                       >
                         Get API Key
+                        <ExternalLink className="ml-1 h-3 w-3" />
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* PhoneBurner Connection */}
+          <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
+                    <Plug className={`h-5 w-5 ${phoneburnerConnection ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">PhoneBurner</CardTitle>
+                    <CardDescription>Power dialer & call tracking</CardDescription>
+                  </div>
+                </div>
+                {phoneburnerConnection && (
+                  <Badge variant="outline" className="border-success text-success">
+                    <StatusDot status="healthy" size="sm" className="mr-1" />
+                    Connected
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {phoneburnerConnection ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Status</span>
+                    <span className="capitalize">
+                      {isSyncingPhoneburnerActive ? 'Syncing...' : (phoneburnerConnection.sync_status || 'Active')}
+                    </span>
+                  </div>
+
+                  {/* Sync Progress */}
+                  {isSyncingPhoneburnerActive && phoneburnerSyncProgress && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          {phoneburnerSyncProgress.step === 'contacts' && 'Syncing contacts...'}
+                          {phoneburnerSyncProgress.step === 'dial_sessions' && 'Syncing dial sessions & calls...'}
+                          {phoneburnerSyncProgress.step === 'complete' && 'Complete'}
+                        </span>
+                      </div>
+                      <Progress value={phoneburnerSyncProgress.progress || 0} className="h-2" />
+                    </div>
+                  )}
+
+                  {phoneburnerConnection.last_sync_at && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Last Sync</span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(phoneburnerConnection.last_sync_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Sync Results */}
+                  {phoneburnerSyncProgress?.step === 'complete' && (
+                    <div className="text-xs text-muted-foreground bg-accent/50 rounded-lg p-3">
+                      <p className="font-medium mb-1">Last sync results:</p>
+                      <p>{phoneburnerSyncProgress.contacts_synced || 0} contacts, {phoneburnerSyncProgress.calls_synced || 0} calls</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => handlePhoneburnerSync(false)}
+                      disabled={isSyncingPhoneburnerActive}
+                    >
+                      {isSyncingPhoneburnerActive ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="mr-2 h-4 w-4" />
+                          Sync Data
+                        </>
+                      )}
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          title="Reset and re-sync from scratch"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-destructive" />
+                            Reset PhoneBurner Sync Data?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will delete all synced PhoneBurner data and start a full re-sync from scratch.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handlePhoneburnerSync(true)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Reset & Full Sync
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                        >
+                          Disconnect
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-destructive" />
+                            Disconnect PhoneBurner?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will remove your PhoneBurner access token and stop all syncing.
+                            You'll need to re-enter your token to reconnect.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleDisconnect(phoneburnerConnection.id)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Disconnect
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="phoneburner-key">Access Token</Label>
+                    <div className="relative">
+                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="phoneburner-key"
+                        type="password"
+                        placeholder="Enter your PhoneBurner access token"
+                        value={phoneburnerApiKey}
+                        onChange={(e) => setPhoneburnerApiKey(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Generate a Personal Access Token in PhoneBurner under My Account → Integration Settings
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Button
+                      onClick={handleConnectPhoneburner}
+                      disabled={isConnectingPhoneburner || !phoneburnerApiKey.trim()}
+                    >
+                      {isConnectingPhoneburner ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        'Connect PhoneBurner'
+                      )}
+                    </Button>
+                    <Button variant="link" size="sm" asChild>
+                      <a
+                        href="https://www.phoneburner.com/developer/getting_started"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        API Docs
                         <ExternalLink className="ml-1 h-3 w-3" />
                       </a>
                     </Button>
