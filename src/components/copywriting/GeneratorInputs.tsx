@@ -11,14 +11,18 @@ interface GeneratorInputsProps {
   setChannel: (value: string) => void;
   sequenceStep: string;
   setSequenceStep: (value: string) => void;
-  targetIndustry: string;
-  setTargetIndustry: (value: string) => void;
-  companyContext: string;
-  setCompanyContext: (value: string) => void;
+  buyerName: string;
+  setBuyerName: (value: string) => void;
+  buyerWebsite: string;
+  setBuyerWebsite: (value: string) => void;
+  industry: string;
+  setIndustry: (value: string) => void;
+  painPoints: string;
+  setPainPoints: (value: string) => void;
+  emailGoal: string;
+  setEmailGoal: (value: string) => void;
   tone: string;
   setTone: (value: string) => void;
-  specificInstructions: string;
-  setSpecificInstructions: (value: string) => void;
 }
 
 const CHANNELS = [
@@ -68,14 +72,18 @@ export function GeneratorInputs({
   setChannel,
   sequenceStep,
   setSequenceStep,
-  targetIndustry,
-  setTargetIndustry,
-  companyContext,
-  setCompanyContext,
+  buyerName,
+  setBuyerName,
+  buyerWebsite,
+  setBuyerWebsite,
+  industry,
+  setIndustry,
+  painPoints,
+  setPainPoints,
+  emailGoal,
+  setEmailGoal,
   tone,
   setTone,
-  specificInstructions,
-  setSpecificInstructions,
 }: GeneratorInputsProps) {
   const steps = SEQUENCE_STEPS[channel as keyof typeof SEQUENCE_STEPS] || SEQUENCE_STEPS.email;
 
@@ -129,24 +137,55 @@ export function GeneratorInputs({
           </Select>
         </div>
 
-        {/* Target Industry */}
+        {/* Buyer Name */}
         <div className="space-y-2">
-          <Label>Target Industry</Label>
+          <Label>Buyer Company Name</Label>
           <Input
-            placeholder="e.g., SaaS, FinTech, Healthcare..."
-            value={targetIndustry}
-            onChange={(e) => setTargetIndustry(e.target.value)}
+            placeholder="e.g., Acme Corp"
+            value={buyerName}
+            onChange={(e) => setBuyerName(e.target.value)}
           />
         </div>
 
-        {/* Company Context */}
+        {/* Buyer Website */}
         <div className="space-y-2">
-          <Label>Company Context</Label>
+          <Label>Buyer Website</Label>
+          <Input
+            placeholder="e.g., acme.com"
+            value={buyerWebsite}
+            onChange={(e) => setBuyerWebsite(e.target.value)}
+          />
+        </div>
+
+        {/* Industry */}
+        <div className="space-y-2">
+          <Label>Industry</Label>
+          <Input
+            placeholder="e.g., SaaS, FinTech, Healthcare..."
+            value={industry}
+            onChange={(e) => setIndustry(e.target.value)}
+          />
+        </div>
+
+        {/* Pain Points */}
+        <div className="space-y-2">
+          <Label>Pain Points</Label>
           <Textarea
-            placeholder="e.g., Series B SaaS company scaling sales team, 50-100 employees..."
-            value={companyContext}
-            onChange={(e) => setCompanyContext(e.target.value)}
+            placeholder="e.g., Struggling with lead quality, high CAC, low conversion rates..."
+            value={painPoints}
+            onChange={(e) => setPainPoints(e.target.value)}
             className="resize-none h-20"
+          />
+        </div>
+
+        {/* Email Goal */}
+        <div className="space-y-2">
+          <Label>Goal of the Email</Label>
+          <Textarea
+            placeholder="e.g., Book a discovery call, get a reply, introduce our solution..."
+            value={emailGoal}
+            onChange={(e) => setEmailGoal(e.target.value)}
+            className="resize-none h-16"
           />
         </div>
 
@@ -171,17 +210,6 @@ export function GeneratorInputs({
               <Label htmlFor="friendly" className="font-normal cursor-pointer">Friendly</Label>
             </div>
           </RadioGroup>
-        </div>
-
-        {/* Specific Instructions */}
-        <div className="space-y-2">
-          <Label>Specific Instructions (optional)</Label>
-          <Textarea
-            placeholder="Any specific requirements, value props to include, angles to try..."
-            value={specificInstructions}
-            onChange={(e) => setSpecificInstructions(e.target.value)}
-            className="resize-none h-20"
-          />
         </div>
       </CardContent>
     </Card>

@@ -9,12 +9,12 @@ const corsHeaders = {
 interface GenerationRequest {
   channel: string;
   sequenceStep: string;
+  buyerName?: string;
+  buyerWebsite?: string;
   targetIndustry?: string;
-  targetPersona?: string;
-  companyContext?: string;
-  triggerEvent?: string;
+  painPoints?: string;
+  emailGoal?: string;
   tone: string;
-  specificInstructions?: string;
   workspaceId: string;
   variationCount?: number;
 }
@@ -39,12 +39,12 @@ serve(async (req) => {
     const { 
       channel, 
       sequenceStep, 
+      buyerName,
+      buyerWebsite,
       targetIndustry, 
-      targetPersona, 
-      companyContext, 
-      triggerEvent, 
+      painPoints,
+      emailGoal,
       tone, 
-      specificInstructions,
       workspaceId,
       variationCount = 3
     } = request;
@@ -160,10 +160,11 @@ serve(async (req) => {
     const prompt = `You are an expert cold outreach copywriter. Generate ${variationCount} ${channel.replace('_', ' ')} variations for a ${sequenceStep.replace('_', ' ')} message.
 
 ## TARGET CONTEXT
+- Buyer Company: ${buyerName || 'Not specified'}
+- Buyer Website: ${buyerWebsite || 'Not specified'}
 - Industry: ${targetIndustry || 'Not specified'}
-- Persona: ${targetPersona || 'Not specified'}
-- Company Context: ${companyContext || 'Not specified'}
-- Trigger Event: ${triggerEvent || 'Not specified'}
+- Pain Points: ${painPoints || 'Not specified'}
+- Goal of Email: ${emailGoal || 'Book a meeting'}
 - Tone: ${tone || 'conversational'}
 
 ## CHANNEL: ${channel.toUpperCase()}
@@ -188,11 +189,6 @@ ${i + 1}. Subject: "${c.subject_line || 'N/A'}"
 ${industryIntel?.length ? `
 ## INDUSTRY INTELLIGENCE:
 ${industryIntel.map(i => `- ${i.intel_type}: ${i.content}`).join('\n')}
-` : ''}
-
-${specificInstructions ? `
-## SPECIFIC INSTRUCTIONS:
-${specificInstructions}
 ` : ''}
 
 ## GENERATION RULES:

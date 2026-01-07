@@ -33,12 +33,12 @@ export interface GenerationResult {
 export interface GenerationRequest {
   channel: string;
   sequenceStep: string;
+  buyerName?: string;
+  buyerWebsite?: string;
   targetIndustry?: string;
-  targetPersona?: string;
-  companyContext?: string;
-  triggerEvent?: string;
+  painPoints?: string;
+  emailGoal?: string;
   tone: string;
-  specificInstructions?: string;
   variationCount?: number;
 }
 

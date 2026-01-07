@@ -11,10 +11,12 @@ export default function CopywritingStudio() {
   // Form state
   const [channel, setChannel] = useState('email');
   const [sequenceStep, setSequenceStep] = useState('first_touch');
-  const [targetIndustry, setTargetIndustry] = useState('');
-  const [companyContext, setCompanyContext] = useState('');
+  const [buyerName, setBuyerName] = useState('');
+  const [buyerWebsite, setBuyerWebsite] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [painPoints, setPainPoints] = useState('');
+  const [emailGoal, setEmailGoal] = useState('');
   const [tone, setTone] = useState('conversational');
-  const [specificInstructions, setSpecificInstructions] = useState('');
 
   const { 
     isGenerating, 
@@ -31,10 +33,12 @@ export default function CopywritingStudio() {
     generateCopy({
       channel,
       sequenceStep,
-      targetIndustry: targetIndustry || undefined,
-      companyContext: companyContext || undefined,
+      buyerName: buyerName || undefined,
+      buyerWebsite: buyerWebsite || undefined,
+      targetIndustry: industry || undefined,
+      painPoints: painPoints || undefined,
+      emailGoal: emailGoal || undefined,
       tone,
-      specificInstructions: specificInstructions || undefined,
       variationCount: 3,
     });
   };
@@ -66,14 +70,18 @@ export default function CopywritingStudio() {
               setChannel={setChannel}
               sequenceStep={sequenceStep}
               setSequenceStep={setSequenceStep}
-              targetIndustry={targetIndustry}
-              setTargetIndustry={setTargetIndustry}
-              companyContext={companyContext}
-              setCompanyContext={setCompanyContext}
+              buyerName={buyerName}
+              setBuyerName={setBuyerName}
+              buyerWebsite={buyerWebsite}
+              setBuyerWebsite={setBuyerWebsite}
+              industry={industry}
+              setIndustry={setIndustry}
+              painPoints={painPoints}
+              setPainPoints={setPainPoints}
+              emailGoal={emailGoal}
+              setEmailGoal={setEmailGoal}
               tone={tone}
               setTone={setTone}
-              specificInstructions={specificInstructions}
-              setSpecificInstructions={setSpecificInstructions}
             />
 
             <Button 
