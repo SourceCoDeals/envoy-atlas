@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useChannel } from '@/hooks/useChannel';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -84,6 +85,7 @@ export default function Connections() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
+  const { channel } = useChannel();
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState('');
@@ -739,9 +741,14 @@ export default function Connections() {
     <DashboardLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Connections</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {channel === 'email' ? 'Email Connections' : 'Calling Connections'}
+          </h1>
           <p className="text-muted-foreground">
-            Connect your email outreach platforms to import campaign data
+            {channel === 'email' 
+              ? 'Connect your email outreach platforms to import campaign data'
+              : 'Connect your cold calling platforms to import dial session data'
+            }
           </p>
         </div>
 
@@ -760,8 +767,11 @@ export default function Connections() {
         )}
 
         <div className="grid gap-6 md:grid-cols-2">
-          {/* Smartlead Connection */}
-          <Card className={smartleadConnection ? 'border-success/30' : ''}>
+          {/* Email Channel Connections */}
+          {channel === 'email' && (
+            <>
+              {/* Smartlead Connection */}
+              <Card className={smartleadConnection ? 'border-success/30' : ''}>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1253,9 +1263,14 @@ export default function Connections() {
               )}
             </CardContent>
           </Card>
+            </>
+          )}
 
-          {/* PhoneBurner Connection */}
-          <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
+          {/* Calling Channel Connections */}
+          {channel === 'calling' && (
+            <>
+              {/* PhoneBurner Connection */}
+              <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1449,6 +1464,8 @@ export default function Connections() {
               )}
             </CardContent>
           </Card>
+            </>
+          )}
         </div>
 
         {/* Data Sync Info */}
@@ -1460,26 +1477,49 @@ export default function Connections() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Historical Backfill</h4>
-                <p className="text-sm text-muted-foreground">
-                  Click "Pull Full History" to import all campaigns, email variants, and metrics
-                </p>
+            {channel === 'email' ? (
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Historical Backfill</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Click "Sync Data" to import all campaigns, email variants, and metrics
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Email Copy Analytics</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Subject lines and body copy are synced with performance metrics
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Copy Insights</h4>
+                  <p className="text-sm text-muted-foreground">
+                    View your synced copy analytics on the Copy Insights page
+                  </p>
+                </div>
               </div>
-              <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Email Copy Analytics</h4>
-                <p className="text-sm text-muted-foreground">
-                  Subject lines and body copy are synced with performance metrics
-                </p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Dial Sessions</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Import dial sessions with call counts, duration, and member info
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Call Analytics</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Dispositions, connect rates, and talk time are automatically tracked
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-accent/30">
+                  <h4 className="font-medium mb-1">Daily Metrics</h4>
+                  <p className="text-sm text-muted-foreground">
+                    View aggregated calling performance on the Calling Dashboard
+                  </p>
+                </div>
               </div>
-              <div className="p-4 rounded-lg bg-accent/30">
-                <h4 className="font-medium mb-1">Copy Insights</h4>
-                <p className="text-sm text-muted-foreground">
-                  View your synced copy analytics on the Copy Insights page
-                </p>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>
