@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useChannel, Channel } from '@/hooks/useChannel';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -27,7 +28,6 @@ import {
   Mail,
   Inbox,
   Shield,
-  Users,
   FileText,
   FlaskConical,
   BookOpen,
@@ -44,6 +44,8 @@ import {
   Briefcase,
   CalendarDays,
   Sparkles,
+  Phone,
+  PhoneCall,
 } from 'lucide-react';
 
 interface NavItem {
@@ -53,7 +55,8 @@ interface NavItem {
   badge?: string;
 }
 
-const mainNavItems: NavItem[] = [
+// Email channel navigation
+const emailMainNavItems: NavItem[] = [
   { title: 'Overview', href: '/', icon: LayoutDashboard },
   { title: 'Deal Hub', href: '/deal-hub', icon: Briefcase },
   { title: 'Inbox', href: '/inbox', icon: Inbox },
@@ -65,15 +68,26 @@ const mainNavItems: NavItem[] = [
   { title: 'Deliverability', href: '/deliverability', icon: Shield },
 ];
 
-const reportsNavItems: NavItem[] = [
+const emailReportsNavItems: NavItem[] = [
   { title: 'Monthly Report', href: '/monthly-report', icon: CalendarDays },
 ];
 
-const experimentNavItems: NavItem[] = [
+const emailExperimentNavItems: NavItem[] = [
   { title: 'Experiments', href: '/experiments', icon: FlaskConical },
   { title: 'Playbook', href: '/playbook', icon: BookOpen },
 ];
 
+// Calling channel navigation
+const callingMainNavItems: NavItem[] = [
+  { title: 'Overview', href: '/calling', icon: LayoutDashboard },
+  { title: 'Call Sessions', href: '/calling/sessions', icon: PhoneCall },
+];
+
+const callingReportsNavItems: NavItem[] = [
+  { title: 'Call Analytics', href: '/calling/analytics', icon: BarChart3 },
+];
+
+// Shared navigation
 const settingsNavItems: NavItem[] = [
   { title: 'Alerts', href: '/alerts', icon: Bell },
   { title: 'Connections', href: '/connections', icon: Plug },
@@ -89,6 +103,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { workspaces, currentWorkspace, setCurrentWorkspace } = useWorkspace();
+  const { channel, setChannel } = useChannel();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -96,6 +111,21 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     await signOut();
     navigate('/auth');
   };
+
+  const handleChannelChange = (newChannel: Channel) => {
+    setChannel(newChannel);
+    // Navigate to the overview of the selected channel
+    if (newChannel === 'calling') {
+      navigate('/calling');
+    } else {
+      navigate('/');
+    }
+  };
+
+  // Get nav items based on current channel
+  const mainNavItems = channel === 'calling' ? callingMainNavItems : emailMainNavItems;
+  const reportsNavItems = channel === 'calling' ? callingReportsNavItems : emailReportsNavItems;
+  const experimentNavItems = channel === 'email' ? emailExperimentNavItems : [];
 
   const NavLink = ({ item }: { item: NavItem }) => {
     const isActive = location.pathname === item.href;
@@ -126,7 +156,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     <>
       {/* Logo */}
       <div className="flex h-14 items-center border-b border-border px-4">
-        <Link to="/" className="flex items-center gap-3">
+        <Link to={channel === 'calling' ? '/calling' : '/'} className="flex items-center gap-3">
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
             <BarChart3 className="h-5 w-5 text-primary-foreground" />
           </div>
@@ -143,6 +173,60 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <ChevronLeft className={cn('h-4 w-4 transition-transform', sidebarCollapsed && 'rotate-180')} />
         </Button>
       </div>
+
+      {/* Channel Toggle */}
+      {!sidebarCollapsed && (
+        <div className="p-4 border-b border-border">
+          <div className="flex rounded-lg bg-muted p-1">
+            <button
+              onClick={() => handleChannelChange('email')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                channel === 'email'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Mail className="h-4 w-4" />
+              Email
+            </button>
+            <button
+              onClick={() => handleChannelChange('calling')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                channel === 'calling'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Phone className="h-4 w-4" />
+              Calling
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Collapsed channel indicator */}
+      {sidebarCollapsed && (
+        <div className="p-2 border-b border-border flex flex-col gap-1">
+          <Button
+            variant={channel === 'email' ? 'default' : 'ghost'}
+            size="icon"
+            onClick={() => handleChannelChange('email')}
+            className="w-full"
+          >
+            <Mail className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={channel === 'calling' ? 'default' : 'ghost'}
+            size="icon"
+            onClick={() => handleChannelChange('calling')}
+            className="w-full"
+          >
+            <Phone className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Workspace selector */}
       {!sidebarCollapsed && workspaces.length > 0 && (
@@ -200,19 +284,22 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             ))}
           </div>
 
-          <Separator />
-
-          {/* Experiments */}
-          <div className="space-y-1">
-            {!sidebarCollapsed && (
-              <p className="px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
-                Testing
-              </p>
-            )}
-            {experimentNavItems.map((item) => (
-              <NavLink key={item.href} item={item} />
-            ))}
-          </div>
+          {/* Testing - Only for Email channel */}
+          {experimentNavItems.length > 0 && (
+            <>
+              <Separator />
+              <div className="space-y-1">
+                {!sidebarCollapsed && (
+                  <p className="px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
+                    Testing
+                  </p>
+                )}
+                {experimentNavItems.map((item) => (
+                  <NavLink key={item.href} item={item} />
+                ))}
+              </div>
+            </>
+          )}
 
           <Separator />
 

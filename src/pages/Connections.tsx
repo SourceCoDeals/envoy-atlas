@@ -24,6 +24,7 @@ import {
   AlertCircle,
   FastForward,
   AlertTriangle,
+  Phone,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -87,8 +88,10 @@ export default function Connections() {
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState('');
   const [replyioApiKey, setReplyioApiKey] = useState('');
+  const [phoneburnerApiKey, setPhoneburnerApiKey] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnectingReplyio, setIsConnectingReplyio] = useState(false);
+  const [isConnectingPhoneburner, setIsConnectingPhoneburner] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isResumingSync, setIsResumingSync] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -534,8 +537,45 @@ export default function Connections() {
     }
   };
 
+  const handleConnectPhoneburner = async () => {
+    if (!currentWorkspace || !user || !phoneburnerApiKey.trim()) {
+      setError('Please enter an API key');
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setIsConnectingPhoneburner(true);
+
+    try {
+      const { error } = await supabase
+        .from('api_connections')
+        .upsert({
+          workspace_id: currentWorkspace.id,
+          platform: 'phoneburner',
+          api_key_encrypted: phoneburnerApiKey,
+          is_active: true,
+          sync_status: 'pending',
+          created_by: user.id,
+        }, {
+          onConflict: 'workspace_id,platform',
+        });
+
+      if (error) throw error;
+
+      setSuccess('PhoneBurner connected successfully!');
+      setPhoneburnerApiKey('');
+      fetchConnections();
+    } catch (err: any) {
+      setError(err.message || 'Failed to connect');
+    } finally {
+      setIsConnectingPhoneburner(false);
+    }
+  };
+
   const smartleadConnection = connections.find(c => c.platform === 'smartlead');
   const replyioConnection = connections.find(c => c.platform === 'replyio');
+  const phoneburnerConnection = connections.find(c => c.platform === 'phoneburner');
   const isSyncingSmartlead = smartleadConnection?.sync_status === 'syncing' || isSyncing;
   const isSyncingReplyioActive = replyioConnection?.sync_status === 'syncing' || isSyncingReplyio;
   const syncProgress = smartleadConnection?.sync_progress;
@@ -1073,6 +1113,129 @@ export default function Connections() {
                     <Button variant="link" size="sm" asChild>
                       <a 
                         href="https://app.reply.io/settings/apikey" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                      >
+                        Get API Key
+                        <ExternalLink className="ml-1 h-3 w-3" />
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* PhoneBurner Connection */}
+          <Card className={phoneburnerConnection ? 'border-success/30' : ''}>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
+                    <Phone className={`h-5 w-5 ${phoneburnerConnection ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">PhoneBurner</CardTitle>
+                    <CardDescription>Cold calling platform</CardDescription>
+                  </div>
+                </div>
+                {phoneburnerConnection && (
+                  <Badge variant="outline" className="border-success text-success">
+                    <StatusDot status="healthy" size="sm" className="mr-1" />
+                    Connected
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {phoneburnerConnection ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Status</span>
+                    <span className="capitalize">{phoneburnerConnection.sync_status || 'Active'}</span>
+                  </div>
+                  
+                  {phoneburnerConnection.last_sync_at && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Last Sync</span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(phoneburnerConnection.last_sync_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    <Button variant="outline" size="sm" className="flex-1" disabled>
+                      <Download className="mr-2 h-4 w-4" />
+                      Sync Data (Coming Soon)
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                        >
+                          Disconnect
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-destructive" />
+                            Disconnect PhoneBurner?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will remove your PhoneBurner API key and stop all syncing.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleDisconnect(phoneburnerConnection.id)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Disconnect
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="phoneburner-key">API Key</Label>
+                    <div className="relative">
+                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="phoneburner-key"
+                        type="password"
+                        placeholder="Enter your PhoneBurner API key"
+                        value={phoneburnerApiKey}
+                        onChange={(e) => setPhoneburnerApiKey(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Button
+                      onClick={handleConnectPhoneburner}
+                      disabled={isConnectingPhoneburner || !phoneburnerApiKey.trim()}
+                    >
+                      {isConnectingPhoneburner ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        'Connect PhoneBurner'
+                      )}
+                    </Button>
+                    <Button variant="link" size="sm" asChild>
+                      <a 
+                        href="https://www.phoneburner.com/developer/index" 
                         target="_blank" 
                         rel="noopener noreferrer"
                       >
