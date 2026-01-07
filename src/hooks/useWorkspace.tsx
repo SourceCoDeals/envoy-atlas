@@ -1,4 +1,6 @@
-import { useState, createContext, useContext, ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import { Database } from '@/integrations/supabase/types';
 
 type Workspace = Database['public']['Tables']['workspaces']['Row'];
@@ -20,31 +22,82 @@ interface WorkspaceContextType {
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
 
-// TEMP: Mock workspace for dev mode (using first SourceCo workspace)
-const MOCK_WORKSPACE: WorkspaceWithRole = {
-  id: 'fd25e07d-984a-4bf2-b3fd-2401d173254e',
-  name: 'SourceCo',
-  slug: 'sourceco',
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  role: 'admin' as AppRole,
-};
-
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  // TEMP: Use mock workspace directly (auth disabled)
-  const [workspaces] = useState<WorkspaceWithRole[]>([MOCK_WORKSPACE]);
-  const [currentWorkspace, setCurrentWorkspace] = useState<WorkspaceWithRole | null>(MOCK_WORKSPACE);
-  const [loading] = useState(false);
+  const { user } = useAuth();
+  const [workspaces, setWorkspaces] = useState<WorkspaceWithRole[]>([]);
+  const [currentWorkspace, setCurrentWorkspace] = useState<WorkspaceWithRole | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchWorkspaces = async () => {
+    if (!user) {
+      setWorkspaces([]);
+      setCurrentWorkspace(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: members, error } = await supabase
+        .from('workspace_members')
+        .select(`
+          role,
+          workspace:workspaces(*)
+        `)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const workspacesWithRoles: WorkspaceWithRole[] = (members || [])
+        .filter(m => m.workspace)
+        .map(m => ({
+          ...(m.workspace as Workspace),
+          role: m.role,
+        }));
+
+      setWorkspaces(workspacesWithRoles);
+
+      // Set current workspace from localStorage or first available
+      const storedWorkspaceId = localStorage.getItem('currentWorkspaceId');
+      const storedWorkspace = workspacesWithRoles.find(w => w.id === storedWorkspaceId);
+      
+      if (storedWorkspace) {
+        setCurrentWorkspace(storedWorkspace);
+      } else if (workspacesWithRoles.length > 0) {
+        setCurrentWorkspace(workspacesWithRoles[0]);
+        localStorage.setItem('currentWorkspaceId', workspacesWithRoles[0].id);
+      }
+    } catch (err) {
+      console.error('Error fetching workspaces:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchWorkspaces();
+  }, [user?.id]);
 
   const handleSetCurrentWorkspace = (workspace: WorkspaceWithRole | null) => {
     setCurrentWorkspace(workspace);
+    if (workspace) {
+      localStorage.setItem('currentWorkspaceId', workspace.id);
+    } else {
+      localStorage.removeItem('currentWorkspaceId');
+    }
   };
 
-  const createWorkspace = async (): Promise<{ error: Error | null; workspace?: Workspace }> => {
-    return { error: null, workspace: MOCK_WORKSPACE };
+  const createWorkspace = async (name: string): Promise<{ error: Error | null; workspace?: Workspace }> => {
+    try {
+      const { data, error } = await supabase.rpc('create_workspace', { _name: name });
+      if (error) throw error;
+      
+      await fetchWorkspaces();
+      return { error: null, workspace: data as Workspace };
+    } catch (err) {
+      return { error: err as Error };
+    }
   };
-
-  const refetch = async () => {};
 
   const userRole = currentWorkspace?.role || null;
 
@@ -57,7 +110,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         loading,
         userRole,
         createWorkspace,
-        refetch,
+        refetch: fetchWorkspaces,
       }}
     >
       {children}
