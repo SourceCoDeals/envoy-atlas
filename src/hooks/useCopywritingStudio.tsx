@@ -38,6 +38,8 @@ export interface GenerationRequest {
   targetIndustry?: string;
   painPoints?: string;
   emailGoal?: string;
+  callTranscript?: string;
+  documentPaths?: string[];
   tone: string;
   variationCount?: number;
 }

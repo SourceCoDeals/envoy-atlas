@@ -14,6 +14,8 @@ interface GenerationRequest {
   targetIndustry?: string;
   painPoints?: string;
   emailGoal?: string;
+  callTranscript?: string;
+  documentPaths?: string[];
   tone: string;
   workspaceId: string;
   variationCount?: number;
@@ -44,6 +46,8 @@ serve(async (req) => {
       targetIndustry, 
       painPoints,
       emailGoal,
+      callTranscript,
+      documentPaths,
       tone, 
       workspaceId,
       variationCount = 3
@@ -189,6 +193,19 @@ ${i + 1}. Subject: "${c.subject_line || 'N/A'}"
 ${industryIntel?.length ? `
 ## INDUSTRY INTELLIGENCE:
 ${industryIntel.map(i => `- ${i.intel_type}: ${i.content}`).join('\n')}
+` : ''}
+
+${callTranscript ? `
+## CALL TRANSCRIPT INSIGHTS:
+The following is a transcript from a real sales call. Extract key language patterns, objections, pain points, and phrases the prospect used:
+
+${callTranscript.substring(0, 5000)}
+${callTranscript.length > 5000 ? '\n[Transcript truncated...]' : ''}
+` : ''}
+
+${documentPaths?.length ? `
+## UPLOADED DOCUMENTS:
+${documentPaths.length} industry document(s) have been uploaded for context. The content will be processed separately.
 ` : ''}
 
 ## GENERATION RULES:
