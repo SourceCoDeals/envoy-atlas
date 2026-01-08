@@ -26,13 +26,20 @@ import Playbook from "./pages/Playbook";
 import Alerts from "./pages/Alerts";
 import Settings from "./pages/Settings";
 import CopywritingStudio from "./pages/CopywritingStudio";
-import CallingDashboard from "./pages/CallingDashboard";
+import CallerDashboard from "./pages/CallerDashboard";
+import EngagementDashboard from "./pages/EngagementDashboard";
+import TopDeals from "./pages/TopDeals";
+import TopCallsWeek from "./pages/TopCallsWeek";
+import DataInsights from "./pages/DataInsights";
+import CallLibrary from "./pages/CallLibrary";
+import CallingInformation from "./pages/CallingInformation";
+import AISummary from "./pages/AISummary";
+import AIChatbot from "./pages/AIChatbot";
 import CallSessions from "./pages/CallSessions";
 import CallAnalytics from "./pages/CallAnalytics";
 import CallSearch from "./pages/CallSearch";
 import BestWorstCalls from "./pages/BestWorstCalls";
 import RepInsights from "./pages/RepInsights";
-import CallLibrary from "./pages/CallLibrary";
 import PatternAnalysis from "./pages/PatternAnalysis";
 import TimingInsights from "./pages/TimingInsights";
 import TrainingQueue from "./pages/TrainingQueue";
@@ -77,14 +84,22 @@ const App = () => (
                   <Route path="/alerts" element={<Alerts />} />
                   <Route path="/settings" element={<Settings />} />
 
-                  {/* Calling routes */}
-                  <Route path="/calling" element={<CallingDashboard />} />
+                  {/* Calling routes - New 9 pages from requirements */}
+                  <Route path="/calling" element={<CallerDashboard />} />
+                  <Route path="/calling/engagements" element={<EngagementDashboard />} />
+                  <Route path="/calling/deals" element={<TopDeals />} />
+                  <Route path="/calling/top-calls" element={<TopCallsWeek />} />
+                  <Route path="/calling/insights" element={<DataInsights />} />
+                  <Route path="/calling/library" element={<CallLibrary />} />
+                  <Route path="/calling/information" element={<CallingInformation />} />
+                  <Route path="/calling/ai-summary" element={<AISummary />} />
+                  <Route path="/calling/chatbot" element={<AIChatbot />} />
+                  {/* Legacy calling routes */}
                   <Route path="/calling/search" element={<CallSearch />} />
                   <Route path="/calling/best-worst" element={<BestWorstCalls />} />
                   <Route path="/calling/sessions" element={<CallSessions />} />
                   <Route path="/calling/analytics" element={<CallAnalytics />} />
                   <Route path="/calling/reps" element={<RepInsights />} />
-                  <Route path="/calling/library" element={<CallLibrary />} />
                   <Route path="/calling/patterns" element={<PatternAnalysis />} />
                   <Route path="/calling/timing" element={<TimingInsights />} />
                   <Route path="/calling/training" element={<TrainingQueue />} />
