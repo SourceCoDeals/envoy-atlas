@@ -382,7 +382,46 @@ serve(async (req) => {
 
       await delay(RATE_LIMIT_DELAY_MS);
 
-      // Test 3b: Option A - Try fetching dial sessions per member using user_id filter
+      // Test 3b: Try /calls endpoint directly (for calls made outside dial sessions)
+      try {
+        const callsRes = await phoneburnerRequest(
+          `/calls?page=1&page_size=5&date_start=${start}&date_end=${end}`,
+          apiKey
+        );
+
+        results.tests.calls_endpoint = {
+          success: true,
+          response_keys: Object.keys(callsRes || {}),
+          raw_preview: JSON.stringify(callsRes).slice(0, 500),
+        };
+
+        // Try to parse the response
+        const callsData = callsRes?.calls ?? {};
+        const calls = callsData?.calls ?? callsRes?.call ?? [];
+        const callArr = Array.isArray(calls) ? calls : [];
+
+        results.tests.calls_endpoint.total_results = callsData.total_results || callArr.length;
+        results.tests.calls_endpoint.calls_on_page = callArr.length;
+        if (callArr.length > 0) {
+          results.tests.calls_endpoint.sample = callArr.slice(0, 2).map((c: any) => ({
+            call_id: c.call_id || c.id,
+            contact_id: c.contact_id,
+            disposition: c.disposition || c.disposition_name,
+            duration: c.duration,
+            raw_keys: Object.keys(c || {}),
+          }));
+        }
+      } catch (e: any) {
+        results.tests.calls_endpoint = {
+          success: false,
+          error: e.message,
+          note: "The /calls endpoint may not exist or require different permissions"
+        };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 3c: Option A - Try fetching dial sessions per member using user_id filter
       if (results.tests.members?.success && results.tests.dial_sessions?.sessions_on_page === 0) {
         results.tests.dial_sessions_per_member = [];
         const memberSamples = results.tests.members.sample || [];
@@ -464,19 +503,19 @@ serve(async (req) => {
       const dialTest = results.tests.dial_sessions;
       const usageTest = results.tests.usage;
       const optionASummary = results.tests.option_a_summary;
+      const callsEndpoint = results.tests.calls_endpoint;
       const authType = results.auth_info?.auth_type || "unknown";
 
       if (dialTest?.success && dialTest.sessions_on_page > 0) {
         results.recommendation = `Found ${dialTest.total_results || dialTest.sessions_on_page} dial sessions using ${authType}! Will sync individual calls from session data.`;
+      } else if (callsEndpoint?.success && callsEndpoint.calls_on_page > 0) {
+        results.recommendation = `Found calls via /calls endpoint (${callsEndpoint.total_results} total). These are likely click-to-call records. Sync can fetch these directly.`;
       } else if (optionASummary?.members_with_sessions > 0) {
         results.recommendation = `Option A works! Found ${optionASummary.total_sessions_found} sessions across ${optionASummary.members_with_sessions} members using ${authType}. Sync will fetch per-member.`;
-      } else if (dialTest?.success && dialTest.sessions_on_page === 0) {
-        const reason = authType === "oauth"
-          ? "OAuth connected but no sessions found. Will try per-member fetch (Option A) during sync."
-          : "No dial sessions found (PAT limitation). Consider using OAuth for full access.";
-        results.recommendation = reason;
+      } else if (dialTest?.success && dialTest.sessions_on_page === 0 && callsEndpoint?.success === false) {
+        results.recommendation = `No dial sessions found. The 12k+ calls in usage may be click-to-call records not accessible via dial session APIs. Consider contacting PhoneBurner support for call history access.`;
       } else if (usageTest?.success && usageTest.total_calls > 0) {
-        results.recommendation = `Usage shows ${usageTest.total_calls} calls across ${usageTest.member_count} members (${authType}). Will use aggregate metrics.`;
+        results.recommendation = `Usage shows ${usageTest.total_calls} calls across ${usageTest.member_count} members (${authType}). Individual call records may require different API access.`;
       } else {
         results.recommendation = `Limited data available (${authType}). Will sync contacts and available metrics.`;
       }
