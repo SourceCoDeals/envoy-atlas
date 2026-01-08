@@ -318,8 +318,9 @@ serve(async (req) => {
           total_contacts: contactsData.total_results || contacts.length,
           total_pages: contactsData.total_pages || 1,
           sample: contacts.slice(0, 2).map((c: any) => ({
-            contact_user_id: c.contact_user_id || c.id,
+            contact_user_id: c.contact_user_id || c.contact_id || c.id,
             name: `${c.first_name || ""} ${c.last_name || ""}`.trim(),
+            raw_keys: Object.keys(c || {}),  // Debug: show available fields
           })),
         };
       } catch (e: any) {
@@ -385,98 +386,102 @@ serve(async (req) => {
 
       // Test 3b: Try contact activities endpoint (calls are tracked per-contact)
       // This is a key discovery - PhoneBurner stores call history as contact activities
-      if (results.tests.contacts?.success && results.tests.contacts.sample?.length > 0) {
-        const testContactId = results.tests.contacts.sample[0].contact_user_id;
+      const testContactId = results.tests.contacts?.sample?.[0]?.contact_user_id;
 
-        if (testContactId) {
-          try {
-            const activitiesRes = await phoneburnerRequest(
-              `/contacts/${testContactId}/activities?page=1&page_size=10&days=180`,
-              apiKey
-            );
+      if (!testContactId) {
+        results.tests.contact_activities = {
+          success: false,
+          error: "No contact ID found in contacts sample",
+          contacts_sample: results.tests.contacts?.sample,
+          note: "Check raw_keys to see available contact fields"
+        };
+      } else {
+        try {
+          const activitiesRes = await phoneburnerRequest(
+            `/contacts/${testContactId}/activities?page=1&page_size=10&days=180`,
+            apiKey
+          );
 
-            results.tests.contact_activities = {
-              success: true,
-              contact_id: testContactId,
-              response_keys: Object.keys(activitiesRes || {}),
-            };
+          results.tests.contact_activities = {
+            success: true,
+            contact_id: testContactId,
+            response_keys: Object.keys(activitiesRes || {}),
+            raw_preview: JSON.stringify(activitiesRes).slice(0, 300),
+          };
 
-            const activitiesData = activitiesRes?.contact_activities ?? {};
-            const activities = activitiesData?.contact_activities ?? [];
-            const activityArr = Array.isArray(activities) ? activities : [];
+          const activitiesData = activitiesRes?.contact_activities ?? {};
+          const activities = activitiesData?.contact_activities ?? [];
+          const activityArr = Array.isArray(activities) ? activities : [];
 
-            results.tests.contact_activities.total_results = activitiesData.total_results || activityArr.length;
-            results.tests.contact_activities.activities_on_page = activityArr.length;
+          results.tests.contact_activities.total_results = activitiesData.total_results || activityArr.length;
+          results.tests.contact_activities.activities_on_page = activityArr.length;
 
-            // Filter for call-related activities
-            const callActivities = activityArr.filter((a: any) =>
-              a.activity?.toLowerCase().includes('call') ||
-              a.activity?.toLowerCase().includes('dial') ||
-              a.activity?.toLowerCase().includes('voicemail')
-            );
+          // Filter for call-related activities
+          const callActivities = activityArr.filter((a: any) =>
+            a.activity?.toLowerCase().includes('call') ||
+            a.activity?.toLowerCase().includes('dial') ||
+            a.activity?.toLowerCase().includes('voicemail')
+          );
 
-            results.tests.contact_activities.call_activities_found = callActivities.length;
+          results.tests.contact_activities.call_activities_found = callActivities.length;
 
-            if (activityArr.length > 0) {
-              results.tests.contact_activities.sample = activityArr.slice(0, 3).map((a: any) => ({
-                activity_id: a.activity_id || a.user_activity_id,
-                activity: a.activity,
-                date: a.date,
-                raw_keys: Object.keys(a || {}),
-              }));
-            }
-          } catch (e: any) {
-            results.tests.contact_activities = {
-              success: false,
-              error: e.message,
-              note: "Contact activities endpoint may require different permissions"
-            };
+          if (activityArr.length > 0) {
+            results.tests.contact_activities.sample = activityArr.slice(0, 3).map((a: any) => ({
+              activity_id: a.activity_id || a.user_activity_id,
+              activity: a.activity,
+              date: a.date,
+              raw_keys: Object.keys(a || {}),
+            }));
           }
+        } catch (e: any) {
+          results.tests.contact_activities = {
+            success: false,
+            contact_id: testContactId,
+            error: e.message,
+            note: "Contact activities endpoint may require different permissions"
+          };
         }
       }
 
       await delay(RATE_LIMIT_DELAY_MS);
 
       // Test 3c: Try contact auditlog endpoint (more detailed call records)
-      if (results.tests.contacts?.success && results.tests.contacts.sample?.length > 0) {
-        const testContactId = results.tests.contacts.sample[0].contact_user_id;
+      if (testContactId) {
+        try {
+          const auditRes = await phoneburnerRequest(
+            `/contacts/${testContactId}/auditlog?page=1&page_size=10`,
+            apiKey
+          );
 
-        if (testContactId) {
-          try {
-            const auditRes = await phoneburnerRequest(
-              `/contacts/${testContactId}/auditlog?page=1&page_size=10`,
-              apiKey
-            );
+          results.tests.contact_auditlog = {
+            success: true,
+            contact_id: testContactId,
+            response_keys: Object.keys(auditRes || {}),
+            raw_preview: JSON.stringify(auditRes).slice(0, 500),
+          };
 
-            results.tests.contact_auditlog = {
-              success: true,
-              contact_id: testContactId,
-              response_keys: Object.keys(auditRes || {}),
-              raw_preview: JSON.stringify(auditRes).slice(0, 500),
-            };
+          const auditData = auditRes?.contact_auditlog ?? auditRes?.auditlog ?? {};
+          const entries = auditData?.contact_auditlog ?? auditData?.auditlog ?? [];
+          const entryArr = Array.isArray(entries) ? entries : [];
 
-            const auditData = auditRes?.contact_auditlog ?? auditRes?.auditlog ?? {};
-            const entries = auditData?.contact_auditlog ?? auditData?.auditlog ?? [];
-            const entryArr = Array.isArray(entries) ? entries : [];
+          results.tests.contact_auditlog.total_results = auditData.total_results || entryArr.length;
+          results.tests.contact_auditlog.entries_on_page = entryArr.length;
 
-            results.tests.contact_auditlog.total_results = auditData.total_results || entryArr.length;
-            results.tests.contact_auditlog.entries_on_page = entryArr.length;
-
-            if (entryArr.length > 0) {
-              results.tests.contact_auditlog.sample = entryArr.slice(0, 3).map((e: any) => ({
-                action: e.action,
-                data_type: e.data_type,
-                date_added: e.date_added,
-                member_id: e.member_id,
-                raw_keys: Object.keys(e || {}),
-              }));
-            }
-          } catch (e: any) {
-            results.tests.contact_auditlog = {
-              success: false,
-              error: e.message,
-            };
+          if (entryArr.length > 0) {
+            results.tests.contact_auditlog.sample = entryArr.slice(0, 3).map((e: any) => ({
+              action: e.action,
+              data_type: e.data_type,
+              date_added: e.date_added,
+              member_id: e.member_id,
+              raw_keys: Object.keys(e || {}),
+            }));
           }
+        } catch (e: any) {
+          results.tests.contact_auditlog = {
+            success: false,
+            contact_id: testContactId,
+            error: e.message,
+          };
         }
       }
 
