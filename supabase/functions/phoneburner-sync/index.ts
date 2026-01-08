@@ -324,6 +324,14 @@ serve(async (req) => {
           `/dialsession?page=1&page_size=5&date_start=${start}&date_end=${end}`,
           apiKey
         );
+
+        // Log raw response structure for debugging
+        results.tests.dial_sessions_raw = {
+          response_keys: Object.keys(sessionsRes || {}),
+          dialsessions_type: typeof sessionsRes?.dialsessions,
+          dialsessions_keys: sessionsRes?.dialsessions ? Object.keys(sessionsRes.dialsessions) : null,
+        };
+
         const sessionsData = sessionsRes?.dialsessions ?? {};
         const sessions = sessionsData?.dialsessions ?? sessionsRes?.dial_sessions ?? [];
         const sessionArr = Array.isArray(sessions) ? sessions : [];
@@ -337,8 +345,28 @@ serve(async (req) => {
             dialsession_id: s.dialsession_id || s.id,
             start_when: s.start_when,
             call_count: s.calls?.length || s.call_count || 0,
+            raw_keys: Object.keys(s || {}),
           })),
         };
+
+        // If we have sessions, test fetching one session's details
+        if (sessionArr.length > 0) {
+          const testSessionId = sessionArr[0]?.dialsession_id || sessionArr[0]?.id;
+          if (testSessionId) {
+            try {
+              const detailRes = await phoneburnerRequest(`/dialsession/${testSessionId}`, apiKey);
+              results.tests.dial_session_detail = {
+                success: true,
+                response_keys: Object.keys(detailRes || {}),
+                calls_found: detailRes?.calls?.length ??
+                            detailRes?.dialsession?.calls?.length ??
+                            detailRes?.dial_session?.calls?.length ?? 0,
+              };
+            } catch (e: any) {
+              results.tests.dial_session_detail = { success: false, error: e.message };
+            }
+          }
+        }
       } catch (e: any) {
         results.tests.dial_sessions = { success: false, error: e.message };
       }
@@ -513,16 +541,21 @@ serve(async (req) => {
         let detail: any = null;
         try {
           detail = await phoneburnerRequest(`/dialsession/${externalSessionId}`, apiKey);
+          console.log(`Session ${externalSessionId} detail keys:`, Object.keys(detail || {}));
           console.log(`Session ${externalSessionId} detail keys: ${Object.keys(detail || {}).join(", ")}`);
         } catch (e) {
           console.error("Dial session detail fetch error", e);
           continue;
         }
 
+        // Try multiple possible response structures
+        const calls = detail?.calls ?? detail?.dial_session?.calls ?? detail?.dialsession?.calls ??
+                      detail?.dialsession?.dialsession?.calls ?? [];
         // The detail response has dialsessions.dialsessions which contains the session with calls
         const detailSession = detail?.dialsessions?.dialsessions ?? detail?.dialsessions ?? detail?.dial_session ?? {};
         const calls = detailSession?.calls ?? detail?.calls ?? [];
         const callArr: any[] = Array.isArray(calls) ? calls : [];
+        console.log(`Session ${externalSessionId}: found ${callArr.length} calls`);
 
         console.log(`Session ${externalSessionId} has ${callArr.length} calls`);
 
@@ -530,6 +563,15 @@ serve(async (req) => {
           const externalCallId = String(c?.call_id ?? c?.id ?? "");
           if (!externalCallId) continue;
 
+          // Fetch individual call details to get recording URL
+          let recordingUrl = c?.recording_url ?? c?.recording ?? null;
+          if (!recordingUrl && externalCallId) {
+            try {
+              const callDetail = await phoneburnerRequest(
+                `/dialsession/call/${externalCallId}?include_recording=1`,
+                apiKey
+              );
+              recordingUrl = callDetail?.call?.recording_url ?? callDetail?.recording_url ?? null;
           // Try to get recording URL for this call
           let recordingUrl = c?.recording_url ?? null;
           if (!recordingUrl) {
@@ -551,6 +593,14 @@ serve(async (req) => {
               phone_number: c?.phone ?? c?.phone_number ?? null,
               start_at: c?.start_when ?? c?.start_at ?? null,
               end_at: c?.end_when ?? c?.end_at ?? null,
+              duration_seconds: c?.duration_seconds ?? c?.duration ?? null,
+              disposition: c?.disposition ?? c?.disposition_name ?? null,
+              disposition_id: c?.disposition_id ? String(c.disposition_id) : null,
+              is_connected: typeof c?.connected === "boolean" ? c.connected :
+                           (c?.disposition?.toLowerCase()?.includes("connect") ?? null),
+              is_voicemail: typeof c?.voicemail === "boolean" ? c.voicemail :
+                           (c?.disposition?.toLowerCase()?.includes("voicemail") ?? null),
+              notes: c?.notes ?? c?.call_notes ?? null,
               duration_seconds: c?.duration ?? c?.duration_seconds ?? null,
               disposition: c?.disposition ?? null,
               disposition_id: null,
@@ -575,6 +625,7 @@ serve(async (req) => {
       if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
     }
 
+    // ================== PHASE 2: CONTACTS ==================
     console.log(`Dial sessions phase complete. Found ${sessionsFoundCount} sessions, synced ${callsSynced} calls.`);
 
     // ================== PHASE 2: CONTACTS (light) ==================
@@ -588,8 +639,10 @@ serve(async (req) => {
       const contactsData = list?.contacts ?? {};
       const contacts = contactsData?.contacts ?? [];
       const contactArr: any[] = Array.isArray(contacts) ? contacts : [];
+      const totalContacts = contactsData?.total_results ?? contactArr.length;
+      const totalPages = contactsData?.total_pages ?? 1;
 
-      console.log(`Contacts page ${contactsPage}: ${contactArr.length} contacts found`);
+      console.log(`Contacts page ${contactsPage}/${totalPages}: ${contactArr.length} contacts (total: ${totalContacts})`);
 
       if (contactArr.length === 0) {
         phase = "metrics";
@@ -608,8 +661,17 @@ serve(async (req) => {
         const externalContactId = String(c?.contact_user_id ?? c?.contact_id ?? c?.id ?? "");
         if (!externalContactId) continue;
 
-        const email = c?.primary_email?.email_address ?? c?.email ?? null;
-        const phone = c?.primary_phone?.raw_phone ?? c?.primary_phone?.phone ?? c?.primary_phone ?? null;
+        // Extract email - handle multiple formats
+        const email = c?.primary_email?.email_address ??
+                     c?.emails?.[0]?.email_address ??
+                     c?.email ?? null;
+
+        // Extract phone - handle multiple formats
+        const phone = c?.primary_phone?.raw_phone ??
+                     c?.primary_phone?.phone ??
+                     c?.phones?.[0]?.raw_phone ??
+                     c?.phones?.[0]?.phone ??
+                     (typeof c?.primary_phone === "string" ? c.primary_phone : null) ?? null;
 
         const { error: upsertErr } = await supabaseAdmin.from("phoneburner_contacts").upsert(
           {
@@ -619,10 +681,11 @@ serve(async (req) => {
             last_name: c?.last_name ?? null,
             email,
             phone,
-            company: c?.company ?? null,
+            company: c?.company ?? c?.company_name ?? null,
             category_id: c?.category_id ? String(c.category_id) : null,
-            date_added: c?.date_added ?? null,
+            date_added: c?.date_added ?? c?.created_at ?? null,
             tags: c?.tags ?? null,
+            updated_at: new Date().toISOString(),
           },
           { onConflict: "workspace_id,external_contact_id" }
         );
@@ -643,11 +706,17 @@ serve(async (req) => {
       // First fetch team members from /members endpoint
       try {
         const membersRes = await phoneburnerRequest(`/members`, apiKey);
+        console.log("Members response keys:", Object.keys(membersRes || {}));
+
+        // Handle nested members structure: { members: { members: [...] } } or { members: [...] }
         // PhoneBurner returns either { members: { members: [...] } } or { members: [...] }
         const rawMembers = membersRes?.members?.members ?? membersRes?.members ?? [];
         const memberArr: any[] = Array.isArray(rawMembers)
           ? (Array.isArray(rawMembers[0]) ? rawMembers[0] : rawMembers)
           : [];
+
+        console.log(`Found ${memberArr.length} members`);
+
         const memberNameMap: Record<string, string> = {};
 
         for (const m of memberArr) {
