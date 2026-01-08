@@ -1286,6 +1286,45 @@ export type Database = {
         }
         Relationships: []
       }
+      cold_calling_benchmarks: {
+        Row: {
+          benchmark_range_high: number | null
+          benchmark_range_low: number | null
+          benchmark_unit: string
+          benchmark_value: number
+          created_at: string
+          description: string | null
+          id: string
+          metric_key: string
+          metric_name: string
+          source: string | null
+        }
+        Insert: {
+          benchmark_range_high?: number | null
+          benchmark_range_low?: number | null
+          benchmark_unit: string
+          benchmark_value: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          metric_key: string
+          metric_name: string
+          source?: string | null
+        }
+        Update: {
+          benchmark_range_high?: number | null
+          benchmark_range_low?: number | null
+          benchmark_unit?: string
+          benchmark_value?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          metric_key?: string
+          metric_name?: string
+          source?: string | null
+        }
+        Relationships: []
+      }
       contact_notes: {
         Row: {
           created_at: string
@@ -2261,6 +2300,61 @@ export type Database = {
           },
         ]
       }
+      lead_call_attempts: {
+        Row: {
+          attempt_count: number
+          first_attempt_at: string
+          id: string
+          last_attempt_at: string
+          lead_id: string
+          outcome: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          attempt_count?: number
+          first_attempt_at?: string
+          id?: string
+          last_attempt_at?: string
+          lead_id: string
+          outcome?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          attempt_count?: number
+          first_attempt_at?: string
+          id?: string
+          last_attempt_at?: string
+          lead_id?: string
+          outcome?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_call_attempts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "contact_engagement_summary"
+            referencedColumns: ["lead_id"]
+          },
+          {
+            foreignKeyName: "lead_call_attempts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_call_attempts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads: {
         Row: {
           assigned_to: string | null
@@ -2738,12 +2832,16 @@ export type Database = {
           calls_connected: number | null
           created_at: string
           date: string
+          decision_maker_connects: number | null
           emails_sent: number | null
           id: string
           interested_count: number | null
+          meaningful_conversations: number | null
+          meetings_booked: number | null
           member_id: string | null
           member_name: string | null
           not_interested_count: number | null
+          qualified_opportunities: number | null
           total_calls: number | null
           total_sessions: number | null
           total_talk_time_seconds: number | null
@@ -2755,12 +2853,16 @@ export type Database = {
           calls_connected?: number | null
           created_at?: string
           date: string
+          decision_maker_connects?: number | null
           emails_sent?: number | null
           id?: string
           interested_count?: number | null
+          meaningful_conversations?: number | null
+          meetings_booked?: number | null
           member_id?: string | null
           member_name?: string | null
           not_interested_count?: number | null
+          qualified_opportunities?: number | null
           total_calls?: number | null
           total_sessions?: number | null
           total_talk_time_seconds?: number | null
@@ -2772,12 +2874,16 @@ export type Database = {
           calls_connected?: number | null
           created_at?: string
           date?: string
+          decision_maker_connects?: number | null
           emails_sent?: number | null
           id?: string
           interested_count?: number | null
+          meaningful_conversations?: number | null
+          meetings_booked?: number | null
           member_id?: string | null
           member_name?: string | null
           not_interested_count?: number | null
+          qualified_opportunities?: number | null
           total_calls?: number | null
           total_sessions?: number | null
           total_talk_time_seconds?: number | null
