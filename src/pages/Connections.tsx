@@ -722,6 +722,30 @@ export default function Connections() {
                             </>
                           )}
                         </div>
+
+                        {/* Upgrade to OAuth for individual call records */}
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={handlePhoneBurnerOAuth}
+                          disabled={!!isConnecting.phoneburner_oauth}
+                        >
+                          {isConnecting.phoneburner_oauth ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Authorizing...
+                            </>
+                          ) : (
+                            <>
+                              <ExternalLink className="mr-2 h-4 w-4" />
+                              Authorize for Individual Calls
+                            </>
+                          )}
+                        </Button>
+                        <p className="text-xs text-muted-foreground text-center">
+                          OAuth authorization enables individual call records & recordings
+                        </p>
+
                         <Button
                           variant="ghost"
                           size="sm"
