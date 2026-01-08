@@ -50,6 +50,24 @@ interface ProspectMetrics {
   pendingFollowUps: number;
 }
 
+interface GatekeeperMetrics {
+  totalGatekeeperCalls: number;
+  outcomes: { outcome: string; count: number; percentage: number }[];
+  techniques: { technique: string; successRate: number; count: number }[];
+  avgHandlingScore: number;
+  transferRate: number;
+  blockedRate: number;
+}
+
+interface WrongNumberMetrics {
+  totalWrongNumbers: number;
+  wrongNumberRate: number;
+  typeBreakdown: { type: string; count: number; percentage: number }[];
+  sourceQuality: { source: string; wrongCount: number; totalCount: number; rate: number }[];
+  correctedCount: number;
+  timeWasted: number;
+}
+
 export function useDataInsights() {
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
@@ -68,6 +86,12 @@ export function useDataInsights() {
   });
   const [prospectMetrics, setProspectMetrics] = useState<ProspectMetrics>({
     industryBreakdown: [], openingTypeEffectiveness: [], topPainPoints: [], pendingFollowUps: 0,
+  });
+  const [gatekeeperMetrics, setGatekeeperMetrics] = useState<GatekeeperMetrics>({
+    totalGatekeeperCalls: 0, outcomes: [], techniques: [], avgHandlingScore: 0, transferRate: 0, blockedRate: 0,
+  });
+  const [wrongNumberMetrics, setWrongNumberMetrics] = useState<WrongNumberMetrics>({
+    totalWrongNumbers: 0, wrongNumberRate: 0, typeBreakdown: [], sourceQuality: [], correctedCount: 0, timeWasted: 0,
   });
 
   useEffect(() => {
@@ -197,6 +221,94 @@ export function useDataInsights() {
       const topPainPoints = Array.from(painPointMap.entries()).map(([painPoint, count]) => ({ painPoint, count })).sort((a, b) => b.count - a.count).slice(0, 10);
 
       setProspectMetrics({ industryBreakdown, openingTypeEffectiveness, topPainPoints, pendingFollowUps: pendingFollowups?.length || 0 });
+
+      // Gatekeeper Metrics
+      const gatekeeperCalls = aiScores?.filter(s => s.call_category === 'Gatekeeper') || [];
+      const totalGK = gatekeeperCalls.length;
+      const outcomeMap = new Map<string, number>();
+      const techniqueMap = new Map<string, { success: number; total: number }>();
+      let totalHandlingScore = 0;
+      let handlingScoreCount = 0;
+
+      gatekeeperCalls.forEach(call => {
+        const outcome = call.gatekeeper_outcome || 'Unknown';
+        outcomeMap.set(outcome, (outcomeMap.get(outcome) || 0) + 1);
+
+        const technique = call.gatekeeper_technique_used || 'Unknown';
+        const existing = techniqueMap.get(technique) || { success: 0, total: 0 };
+        existing.total += 1;
+        if (outcome === 'Transferred' || outcome === 'Callback Scheduled') existing.success += 1;
+        techniqueMap.set(technique, existing);
+
+        if (call.gatekeeper_handling_score) {
+          totalHandlingScore += call.gatekeeper_handling_score;
+          handlingScoreCount += 1;
+        }
+      });
+
+      const gkOutcomes = Array.from(outcomeMap.entries()).map(([outcome, count]) => ({
+        outcome, count, percentage: totalGK > 0 ? (count / totalGK) * 100 : 0,
+      }));
+      const gkTechniques = Array.from(techniqueMap.entries()).map(([technique, data]) => ({
+        technique, successRate: data.total > 0 ? (data.success / data.total) * 100 : 0, count: data.total,
+      }));
+      const transferredCount = outcomeMap.get('Transferred') || 0;
+      const blockedCount = outcomeMap.get('Blocked') || 0;
+
+      setGatekeeperMetrics({
+        totalGatekeeperCalls: totalGK,
+        outcomes: gkOutcomes,
+        techniques: gkTechniques,
+        avgHandlingScore: handlingScoreCount > 0 ? totalHandlingScore / handlingScoreCount : 0,
+        transferRate: totalGK > 0 ? (transferredCount / totalGK) * 100 : 0,
+        blockedRate: totalGK > 0 ? (blockedCount / totalGK) * 100 : 0,
+      });
+
+      // Wrong Number Metrics
+      const wrongNumberCalls = aiScores?.filter(s => s.wrong_number_flag) || [];
+      const totalWN = wrongNumberCalls.length;
+      const wnTypeMap = new Map<string, number>();
+      const sourceMap = new Map<string, { wrong: number; total: number }>();
+      let corrected = 0;
+
+      wrongNumberCalls.forEach(call => {
+        const type = call.wrong_number_type || 'Unknown';
+        wnTypeMap.set(type, (wnTypeMap.get(type) || 0) + 1);
+
+        const source = call.data_source || 'Unknown';
+        const existing = sourceMap.get(source) || { wrong: 0, total: 0 };
+        existing.wrong += 1;
+        sourceMap.set(source, existing);
+
+        if (call.correct_info_obtained) corrected += 1;
+      });
+
+      // Add total counts for sources
+      aiScores?.forEach(call => {
+        const source = call.data_source || 'Unknown';
+        const existing = sourceMap.get(source) || { wrong: 0, total: 0 };
+        existing.total += 1;
+        sourceMap.set(source, existing);
+      });
+
+      const wnTypes = Array.from(wnTypeMap.entries()).map(([type, count]) => ({
+        type, count, percentage: totalWN > 0 ? (count / totalWN) * 100 : 0,
+      }));
+      const sourceQuality = Array.from(sourceMap.entries())
+        .filter(([_, data]) => data.total > 0)
+        .map(([source, data]) => ({
+          source, wrongCount: data.wrong, totalCount: data.total, rate: (data.wrong / data.total) * 100,
+        }));
+
+      setWrongNumberMetrics({
+        totalWrongNumbers: totalWN,
+        wrongNumberRate: totalDials > 0 ? (totalWN / totalDials) * 100 : 0,
+        typeBreakdown: wnTypes,
+        sourceQuality,
+        correctedCount: corrected,
+        timeWasted: totalWN * 2, // Assume ~2 min wasted per wrong number
+      });
+
     } catch (error) {
       console.error('Error fetching data insights:', error);
     } finally {
@@ -204,5 +316,15 @@ export function useDataInsights() {
     }
   };
 
-  return { loading, benchmarks, activityMetrics, engagementMetrics, outcomeMetrics, prospectMetrics, refetch: fetchAllData };
+  return { 
+    loading, 
+    benchmarks, 
+    activityMetrics, 
+    engagementMetrics, 
+    outcomeMetrics, 
+    prospectMetrics, 
+    gatekeeperMetrics,
+    wrongNumberMetrics,
+    refetch: fetchAllData 
+  };
 }
