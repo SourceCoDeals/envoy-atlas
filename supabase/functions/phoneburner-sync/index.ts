@@ -619,13 +619,15 @@ serve(async (req) => {
       // First fetch team members from /members endpoint
       try {
         const membersRes = await phoneburnerRequest(`/members`, apiKey);
-        const members = membersRes?.members ?? [];
-        const memberArr: any[] = Array.isArray(members) ? members : [];
-
+        // PhoneBurner returns either { members: { members: [...] } } or { members: [...] }
+        const rawMembers = membersRes?.members?.members ?? membersRes?.members ?? [];
+        const memberArr: any[] = Array.isArray(rawMembers)
+          ? (Array.isArray(rawMembers[0]) ? rawMembers[0] : rawMembers)
+          : [];
         const memberNameMap: Record<string, string> = {};
 
         for (const m of memberArr) {
-          const externalMemberId = String(m?.member_user_id ?? m?.member_id ?? m?.id ?? "");
+          const externalMemberId = String(m?.member_user_id ?? m?.user_id ?? m?.member_id ?? m?.id ?? "");
           if (!externalMemberId) continue;
 
           const firstName = m?.first_name ?? "";
