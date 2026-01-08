@@ -480,18 +480,22 @@ serve(async (req) => {
     // ================== PHASE 1: DIAL SESSIONS ==================
     console.log(`Starting dial sessions sync from ${startYmd} to ${endYmd}`);
 
+    // Try to fetch dial sessions (works if user has their own sessions)
+    let sessionsFoundCount = 0;
+    
     while (phase === "dialsessions" && Date.now() - startedAt < TIME_BUDGET_MS) {
       const list = await phoneburnerRequest(
         `/dialsession?page=${sessionPage}&page_size=${DIALSESSION_PAGE_SIZE}&date_start=${startYmd}&date_end=${endYmd}`,
         apiKey
       );
 
-      console.log(`Dial sessions response keys: ${Object.keys(list || {}).join(", ")}`);
+      console.log(`Dial sessions response: ${JSON.stringify(list).slice(0, 500)}`);
 
-      const sessions = list?.dialsessions?.dialsessions ?? list?.dialsessions ?? list?.dial_sessions ?? [];
-      const sessionArr: any[] = Array.isArray(sessions) ? sessions : [];
+      const sessionsData = list?.dialsessions ?? {};
+      const sessions = sessionsData?.dialsessions ?? list?.dial_sessions ?? [];
+      const sessionArr: any[] = Array.isArray(sessions) ? sessions : (sessions ? [sessions] : []);
 
-      console.log(`Dial sessions page ${sessionPage}: ${sessionArr.length} sessions found`);
+      console.log(`Dial sessions page ${sessionPage}: ${sessionArr.length} sessions found (total_results: ${sessionsData.total_results || 'unknown'})`);
 
       if (sessionArr.length === 0) {
         console.log("No more dial sessions, moving to contacts phase");
@@ -503,8 +507,10 @@ serve(async (req) => {
       for (const s of sessionArr) {
         if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
 
-        const externalSessionId = String(s?.id ?? s?.dial_session_id ?? s?.dialsession_id ?? "");
+        const externalSessionId = String(s?.dialsession_id ?? s?.id ?? s?.dial_session_id ?? "");
         if (!externalSessionId) continue;
+
+        sessionsFoundCount++;
 
         const { data: sessionRow, error: sessionUpsertErr } = await supabaseAdmin
           .from("phoneburner_dial_sessions")
@@ -512,11 +518,11 @@ serve(async (req) => {
             {
               workspace_id: workspaceId,
               external_session_id: externalSessionId,
-              member_id: s?.member_id ? String(s.member_id) : null,
-              member_name: s?.member_name ?? null,
+              member_id: null, // Will be populated later if available
+              member_name: null,
               start_at: s?.start_when ?? s?.start_at ?? null,
               end_at: s?.end_when ?? s?.end_at ?? null,
-              call_count: s?.call_count ?? s?.calls_count ?? null,
+              call_count: s?.call_count ?? null,
               updated_at: new Date().toISOString(),
             },
             { onConflict: "workspace_id,external_session_id" }
@@ -531,11 +537,12 @@ serve(async (req) => {
 
         sessionsSynced += 1;
 
-        // Fetch detail to get calls array
+        // Fetch session detail to get individual calls
         let detail: any = null;
         try {
           detail = await phoneburnerRequest(`/dialsession/${externalSessionId}`, apiKey);
           console.log(`Session ${externalSessionId} detail keys:`, Object.keys(detail || {}));
+          console.log(`Session ${externalSessionId} detail keys: ${Object.keys(detail || {}).join(", ")}`);
         } catch (e) {
           console.error("Dial session detail fetch error", e);
           continue;
@@ -544,11 +551,16 @@ serve(async (req) => {
         // Try multiple possible response structures
         const calls = detail?.calls ?? detail?.dial_session?.calls ?? detail?.dialsession?.calls ??
                       detail?.dialsession?.dialsession?.calls ?? [];
+        // The detail response has dialsessions.dialsessions which contains the session with calls
+        const detailSession = detail?.dialsessions?.dialsessions ?? detail?.dialsessions ?? detail?.dial_session ?? {};
+        const calls = detailSession?.calls ?? detail?.calls ?? [];
         const callArr: any[] = Array.isArray(calls) ? calls : [];
         console.log(`Session ${externalSessionId}: found ${callArr.length} calls`);
 
+        console.log(`Session ${externalSessionId} has ${callArr.length} calls`);
+
         for (const c of callArr) {
-          const externalCallId = String(c?.id ?? c?.call_id ?? c?.callId ?? "");
+          const externalCallId = String(c?.call_id ?? c?.id ?? "");
           if (!externalCallId) continue;
 
           // Fetch individual call details to get recording URL
@@ -560,6 +572,13 @@ serve(async (req) => {
                 apiKey
               );
               recordingUrl = callDetail?.call?.recording_url ?? callDetail?.recording_url ?? null;
+          // Try to get recording URL for this call
+          let recordingUrl = c?.recording_url ?? null;
+          if (!recordingUrl) {
+            try {
+              const callDetail = await phoneburnerRequest(`/dialsession/call/${externalCallId}?include_recording=1`, apiKey);
+              const callData = callDetail?.call?.call ?? callDetail?.call ?? {};
+              recordingUrl = callData?.recording_url ?? callData?.recording ?? null;
             } catch (e) {
               // Recording fetch failed, continue without it
             }
@@ -582,6 +601,12 @@ serve(async (req) => {
               is_voicemail: typeof c?.voicemail === "boolean" ? c.voicemail :
                            (c?.disposition?.toLowerCase()?.includes("voicemail") ?? null),
               notes: c?.notes ?? c?.call_notes ?? null,
+              duration_seconds: c?.duration ?? c?.duration_seconds ?? null,
+              disposition: c?.disposition ?? null,
+              disposition_id: null,
+              is_connected: c?.connected === "1" || c?.connected === 1 || c?.connected === true,
+              is_voicemail: c?.voicemail === "1" || c?.voicemail === 1 || c?.voicemail === true,
+              notes: c?.note ?? c?.notes ?? null,
               recording_url: recordingUrl,
               updated_at: new Date().toISOString(),
             },
@@ -597,11 +622,13 @@ serve(async (req) => {
       sessionPage += 1;
       await persistProgress({});
 
-      // Conservative exit: page forward until time budget, continuation will resume
       if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
     }
 
     // ================== PHASE 2: CONTACTS ==================
+    console.log(`Dial sessions phase complete. Found ${sessionsFoundCount} sessions, synced ${callsSynced} calls.`);
+
+    // ================== PHASE 2: CONTACTS (light) ==================
     while (phase === "contacts" && Date.now() - startedAt < TIME_BUDGET_MS) {
       const list = await phoneburnerRequest(
         `/contacts?page=${contactsPage}&page_size=${CONTACT_PAGE_SIZE}`,
@@ -682,6 +709,7 @@ serve(async (req) => {
         console.log("Members response keys:", Object.keys(membersRes || {}));
 
         // Handle nested members structure: { members: { members: [...] } } or { members: [...] }
+        // PhoneBurner returns either { members: { members: [...] } } or { members: [...] }
         const rawMembers = membersRes?.members?.members ?? membersRes?.members ?? [];
         const memberArr: any[] = Array.isArray(rawMembers)
           ? (Array.isArray(rawMembers[0]) ? rawMembers[0] : rawMembers)
@@ -692,7 +720,7 @@ serve(async (req) => {
         const memberNameMap: Record<string, string> = {};
 
         for (const m of memberArr) {
-          const externalMemberId = String(m?.member_user_id ?? m?.member_id ?? m?.id ?? "");
+          const externalMemberId = String(m?.member_user_id ?? m?.user_id ?? m?.member_id ?? m?.id ?? "");
           if (!externalMemberId) continue;
 
           const firstName = m?.first_name ?? "";

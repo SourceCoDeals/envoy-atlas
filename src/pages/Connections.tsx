@@ -89,6 +89,8 @@ export default function Connections() {
 
     try {
       setLoading(true);
+      // Only select non-sensitive columns - api_key_encrypted is intentionally excluded
+      // for security. Edge functions access keys directly using service role.
       const { data, error } = await supabase
         .from("api_connections")
         .select("id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at")
@@ -227,8 +229,9 @@ export default function Connections() {
       // Store state in sessionStorage for verification on callback
       sessionStorage.setItem("phoneburner_oauth_state", state);
 
-      // Redirect user to PhoneBurner authorization page
-      window.location.href = authorization_url;
+      // PhoneBurner blocks being embedded in iframes (X-Frame-Options/CSP).
+      // Open OAuth in a new tab/window.
+      window.open(authorization_url, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Failed to start PhoneBurner OAuth flow");
@@ -722,6 +725,30 @@ export default function Connections() {
                             </>
                           )}
                         </div>
+
+                        {/* Upgrade to OAuth for individual call records */}
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={handlePhoneBurnerOAuth}
+                          disabled={!!isConnecting.phoneburner_oauth}
+                        >
+                          {isConnecting.phoneburner_oauth ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Authorizing...
+                            </>
+                          ) : (
+                            <>
+                              <ExternalLink className="mr-2 h-4 w-4" />
+                              Authorize for Individual Calls
+                            </>
+                          )}
+                        </Button>
+                        <p className="text-xs text-muted-foreground text-center">
+                          OAuth authorization enables individual call records & recordings
+                        </p>
+
                         <Button
                           variant="ghost"
                           size="sm"
