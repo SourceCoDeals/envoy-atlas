@@ -828,14 +828,64 @@ export default function Connections() {
                                 </div>
                               </div>
                             )}
-                            {diagnosticResult.tests?.usage && (
+                            {diagnosticResult.tests?.dial_sessions_no_date_filter && (
                               <div className="flex justify-between">
-                                <span>Usage (90 days):</span>
-                                <span className={diagnosticResult.tests.usage.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.usage.success
-                                    ? `${diagnosticResult.tests.usage.total_calls} calls`
-                                    : "Failed"}
+                                <span>Dial Sessions (no filter):</span>
+                                <span className={diagnosticResult.tests.dial_sessions_no_date_filter.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.dial_sessions_no_date_filter.success
+                                    ? `${diagnosticResult.tests.dial_sessions_no_date_filter.total_results} found`
+                                    : diagnosticResult.tests.dial_sessions_no_date_filter.error || "Failed"}
                                 </span>
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.members_entire_team && (
+                              <div className="flex justify-between">
+                                <span>Entire Team Members:</span>
+                                <span className={diagnosticResult.tests.members_entire_team.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.members_entire_team.success
+                                    ? `${diagnosticResult.tests.members_entire_team.count} found`
+                                    : diagnosticResult.tests.members_entire_team.error || "Failed"}
+                                </span>
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.voicemails && (
+                              <div className="flex justify-between">
+                                <span>Voicemails:</span>
+                                <span className={diagnosticResult.tests.voicemails.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.voicemails.success
+                                    ? `${diagnosticResult.tests.voicemails.total_results} found`
+                                    : diagnosticResult.tests.voicemails.error || "Failed"}
+                                </span>
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.dialsession_settings && (
+                              <div className="flex justify-between">
+                                <span>Dialsession Settings:</span>
+                                <span className={diagnosticResult.tests.dialsession_settings.success ? "text-green-500" : "text-red-500"}>
+                                  {diagnosticResult.tests.dialsession_settings.success ? "Retrieved" : diagnosticResult.tests.dialsession_settings.error || "Failed"}
+                                </span>
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.usage && (
+                              <div className="flex flex-col gap-1">
+                                <div className="flex justify-between">
+                                  <span>Usage (90 days):</span>
+                                  <span className={diagnosticResult.tests.usage.success ? "text-green-500" : "text-red-500"}>
+                                    {diagnosticResult.tests.usage.success
+                                      ? `${diagnosticResult.tests.usage.total_calls} calls`
+                                      : "Failed"}
+                                  </span>
+                                </div>
+                                {diagnosticResult.tests.usage.member_breakdown && (
+                                  <div className="pl-2 text-muted-foreground space-y-0.5">
+                                    {diagnosticResult.tests.usage.member_breakdown.map((m: any, i: number) => (
+                                      <div key={i} className="flex justify-between">
+                                        <span>└ {m.name}:</span>
+                                        <span>{m.total_calls} calls</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             )}
                             {diagnosticResult.recommendation && (
