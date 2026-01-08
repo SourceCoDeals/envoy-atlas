@@ -45,6 +45,7 @@ import TimingInsights from "./pages/TimingInsights";
 import TrainingQueue from "./pages/TrainingQueue";
 import OnboardingProgress from "./pages/OnboardingProgress";
 import Contacts from "./pages/Contacts";
+import PhoneBurnerCallback from "./pages/PhoneBurnerCallback";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -70,6 +71,7 @@ const App = () => (
                   <Route path="/monthly-report" element={<MonthlyReport />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/connections" element={<Connections />} />
+                  <Route path="/oauth/phoneburner/callback" element={<PhoneBurnerCallback />} />
                   <Route path="/campaigns" element={<Campaigns />} />
                   <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
                   <Route path="/inbox" element={<Inbox />} />

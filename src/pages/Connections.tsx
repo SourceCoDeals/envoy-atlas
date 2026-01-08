@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/hooks/useAuth";
@@ -20,6 +20,7 @@ import {
   Clock,
   Download,
   ExternalLink,
+  KeyRound,
   Loader2,
   Phone,
   Plug,
@@ -50,6 +51,7 @@ async function getAccessToken(): Promise<string> {
 
 export default function Connections() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { channel } = useChannel();
@@ -67,6 +69,7 @@ export default function Connections() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
+  const [showPATInput, setShowPATInput] = useState(false);
 
   const smartleadConnection = useMemo(
     () => connections.find((c) => c.platform === "smartlead"),
@@ -105,6 +108,30 @@ export default function Connections() {
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth");
   }, [authLoading, user, navigate]);
+
+  // Handle OAuth callback results from query params
+  useEffect(() => {
+    const successParam = searchParams.get("success");
+    const errorParam = searchParams.get("error");
+
+    if (successParam === "phoneburner_connected") {
+      setSuccess("PhoneBurner connected successfully! You can now sync your data.");
+      // Clear the query params
+      setSearchParams({}, { replace: true });
+      // Refresh connections
+      if (currentWorkspace?.id) fetchConnections();
+    } else if (errorParam) {
+      const errorMessages: Record<string, string> = {
+        oauth_denied: "PhoneBurner authorization was denied.",
+        missing_params: "Missing authorization parameters. Please try again.",
+        invalid_state: "Invalid authorization state. Please try again.",
+        callback_failed: "Failed to complete PhoneBurner connection. Please try again.",
+      };
+      setError(errorMessages[errorParam] || "An error occurred during PhoneBurner connection.");
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (currentWorkspace?.id) void fetchConnections();
@@ -169,6 +196,44 @@ export default function Connections() {
       setError(e?.message || `Failed to connect ${platform}`);
     } finally {
       setIsConnecting((s) => ({ ...s, [platform]: false }));
+    }
+  };
+
+  const handlePhoneBurnerOAuth = async () => {
+    if (!currentWorkspace || !user) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsConnecting((s) => ({ ...s, phoneburner_oauth: true }));
+
+    try {
+      const token = await getAccessToken();
+      const res = await supabase.functions.invoke("phoneburner-oauth", {
+        body: {
+          action: "authorize",
+          workspace_id: currentWorkspace.id,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || "Failed to initiate OAuth");
+
+      const { authorization_url, state } = res.data;
+
+      if (!authorization_url) {
+        throw new Error("OAuth not configured. Please contact support or use a Personal Access Token.");
+      }
+
+      // Store state in sessionStorage for verification on callback
+      sessionStorage.setItem("phoneburner_oauth_state", state);
+
+      // Redirect user to PhoneBurner authorization page
+      window.location.href = authorization_url;
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to start PhoneBurner OAuth flow");
+    } finally {
+      setIsConnecting((s) => ({ ...s, phoneburner_oauth: false }));
     }
   };
 
@@ -479,23 +544,100 @@ export default function Connections() {
                   <CardContent className="space-y-4">
                     {!phoneburnerConnection ? (
                       <>
-                        <div className="space-y-2">
-                          <Label htmlFor="pb-token">Personal Access Token</Label>
-                          <Input
-                            id="pb-token"
-                            value={phoneburnerToken}
-                            onChange={(e) => setPhoneburnerToken(e.target.value)}
-                            placeholder="Paste PhoneBurner PAT"
-                          />
-                        </div>
-                        <Button onClick={() => handleConnect("phoneburner")} disabled={!!isConnecting.phoneburner} className="w-full">
-                          {isConnecting.phoneburner ? (
+                        {/* Primary: OAuth Connection */}
+                        <Button
+                          onClick={handlePhoneBurnerOAuth}
+                          disabled={!!isConnecting.phoneburner_oauth}
+                          className="w-full"
+                        >
+                          {isConnecting.phoneburner_oauth ? (
                             <>
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                               Connecting...
                             </>
                           ) : (
-                            "Connect PhoneBurner"
+                            <>
+                              <ExternalLink className="mr-2 h-4 w-4" />
+                              Connect with PhoneBurner
+                            </>
+                          )}
+                        </Button>
+
+                        {/* Secondary: PAT for developers */}
+                        <div className="relative">
+                          <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t" />
+                          </div>
+                          <div className="relative flex justify-center text-xs uppercase">
+                            <span className="bg-card px-2 text-muted-foreground">or</span>
+                          </div>
+                        </div>
+
+                        {showPATInput ? (
+                          <div className="space-y-2">
+                            <Label htmlFor="pb-token">Personal Access Token</Label>
+                            <Input
+                              id="pb-token"
+                              value={phoneburnerToken}
+                              onChange={(e) => setPhoneburnerToken(e.target.value)}
+                              placeholder="Paste PhoneBurner PAT"
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={() => handleConnect("phoneburner")}
+                                disabled={!!isConnecting.phoneburner}
+                                variant="outline"
+                                className="flex-1"
+                              >
+                                {isConnecting.phoneburner ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Connecting...
+                                  </>
+                                ) : (
+                                  "Connect with PAT"
+                                )}
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => setShowPATInput(false)}>
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full text-muted-foreground"
+                            onClick={() => setShowPATInput(true)}
+                          >
+                            <KeyRound className="mr-2 h-4 w-4" />
+                            Use Personal Access Token instead
+                          </Button>
+                        )}
+                      </>
+                    ) : phoneburnerConnection.sync_status === "auth_expired" ? (
+                      <>
+                        <Alert variant="destructive" className="mb-2">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>
+                            PhoneBurner authorization has expired. Please reconnect.
+                          </AlertDescription>
+                        </Alert>
+                        <Button
+                          onClick={handlePhoneBurnerOAuth}
+                          disabled={!!isConnecting.phoneburner_oauth}
+                          className="w-full"
+                        >
+                          {isConnecting.phoneburner_oauth ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Reconnecting...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                              Reconnect PhoneBurner
+                            </>
                           )}
                         </Button>
                       </>

@@ -8,13 +8,22 @@ const corsHeaders = {
 };
 
 const PHONEBURNER_BASE_URL = "https://www.phoneburner.com/rest/1";
+const PHONEBURNER_REFRESH_URL = "https://www.phoneburner.com/oauth/refreshtoken";
 const RATE_LIMIT_DELAY_MS = 500;
 const TIME_BUDGET_MS = 50_000;
 const SYNC_LOCK_TIMEOUT_MS = 30_000;
 const DAYS_TO_SYNC = 180;
+const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 minutes before expiry
 
 const DIALSESSION_PAGE_SIZE = 50;
 const CONTACT_PAGE_SIZE = 100;
+
+type OAuthTokens = {
+  access_token: string;
+  refresh_token?: string;
+  expires_at?: string;
+  auth_type?: "oauth" | "pat";
+};
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,6 +37,108 @@ function daysAgo(n: number) {
   const d = new Date();
   d.setDate(d.getDate() - n);
   return d;
+}
+
+function parseApiKey(apiKeyEncrypted: string): OAuthTokens {
+  // Try to parse as JSON (OAuth tokens)
+  try {
+    const parsed = JSON.parse(apiKeyEncrypted);
+    if (parsed.access_token) {
+      return {
+        access_token: parsed.access_token,
+        refresh_token: parsed.refresh_token,
+        expires_at: parsed.expires_at,
+        auth_type: parsed.auth_type || "oauth",
+      };
+    }
+  } catch (e) {
+    // Not JSON, treat as legacy Personal Access Token
+  }
+  return {
+    access_token: apiKeyEncrypted,
+    auth_type: "pat",
+  };
+}
+
+function isTokenExpired(tokens: OAuthTokens): boolean {
+  if (!tokens.expires_at || tokens.auth_type === "pat") {
+    return false; // PATs don't expire, or no expiry info
+  }
+  const expiresAt = new Date(tokens.expires_at).getTime();
+  return Date.now() + TOKEN_REFRESH_BUFFER_MS >= expiresAt;
+}
+
+async function refreshOAuthToken(
+  tokens: OAuthTokens,
+  connectionId: string,
+  supabaseAdmin: any
+): Promise<string> {
+  const clientId = Deno.env.get("PHONEBURNER_CLIENT_ID");
+  const clientSecret = Deno.env.get("PHONEBURNER_CLIENT_SECRET");
+
+  if (!clientId || !clientSecret) {
+    throw new Error("PhoneBurner OAuth not configured for token refresh");
+  }
+
+  if (!tokens.refresh_token) {
+    throw new Error("No refresh token available. Please reconnect PhoneBurner.");
+  }
+
+  console.log("Refreshing PhoneBurner OAuth token...");
+
+  const refreshResponse = await fetch(PHONEBURNER_REFRESH_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: tokens.refresh_token,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!refreshResponse.ok) {
+    const errorText = await refreshResponse.text();
+    console.error("Token refresh failed:", errorText);
+
+    // Mark connection as needing re-authorization
+    await supabaseAdmin
+      .from("api_connections")
+      .update({ sync_status: "auth_expired" })
+      .eq("id", connectionId);
+
+    throw new Error("OAuth token expired. Please reconnect PhoneBurner.");
+  }
+
+  const newTokenData = await refreshResponse.json();
+
+  // Calculate new expiration
+  const newExpiresAt = newTokenData.expires
+    ? new Date(newTokenData.expires * 1000).toISOString()
+    : newTokenData.expires_in
+      ? new Date(Date.now() + newTokenData.expires_in * 1000).toISOString()
+      : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Update stored tokens
+  const updatedTokens = JSON.stringify({
+    access_token: newTokenData.access_token,
+    refresh_token: newTokenData.refresh_token || tokens.refresh_token,
+    expires_at: newExpiresAt,
+    token_type: newTokenData.token_type || "bearer",
+    auth_type: "oauth",
+  });
+
+  await supabaseAdmin
+    .from("api_connections")
+    .update({ api_key_encrypted: updatedTokens })
+    .eq("id", connectionId);
+
+  console.log("Token refreshed successfully, new expiry:", newExpiresAt);
+
+  return newTokenData.access_token;
 }
 
 async function phoneburnerRequest(endpoint: string, apiKey: string, retries = 3): Promise<any> {
@@ -132,7 +243,25 @@ serve(async (req) => {
     if (connErr) throw connErr;
     if (!connection) throw new Error("PhoneBurner is not connected");
 
-    const apiKey: string = connection.api_key_encrypted;
+    // Parse and validate OAuth tokens
+    const tokens = parseApiKey(connection.api_key_encrypted);
+    let apiKey: string = tokens.access_token;
+
+    // Check if OAuth token needs refresh
+    if (tokens.auth_type === "oauth" && isTokenExpired(tokens)) {
+      try {
+        apiKey = await refreshOAuthToken(tokens, connection.id, supabaseAdmin);
+      } catch (refreshError: any) {
+        return new Response(
+          JSON.stringify({
+            error: "Authentication expired",
+            details: refreshError.message,
+            action_required: "reconnect"
+          }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
     if (diagnostic) {
       console.log("Running PhoneBurner diagnostics...");
