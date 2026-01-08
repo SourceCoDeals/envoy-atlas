@@ -31,17 +31,9 @@ export default function PhoneBurnerCallback() {
         return;
       }
 
-      // Verify state matches what we stored (CSRF protection)
-      const storedState = sessionStorage.getItem("phoneburner_oauth_state");
-      if (storedState !== state) {
-        setStatus("error");
-        setMessage("Invalid state parameter. Please try connecting again.");
-        setTimeout(() => navigate("/connections?error=invalid_state"), 3000);
-        return;
-      }
-
-      // Clear stored state
-      sessionStorage.removeItem("phoneburner_oauth_state");
+      // Note: We skip client-side state validation since sessionStorage doesn't
+      // persist across browser tabs/windows. The edge function validates the state
+      // parameter contains valid workspace_id and user_id.
 
       try {
         // Get current session for authorization
