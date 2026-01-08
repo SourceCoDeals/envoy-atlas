@@ -44,3 +44,15 @@ verify_jwt = false
 
 [functions.process-calls-batch]
 verify_jwt = false
+
+[functions.import-google-sheet]
+verify_jwt = false
+
+[functions.nocodb-sync]
+verify_jwt = false
+
+[functions.fetch-transcripts]
+verify_jwt = false
+
+[functions.score-external-calls]
+verify_jwt = false
