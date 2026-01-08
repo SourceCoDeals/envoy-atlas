@@ -89,6 +89,8 @@ export default function Connections() {
 
     try {
       setLoading(true);
+      // Only select non-sensitive columns - api_key_encrypted is intentionally excluded
+      // for security. Edge functions access keys directly using service role.
       const { data, error } = await supabase
         .from("api_connections")
         .select("id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at")
