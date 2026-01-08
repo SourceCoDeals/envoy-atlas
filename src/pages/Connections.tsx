@@ -227,8 +227,9 @@ export default function Connections() {
       // Store state in sessionStorage for verification on callback
       sessionStorage.setItem("phoneburner_oauth_state", state);
 
-      // Redirect user to PhoneBurner authorization page
-      window.location.href = authorization_url;
+      // PhoneBurner blocks being embedded in iframes (X-Frame-Options/CSP).
+      // Open OAuth in a new tab/window.
+      window.open(authorization_url, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Failed to start PhoneBurner OAuth flow");
