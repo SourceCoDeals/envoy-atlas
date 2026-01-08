@@ -2035,6 +2035,7 @@ export type Database = {
           id: string
           interested_count: number | null
           member_id: string | null
+          member_name: string | null
           not_interested_count: number | null
           total_calls: number | null
           total_sessions: number | null
@@ -2051,6 +2052,7 @@ export type Database = {
           id?: string
           interested_count?: number | null
           member_id?: string | null
+          member_name?: string | null
           not_interested_count?: number | null
           total_calls?: number | null
           total_sessions?: number | null
@@ -2067,6 +2069,7 @@ export type Database = {
           id?: string
           interested_count?: number | null
           member_id?: string | null
+          member_name?: string | null
           not_interested_count?: number | null
           total_calls?: number | null
           total_sessions?: number | null
@@ -2128,6 +2131,47 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "phoneburner_dial_sessions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      phoneburner_members: {
+        Row: {
+          created_at: string
+          email: string | null
+          external_member_id: string
+          id: string
+          name: string | null
+          role: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          external_member_id: string
+          id?: string
+          name?: string | null
+          role?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          external_member_id?: string
+          id?: string
+          name?: string | null
+          role?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phoneburner_members_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
