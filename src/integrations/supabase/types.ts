@@ -468,30 +468,49 @@ export type Database = {
       }
       call_ai_scores: {
         Row: {
+          best_time_to_call: string | null
           buyer_type_preference: string | null
           call_category: string | null
           call_id: string
+          clarity_of_value_proposition_justification: string | null
+          clarity_of_value_proposition_score: number | null
           composite_score: number | null
+          correct_info_obtained: boolean | null
           created_at: string
+          data_source: string | null
           decision_maker_identification: number | null
+          direct_line_obtained: string | null
           engagement_justification: string | null
           engagement_score: number | null
+          gatekeeper_handling_score: number | null
+          gatekeeper_info_gathered: Json | null
+          gatekeeper_name: string | null
+          gatekeeper_outcome: string | null
+          gatekeeper_technique_used: string | null
+          gatekeeper_title: string | null
           id: string
           initial_valuation_discussion: number | null
+          key_concerns: string[] | null
+          key_topics_discussed: string[] | null
           mandatory_question_details: Json | null
           mandatory_questions_adherence: number | null
           mandatory_questions_asked: Json | null
+          motivation_factors: string[] | null
           next_step_clarity_justification: string | null
           next_step_clarity_score: number | null
           not_interested_reason: string | null
           objection_handling_justification: string | null
           objection_handling_score: number | null
           objection_resolution_rate: number | null
+          objection_to_resolution_rate: number | null
           objections_list: Json | null
           objections_text: string | null
           opening_type: string | null
           overall_quality_score: number | null
+          owner_name_confirmed: string | null
           personal_insights: string | null
+          quality_of_conversation_justification: string | null
+          quality_of_conversation_score: number | null
           rapport_building_justification: string | null
           rapport_building_score: number | null
           referral_generation_rate: number | null
@@ -500,40 +519,64 @@ export type Database = {
           script_adherence_score: number | null
           seller_interest_justification: string | null
           seller_interest_score: number | null
+          timeline_months: number | null
           timeline_to_sell: string | null
           transcript_id: string | null
           trigger_events: Json | null
           valuation_discussion_justification: string | null
           valuation_discussion_score: number | null
+          valuation_multiple: number | null
           value_proposition_justification: string | null
           value_proposition_score: number | null
           workspace_id: string
+          wrong_number_flag: boolean | null
+          wrong_number_notes: string | null
+          wrong_number_type: string | null
         }
         Insert: {
+          best_time_to_call?: string | null
           buyer_type_preference?: string | null
           call_category?: string | null
           call_id: string
+          clarity_of_value_proposition_justification?: string | null
+          clarity_of_value_proposition_score?: number | null
           composite_score?: number | null
+          correct_info_obtained?: boolean | null
           created_at?: string
+          data_source?: string | null
           decision_maker_identification?: number | null
+          direct_line_obtained?: string | null
           engagement_justification?: string | null
           engagement_score?: number | null
+          gatekeeper_handling_score?: number | null
+          gatekeeper_info_gathered?: Json | null
+          gatekeeper_name?: string | null
+          gatekeeper_outcome?: string | null
+          gatekeeper_technique_used?: string | null
+          gatekeeper_title?: string | null
           id?: string
           initial_valuation_discussion?: number | null
+          key_concerns?: string[] | null
+          key_topics_discussed?: string[] | null
           mandatory_question_details?: Json | null
           mandatory_questions_adherence?: number | null
           mandatory_questions_asked?: Json | null
+          motivation_factors?: string[] | null
           next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
           not_interested_reason?: string | null
           objection_handling_justification?: string | null
           objection_handling_score?: number | null
           objection_resolution_rate?: number | null
+          objection_to_resolution_rate?: number | null
           objections_list?: Json | null
           objections_text?: string | null
           opening_type?: string | null
           overall_quality_score?: number | null
+          owner_name_confirmed?: string | null
           personal_insights?: string | null
+          quality_of_conversation_justification?: string | null
+          quality_of_conversation_score?: number | null
           rapport_building_justification?: string | null
           rapport_building_score?: number | null
           referral_generation_rate?: number | null
@@ -542,40 +585,64 @@ export type Database = {
           script_adherence_score?: number | null
           seller_interest_justification?: string | null
           seller_interest_score?: number | null
+          timeline_months?: number | null
           timeline_to_sell?: string | null
           transcript_id?: string | null
           trigger_events?: Json | null
           valuation_discussion_justification?: string | null
           valuation_discussion_score?: number | null
+          valuation_multiple?: number | null
           value_proposition_justification?: string | null
           value_proposition_score?: number | null
           workspace_id: string
+          wrong_number_flag?: boolean | null
+          wrong_number_notes?: string | null
+          wrong_number_type?: string | null
         }
         Update: {
+          best_time_to_call?: string | null
           buyer_type_preference?: string | null
           call_category?: string | null
           call_id?: string
+          clarity_of_value_proposition_justification?: string | null
+          clarity_of_value_proposition_score?: number | null
           composite_score?: number | null
+          correct_info_obtained?: boolean | null
           created_at?: string
+          data_source?: string | null
           decision_maker_identification?: number | null
+          direct_line_obtained?: string | null
           engagement_justification?: string | null
           engagement_score?: number | null
+          gatekeeper_handling_score?: number | null
+          gatekeeper_info_gathered?: Json | null
+          gatekeeper_name?: string | null
+          gatekeeper_outcome?: string | null
+          gatekeeper_technique_used?: string | null
+          gatekeeper_title?: string | null
           id?: string
           initial_valuation_discussion?: number | null
+          key_concerns?: string[] | null
+          key_topics_discussed?: string[] | null
           mandatory_question_details?: Json | null
           mandatory_questions_adherence?: number | null
           mandatory_questions_asked?: Json | null
+          motivation_factors?: string[] | null
           next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
           not_interested_reason?: string | null
           objection_handling_justification?: string | null
           objection_handling_score?: number | null
           objection_resolution_rate?: number | null
+          objection_to_resolution_rate?: number | null
           objections_list?: Json | null
           objections_text?: string | null
           opening_type?: string | null
           overall_quality_score?: number | null
+          owner_name_confirmed?: string | null
           personal_insights?: string | null
+          quality_of_conversation_justification?: string | null
+          quality_of_conversation_score?: number | null
           rapport_building_justification?: string | null
           rapport_building_score?: number | null
           referral_generation_rate?: number | null
@@ -584,14 +651,19 @@ export type Database = {
           script_adherence_score?: number | null
           seller_interest_justification?: string | null
           seller_interest_score?: number | null
+          timeline_months?: number | null
           timeline_to_sell?: string | null
           transcript_id?: string | null
           trigger_events?: Json | null
           valuation_discussion_justification?: string | null
           valuation_discussion_score?: number | null
+          valuation_multiple?: number | null
           value_proposition_justification?: string | null
           value_proposition_score?: number | null
           workspace_id?: string
+          wrong_number_flag?: boolean | null
+          wrong_number_notes?: string | null
+          wrong_number_type?: string | null
         }
         Relationships: [
           {
@@ -3673,6 +3745,27 @@ export type Database = {
           },
         ]
       }
+      gatekeeper_analytics: {
+        Row: {
+          avg_handling_score: number | null
+          blocked_count: number | null
+          call_count: number | null
+          callback_count: number | null
+          gatekeeper_outcome: string | null
+          gatekeeper_technique_used: string | null
+          transferred_count: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_ai_scores_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inbox_items: {
         Row: {
           campaign_id: string | null
@@ -3742,6 +3835,24 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "hourly_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wrong_number_analytics: {
+        Row: {
+          corrected_count: number | null
+          count: number | null
+          data_source: string | null
+          workspace_id: string | null
+          wrong_number_type: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_ai_scores_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
