@@ -63,17 +63,17 @@ function InsightCard({
 
 export default function PatternAnalysis() {
   const { data: callsData = [], isLoading } = useCallsWithScores({ limit: 500 });
-  const aiScores = callsData.filter(c => c.score).map(c => ({ ...c.score!, call_id: c.id }));
-  const calls = callsData;
+  
+  // Filter for scored calls
+  const scoredCalls = callsData.filter(c => c.composite_score !== null);
 
   const openingAnalysis = useMemo(() => {
     const byType = new Map<string, { count: number; avgScore: number; meetingRate: number }>();
     
-    aiScores.forEach(score => {
-      const type = score.opening_type || 'generic';
-      const call = calls.find(c => c.id === score.call_id);
-      const hasMeeting = call?.disposition?.toLowerCase().includes('meeting') || 
-                         call?.disposition?.toLowerCase().includes('interested');
+    scoredCalls.forEach(call => {
+      const type = call.opening_type || 'generic';
+      const hasMeeting = call.call_category?.toLowerCase().includes('meeting') || 
+                         call.call_category?.toLowerCase().includes('interested');
       
       if (!byType.has(type)) {
         byType.set(type, { count: 0, avgScore: 0, meetingRate: 0 });
@@ -81,7 +81,7 @@ export default function PatternAnalysis() {
       
       const current = byType.get(type)!;
       const newCount = current.count + 1;
-      current.avgScore = (current.avgScore * current.count + (score.composite_score || 0)) / newCount;
+      current.avgScore = (current.avgScore * current.count + (call.composite_score || 0)) / newCount;
       current.meetingRate = (current.meetingRate * current.count + (hasMeeting ? 1 : 0)) / newCount;
       current.count = newCount;
     });
@@ -92,51 +92,25 @@ export default function PatternAnalysis() {
       avgScore: byType.get(type.value)?.avgScore || 0,
       meetingRate: (byType.get(type.value)?.meetingRate || 0) * 100,
     })).sort((a, b) => b.avgScore - a.avgScore);
-  }, [aiScores, calls]);
+  }, [scoredCalls]);
 
   const objectionAnalysis = useMemo(() => {
-    const objectionCounts = new Map<string, { total: number; recovered: number }>();
-    
-    aiScores.forEach(score => {
-      const objections = score.objections_list as Array<{ objection: string; recovered: boolean }> | null;
-      if (objections) {
-        objections.forEach(obj => {
-          const key = obj.objection || 'Other';
-          if (!objectionCounts.has(key)) {
-            objectionCounts.set(key, { total: 0, recovered: 0 });
-          }
-          const current = objectionCounts.get(key)!;
-          current.total++;
-          if (obj.recovered) current.recovered++;
-        });
-      }
-    });
-
-    return Array.from(objectionCounts.entries())
-      .map(([objection, data]) => ({
-        objection,
-        total: data.total,
-        recovered: data.recovered,
-        recoveryRate: data.total > 0 ? (data.recovered / data.total) * 100 : 0,
-      }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 8);
-  }, [aiScores]);
+    // This would require objections_list to be parsed - simplified for now
+    return [];
+  }, [scoredCalls]);
 
   const scoreCorrelations = useMemo(() => {
-    const meetingCalls = aiScores.filter(score => {
-      const call = calls.find(c => c.id === score.call_id);
-      return call?.disposition?.toLowerCase().includes('meeting') || 
-             call?.disposition?.toLowerCase().includes('interested');
-    });
+    const meetingCalls = scoredCalls.filter(call => 
+      call.call_category?.toLowerCase().includes('meeting') || 
+      call.call_category?.toLowerCase().includes('interested')
+    );
 
-    const noMeetingCalls = aiScores.filter(score => {
-      const call = calls.find(c => c.id === score.call_id);
-      return !(call?.disposition?.toLowerCase().includes('meeting') || 
-               call?.disposition?.toLowerCase().includes('interested'));
-    });
+    const noMeetingCalls = scoredCalls.filter(call => 
+      !(call.call_category?.toLowerCase().includes('meeting') || 
+        call.call_category?.toLowerCase().includes('interested'))
+    );
 
-    const avgForGroup = (group: typeof aiScores, key: 'next_step_clarity_score' | 'seller_interest_score' | 'rapport_building_score' | 'objection_handling_score' | 'value_proposition_score') => {
+    const avgForGroup = (group: typeof scoredCalls, key: 'next_step_clarity_score' | 'seller_interest_score' | 'rapport_building_score' | 'objection_handling_score' | 'value_proposition_score') => {
       const values = group.map(s => s[key]).filter((v): v is number => typeof v === 'number');
       return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
     };
@@ -148,7 +122,7 @@ export default function PatternAnalysis() {
       { dimension: 'Objection Handling', meeting: avgForGroup(meetingCalls, 'objection_handling_score'), noMeeting: avgForGroup(noMeetingCalls, 'objection_handling_score') },
       { dimension: 'Value Proposition', meeting: avgForGroup(meetingCalls, 'value_proposition_score'), noMeeting: avgForGroup(noMeetingCalls, 'value_proposition_score') },
     ];
-  }, [aiScores, calls]);
+  }, [scoredCalls]);
 
   const topInsights = useMemo(() => {
     const insights = [];
@@ -162,18 +136,6 @@ export default function PatternAnalysis() {
         insight: `${bestOpening.label} openings have the highest avg score (${bestOpening.avgScore.toFixed(0)}) and ${bestOpening.meetingRate.toFixed(0)}% meeting rate`,
         metric: `+${((bestOpening.avgScore / (openingAnalysis[openingAnalysis.length - 1]?.avgScore || 1) - 1) * 100).toFixed(0)}%`,
         trend: 'up' as const,
-      });
-    }
-
-    // Hardest objection
-    const hardestObjection = objectionAnalysis.filter(o => o.total >= 3).sort((a, b) => a.recoveryRate - b.recoveryRate)[0];
-    if (hardestObjection) {
-      insights.push({
-        icon: AlertTriangle,
-        title: 'Toughest Objection',
-        insight: `"${hardestObjection.objection}" has the lowest recovery rate at ${hardestObjection.recoveryRate.toFixed(0)}%`,
-        metric: `${hardestObjection.total} occurrences`,
-        trend: 'down' as const,
       });
     }
 
@@ -192,7 +154,7 @@ export default function PatternAnalysis() {
     }
 
     return insights;
-  }, [openingAnalysis, objectionAnalysis, scoreCorrelations]);
+  }, [openingAnalysis, scoreCorrelations]);
 
   if (isLoading) {
     return (
@@ -211,7 +173,7 @@ export default function PatternAnalysis() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Pattern Analysis</h1>
           <p className="text-muted-foreground">
-            Discover what works and what doesn't across {aiScores.length} analyzed calls
+            Discover what works and what doesn't across {scoredCalls.length} analyzed calls
           </p>
         </div>
 
@@ -276,47 +238,6 @@ export default function PatternAnalysis() {
                 </ResponsiveContainer>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Objection Analysis */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Objection Recovery Rates</CardTitle>
-            <CardDescription>
-              How well the team handles common objections
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {objectionAnalysis.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No objection data available yet
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {objectionAnalysis.map(obj => (
-                  <div key={obj.objection} className="flex items-center gap-4">
-                    <div className="w-48 truncate font-medium text-sm">
-                      "{obj.objection}"
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <Progress value={obj.recoveryRate} className="flex-1 h-3" />
-                        <span className="text-sm font-medium w-12 text-right">
-                          {obj.recoveryRate.toFixed(0)}%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground w-24">
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      {obj.recovered}
-                      <XCircle className="h-4 w-4 text-red-500" />
-                      {obj.total - obj.recovered}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </CardContent>
         </Card>
 

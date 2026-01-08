@@ -3,9 +3,9 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useCallsWithScores } from '@/hooks/useCallIntelligence';
-import { Clock, TrendingUp, Calendar, Phone } from 'lucide-react';
+import { Clock, TrendingUp, Calendar } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend } from 'recharts';
-import { format, getDay, getHours, parseISO, startOfWeek, addDays } from 'date-fns';
+import { getDay, getHours, parseISO } from 'date-fns';
 
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 8); // 8 AM to 7 PM
@@ -30,7 +30,7 @@ function HeatmapCell({ value, maxValue }: { value: number; maxValue: number }) {
 export default function TimingInsights() {
   const { data: callsData = [], isLoading } = useCallsWithScores({ limit: 500 });
   const calls = callsData;
-  const aiScores = callsData.filter(c => c.score).map(c => ({ ...c.score!, call_id: c.id }));
+  const scoredCalls = callsData.filter(c => c.composite_score !== null);
 
   const connectRateHeatmap = useMemo(() => {
     const grid: Record<string, Record<number, { total: number; connected: number }>> = {};
@@ -43,20 +43,21 @@ export default function TimingInsights() {
     });
 
     calls.forEach(call => {
-      if (!call.start_at) return;
-      const date = parseISO(call.start_at);
+      if (!call.date_time) return;
+      const date = parseISO(call.date_time);
       const day = DAYS_OF_WEEK[getDay(date)];
       const hour = getHours(date);
       
       if (hour >= 8 && hour <= 19 && grid[day][hour]) {
         grid[day][hour].total++;
-        if (call.is_connected) {
+        // Consider connected if has meaningful transcript
+        if (call.transcript_text && call.transcript_text.length > 100) {
           grid[day][hour].connected++;
         }
       }
     });
 
-    return { grid, maxRate: 0.5 }; // Assume 50% is a good max for color scaling
+    return { grid, maxRate: 0.5 };
   }, [calls]);
 
   const bestTimes = useMemo(() => {
@@ -64,7 +65,7 @@ export default function TimingInsights() {
     
     Object.entries(connectRateHeatmap.grid).forEach(([day, hours]) => {
       Object.entries(hours).forEach(([hour, data]) => {
-        if (data.total >= 5) { // Minimum sample size
+        if (data.total >= 5) {
           timeSlots.push({
             day,
             hour: parseInt(hour),
@@ -105,18 +106,17 @@ export default function TimingInsights() {
     });
 
     calls.forEach(call => {
-      if (!call.start_at) return;
-      const hour = getHours(parseISO(call.start_at));
+      if (!call.date_time) return;
+      const hour = getHours(parseISO(call.date_time));
       
       if (hour >= 8 && hour <= 19 && hourlyStats[hour]) {
         hourlyStats[hour].total++;
-        if (call.is_connected) {
+        if (call.transcript_text && call.transcript_text.length > 100) {
           hourlyStats[hour].connected++;
         }
         
-        const score = aiScores.find(s => s.call_id === call.id);
-        if (score?.composite_score) {
-          hourlyStats[hour].scores.push(score.composite_score);
+        if (call.composite_score) {
+          hourlyStats[hour].scores.push(call.composite_score);
         }
       }
     });
@@ -132,7 +132,7 @@ export default function TimingInsights() {
         'Call Volume': stats.total,
       };
     });
-  }, [calls, aiScores]);
+  }, [calls]);
 
   const dailyData = useMemo(() => {
     const dailyStats: Record<string, { total: number; connected: number; avgScore: number; scores: number[] }> = {};
@@ -142,21 +142,20 @@ export default function TimingInsights() {
     });
 
     calls.forEach(call => {
-      if (!call.start_at) return;
-      const day = DAYS_OF_WEEK[getDay(parseISO(call.start_at))];
+      if (!call.date_time) return;
+      const day = DAYS_OF_WEEK[getDay(parseISO(call.date_time))];
       
       dailyStats[day].total++;
-      if (call.is_connected) {
+      if (call.transcript_text && call.transcript_text.length > 100) {
         dailyStats[day].connected++;
       }
       
-      const score = aiScores.find(s => s.call_id === call.id);
-      if (score?.composite_score) {
-        dailyStats[day].scores.push(score.composite_score);
+      if (call.composite_score) {
+        dailyStats[day].scores.push(call.composite_score);
       }
     });
 
-    return DAYS_OF_WEEK.slice(1, 6).map(day => { // Mon-Fri only
+    return DAYS_OF_WEEK.slice(1, 6).map(day => {
       const stats = dailyStats[day];
       return {
         day,
@@ -167,7 +166,7 @@ export default function TimingInsights() {
         'Call Volume': stats.total,
       };
     });
-  }, [calls, aiScores]);
+  }, [calls]);
 
   if (isLoading) {
     return (
@@ -186,7 +185,7 @@ export default function TimingInsights() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Timing Insights</h1>
           <p className="text-muted-foreground">
-            Discover the best times to call based on {calls.length} dials
+            Discover the best times to call based on {calls.length} calls
           </p>
         </div>
 
