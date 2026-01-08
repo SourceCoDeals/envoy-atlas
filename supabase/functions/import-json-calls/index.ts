@@ -30,17 +30,40 @@ serve(async (req) => {
       console.log(`[import-json-calls] Cleared existing calls`);
     }
 
+    // Helper to parse numeric score
+    const parseScore = (val: any): number | null => {
+      if (val === null || val === undefined || val === "") return null;
+      const num = typeof val === "number" ? val : parseFloat(String(val));
+      return isNaN(num) ? null : num;
+    };
+
+    // Helper to extract contact name from call title
+    const extractContactName = (title: string): string | null => {
+      // Pattern: "Cold Call to John Smith(1234567890)"
+      const match = title?.match(/Cold Call to ([^(]+)/i);
+      if (match) return match[1].trim();
+      // Pattern: "Company Name <ext> Something"
+      const extMatch = title?.match(/^([^<]+)/);
+      if (extMatch) return extMatch[1].trim();
+      return null;
+    };
+
     const records = calls.map((call: any, index: number) => {
       const transcript = call["Transcript"];
       const hasTranscript = transcript && transcript !== "[No Transcript]" && transcript.length > 50;
       
-      // Check if already scored
-      const hasScores = call["Seller Interest Score"] && call["Seller Interest Score"] !== "";
+      // Check if already scored - look for any score field
+      const sellerInterestScore = parseScore(call["Seller Interest Score"]);
+      const hasScores = sellerInterestScore !== null;
+      
+      // Extract contact name from title
+      const callTitle = call["Call Title"] || `Import ${index + 1}`;
+      const contactName = extractContactName(callTitle);
       
       return {
         workspace_id: workspaceId,
         nocodb_row_id: `json_${index}_${Date.now()}`,
-        call_title: call["Call Title"] || `Import ${index + 1}`,
+        call_title: callTitle,
         fireflies_url: call["Fireflies URL"] || null,
         date_time: call["Date Time"] ? new Date(call["Date Time"]).toISOString() : null,
         host_email: call["Host Email"] || null,
@@ -48,6 +71,25 @@ serve(async (req) => {
         call_type: "external",
         transcript_text: hasTranscript ? transcript : null,
         import_status: hasScores ? "scored" : (hasTranscript ? "transcript_fetched" : "pending"),
+        // Score fields
+        seller_interest_score: sellerInterestScore,
+        seller_interest_justification: call["Seller Interest Score Justification"] || call["Interest Justification"] || null,
+        objection_handling_score: parseScore(call["Objection Handling Score"]),
+        rapport_building_score: parseScore(call["Rapport Building Score"]),
+        value_proposition_score: parseScore(call["Value Proposition Score"]),
+        engagement_score: parseScore(call["Engagement Score"]),
+        quality_of_conversation_score: parseScore(call["Quality of Conversation Score"]) || parseScore(call["Conversation Quality Score"]),
+        next_step_clarity_score: parseScore(call["Next Step Clarity Score"]),
+        composite_score: parseScore(call["Composite Score"]) || parseScore(call["Overall Score"]),
+        timeline_to_sell: call["Timeline to Sell"] || call["Timeline"] || null,
+        call_summary: call["Call Summary"] || call["Summary"] || null,
+        call_category: call["Call Category"] || call["Category"] || null,
+        opening_type: call["Opening Type"] || null,
+        contact_name: contactName,
+        company_name: call["Company Name"] || call["Company"] || null,
+        key_topics_discussed: call["Key Topics"] ? (Array.isArray(call["Key Topics"]) ? call["Key Topics"] : [call["Key Topics"]]) : null,
+        key_concerns: call["Key Concerns"] ? (Array.isArray(call["Key Concerns"]) ? call["Key Concerns"] : [call["Key Concerns"]]) : null,
+        motivation_factors: call["Motivation Factors"] ? (Array.isArray(call["Motivation Factors"]) ? call["Motivation Factors"] : [call["Motivation Factors"]]) : null,
       };
     });
 
