@@ -12,7 +12,26 @@ serve(async (req) => {
   }
 
   try {
-    const { email } = await req.json();
+    // SECURITY: Require a secret token to prevent unauthorized access
+    const devSecret = Deno.env.get('DEV_AUTO_LOGIN_SECRET');
+    if (!devSecret) {
+      console.error('DEV_AUTO_LOGIN_SECRET not configured - function disabled');
+      return new Response(
+        JSON.stringify({ error: 'Development auto-login is disabled' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { email, secret } = await req.json();
+
+    // SECURITY: Validate the secret token
+    if (!secret || secret !== devSecret) {
+      console.warn('Unauthorized dev-auto-login attempt');
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: Invalid or missing secret' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     
     if (!email) {
       return new Response(
@@ -20,6 +39,9 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // SECURITY: Audit log the usage
+    console.log(`[AUDIT] dev-auto-login used for email: ${email} at ${new Date().toISOString()}`);
 
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
