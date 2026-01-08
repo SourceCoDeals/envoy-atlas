@@ -16,17 +16,15 @@ export interface CallLibraryEntry {
   added_by: string;
   created_at: string;
   updated_at: string;
-  // Joined data
+  // Joined data from external_calls
   call?: {
     id: string;
-    phone_number: string | null;
-    duration_seconds: number | null;
-    disposition: string | null;
-    recording_url: string | null;
-    start_at: string | null;
-    dial_session?: {
-      member_name: string | null;
-    };
+    call_title: string | null;
+    contact_name: string | null;
+    company_name: string | null;
+    phoneburner_recording_url: string | null;
+    date_time: string | null;
+    host_email: string | null;
   };
   ai_score?: {
     composite_score: number | null;
@@ -56,41 +54,50 @@ export function useCallLibrary() {
     queryFn: async () => {
       if (!workspace?.id) return [];
 
-      const { data, error } = await supabase
+      // Fetch library entries
+      const { data: libraryEntries, error: entriesError } = await supabase
         .from('call_library_entries')
-        .select(`
-          *,
-          call:phoneburner_calls(
-            id,
-            phone_number,
-            duration_seconds,
-            disposition,
-            recording_url,
-            start_at,
-            dial_session:phoneburner_dial_sessions(member_name)
-          )
-        `)
+        .select('*')
         .eq('workspace_id', workspace.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (entriesError) throw entriesError;
+      if (!libraryEntries || libraryEntries.length === 0) return [];
 
-      // Fetch AI scores separately
-      const callIds = data?.map(e => e.call_id).filter(Boolean) || [];
-      if (callIds.length > 0) {
-        const { data: scores } = await supabase
-          .from('call_ai_scores')
-          .select('call_id, composite_score, seller_interest_score, objection_handling_score, rapport_building_score')
-          .in('call_id', callIds);
+      // Get call IDs to fetch from external_calls
+      const callIds = libraryEntries.map(e => e.call_id).filter(Boolean);
+      
+      if (callIds.length === 0) return libraryEntries as CallLibraryEntry[];
 
-        const scoreMap = new Map(scores?.map(s => [s.call_id, s]) || []);
-        return data?.map(entry => ({
+      // Fetch call details from external_calls
+      const { data: externalCalls } = await supabase
+        .from('external_calls')
+        .select('id, call_title, contact_name, company_name, phoneburner_recording_url, date_time, host_email, composite_score, seller_interest_score, objection_handling_score, rapport_building_score')
+        .in('id', callIds);
+
+      const callMap = new Map(externalCalls?.map(c => [c.id, c]) || []);
+
+      return libraryEntries.map(entry => {
+        const callData = callMap.get(entry.call_id);
+        return {
           ...entry,
-          ai_score: scoreMap.get(entry.call_id) || null,
-        })) as CallLibraryEntry[];
-      }
-
-      return data as CallLibraryEntry[];
+          call: callData ? {
+            id: callData.id,
+            call_title: callData.call_title,
+            contact_name: callData.contact_name,
+            company_name: callData.company_name,
+            phoneburner_recording_url: callData.phoneburner_recording_url,
+            date_time: callData.date_time,
+            host_email: callData.host_email,
+          } : undefined,
+          ai_score: callData ? {
+            composite_score: callData.composite_score,
+            seller_interest_score: callData.seller_interest_score,
+            objection_handling_score: callData.objection_handling_score,
+            rapport_building_score: callData.rapport_building_score,
+          } : undefined,
+        };
+      }) as CallLibraryEntry[];
     },
     enabled: !!workspace?.id,
   });

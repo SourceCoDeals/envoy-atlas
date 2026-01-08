@@ -4,16 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { 
   Search, 
-  Filter, 
   Phone, 
   Clock, 
   Brain, 
@@ -25,13 +17,7 @@ import {
 } from 'lucide-react';
 import { useCallsWithScores } from '@/hooks/useCallIntelligence';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { formatDistanceToNow, format } from 'date-fns';
-
-function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return minutes > 0 ? `${minutes}m ${secs}s` : `${secs}s`;
-}
+import { format } from 'date-fns';
 
 function getScoreBadgeVariant(score: number): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (score >= 70) return 'default';
@@ -52,7 +38,6 @@ export default function CallSearch() {
     minScore?: number;
     maxScore?: number;
     hasTranscript?: boolean;
-    disposition?: string;
   }>({});
 
   const { data: calls, isLoading } = useCallsWithScores({
@@ -67,7 +52,6 @@ export default function CallSearch() {
 
   const applyQuickFilter = (filterConfig: typeof quickFilters[0]['filter']) => {
     setFilters(prev => {
-      // Toggle off if same filter is applied
       const isSame = JSON.stringify(prev) === JSON.stringify(filterConfig);
       return isSame ? {} : filterConfig;
     });
@@ -163,35 +147,32 @@ export default function CallSearch() {
                     >
                       <div className="flex items-center gap-4">
                         <div>
-                          <p className="font-medium">{call.phone_number || 'Unknown number'}</p>
+                          <p className="font-medium">{call.contact_name || call.company_name || call.call_title || 'Unknown'}</p>
                           <div className="flex items-center gap-3 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
-                              {call.start_at 
-                                ? format(new Date(call.start_at), 'MMM d, yyyy h:mm a')
+                              {call.date_time 
+                                ? format(new Date(call.date_time), 'MMM d, yyyy h:mm a')
                                 : 'Unknown date'
                               }
                             </span>
-                            {call.duration_seconds && (
-                              <span>{formatDuration(call.duration_seconds)}</span>
-                            )}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        {call.disposition && (
-                          <Badge variant="outline">{call.disposition}</Badge>
+                        {call.import_status && (
+                          <Badge variant="outline">{call.import_status}</Badge>
                         )}
-                        {call.transcript?.transcription_status === 'completed' && (
+                        {call.transcript_text && (
                           <Badge variant="secondary" className="gap-1">
                             <FileText className="h-3 w-3" />
                             Transcribed
                           </Badge>
                         )}
-                        {call.score?.composite_score !== null && (
-                          <Badge variant={getScoreBadgeVariant(call.score.composite_score || 0)}>
+                        {call.composite_score !== null && (
+                          <Badge variant={getScoreBadgeVariant(call.composite_score || 0)}>
                             <Brain className="h-3 w-3 mr-1" />
-                            {call.score.composite_score}/100
+                            {call.composite_score}/100
                           </Badge>
                         )}
                         {expandedCallId === call.id ? (
@@ -206,49 +187,49 @@ export default function CallSearch() {
                     {expandedCallId === call.id && (
                       <div className="border-t bg-muted/30 p-4 space-y-4">
                         {/* Score Breakdown */}
-                        {call.score && (
+                        {call.composite_score !== null && (
                           <div className="space-y-3">
                             <h4 className="font-medium text-sm">AI Score Breakdown</h4>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                               <div className="bg-card rounded-lg p-3">
                                 <p className="text-xs text-muted-foreground">Seller Interest</p>
-                                <p className="text-lg font-bold">{call.score.seller_interest_score || '--'}/10</p>
+                                <p className="text-lg font-bold">{call.seller_interest_score || '--'}/10</p>
                               </div>
                               <div className="bg-card rounded-lg p-3">
                                 <p className="text-xs text-muted-foreground">Objection Handling</p>
-                                <p className="text-lg font-bold">{call.score.objection_handling_score || '--'}/10</p>
+                                <p className="text-lg font-bold">{call.objection_handling_score || '--'}/10</p>
                               </div>
                               <div className="bg-card rounded-lg p-3">
                                 <p className="text-xs text-muted-foreground">Rapport Building</p>
-                                <p className="text-lg font-bold">{call.score.rapport_building_score || '--'}/10</p>
+                                <p className="text-lg font-bold">{call.rapport_building_score || '--'}/10</p>
                               </div>
                               <div className="bg-card rounded-lg p-3">
                                 <p className="text-xs text-muted-foreground">Next Step Clarity</p>
-                                <p className="text-lg font-bold">{call.score.next_step_clarity_score || '--'}/10</p>
+                                <p className="text-lg font-bold">{call.next_step_clarity_score || '--'}/10</p>
                               </div>
                             </div>
 
                             {/* Insights */}
                             <div className="flex flex-wrap gap-2">
-                              {call.score.opening_type && (
-                                <Badge variant="outline">Opening: {call.score.opening_type}</Badge>
+                              {call.opening_type && (
+                                <Badge variant="outline">Opening: {call.opening_type}</Badge>
                               )}
-                              {call.score.timeline_to_sell && (
-                                <Badge variant="outline">Timeline: {call.score.timeline_to_sell}</Badge>
+                              {call.timeline_to_sell && (
+                                <Badge variant="outline">Timeline: {call.timeline_to_sell}</Badge>
                               )}
                             </div>
 
-                            {call.score.personal_insights && (
+                            {call.call_summary && (
                               <div className="bg-card rounded-lg p-3">
-                                <p className="text-xs text-muted-foreground mb-1">Personal Insights</p>
-                                <p className="text-sm">{call.score.personal_insights}</p>
+                                <p className="text-xs text-muted-foreground mb-1">Call Summary</p>
+                                <p className="text-sm">{call.call_summary}</p>
                               </div>
                             )}
                           </div>
                         )}
 
                         {/* Transcript Preview */}
-                        {call.transcript?.transcript_text && (
+                        {call.transcript_text && (
                           <div className="space-y-2">
                             <h4 className="font-medium text-sm flex items-center gap-2">
                               <MessageSquare className="h-4 w-4" />
@@ -256,8 +237,8 @@ export default function CallSearch() {
                             </h4>
                             <div className="bg-card rounded-lg p-4 max-h-64 overflow-y-auto">
                               <pre className="text-sm whitespace-pre-wrap font-sans">
-                                {call.transcript.transcript_text.slice(0, 1000)}
-                                {call.transcript.transcript_text.length > 1000 && '...'}
+                                {call.transcript_text.slice(0, 1000)}
+                                {call.transcript_text.length > 1000 && '...'}
                               </pre>
                             </div>
                           </div>
@@ -265,11 +246,19 @@ export default function CallSearch() {
 
                         {/* Actions */}
                         <div className="flex gap-2">
-                          {call.recording_url && (
+                          {call.phoneburner_recording_url && (
                             <Button variant="outline" size="sm" asChild>
-                              <a href={call.recording_url} target="_blank" rel="noopener noreferrer">
+                              <a href={call.phoneburner_recording_url} target="_blank" rel="noopener noreferrer">
                                 <Play className="h-4 w-4 mr-2" />
                                 Listen
+                              </a>
+                            </Button>
+                          )}
+                          {call.fireflies_url && (
+                            <Button variant="outline" size="sm" asChild>
+                              <a href={call.fireflies_url} target="_blank" rel="noopener noreferrer">
+                                <FileText className="h-4 w-4 mr-2" />
+                                View in Fireflies
                               </a>
                             </Button>
                           )}

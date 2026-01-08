@@ -16,20 +16,9 @@ interface RepStats {
   avgRapportBuilding: number;
   avgValueProposition: number;
   avgEngagement: number;
-  avgScriptAdherence: number;
   avgNextStepClarity: number;
-  avgValuationDiscussion: number;
-  avgMandatoryQuestions: number;
-  totalTalkTime: number;
   connectRate: number;
   meetingsSet: number;
-}
-
-function formatDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return `${hours}h ${mins}m`;
-  return `${mins}m`;
 }
 
 function RepRadarChart({ rep }: { rep: RepStats }) {
@@ -39,9 +28,7 @@ function RepRadarChart({ rep }: { rep: RepStats }) {
     { dimension: 'Rapport Building', value: rep.avgRapportBuilding * 10, fullMark: 100 },
     { dimension: 'Value Proposition', value: rep.avgValueProposition * 10, fullMark: 100 },
     { dimension: 'Engagement', value: rep.avgEngagement * 10, fullMark: 100 },
-    { dimension: 'Script Adherence', value: rep.avgScriptAdherence * 10, fullMark: 100 },
     { dimension: 'Next Step Clarity', value: rep.avgNextStepClarity * 10, fullMark: 100 },
-    { dimension: 'Valuation Discussion', value: rep.avgValuationDiscussion * 10, fullMark: 100 },
   ];
 
   return (
@@ -70,9 +57,7 @@ function RepCard({ rep, rank }: { rep: RepStats; rank: number }) {
       { name: 'Rapport Building', score: rep.avgRapportBuilding },
       { name: 'Value Proposition', score: rep.avgValueProposition },
       { name: 'Engagement', score: rep.avgEngagement },
-      { name: 'Script Adherence', score: rep.avgScriptAdherence },
       { name: 'Next Step Clarity', score: rep.avgNextStepClarity },
-      { name: 'Valuation Discussion', score: rep.avgValuationDiscussion },
     ].sort((a, b) => b.score - a.score);
 
     return {
@@ -132,11 +117,7 @@ function RepCard({ rep, rank }: { rep: RepStats; rank: number }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t text-center text-sm">
-          <div>
-            <p className="font-semibold">{formatDuration(rep.totalTalkTime)}</p>
-            <p className="text-xs text-muted-foreground">Talk Time</p>
-          </div>
+        <div className="grid grid-cols-2 gap-2 pt-2 border-t text-center text-sm">
           <div>
             <p className="font-semibold">{(rep.connectRate * 100).toFixed(0)}%</p>
             <p className="text-xs text-muted-foreground">Connect Rate</p>
@@ -179,54 +160,45 @@ export default function RepInsights() {
   const { data: callsData = [], isLoading } = useCallsWithScores({ limit: 500 });
 
   const repStats = useMemo(() => {
-    const repMap = new Map<string, {
-      scores: Array<NonNullable<typeof callsData[0]['score']>>;
-      calls: typeof callsData;
-    }>();
+    const repMap = new Map<string, typeof callsData>();
 
-    // Group calls by rep (via dial session) and collect scores
+    // Group calls by host_email
     callsData.forEach(call => {
-      const repName = 'Unknown Rep'; // PhoneBurner doesn't include dial_session in our query
+      const repName = call.host_email || 'Unknown Rep';
       if (!repMap.has(repName)) {
-        repMap.set(repName, { scores: [], calls: [] });
+        repMap.set(repName, []);
       }
-      repMap.get(repName)!.calls.push(call);
-      if (call.score) {
-        repMap.get(repName)!.scores.push(call.score);
-      }
+      repMap.get(repName)!.push(call);
     });
 
     // Calculate stats per rep
     const stats: RepStats[] = [];
-    repMap.forEach((data, name) => {
-      if (data.scores.length === 0) return;
+    repMap.forEach((calls, name) => {
+      const scoredCalls = calls.filter(c => c.composite_score !== null);
+      if (scoredCalls.length === 0) return;
 
-      const avgScore = (key: keyof typeof data.scores[0]) => {
-        const values = data.scores.map(s => s[key]).filter((v): v is number => typeof v === 'number');
+      const avgScore = (key: keyof typeof scoredCalls[0]) => {
+        const values = scoredCalls.map(s => s[key]).filter((v): v is number => typeof v === 'number');
         return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
       };
 
-      const connectedCalls = data.calls.filter(c => c.is_connected);
-      const meetingsSet = data.calls.filter(c => 
-        c.disposition?.toLowerCase().includes('meeting') || 
-        c.disposition?.toLowerCase().includes('interested')
+      const connectedCalls = calls.filter(c => c.transcript_text && c.transcript_text.length > 100);
+      const meetingsSet = calls.filter(c => 
+        c.call_category?.toLowerCase().includes('meeting') || 
+        c.call_category?.toLowerCase().includes('interested')
       ).length;
 
       stats.push({
         name,
-        totalCalls: data.scores.length,
+        totalCalls: scoredCalls.length,
         avgCompositeScore: avgScore('composite_score'),
         avgSellerInterest: avgScore('seller_interest_score'),
         avgObjectionHandling: avgScore('objection_handling_score'),
         avgRapportBuilding: avgScore('rapport_building_score'),
         avgValueProposition: avgScore('value_proposition_score'),
         avgEngagement: avgScore('engagement_score'),
-        avgScriptAdherence: avgScore('script_adherence_score'),
         avgNextStepClarity: avgScore('next_step_clarity_score'),
-        avgValuationDiscussion: avgScore('valuation_discussion_score'),
-        avgMandatoryQuestions: avgScore('mandatory_questions_adherence'),
-        totalTalkTime: data.calls.reduce((sum, c) => sum + (c.duration_seconds || 0), 0),
-        connectRate: data.calls.length > 0 ? connectedCalls.length / data.calls.length : 0,
+        connectRate: calls.length > 0 ? connectedCalls.length / calls.length : 0,
         meetingsSet,
       });
     });
@@ -247,7 +219,7 @@ export default function RepInsights() {
     };
   }, [repStats]);
 
-  const totalScoredCalls = callsData.filter(c => c.score).length;
+  const totalScoredCalls = callsData.filter(c => c.composite_score !== null).length;
 
   if (isLoading) {
     return (
@@ -267,7 +239,7 @@ export default function RepInsights() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Rep Insights</h1>
             <p className="text-muted-foreground">
-              AI-powered performance analysis across 10 scoring dimensions
+              AI-powered performance analysis across scoring dimensions
             </p>
           </div>
           <div className="flex items-center gap-2">

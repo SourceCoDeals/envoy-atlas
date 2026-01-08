@@ -5,43 +5,26 @@ import { toast } from 'sonner';
 
 export interface CallWithScores {
   id: string;
-  external_call_id: string;
-  start_at: string | null;
-  end_at: string | null;
-  duration_seconds: number | null;
-  disposition: string | null;
-  is_connected: boolean | null;
-  is_voicemail: boolean | null;
-  recording_url: string | null;
-  notes: string | null;
-  phone_number: string | null;
-  dial_session_id: string | null;
-  workspace_id: string;
-  transcript?: {
-    id: string;
-    transcript_text: string | null;
-    transcription_status: string;
-    word_count: number | null;
-    speaker_segments: unknown;
-  } | null;
-  score?: {
-    id: string;
-    composite_score: number | null;
-    seller_interest_score: number | null;
-    objection_handling_score: number | null;
-    rapport_building_score: number | null;
-    value_proposition_score: number | null;
-    engagement_score: number | null;
-    script_adherence_score: number | null;
-    next_step_clarity_score: number | null;
-    valuation_discussion_score: number | null;
-    mandatory_questions_adherence: number | null;
-    opening_type: string | null;
-    trigger_events: unknown;
-    objections_list: unknown;
-    personal_insights: string | null;
-    timeline_to_sell: string | null;
-  } | null;
+  call_title: string | null;
+  date_time: string | null;
+  phoneburner_recording_url: string | null;
+  fireflies_url: string | null;
+  transcript_text: string | null;
+  contact_name: string | null;
+  company_name: string | null;
+  host_email: string | null;
+  composite_score: number | null;
+  seller_interest_score: number | null;
+  objection_handling_score: number | null;
+  rapport_building_score: number | null;
+  value_proposition_score: number | null;
+  engagement_score: number | null;
+  next_step_clarity_score: number | null;
+  opening_type: string | null;
+  call_summary: string | null;
+  call_category: string | null;
+  timeline_to_sell: string | null;
+  import_status: string | null;
 }
 
 export interface CallingMetrics {
@@ -78,55 +61,42 @@ export function useCallingMetrics(dateRange?: { start: Date; end: Date }) {
         };
       }
 
-      // Fetch calls
+      // Fetch calls from external_calls
       let query = supabase
-        .from('phoneburner_calls')
-        .select('id, duration_seconds, is_connected, is_voicemail, recording_url')
+        .from('external_calls')
+        .select('id, phoneburner_recording_url, transcript_text, composite_score, import_status')
         .eq('workspace_id', currentWorkspace.id);
 
       if (dateRange) {
         query = query
-          .gte('start_at', dateRange.start.toISOString())
-          .lte('start_at', dateRange.end.toISOString());
+          .gte('date_time', dateRange.start.toISOString())
+          .lte('date_time', dateRange.end.toISOString());
       }
 
       const { data: calls, error: callsError } = await query;
       if (callsError) throw callsError;
 
-      // Fetch transcripts count
-      const { count: transcribedCount } = await supabase
-        .from('call_transcripts')
-        .select('id', { count: 'exact', head: true })
-        .eq('workspace_id', currentWorkspace.id)
-        .eq('transcription_status', 'completed');
-
-      // Fetch scores with avg composite
-      const { data: scores } = await supabase
-        .from('call_ai_scores')
-        .select('composite_score')
-        .eq('workspace_id', currentWorkspace.id)
-        .not('composite_score', 'is', null);
-
       const totalCalls = calls?.length || 0;
-      const totalConnected = calls?.filter(c => c.is_connected).length || 0;
-      const totalVoicemails = calls?.filter(c => c.is_voicemail).length || 0;
-      const totalTalkTimeSeconds = calls?.reduce((sum, c) => sum + (c.duration_seconds || 0), 0) || 0;
-      const callsWithRecording = calls?.filter(c => c.recording_url).length || 0;
+      const totalConnected = calls?.filter(c => c.transcript_text && c.transcript_text.length > 100).length || 0;
+      const callsWithRecording = calls?.filter(c => c.phoneburner_recording_url).length || 0;
+      const transcribedCalls = calls?.filter(c => c.transcript_text).length || 0;
+      const scoredCalls = calls?.filter(c => c.composite_score !== null).length || 0;
 
-      const avgAIScore = scores && scores.length > 0
-        ? Math.round(scores.reduce((sum, s) => sum + (s.composite_score || 0), 0) / scores.length)
+      const scoresWithValue = calls?.filter(c => c.composite_score !== null) || [];
+      const avgAIScore = scoresWithValue.length > 0
+        ? Math.round(scoresWithValue.reduce((sum, c) => sum + (c.composite_score || 0), 0) / scoresWithValue.length)
         : null;
 
       return {
         totalCalls,
         totalConnected,
-        totalVoicemails,
-        totalTalkTimeSeconds,
+        totalVoicemails: 0,
+        totalTalkTimeSeconds: 0,
         connectRate: totalCalls > 0 ? (totalConnected / totalCalls) * 100 : 0,
-        avgDuration: totalConnected > 0 ? totalTalkTimeSeconds / totalConnected : 0,
+        avgDuration: 0,
         avgAIScore,
-        transcribedCalls: transcribedCount || 0,
-        scoredCalls: scores?.length || 0,
+        transcribedCalls,
+        scoredCalls,
         callsWithRecording,
       };
     },
@@ -139,7 +109,6 @@ export function useCallsWithScores(options?: {
   offset?: number;
   minScore?: number;
   maxScore?: number;
-  disposition?: string;
   hasTranscript?: boolean;
   search?: string;
 }) {
@@ -150,16 +119,11 @@ export function useCallsWithScores(options?: {
     queryFn: async (): Promise<CallWithScores[]> => {
       if (!currentWorkspace?.id) return [];
 
-      // Fetch calls
       let query = supabase
-        .from('phoneburner_calls')
+        .from('external_calls')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
-        .order('start_at', { ascending: false });
-
-      if (options?.disposition) {
-        query = query.eq('disposition', options.disposition);
-      }
+        .order('date_time', { ascending: false });
 
       if (options?.limit) {
         query = query.limit(options.limit);
@@ -169,54 +133,32 @@ export function useCallsWithScores(options?: {
         query = query.range(options.offset, options.offset + (options.limit || 50) - 1);
       }
 
-      const { data: calls, error: callsError } = await query;
-      if (callsError) throw callsError;
+      const { data: calls, error } = await query;
+      if (error) throw error;
 
-      if (!calls || calls.length === 0) return [];
-
-      const callIds = calls.map(c => c.id);
-
-      // Fetch transcripts
-      const { data: transcripts } = await supabase
-        .from('call_transcripts')
-        .select('id, call_id, transcript_text, transcription_status, word_count, speaker_segments')
-        .in('call_id', callIds);
-
-      // Fetch scores
-      const { data: scores } = await supabase
-        .from('call_ai_scores')
-        .select('id, call_id, composite_score, seller_interest_score, objection_handling_score, rapport_building_score, value_proposition_score, engagement_score, script_adherence_score, next_step_clarity_score, valuation_discussion_score, mandatory_questions_adherence, opening_type, trigger_events, objections_list, personal_insights, timeline_to_sell')
-        .in('call_id', callIds);
-
-      // Map transcripts and scores to calls
-      const transcriptMap = new Map(transcripts?.map(t => [t.call_id, t]) || []);
-      const scoreMap = new Map(scores?.map(s => [s.call_id, s]) || []);
-
-      let results: CallWithScores[] = calls.map(call => ({
-        ...call,
-        transcript: transcriptMap.get(call.id) || null,
-        score: scoreMap.get(call.id) || null,
-      }));
+      let results = calls as CallWithScores[];
 
       // Filter by score range
       if (options?.minScore !== undefined) {
-        results = results.filter(r => r.score?.composite_score && r.score.composite_score >= options.minScore!);
+        results = results.filter(r => r.composite_score && r.composite_score >= options.minScore!);
       }
       if (options?.maxScore !== undefined) {
-        results = results.filter(r => r.score?.composite_score && r.score.composite_score <= options.maxScore!);
+        results = results.filter(r => r.composite_score && r.composite_score <= options.maxScore!);
       }
 
       // Filter by transcript
       if (options?.hasTranscript) {
-        results = results.filter(r => r.transcript?.transcription_status === 'completed');
+        results = results.filter(r => r.transcript_text && r.transcript_text.length > 0);
       }
 
       // Search in transcript text
       if (options?.search) {
         const searchLower = options.search.toLowerCase();
         results = results.filter(r => 
-          r.transcript?.transcript_text?.toLowerCase().includes(searchLower) ||
-          r.notes?.toLowerCase().includes(searchLower)
+          r.transcript_text?.toLowerCase().includes(searchLower) ||
+          r.call_title?.toLowerCase().includes(searchLower) ||
+          r.contact_name?.toLowerCase().includes(searchLower) ||
+          r.company_name?.toLowerCase().includes(searchLower)
         );
       }
 
@@ -234,17 +176,20 @@ export function useTopAndBottomCalls(limit: number = 5) {
     queryFn: async () => {
       if (!currentWorkspace?.id) return { topCalls: [], bottomCalls: [] };
 
-      // Fetch all scores with call info
-      const { data: scores, error } = await supabase
-        .from('call_ai_scores')
+      // Fetch all scored calls
+      const { data: calls, error } = await supabase
+        .from('external_calls')
         .select(`
           id,
-          call_id,
+          call_title,
+          date_time,
+          contact_name,
+          company_name,
           composite_score,
           seller_interest_score,
           next_step_clarity_score,
           opening_type,
-          personal_insights
+          call_summary
         `)
         .eq('workspace_id', currentWorkspace.id)
         .not('composite_score', 'is', null)
@@ -252,28 +197,39 @@ export function useTopAndBottomCalls(limit: number = 5) {
 
       if (error) throw error;
 
-      const topScores = scores?.slice(0, limit) || [];
-      const bottomScores = scores?.slice(-limit).reverse() || [];
+      const topCalls = (calls?.slice(0, limit) || []).map(c => ({
+        id: c.id,
+        call_id: c.id,
+        composite_score: c.composite_score,
+        seller_interest_score: c.seller_interest_score,
+        next_step_clarity_score: c.next_step_clarity_score,
+        opening_type: c.opening_type,
+        personal_insights: c.call_summary,
+        call: {
+          id: c.id,
+          phone_number: c.contact_name || c.company_name,
+          start_at: c.date_time,
+          duration_seconds: null,
+        }
+      }));
 
-      // Fetch call details for these
-      const allCallIds = [...topScores, ...bottomScores].map(s => s.call_id);
-      
-      const { data: calls } = await supabase
-        .from('phoneburner_calls')
-        .select('id, start_at, duration_seconds, disposition, phone_number')
-        .in('id', allCallIds);
+      const bottomCalls = (calls?.slice(-limit).reverse() || []).map(c => ({
+        id: c.id,
+        call_id: c.id,
+        composite_score: c.composite_score,
+        seller_interest_score: c.seller_interest_score,
+        next_step_clarity_score: c.next_step_clarity_score,
+        opening_type: c.opening_type,
+        personal_insights: c.call_summary,
+        call: {
+          id: c.id,
+          phone_number: c.contact_name || c.company_name,
+          start_at: c.date_time,
+          duration_seconds: null,
+        }
+      }));
 
-      const callMap = new Map(calls?.map(c => [c.id, c]) || []);
-
-      const enrichScore = (score: typeof scores[0]) => ({
-        ...score,
-        call: callMap.get(score.call_id),
-      });
-
-      return {
-        topCalls: topScores.map(enrichScore),
-        bottomCalls: bottomScores.map(enrichScore),
-      };
+      return { topCalls, bottomCalls };
     },
     enabled: !!currentWorkspace?.id,
   });
@@ -368,7 +324,7 @@ export function useScoreCall() {
   });
 }
 
-// ================== AGGREGATE METRICS (Option B) ==================
+// ================== AGGREGATE METRICS ==================
 
 export interface RepPerformance {
   memberId: string;
@@ -407,62 +363,53 @@ export function useAggregateCallingMetrics() {
         };
       }
 
-      // Fetch aggregate metrics from phoneburner_daily_metrics
-      const { data: metrics, error } = await supabase
-        .from('phoneburner_daily_metrics')
-        .select('member_id, member_name, total_calls, calls_connected, voicemails_left, total_talk_time_seconds, total_sessions')
+      // Fetch from external_calls and group by host_email
+      const { data: calls, error } = await supabase
+        .from('external_calls')
+        .select('host_email, transcript_text, composite_score')
         .eq('workspace_id', currentWorkspace.id);
 
       if (error) throw error;
 
-      // Aggregate by member
-      const memberMap = new Map<string, RepPerformance>();
+      // Aggregate by host
+      const hostMap = new Map<string, RepPerformance>();
 
-      for (const m of metrics || []) {
-        const memberId = m.member_id || 'unknown';
-        const existing = memberMap.get(memberId);
+      for (const call of calls || []) {
+        const hostId = call.host_email || 'unknown';
+        const existing = hostMap.get(hostId);
+        const isConnected = call.transcript_text && call.transcript_text.length > 100;
         
         if (existing) {
-          existing.totalCalls += m.total_calls || 0;
-          existing.callsConnected += m.calls_connected || 0;
-          existing.voicemailsLeft += m.voicemails_left || 0;
-          existing.totalTalkTimeSeconds += m.total_talk_time_seconds || 0;
-          existing.totalSessions += m.total_sessions || 0;
-          // Update name if we have one
-          if (m.member_name && !existing.memberName.startsWith('Member ')) {
-            existing.memberName = m.member_name;
-          }
+          existing.totalCalls += 1;
+          existing.callsConnected += isConnected ? 1 : 0;
         } else {
-          memberMap.set(memberId, {
-            memberId,
-            memberName: m.member_name || `Member ${memberId.slice(-6)}`,
-            totalCalls: m.total_calls || 0,
-            callsConnected: m.calls_connected || 0,
+          hostMap.set(hostId, {
+            memberId: hostId,
+            memberName: hostId,
+            totalCalls: 1,
+            callsConnected: isConnected ? 1 : 0,
             connectRate: 0,
-            voicemailsLeft: m.voicemails_left || 0,
-            totalTalkTimeSeconds: m.total_talk_time_seconds || 0,
-            totalSessions: m.total_sessions || 0,
+            voicemailsLeft: 0,
+            totalTalkTimeSeconds: 0,
+            totalSessions: 1,
           });
         }
       }
 
-      // Calculate connect rates and build array
-      const repPerformance = Array.from(memberMap.values()).map(rep => ({
+      // Calculate connect rates
+      const repPerformance = Array.from(hostMap.values()).map(rep => ({
         ...rep,
         connectRate: rep.totalCalls > 0 ? (rep.callsConnected / rep.totalCalls) * 100 : 0,
       })).sort((a, b) => b.connectRate - a.connectRate);
 
-      // Calculate totals
       const totalCalls = repPerformance.reduce((sum, r) => sum + r.totalCalls, 0);
       const totalConnected = repPerformance.reduce((sum, r) => sum + r.callsConnected, 0);
-      const totalVoicemails = repPerformance.reduce((sum, r) => sum + r.voicemailsLeft, 0);
-      const totalTalkTimeSeconds = repPerformance.reduce((sum, r) => sum + r.totalTalkTimeSeconds, 0);
 
       return {
         totalCalls,
         totalConnected,
-        totalVoicemails,
-        totalTalkTimeSeconds,
+        totalVoicemails: 0,
+        totalTalkTimeSeconds: 0,
         connectRate: totalCalls > 0 ? (totalConnected / totalCalls) * 100 : 0,
         repPerformance,
       };

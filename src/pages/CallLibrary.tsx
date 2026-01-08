@@ -31,16 +31,10 @@ function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemo
             )}
             
             <div className="flex flex-wrap items-center gap-2 mt-3">
-              {entry.call?.dial_session?.member_name && (
+              {entry.call?.host_email && (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <User className="h-3 w-3" />
-                  {entry.call.dial_session.member_name}
-                </div>
-              )}
-              {entry.call?.duration_seconds && (
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3" />
-                  {formatDuration(entry.call.duration_seconds)}
+                  {entry.call.host_email}
                 </div>
               )}
               {entry.ai_score?.composite_score && (
@@ -62,9 +56,9 @@ function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemo
           </div>
 
           <div className="flex flex-col gap-2">
-            {entry.call?.recording_url && (
+            {entry.call?.phoneburner_recording_url && (
               <Button size="sm" variant="outline" asChild>
-                <a href={entry.call.recording_url} target="_blank" rel="noopener noreferrer">
+                <a href={entry.call.phoneburner_recording_url} target="_blank" rel="noopener noreferrer">
                   <Play className="h-4 w-4" />
                 </a>
               </Button>
