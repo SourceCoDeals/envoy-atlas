@@ -549,9 +549,19 @@ serve(async (req) => {
         let totalCalls = 0;
         let totalSessions = 0;
 
+        // Show per-member breakdown
+        const memberBreakdown: any[] = [];
         for (const id of memberIds) {
-          totalCalls += usage[id]?.calls || 0;
-          totalSessions += usage[id]?.sessions || 0;
+          const memberStats = usage[id] || {};
+          totalCalls += memberStats?.calls || 0;
+          totalSessions += memberStats?.sessions || 0;
+          memberBreakdown.push({
+            member_id: id,
+            calls: memberStats?.calls || 0,
+            sessions: memberStats?.sessions || 0,
+            connected: memberStats?.connected || 0,
+            voicemail: memberStats?.voicemail || 0,
+          });
         }
 
         results.tests.usage = {
@@ -560,9 +570,109 @@ serve(async (req) => {
           member_count: memberIds.length,
           total_calls: totalCalls,
           total_sessions: totalSessions,
+          member_breakdown: memberBreakdown.slice(0, 3),  // Show first 3 members
+          note: totalSessions === 0 && totalCalls > 0
+            ? "Sessions=0 but calls exist - calls may be click-to-call not dial sessions"
+            : null,
         };
       } catch (e: any) {
         results.tests.usage = { success: false, error: e.message };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 5: Try dial sessions WITHOUT date filter (maybe dates are the issue)
+      try {
+        const noDateRes = await phoneburnerRequest(
+          `/dialsession?page=1&page_size=5`,
+          apiKey
+        );
+
+        const noDateData = noDateRes?.dialsessions ?? {};
+        const noDateSessions = noDateData?.dialsessions ?? [];
+        const noDateArr = Array.isArray(noDateSessions) ? noDateSessions : [];
+
+        results.tests.dial_sessions_no_date_filter = {
+          success: true,
+          sessions_found: noDateArr.length,
+          total_results: noDateData.total_results || noDateArr.length,
+          note: noDateArr.length > 0
+            ? "Sessions exist! Date filter may be too restrictive."
+            : "Still no sessions without date filter",
+        };
+      } catch (e: any) {
+        results.tests.dial_sessions_no_date_filter = {
+          success: false,
+          error: e.message
+        };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 6: Try getting members with entire_team parameter
+      try {
+        const teamMembersRes = await phoneburnerRequest(
+          `/members?entire_team=1`,
+          apiKey
+        );
+
+        const rawTeamMembers = teamMembersRes?.members?.members ?? teamMembersRes?.members ?? [];
+        const teamMemberArr = Array.isArray(rawTeamMembers)
+          ? (Array.isArray(rawTeamMembers[0]) ? rawTeamMembers[0] : rawTeamMembers)
+          : [];
+
+        results.tests.members_entire_team = {
+          success: true,
+          count: teamMemberArr.length,
+          note: teamMemberArr.length > (results.tests.members?.count || 0)
+            ? "entire_team=1 returns more members!"
+            : "Same member count with entire_team param",
+        };
+      } catch (e: any) {
+        results.tests.members_entire_team = {
+          success: false,
+          error: e.message
+        };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 7: Check voicemails endpoint (might show call activity)
+      try {
+        const voicemailsRes = await phoneburnerRequest(`/voicemails`, apiKey);
+
+        results.tests.voicemails = {
+          success: true,
+          response_keys: Object.keys(voicemailsRes || {}),
+          raw_preview: JSON.stringify(voicemailsRes).slice(0, 300),
+        };
+
+        const voicemails = voicemailsRes?.voicemails ?? [];
+        const vmArr = Array.isArray(voicemails) ? voicemails : [];
+        results.tests.voicemails.count = vmArr.length;
+      } catch (e: any) {
+        results.tests.voicemails = {
+          success: false,
+          error: e.message
+        };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 8: Check dialsession settings (understand user's config)
+      try {
+        const settingsRes = await phoneburnerRequest(`/dialsession/settings`, apiKey);
+
+        results.tests.dialsession_settings = {
+          success: true,
+          response_keys: Object.keys(settingsRes || {}),
+          raw_preview: JSON.stringify(settingsRes).slice(0, 400),
+        };
+      } catch (e: any) {
+        results.tests.dialsession_settings = {
+          success: false,
+          error: e.message
+        };
       }
 
       // Generate recommendation
