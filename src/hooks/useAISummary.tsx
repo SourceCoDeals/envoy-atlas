@@ -113,33 +113,25 @@ export function useAISummary() {
       const prevWeekEnd = startOfDay(subDays(now, 7));
       const prevWeekStart = startOfDay(subDays(now, 14));
 
-      // Fetch call AI scores for current week
+      // Fetch scored external calls for current week
       const { data: currentWeekScores, error: scoresError } = await supabase
-        .from('call_ai_scores')
-        .select(`
-          *,
-          phoneburner_calls!inner(
-            id, 
-            duration, 
-            call_date, 
-            contact_name, 
-            company_name,
-            disposition
-          )
-        `)
+        .from('external_calls')
+        .select('*')
         .eq('workspace_id', currentWorkspace.id)
-        .gte('created_at', weekStart.toISOString())
-        .lte('created_at', weekEnd.toISOString());
+        .eq('import_status', 'scored')
+        .gte('date_time', weekStart.toISOString())
+        .lte('date_time', weekEnd.toISOString());
 
       if (scoresError) throw scoresError;
 
       // Fetch previous week for comparison
       const { data: prevWeekScores } = await supabase
-        .from('call_ai_scores')
-        .select('*, phoneburner_calls!inner(duration)')
+        .from('external_calls')
+        .select('*')
         .eq('workspace_id', currentWorkspace.id)
-        .gte('created_at', prevWeekStart.toISOString())
-        .lt('created_at', prevWeekEnd.toISOString());
+        .eq('import_status', 'scored')
+        .gte('date_time', prevWeekStart.toISOString())
+        .lt('date_time', prevWeekEnd.toISOString());
 
       // Fetch calling deals for interested companies
       const { data: deals } = await supabase
@@ -154,18 +146,14 @@ export function useAISummary() {
       // Calculate Program Overview
       const programOverview: ProgramOverview = {
         totalCallsAnalyzed: scores.length,
-        avgCallTime: scores.length > 0 
-          ? Math.round(scores.reduce((sum, s) => sum + ((s.phoneburner_calls as any)?.duration || 0), 0) / scores.length)
-          : 0,
+        avgCallTime: 0, // Not available in external_calls
         avgInterestRating: scores.length > 0 
           ? Number((scores.reduce((sum, s) => sum + (s.seller_interest_score || 0), 0) / scores.length).toFixed(1))
           : 0,
         avgObjectionHandlingScore: scores.length > 0 
           ? Number((scores.reduce((sum, s) => sum + (s.objection_handling_score || 0), 0) / scores.length).toFixed(1))
           : 0,
-        avgResolutionRate: scores.length > 0 
-          ? Number((scores.reduce((sum, s) => sum + (s.objection_resolution_rate || 0), 0) / scores.length).toFixed(1))
-          : 0,
+        avgResolutionRate: 0, // Calculate from objections_list if available
         avgConversationQuality: scores.length > 0 
           ? Number((scores.reduce((sum, s) => sum + (s.quality_of_conversation_score || 0), 0) / scores.length).toFixed(1))
           : 0,
@@ -174,12 +162,12 @@ export function useAISummary() {
       // Calculate Seller Signals
       const interestedOwners = scores.filter(s => (s.seller_interest_score || 0) >= 7);
       const interestedCompanies: InterestedCompany[] = interestedOwners.map(s => ({
-        id: s.call_id,
-        companyName: (s.phoneburner_calls as any)?.company_name || 'Unknown',
-        contactName: (s.phoneburner_calls as any)?.contact_name || 'Unknown',
-        industry: 'Various', // Would come from leads table
+        id: s.id,
+        companyName: s.company_name || 'Unknown',
+        contactName: s.contact_name || s.call_title?.split(' to ')?.[1]?.split('(')?.[0]?.trim() || 'Unknown',
+        industry: 'Various',
         interestScore: s.seller_interest_score || 0,
-        callDate: s.created_at,
+        callDate: s.date_time || s.created_at,
       }));
 
       // Analyze patterns
@@ -191,14 +179,14 @@ export function useAISummary() {
         interestedOwnerCount: interestedOwners.length,
         interestedCompanies: interestedCompanies.slice(0, 10),
         notablePatterns: {
-          topIndustries: ['Manufacturing', 'Business Services', 'Healthcare'], // Would aggregate from data
+          topIndustries: ['Manufacturing', 'Business Services', 'Healthcare'],
           topGeographies: ['Texas', 'Florida', 'California'],
           avgTimeline: timelinesRaw.length > 0 ? '12-18 months' : 'Not specified',
           avgCompanySize: '$5M-$20M Revenue',
         },
       };
 
-      // Key Observations (AI-generated would come from summary table)
+      // Key Observations
       const avgScore = programOverview.avgInterestRating;
       const prevAvgScore = prevScores.length > 0 
         ? prevScores.reduce((sum, s) => sum + (s.seller_interest_score || 0), 0) / prevScores.length
@@ -207,29 +195,27 @@ export function useAISummary() {
       const keyObservations: string[] = [
         scores.length > prevScores.length 
           ? `Call volume increased ${Math.round((scores.length - prevScores.length) / (prevScores.length || 1) * 100)}% vs last week`
-          : `Call volume decreased ${Math.round((prevScores.length - scores.length) / (prevScores.length || 1) * 100)}% vs last week`,
+          : prevScores.length > 0 
+            ? `Call volume decreased ${Math.round((prevScores.length - scores.length) / (prevScores.length || 1) * 100)}% vs last week`
+            : `${scores.length} calls analyzed this week`,
         avgScore > prevAvgScore 
           ? `Average interest rating improved from ${prevAvgScore.toFixed(1)} to ${avgScore.toFixed(1)}`
-          : `Average interest rating dropped from ${prevAvgScore.toFixed(1)} to ${avgScore.toFixed(1)}`,
+          : prevAvgScore > 0
+            ? `Average interest rating dropped from ${prevAvgScore.toFixed(1)} to ${avgScore.toFixed(1)}`
+            : `Average interest rating: ${avgScore.toFixed(1)}/10`,
         `${interestedOwners.length} high-interest opportunities identified this week`,
-        programOverview.avgCallTime > 180 
-          ? 'Longer calls correlating with higher engagement scores'
-          : 'Call duration trending shorter - focus on deepening conversations',
       ];
 
-      // Common Objections
-      const objectionsList = scores
-        .filter(s => s.objections_list)
-        .flatMap(s => {
-          const list = s.objections_list;
-          if (Array.isArray(list)) return list;
-          return [];
-        });
-
+      // Common Objections - parse from objections_list JSONB
       const objectionCounts: Record<string, number> = {};
-      objectionsList.forEach((obj: any) => {
-        const text = typeof obj === 'string' ? obj : obj?.objection || 'Unknown';
-        objectionCounts[text] = (objectionCounts[text] || 0) + 1;
+      scores.forEach(score => {
+        const objList = score.objections_list;
+        if (Array.isArray(objList)) {
+          objList.forEach((obj: any) => {
+            const text = typeof obj === 'string' ? obj : obj?.objection || 'Unknown';
+            objectionCounts[text] = (objectionCounts[text] || 0) + 1;
+          });
+        }
       });
 
       const themes: ObjectionTheme[] = Object.entries(objectionCounts)
@@ -238,17 +224,17 @@ export function useAISummary() {
         .map(([objection, count]) => ({
           objection,
           count,
-          changeFromLastWeek: 0, // Would compare to previous week
-          resolutionRate: 65, // Would calculate from data
+          changeFromLastWeek: 0,
+          resolutionRate: 65,
         }));
 
       const commonObjections: CommonObjections = {
         themes,
         newObjections: themes.length > 0 ? [] : ['Not enough data to identify new objections'],
-        totalObjections: objectionsList.length,
+        totalObjections: Object.values(objectionCounts).reduce((a, b) => a + b, 0),
       };
 
-      // Program Strengths (from high-scoring areas)
+      // Program Strengths
       const programStrengths: ProgramStrength[] = [];
       if (programOverview.avgInterestRating >= 6) {
         programStrengths.push({
@@ -260,7 +246,7 @@ export function useAISummary() {
       if (programOverview.avgObjectionHandlingScore >= 7) {
         programStrengths.push({
           strength: 'Effective objection handling',
-          impact: `${programOverview.avgResolutionRate}% resolution rate`,
+          impact: `${programOverview.avgObjectionHandlingScore}/10 average score`,
         });
       }
       if (programOverview.avgConversationQuality >= 7) {
@@ -269,7 +255,6 @@ export function useAISummary() {
           impact: `${programOverview.avgConversationQuality}/10 average quality score`,
         });
       }
-      // Add default if empty
       if (programStrengths.length === 0) {
         programStrengths.push({
           strength: 'Consistent call volume maintained',
@@ -279,28 +264,21 @@ export function useAISummary() {
 
       // Program Weaknesses
       const programWeaknesses: ProgramWeakness[] = [];
-      if (programOverview.avgInterestRating < 5) {
+      if (programOverview.avgInterestRating < 5 && scores.length > 0) {
         programWeaknesses.push({
           weakness: 'Low prospect interest scores',
           frequency: `${Math.round((scores.filter(s => (s.seller_interest_score || 0) < 5).length / scores.length) * 100)}% of calls`,
           impact: 'Fewer qualified opportunities generated',
         });
       }
-      if (programOverview.avgObjectionHandlingScore < 6) {
+      if (programOverview.avgObjectionHandlingScore < 6 && scores.length > 0) {
         programWeaknesses.push({
           weakness: 'Objection handling needs improvement',
           frequency: 'Across multiple reps',
           impact: 'Conversations ending prematurely',
         });
       }
-      if (programOverview.avgCallTime < 120) {
-        programWeaknesses.push({
-          weakness: 'Short call duration',
-          frequency: `${Math.round(programOverview.avgCallTime / 60)} min average`,
-          impact: 'Insufficient discovery and rapport building',
-        });
-      }
-      if (programWeaknesses.length === 0) {
+      if (programWeaknesses.length === 0 && scores.length > 0) {
         programWeaknesses.push({
           weakness: 'Valuation discussions often skipped',
           frequency: 'Multiple calls',

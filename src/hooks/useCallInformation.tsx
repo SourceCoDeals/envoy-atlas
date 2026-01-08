@@ -139,13 +139,14 @@ export function useCallInformation() {
       setError(null);
 
       try {
-        // Fetch call AI scores
-        const { data: aiScores, error: scoresError } = await supabase
-          .from('call_ai_scores')
+        // Fetch scored external calls
+        const { data: externalCalls, error: callsError } = await supabase
+          .from('external_calls')
           .select('*')
-          .eq('workspace_id', currentWorkspace.id);
+          .eq('workspace_id', currentWorkspace.id)
+          .eq('import_status', 'scored');
 
-        if (scoresError) throw scoresError;
+        if (callsError) throw callsError;
 
         // Fetch calling deals
         const { data: deals, error: dealsError } = await supabase
@@ -163,24 +164,8 @@ export function useCallInformation() {
 
         if (summariesError) throw summariesError;
 
-        // Fetch phoneburner calls for contact info
-        const { data: calls, error: callsError } = await supabase
-          .from('phoneburner_calls')
-          .select('id, phone_number, created_at, contact_id')
-          .eq('workspace_id', currentWorkspace.id);
-
-        if (callsError) throw callsError;
-
-        // Fetch leads for contact names
-        const { data: leads } = await supabase
-          .from('leads')
-          .select('id, first_name, last_name, company')
-          .eq('workspace_id', currentWorkspace.id);
-
-        const leadsMap = new Map(leads?.map((l) => [l.id, l]));
-
-        // Process data
-        const totalCallsScored = aiScores?.length || 0;
+        const aiScores = externalCalls || [];
+        const totalCallsScored = aiScores.length;
 
         // Call category distribution
         const callCategories: CallCategoryDistribution = {
@@ -189,28 +174,24 @@ export function useCallInformation() {
           connection: 0,
           total: totalCallsScored,
         };
-        aiScores?.forEach((score) => {
+        aiScores.forEach((score) => {
           const category = (score.call_category || '').toLowerCase();
           if (category.includes('voicemail')) callCategories.voicemail++;
           else if (category.includes('gatekeeper')) callCategories.gatekeeper++;
-          else if (category.includes('connection')) callCategories.connection++;
+          else callCategories.connection++;
         });
 
-        // Interest distribution from deals
+        // Interest distribution based on seller_interest_score
         const interestDistribution: InterestDistribution = {
-          yes: 0,
-          no: 0,
-          maybe: 0,
-          unknown: 0,
-          total: deals?.length || 0,
+          yes: aiScores.filter(s => (s.seller_interest_score || 0) >= 7).length,
+          no: aiScores.filter(s => (s.seller_interest_score || 0) <= 3).length,
+          maybe: aiScores.filter(s => {
+            const score = s.seller_interest_score || 0;
+            return score > 3 && score < 7;
+          }).length,
+          unknown: aiScores.filter(s => !s.seller_interest_score).length,
+          total: totalCallsScored,
         };
-        deals?.forEach((deal) => {
-          const interest = (deal.interest_level || '').toLowerCase();
-          if (interest === 'yes') interestDistribution.yes++;
-          else if (interest === 'no') interestDistribution.no++;
-          else if (interest === 'maybe') interestDistribution.maybe++;
-          else interestDistribution.unknown++;
-        });
 
         // Timeline distribution
         const timelineDistribution: TimelineDistribution = {
@@ -220,7 +201,7 @@ export function useCallInformation() {
           longTerm: 0,
           unknown: 0,
         };
-        aiScores?.forEach((score) => {
+        aiScores.forEach((score) => {
           const timeline = (score.timeline_to_sell || '').toLowerCase();
           if (timeline.includes('immediate') || timeline.includes('now')) {
             timelineDistribution.immediate++;
@@ -242,26 +223,22 @@ export function useCallInformation() {
         };
 
         const averageScores: AverageScores = {
-          sellerInterest: calculateAvg(aiScores?.map((s) => s.seller_interest_score)),
-          objectionHandling: calculateAvg(aiScores?.map((s) => s.objection_handling_score)),
-          rapportBuilding: calculateAvg(aiScores?.map((s) => s.rapport_building_score)),
-          valueProposition: calculateAvg(aiScores?.map((s) => s.value_proposition_score)),
-          engagement: calculateAvg(aiScores?.map((s) => s.engagement_score)),
-          scriptAdherence: calculateAvg(aiScores?.map((s) => s.script_adherence_score)),
-          nextStepClarity: calculateAvg(aiScores?.map((s) => s.next_step_clarity_score)),
-          valuationDiscussion: calculateAvg(aiScores?.map((s) => s.valuation_discussion_score)),
-          overallQuality: calculateAvg(aiScores?.map((s) => s.overall_quality_score)),
-          decisionMakerIdentification: calculateAvg(aiScores?.map((s) => s.decision_maker_identification)),
+          sellerInterest: calculateAvg(aiScores.map((s) => s.seller_interest_score)),
+          objectionHandling: calculateAvg(aiScores.map((s) => s.objection_handling_score)),
+          rapportBuilding: calculateAvg(aiScores.map((s) => s.rapport_building_score)),
+          valueProposition: calculateAvg(aiScores.map((s) => s.value_proposition_score)),
+          engagement: calculateAvg(aiScores.map((s) => s.engagement_score)),
+          scriptAdherence: 0, // Not tracked in external_calls
+          nextStepClarity: calculateAvg(aiScores.map((s) => s.next_step_clarity_score)),
+          valuationDiscussion: 0, // Not tracked in external_calls
+          overallQuality: calculateAvg(aiScores.map((s) => s.quality_of_conversation_score)),
+          decisionMakerIdentification: 0, // Not tracked in external_calls
         };
 
-        // Mandatory questions stats
+        // Mandatory questions stats - parse from key_topics_discussed
         const questionCounts: Record<string, number> = {};
-        aiScores?.forEach((score) => {
-          const questions = score.mandatory_questions_asked as string[] || [];
-          questions.forEach((q) => {
-            questionCounts[q] = (questionCounts[q] || 0) + 1;
-          });
-        });
+        // For now, we don't have mandatory question tracking in external_calls
+        // This would need to be added to the AI scoring prompt
 
         const mandatoryQuestions: MandatoryQuestionStats[] = defaultMandatoryQuestions.map((q) => ({
           questionId: q.id,
@@ -271,16 +248,19 @@ export function useCallInformation() {
           percentage: totalCallsScored > 0 ? Math.round((questionCounts[q.id] || 0) / totalCallsScored * 100) : 0,
         }));
 
-        // Top objections
+        // Top objections from objections_list JSONB
         const objectionCounts: Record<string, number> = {};
-        aiScores?.forEach((score) => {
-          const objections = score.objections_text?.split(',') || [];
-          objections.forEach((obj) => {
-            const cleaned = obj.trim().toLowerCase();
-            if (cleaned) {
-              objectionCounts[cleaned] = (objectionCounts[cleaned] || 0) + 1;
-            }
-          });
+        aiScores.forEach((score) => {
+          const objList = score.objections_list;
+          if (Array.isArray(objList)) {
+            objList.forEach((obj: any) => {
+              const text = typeof obj === 'string' ? obj : obj?.objection || '';
+              const cleaned = text.trim().toLowerCase();
+              if (cleaned) {
+                objectionCounts[cleaned] = (objectionCounts[cleaned] || 0) + 1;
+              }
+            });
+          }
         });
 
         const topObjections: ObjectionStats[] = Object.entries(objectionCounts)
@@ -288,36 +268,45 @@ export function useCallInformation() {
           .sort((a, b) => b.count - a.count)
           .slice(0, 10);
 
-        // Build call records
-        const callsMap = new Map(calls?.map((c) => [c.id, c]));
+        // Build call records from external_calls
         const summariesMap = new Map(summaries?.map((s) => [s.call_id, s]));
 
-        const callRecords: CallRecord[] = (aiScores || []).map((score) => {
-          const call = callsMap.get(score.call_id);
-          const summary = summariesMap.get(score.call_id);
-          const lead = call?.contact_id ? leadsMap.get(call.contact_id) : null;
-          const contactName = lead ? `${lead.first_name || ''} ${lead.last_name || ''}`.trim() : 'Unknown';
+        const callRecords: CallRecord[] = aiScores.map((score) => {
+          const summary = summariesMap.get(score.id);
+          const contactName = score.contact_name || 
+            score.call_title?.split(' to ')?.[1]?.split('(')?.[0]?.trim() || 
+            'Unknown';
           
+          // Parse objections from JSONB
+          const objections: string[] = [];
+          if (Array.isArray(score.objections_list)) {
+            score.objections_list.forEach((obj: any) => {
+              const text = typeof obj === 'string' ? obj : obj?.objection;
+              if (text) objections.push(text);
+            });
+          }
+
           return {
             id: score.id,
-            callId: score.call_id,
-            contactName: contactName || 'Unknown',
-            companyName: lead?.company || '',
-            callCategory: score.call_category || 'Unknown',
-            interestLevel: '',
+            callId: score.id,
+            contactName,
+            companyName: score.company_name || '',
+            callCategory: score.call_category || 'Connection',
+            interestLevel: (score.seller_interest_score || 0) >= 7 ? 'Yes' : 
+                          (score.seller_interest_score || 0) <= 3 ? 'No' : 'Maybe',
             sellerInterestScore: score.seller_interest_score || 0,
-            overallQualityScore: score.overall_quality_score || score.composite_score || 0,
+            overallQualityScore: score.composite_score || score.quality_of_conversation_score || 0,
             timeline: score.timeline_to_sell || 'Unknown',
-            objections: score.objections_text?.split(',').map((o) => o.trim()) || [],
-            summary: summary?.summary || '',
+            objections,
+            summary: score.call_summary || summary?.summary || '',
             followupTask: summary?.followup_task_name || null,
             followupDueDate: summary?.followup_due_date || null,
             isFollowupCompleted: summary?.is_followup_completed || false,
-            createdAt: score.created_at,
+            createdAt: score.date_time || score.created_at,
           };
         });
 
-        // Business intelligence
+        // Business intelligence from deals
         const interestedDeals = deals?.filter((d) => d.interest_level?.toLowerCase() === 'yes') || [];
         const totalPipelineRevenue = interestedDeals.reduce((sum, d) => sum + (d.annual_revenue_raw || d.revenue || 0), 0);
         const totalPipelineEbitda = interestedDeals.reduce((sum, d) => sum + (d.ebitda_raw || 0), 0);
@@ -354,14 +343,15 @@ export function useCallInformation() {
         const pendingFollowups: PendingFollowup[] = (summaries || [])
           .filter((s) => !s.is_followup_completed && s.followup_due_date)
           .map((s) => {
-            const call = callsMap.get(s.call_id);
-            const lead = call?.contact_id ? leadsMap.get(call.contact_id) : null;
-            const contactName = lead ? `${lead.first_name || ''} ${lead.last_name || ''}`.trim() : 'Unknown';
+            const call = aiScores.find(c => c.id === s.call_id);
+            const contactName = call?.contact_name || 
+              call?.call_title?.split(' to ')?.[1]?.split('(')?.[0]?.trim() || 
+              'Unknown';
             return {
               id: s.id,
               callId: s.call_id,
-              contactName: contactName || 'Unknown',
-              companyName: lead?.company || '',
+              contactName,
+              companyName: call?.company_name || '',
               taskName: s.followup_task_name || '',
               dueDate: s.followup_due_date || '',
             };

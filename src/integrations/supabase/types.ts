@@ -2265,53 +2265,110 @@ export type Database = {
       external_calls: {
         Row: {
           all_participants: string | null
+          call_category: string | null
+          call_summary: string | null
           call_title: string | null
           call_type: string | null
+          company_name: string | null
+          composite_score: number | null
+          contact_name: string | null
           created_at: string | null
           date_time: string | null
+          engagement_score: number | null
           error_message: string | null
           fireflies_url: string | null
           host_email: string | null
           id: string
           import_status: string | null
+          key_concerns: string[] | null
+          key_topics_discussed: string[] | null
+          motivation_factors: string[] | null
+          next_step_clarity_score: number | null
           nocodb_row_id: string | null
+          objection_handling_score: number | null
+          objections_list: Json | null
+          opening_type: string | null
           phoneburner_recording_url: string | null
+          quality_of_conversation_score: number | null
+          rapport_building_score: number | null
+          seller_interest_justification: string | null
+          seller_interest_score: number | null
+          timeline_to_sell: string | null
           transcript_text: string | null
           updated_at: string | null
+          value_proposition_score: number | null
           workspace_id: string
         }
         Insert: {
           all_participants?: string | null
+          call_category?: string | null
+          call_summary?: string | null
           call_title?: string | null
           call_type?: string | null
+          company_name?: string | null
+          composite_score?: number | null
+          contact_name?: string | null
           created_at?: string | null
           date_time?: string | null
+          engagement_score?: number | null
           error_message?: string | null
           fireflies_url?: string | null
           host_email?: string | null
           id?: string
           import_status?: string | null
+          key_concerns?: string[] | null
+          key_topics_discussed?: string[] | null
+          motivation_factors?: string[] | null
+          next_step_clarity_score?: number | null
           nocodb_row_id?: string | null
+          objection_handling_score?: number | null
+          objections_list?: Json | null
+          opening_type?: string | null
           phoneburner_recording_url?: string | null
+          quality_of_conversation_score?: number | null
+          rapport_building_score?: number | null
+          seller_interest_justification?: string | null
+          seller_interest_score?: number | null
+          timeline_to_sell?: string | null
           transcript_text?: string | null
           updated_at?: string | null
+          value_proposition_score?: number | null
           workspace_id: string
         }
         Update: {
           all_participants?: string | null
+          call_category?: string | null
+          call_summary?: string | null
           call_title?: string | null
           call_type?: string | null
+          company_name?: string | null
+          composite_score?: number | null
+          contact_name?: string | null
           created_at?: string | null
           date_time?: string | null
+          engagement_score?: number | null
           error_message?: string | null
           fireflies_url?: string | null
           host_email?: string | null
           id?: string
           import_status?: string | null
+          key_concerns?: string[] | null
+          key_topics_discussed?: string[] | null
+          motivation_factors?: string[] | null
+          next_step_clarity_score?: number | null
           nocodb_row_id?: string | null
+          objection_handling_score?: number | null
+          objections_list?: Json | null
+          opening_type?: string | null
           phoneburner_recording_url?: string | null
+          quality_of_conversation_score?: number | null
+          rapport_building_score?: number | null
+          seller_interest_justification?: string | null
+          seller_interest_score?: number | null
+          timeline_to_sell?: string | null
           transcript_text?: string | null
           updated_at?: string | null
+          value_proposition_score?: number | null
           workspace_id?: string
         }
         Relationships: [

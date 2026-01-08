@@ -1,0 +1,21 @@
+-- Add score columns to external_calls table for storing AI analysis results
+ALTER TABLE public.external_calls 
+ADD COLUMN IF NOT EXISTS seller_interest_score numeric,
+ADD COLUMN IF NOT EXISTS seller_interest_justification text,
+ADD COLUMN IF NOT EXISTS objection_handling_score numeric,
+ADD COLUMN IF NOT EXISTS rapport_building_score numeric,
+ADD COLUMN IF NOT EXISTS value_proposition_score numeric,
+ADD COLUMN IF NOT EXISTS engagement_score numeric,
+ADD COLUMN IF NOT EXISTS quality_of_conversation_score numeric,
+ADD COLUMN IF NOT EXISTS next_step_clarity_score numeric,
+ADD COLUMN IF NOT EXISTS composite_score numeric,
+ADD COLUMN IF NOT EXISTS key_topics_discussed text[],
+ADD COLUMN IF NOT EXISTS key_concerns text[],
+ADD COLUMN IF NOT EXISTS motivation_factors text[],
+ADD COLUMN IF NOT EXISTS timeline_to_sell text,
+ADD COLUMN IF NOT EXISTS objections_list jsonb,
+ADD COLUMN IF NOT EXISTS call_summary text,
+ADD COLUMN IF NOT EXISTS call_category text,
+ADD COLUMN IF NOT EXISTS opening_type text,
+ADD COLUMN IF NOT EXISTS contact_name text,
+ADD COLUMN IF NOT EXISTS company_name text;

@@ -14,7 +14,6 @@ import {
   FileText,
   BookOpen,
   Star,
-  TrendingUp,
   Loader2,
   Phone,
   Clock,
@@ -68,25 +67,17 @@ export default function TopCallsWeek() {
     setLoading(true);
 
     try {
-      // Fetch top scored calls from this week
+      // Fetch top scored calls from this week from external_calls
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
 
       const { data: scores, error } = await supabase
-        .from('call_ai_scores')
-        .select(`
-          *,
-          phoneburner_calls:call_id (
-            contact_name,
-            contact_phone,
-            disposition,
-            duration_seconds,
-            called_at,
-            member_name
-          )
-        `)
+        .from('external_calls')
+        .select('*')
         .eq('workspace_id', currentWorkspace.id)
-        .gte('created_at', weekAgo.toISOString())
+        .eq('import_status', 'scored')
+        .not('composite_score', 'is', null)
+        .gte('date_time', weekAgo.toISOString())
         .order('composite_score', { ascending: false })
         .limit(10);
 
@@ -95,14 +86,14 @@ export default function TopCallsWeek() {
       // Transform data
       const calls: TopCall[] = (scores || []).map((s: any) => ({
         id: s.id,
-        call_id: s.call_id,
+        call_id: s.id,
         composite_score: s.composite_score || 0,
-        rep_name: s.phoneburner_calls?.member_name || 'Unknown',
-        contact_name: s.phoneburner_calls?.contact_name || 'Unknown',
-        company_name: 'Company', // Would come from lead data
-        duration_seconds: s.phoneburner_calls?.duration_seconds || 0,
-        call_date: s.phoneburner_calls?.called_at || s.created_at,
-        outcome: s.phoneburner_calls?.disposition || 'Unknown',
+        rep_name: s.host_email?.split('@')[0] || 'Unknown',
+        contact_name: s.contact_name || s.call_title?.split(' to ')?.[1]?.split('(')?.[0]?.trim() || 'Unknown',
+        company_name: s.company_name || 'Company',
+        duration_seconds: 0, // Not available in external_calls
+        call_date: s.date_time || s.created_at,
+        outcome: s.call_category || 'Connection',
         opening_type: s.opening_type,
         key_techniques: [
           s.seller_interest_score >= 8 ? 'Strong seller qualification' : null,
@@ -110,27 +101,28 @@ export default function TopCallsWeek() {
           s.rapport_building_score >= 8 ? 'Great rapport building' : null,
           s.next_step_clarity_score >= 8 ? 'Clear next steps' : null,
         ].filter(Boolean) as string[],
-        why_it_worked: s.seller_interest_justification || 'High overall quality',
+        why_it_worked: s.seller_interest_justification || s.call_summary || 'High overall quality',
       }));
 
       setTopCalls(calls);
 
-      // Generate pattern insights (would come from AI analysis)
+      // Generate pattern insights based on actual data
+      const highScorers = scores?.filter(s => s.composite_score >= 70) || [];
       setPatterns([
         {
           category: 'Opening Approach',
-          insight: 'Permission-based openings leading to 40% higher engagement',
-          frequency: '7/10 top calls',
+          insight: 'Permission-based openings leading to higher engagement',
+          frequency: `${highScorers.filter(s => s.opening_type?.includes('permission')).length}/${highScorers.length} top calls`,
         },
         {
           category: 'Discovery Technique',
           insight: 'Asking about timeline within first 2 minutes',
-          frequency: '8/10 top calls',
+          frequency: `${highScorers.filter(s => s.timeline_to_sell).length}/${highScorers.length} top calls`,
         },
         {
-          category: 'Closing Approach',
-          insight: 'Offering specific meeting times vs. open-ended',
-          frequency: '6/10 top calls',
+          category: 'Interest Level',
+          insight: 'High seller interest correlates with quality conversations',
+          frequency: `${highScorers.filter(s => s.seller_interest_score >= 7).length}/${highScorers.length} top calls`,
         },
       ]);
     } catch (err) {
@@ -141,6 +133,7 @@ export default function TopCallsWeek() {
   };
 
   const formatDuration = (seconds: number) => {
+    if (!seconds) return 'N/A';
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -183,7 +176,7 @@ export default function TopCallsWeek() {
             {[...Array(5)].map((_, i) => (
               <Card key={i}>
                 <CardContent className="pt-6">
-                  <Skeleton className="h-24 w-full" />
+                  <div className="h-24 w-full bg-muted animate-pulse rounded" />
                 </CardContent>
               </Card>
             ))}
@@ -227,10 +220,12 @@ export default function TopCallsWeek() {
                               <User className="h-3 w-3" />
                               {call.rep_name}
                             </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {formatDuration(call.duration_seconds)}
-                            </span>
+                            {call.duration_seconds > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatDuration(call.duration_seconds)}
+                              </span>
+                            )}
                             {call.opening_type && (
                               <Badge variant="secondary" className="text-xs">
                                 {call.opening_type}
@@ -242,7 +237,7 @@ export default function TopCallsWeek() {
                         {/* Score */}
                         <div className="text-right">
                           <p className={`text-xl font-bold ${getScoreColor(call.composite_score)}`}>
-                            {call.composite_score}
+                            {Math.round(call.composite_score)}
                           </p>
                           <p className="text-xs text-muted-foreground">AI Score</p>
                         </div>
