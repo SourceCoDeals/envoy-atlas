@@ -485,9 +485,40 @@ serve(async (req) => {
       await persistProgress({});
     }
 
-    // ================== PHASE 3: METRICS (team aggregate) ==================
+    // ================== PHASE 3: MEMBERS ==================
     if (phase === "metrics" && Date.now() - startedAt < TIME_BUDGET_MS) {
+      // First fetch team members from /members endpoint
       try {
+        const membersRes = await phoneburnerRequest(`/members`, apiKey);
+        const members = membersRes?.members ?? [];
+        const memberArr: any[] = Array.isArray(members) ? members : [];
+
+        const memberNameMap: Record<string, string> = {};
+
+        for (const m of memberArr) {
+          const externalMemberId = String(m?.member_user_id ?? m?.member_id ?? m?.id ?? "");
+          if (!externalMemberId) continue;
+
+          const firstName = m?.first_name ?? "";
+          const lastName = m?.last_name ?? "";
+          const fullName = [firstName, lastName].filter(Boolean).join(" ") || null;
+          
+          memberNameMap[externalMemberId] = fullName || `Member ${externalMemberId}`;
+
+          await supabaseAdmin.from("phoneburner_members").upsert(
+            {
+              workspace_id: workspaceId,
+              external_member_id: externalMemberId,
+              name: fullName,
+              email: m?.email ?? null,
+              role: m?.role ?? null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "workspace_id,external_member_id" }
+          );
+        }
+
+        // Now fetch usage metrics and include member names
         const usageEnd = formatDateYMD(new Date());
         const usageStart = formatDateYMD(daysAgo(Math.min(DAYS_TO_SYNC, 90)));
 
@@ -506,6 +537,7 @@ serve(async (req) => {
               workspace_id: workspaceId,
               date: usageEnd,
               member_id: memberId,
+              member_name: memberNameMap[memberId] || null,
               total_sessions: stats?.sessions ?? 0,
               total_calls: stats?.calls ?? 0,
               calls_connected: stats?.connected ?? 0,
@@ -517,7 +549,7 @@ serve(async (req) => {
           );
         }
       } catch (e) {
-        console.error("Usage metrics fetch failed", e);
+        console.error("Members/Usage metrics fetch failed", e);
       }
 
       phase = "linking";

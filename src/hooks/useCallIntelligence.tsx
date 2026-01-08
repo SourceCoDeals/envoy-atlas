@@ -367,3 +367,106 @@ export function useScoreCall() {
     },
   });
 }
+
+// ================== AGGREGATE METRICS (Option B) ==================
+
+export interface RepPerformance {
+  memberId: string;
+  memberName: string;
+  totalCalls: number;
+  callsConnected: number;
+  connectRate: number;
+  voicemailsLeft: number;
+  totalTalkTimeSeconds: number;
+  totalSessions: number;
+}
+
+export interface AggregateMetrics {
+  totalCalls: number;
+  totalConnected: number;
+  totalVoicemails: number;
+  totalTalkTimeSeconds: number;
+  connectRate: number;
+  repPerformance: RepPerformance[];
+}
+
+export function useAggregateCallingMetrics() {
+  const { currentWorkspace } = useWorkspace();
+
+  return useQuery({
+    queryKey: ['aggregate-calling-metrics', currentWorkspace?.id],
+    queryFn: async (): Promise<AggregateMetrics> => {
+      if (!currentWorkspace?.id) {
+        return {
+          totalCalls: 0,
+          totalConnected: 0,
+          totalVoicemails: 0,
+          totalTalkTimeSeconds: 0,
+          connectRate: 0,
+          repPerformance: [],
+        };
+      }
+
+      // Fetch aggregate metrics from phoneburner_daily_metrics
+      const { data: metrics, error } = await supabase
+        .from('phoneburner_daily_metrics')
+        .select('member_id, member_name, total_calls, calls_connected, voicemails_left, total_talk_time_seconds, total_sessions')
+        .eq('workspace_id', currentWorkspace.id);
+
+      if (error) throw error;
+
+      // Aggregate by member
+      const memberMap = new Map<string, RepPerformance>();
+
+      for (const m of metrics || []) {
+        const memberId = m.member_id || 'unknown';
+        const existing = memberMap.get(memberId);
+        
+        if (existing) {
+          existing.totalCalls += m.total_calls || 0;
+          existing.callsConnected += m.calls_connected || 0;
+          existing.voicemailsLeft += m.voicemails_left || 0;
+          existing.totalTalkTimeSeconds += m.total_talk_time_seconds || 0;
+          existing.totalSessions += m.total_sessions || 0;
+          // Update name if we have one
+          if (m.member_name && !existing.memberName.startsWith('Member ')) {
+            existing.memberName = m.member_name;
+          }
+        } else {
+          memberMap.set(memberId, {
+            memberId,
+            memberName: m.member_name || `Member ${memberId.slice(-6)}`,
+            totalCalls: m.total_calls || 0,
+            callsConnected: m.calls_connected || 0,
+            connectRate: 0,
+            voicemailsLeft: m.voicemails_left || 0,
+            totalTalkTimeSeconds: m.total_talk_time_seconds || 0,
+            totalSessions: m.total_sessions || 0,
+          });
+        }
+      }
+
+      // Calculate connect rates and build array
+      const repPerformance = Array.from(memberMap.values()).map(rep => ({
+        ...rep,
+        connectRate: rep.totalCalls > 0 ? (rep.callsConnected / rep.totalCalls) * 100 : 0,
+      })).sort((a, b) => b.connectRate - a.connectRate);
+
+      // Calculate totals
+      const totalCalls = repPerformance.reduce((sum, r) => sum + r.totalCalls, 0);
+      const totalConnected = repPerformance.reduce((sum, r) => sum + r.callsConnected, 0);
+      const totalVoicemails = repPerformance.reduce((sum, r) => sum + r.voicemailsLeft, 0);
+      const totalTalkTimeSeconds = repPerformance.reduce((sum, r) => sum + r.totalTalkTimeSeconds, 0);
+
+      return {
+        totalCalls,
+        totalConnected,
+        totalVoicemails,
+        totalTalkTimeSeconds,
+        connectRate: totalCalls > 0 ? (totalConnected / totalCalls) * 100 : 0,
+        repPerformance,
+      };
+    },
+    enabled: !!currentWorkspace?.id,
+  });
+}
