@@ -720,6 +720,21 @@ serve(async (req) => {
 
         let memberSessionPage = 1;
         let hasMorePages = true;
+        // Fetch session detail to get individual calls
+        let detail: any = null;
+        try {
+          detail = await phoneburnerRequest(`/dialsession/${externalSessionId}`, apiKey);
+          console.log(`Session ${externalSessionId} detail keys: ${Object.keys(detail || {}).join(", ")}`);
+        } catch (e) {
+          console.error("Dial session detail fetch error", e);
+          continue;
+        }
+
+        // The detail response structure: { dialsessions: { dialsessions: { calls: [...] } } }
+        const detailSession = detail?.dialsessions?.dialsessions ?? detail?.dialsessions ?? detail?.dial_session ?? detail ?? {};
+        const calls = detailSession?.calls ?? detail?.calls ?? [];
+        const callArr: any[] = Array.isArray(calls) ? calls : [];
+        console.log(`Session ${externalSessionId} has ${callArr.length} calls`);
 
         while (hasMorePages && Date.now() - startedAt < TIME_BUDGET_MS) {
           try {
@@ -737,6 +752,15 @@ serve(async (req) => {
             if (memberSessionArr.length === 0) {
               hasMorePages = false;
               break;
+          // Try to get recording URL for this call
+          let recordingUrl = c?.recording_url ?? c?.recording ?? null;
+          if (!recordingUrl) {
+            try {
+              const callDetail = await phoneburnerRequest(`/dialsession/call/${externalCallId}?include_recording=1`, apiKey);
+              const callData = callDetail?.call?.call ?? callDetail?.call ?? {};
+              recordingUrl = callData?.recording_url ?? callData?.recording ?? null;
+            } catch (e) {
+              // Recording fetch failed, continue without it
             }
 
             for (const s of memberSessionArr) {
@@ -745,6 +769,26 @@ serve(async (req) => {
               await syncSessionWithCalls(s, memberId, memberName);
               await persistProgress({});
             }
+          const { error: callErr } = await supabaseAdmin.from("phoneburner_calls").upsert(
+            {
+              workspace_id: workspaceId,
+              dial_session_id: sessionRow.id,
+              external_call_id: externalCallId,
+              external_contact_id: c?.contact_id ? String(c.contact_id) : null,
+              phone_number: c?.phone ?? c?.phone_number ?? null,
+              start_at: c?.start_when ?? c?.start_at ?? null,
+              end_at: c?.end_when ?? c?.end_at ?? null,
+              duration_seconds: c?.duration ?? c?.duration_seconds ?? null,
+              disposition: c?.disposition ?? c?.disposition_name ?? null,
+              disposition_id: c?.disposition_id ? String(c.disposition_id) : null,
+              is_connected: c?.connected === "1" || c?.connected === 1 || c?.connected === true,
+              is_voicemail: c?.voicemail === "1" || c?.voicemail === 1 || c?.voicemail === true,
+              notes: c?.note ?? c?.notes ?? null,
+              recording_url: recordingUrl,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "workspace_id,external_call_id" }
+          );
 
             memberSessionPage += 1;
             hasMorePages = memberSessionArr.length === DIALSESSION_PAGE_SIZE;
