@@ -451,7 +451,7 @@ export default function Connections() {
         body: {
           calls,
           workspaceId: currentWorkspace.id,
-          clearExisting: true,
+          clearExisting: false,
         },
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -459,7 +459,7 @@ export default function Connections() {
       if (res.error) throw new Error(res.error.message || "Import failed");
 
       const data = res.data;
-      setSuccess(`Imported ${data.inserted} calls (${data.withTranscripts} with transcripts).`);
+      setSuccess(`Added ${data.inserted} calls (${data.withTranscripts} with transcripts).`);
       await fetchNocodbStats();
     } catch (e: any) {
       console.error(e);
