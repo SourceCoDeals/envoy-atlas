@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { useWorkspace } from '@/hooks/useWorkspace';
+import { useAISummary } from '@/hooks/useAISummary';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
-import { supabase } from '@/integrations/supabase/client';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { format } from 'date-fns';
 import {
   TrendingUp,
   TrendingDown,
@@ -18,182 +19,35 @@ import {
   Loader2,
   Zap,
   ArrowRight,
-  ExternalLink,
   Calendar,
-  User,
-  Play,
+  Phone,
+  Clock,
+  Star,
+  MessageSquare,
+  Users,
+  Building2,
+  Lightbulb,
+  AlertCircle,
+  Rocket,
+  Shield,
+  Activity,
+  BarChart3,
+  ThumbsUp,
+  ThumbsDown,
+  RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
-
-interface WeeklySummary {
-  id: string;
-  week_start: string;
-  week_end: string;
-  team_health_score: number;
-  team_health_trend: 'up' | 'down' | 'flat';
-  key_driver: string;
-  whats_working: WorkingItem[];
-  areas_needing_attention: AttentionItem[];
-  weekly_focus_recommendations: Recommendation[];
-}
-
-interface WorkingItem {
-  pattern: string;
-  impact: string;
-  recommendation: string;
-  example_call_id?: string;
-}
-
-interface AttentionItem {
-  priority: 'urgent' | 'high' | 'medium';
-  issue: string;
-  data: string;
-  root_cause: string;
-  recommendation: string;
-}
-
-interface Recommendation {
-  action: string;
-  owner: string;
-  due_date: string;
-  predicted_impact: string;
-}
 
 export default function AISummary() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { currentWorkspace } = useWorkspace();
-  const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState<WeeklySummary | null>(null);
+  const { data, loading, error, refetch } = useAISummary();
 
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/auth');
     }
   }, [user, authLoading, navigate]);
-
-  useEffect(() => {
-    if (currentWorkspace?.id) {
-      fetchSummary();
-    }
-  }, [currentWorkspace?.id]);
-
-  const fetchSummary = async () => {
-    if (!currentWorkspace?.id) return;
-    setLoading(true);
-
-    try {
-      // Try to fetch existing summary
-      const { data: existingSummary } = await supabase
-        .from('ai_weekly_summaries')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .order('week_start', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (existingSummary) {
-        setSummary({
-          id: existingSummary.id,
-          week_start: existingSummary.week_start,
-          week_end: existingSummary.week_end,
-          team_health_score: existingSummary.team_health_score || 0,
-          team_health_trend: (existingSummary.team_health_trend as 'up' | 'down' | 'flat') || 'flat',
-          key_driver: existingSummary.key_driver || '',
-          whats_working: (existingSummary.whats_working as unknown as WorkingItem[]) || [],
-          areas_needing_attention: (existingSummary.areas_needing_attention as unknown as AttentionItem[]) || [],
-          weekly_focus_recommendations: (existingSummary.weekly_focus_recommendations as unknown as Recommendation[]) || [],
-        });
-      } else {
-        // Generate sample summary if none exists
-        const today = new Date();
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() - today.getDay());
-
-        setSummary({
-          id: 'sample',
-          week_start: weekStart.toISOString(),
-          week_end: today.toISOString(),
-          team_health_score: 72,
-          team_health_trend: 'up',
-          key_driver: 'Improved objection handling across the team',
-          whats_working: [
-            {
-              pattern: 'Permission-based openings',
-              impact: '74% conversation rate vs 58% baseline',
-              recommendation: 'Scale this approach across all reps',
-            },
-            {
-              pattern: 'Timeline questions in first 2 minutes',
-              impact: '2.3x higher meeting conversion',
-              recommendation: 'Add to mandatory discovery checklist',
-            },
-            {
-              pattern: 'Specific meeting time proposals',
-              impact: '45% higher booking rate',
-              recommendation: 'Train reps on calendar blocking technique',
-            },
-          ],
-          areas_needing_attention: [
-            {
-              priority: 'high',
-              issue: 'Valuation discussion avoidance',
-              data: 'Only 38% of calls discuss valuation expectations',
-              root_cause: 'Reps uncomfortable with money conversations',
-              recommendation: 'Schedule valuation talk track workshop',
-            },
-            {
-              priority: 'medium',
-              issue: 'Follow-up call delays',
-              data: 'Average 4.2 days between calls vs. 2.5 day target',
-              root_cause: 'No automated reminder system',
-              recommendation: 'Implement same-day follow-up triggers',
-            },
-          ],
-          weekly_focus_recommendations: [
-            {
-              action: 'Review top 3 calls with team',
-              owner: 'Team Lead',
-              due_date: 'Friday',
-              predicted_impact: '+8% AI score improvement',
-            },
-            {
-              action: 'Implement valuation script',
-              owner: 'Training Manager',
-              due_date: 'Wednesday',
-              predicted_impact: '+15% valuation discussions',
-            },
-            {
-              action: 'Set up follow-up automation',
-              owner: 'Ops Manager',
-              due_date: 'End of Week',
-              predicted_impact: '-1.7 day follow-up time',
-            },
-          ],
-        });
-      }
-    } catch (err) {
-      console.error('Error fetching summary:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getHealthColor = (score: number) => {
-    if (score >= 80) return 'text-success';
-    if (score >= 60) return 'text-chart-4';
-    return 'text-destructive';
-  };
-
-  const getPriorityBadge = (priority: string) => {
-    switch (priority) {
-      case 'urgent':
-        return <Badge className="bg-destructive/10 text-destructive border-destructive/30">Urgent</Badge>;
-      case 'high':
-        return <Badge className="bg-warning/10 text-warning border-warning/30">High</Badge>;
-      default:
-        return <Badge className="bg-chart-4/10 text-chart-4 border-chart-4/30">Medium</Badge>;
-    }
-  };
 
   if (authLoading) {
     return (
@@ -205,157 +59,387 @@ export default function AISummary() {
 
   if (!user) return null;
 
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getChangeIcon = (change: number) => {
+    if (change > 0) return <TrendingUp className="h-4 w-4 text-success" />;
+    if (change < 0) return <TrendingDown className="h-4 w-4 text-destructive" />;
+    return <ArrowRight className="h-4 w-4 text-muted-foreground" />;
+  };
+
+  const getChangeColor = (change: number) => {
+    if (change > 0) return 'text-success';
+    if (change < 0) return 'text-destructive';
+    return 'text-muted-foreground';
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high':
+        return 'bg-destructive/10 text-destructive border-destructive/30';
+      case 'medium':
+        return 'bg-warning/10 text-warning border-warning/30';
+      default:
+        return 'bg-muted text-muted-foreground border-muted';
+    }
+  };
+
+  const getRecommendationTypeIcon = (type: string) => {
+    switch (type) {
+      case 'double_down':
+        return <Rocket className="h-4 w-4 text-success" />;
+      case 'test':
+        return <Activity className="h-4 w-4 text-primary" />;
+      case 'change':
+        return <RefreshCw className="h-4 w-4 text-warning" />;
+      case 'experiment':
+        return <Lightbulb className="h-4 w-4 text-chart-4" />;
+      default:
+        return <Target className="h-4 w-4" />;
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">AI Summary & Recommendations</h1>
-            <p className="text-muted-foreground">What's working, what's not, and what to do about it</p>
+            <h1 className="text-2xl font-bold tracking-tight">AI Weekly Summary</h1>
+            <p className="text-muted-foreground">
+              {data ? `${format(data.weekStart, 'MMM d')} - ${format(data.weekEnd, 'MMM d, yyyy')}` : 'Program intelligence and recommendations'}
+            </p>
           </div>
-          <Button variant="outline">
-            <Calendar className="h-4 w-4 mr-2" />
-            This Week
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={refetch}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            <Button variant="outline">
+              <Calendar className="h-4 w-4 mr-2" />
+              Last 7 Days
+            </Button>
+          </div>
         </div>
 
         {loading ? (
           <div className="space-y-4">
-            <Skeleton className="h-40 w-full" />
+            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+              {[...Array(6)].map((_, i) => (
+                <Skeleton key={i} className="h-28" />
+              ))}
+            </div>
             <div className="grid gap-4 lg:grid-cols-2">
               <Skeleton className="h-80" />
               <Skeleton className="h-80" />
             </div>
           </div>
-        ) : summary ? (
+        ) : data ? (
           <>
-            {/* Overall Assessment */}
-            <Card className="bg-gradient-to-r from-primary/5 to-transparent">
-              <CardContent className="py-6">
-                <div className="flex items-center gap-6">
-                  <div className="flex-shrink-0">
-                    <div className={`text-5xl font-bold ${getHealthColor(summary.team_health_score)}`}>
-                      {summary.team_health_score}
+            {/* 1. Program Overview */}
+            <div>
+              <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                <BarChart3 className="h-5 w-5 text-primary" />
+                Program Overview (Last 7 Days)
+              </h2>
+              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="flex items-center justify-between">
+                      <Phone className="h-5 w-5 text-muted-foreground" />
+                      {getChangeIcon(data.previousWeekComparison.callsChange)}
                     </div>
-                    <p className="text-sm text-muted-foreground text-center">Team Health</p>
-                  </div>
-                  <div className="h-16 w-px bg-border" />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      {summary.team_health_trend === 'up' ? (
-                        <TrendingUp className="h-5 w-5 text-success" />
-                      ) : summary.team_health_trend === 'down' ? (
-                        <TrendingDown className="h-5 w-5 text-destructive" />
-                      ) : (
-                        <ArrowRight className="h-5 w-5 text-muted-foreground" />
-                      )}
-                      <span className="font-medium">
-                        {summary.team_health_trend === 'up'
-                          ? 'Improving'
-                          : summary.team_health_trend === 'down'
-                          ? 'Declining'
-                          : 'Stable'}
-                      </span>
+                    <p className="text-2xl font-bold mt-2">{data.programOverview.totalCallsAnalyzed}</p>
+                    <p className="text-xs text-muted-foreground">Total Calls Analyzed</p>
+                    <p className={`text-xs mt-1 ${getChangeColor(data.previousWeekComparison.callsChange)}`}>
+                      {data.previousWeekComparison.callsChange > 0 ? '+' : ''}{data.previousWeekComparison.callsChange}% vs last week
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4">
+                    <Clock className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-2xl font-bold mt-2">{formatDuration(data.programOverview.avgCallTime)}</p>
+                    <p className="text-xs text-muted-foreground">Avg Call Time</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="flex items-center justify-between">
+                      <Star className="h-5 w-5 text-muted-foreground" />
+                      {getChangeIcon(data.previousWeekComparison.interestChange)}
                     </div>
-                    <p className="text-muted-foreground">{summary.key_driver}</p>
+                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgInterestRating}/10</p>
+                    <p className="text-xs text-muted-foreground">Avg Interest Rating</p>
+                    <p className={`text-xs mt-1 ${getChangeColor(data.previousWeekComparison.interestChange)}`}>
+                      {data.previousWeekComparison.interestChange > 0 ? '+' : ''}{data.previousWeekComparison.interestChange} vs last week
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4">
+                    <Shield className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgObjectionHandlingScore}/10</p>
+                    <p className="text-xs text-muted-foreground">Avg Objection Handling</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4">
+                    <Target className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgResolutionRate}%</p>
+                    <p className="text-xs text-muted-foreground">Avg Resolution Rate</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4">
+                    <MessageSquare className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgConversationQuality}/10</p>
+                    <p className="text-xs text-muted-foreground">Avg Conversation Quality</p>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* 2. Seller Signal Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Users className="h-5 w-5 text-success" />
+                    Seller Signal Summary
+                  </CardTitle>
+                  <CardDescription>Owners expressing interest in selling</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-success/10 border border-success/20">
+                    <div>
+                      <p className="text-3xl font-bold text-success">{data.sellerSignals.interestedOwnerCount}</p>
+                      <p className="text-sm text-muted-foreground">Interested Owners</p>
+                    </div>
+                    <Building2 className="h-10 w-10 text-success/50" />
                   </div>
-                </div>
+
+                  {data.sellerSignals.interestedCompanies.length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium mb-2">Interested Companies</p>
+                      <ScrollArea className="h-32">
+                        <div className="space-y-2">
+                          {data.sellerSignals.interestedCompanies.map((company) => (
+                            <div 
+                              key={company.id} 
+                              className="flex items-center justify-between p-2 rounded border hover:bg-muted/50 cursor-pointer"
+                              onClick={() => navigate(`/calling/call-sessions?callId=${company.id}`)}
+                            >
+                              <div>
+                                <p className="text-sm font-medium">{company.companyName}</p>
+                                <p className="text-xs text-muted-foreground">{company.contactName}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="bg-success/10 text-success">
+                                  {company.interestScore}/10
+                                </Badge>
+                                <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Top Industries</p>
+                      <p className="text-sm">{data.sellerSignals.notablePatterns.topIndustries.slice(0, 2).join(', ')}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Avg Timeline</p>
+                      <p className="text-sm">{data.sellerSignals.notablePatterns.avgTimeline}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 3. Key Observations */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Lightbulb className="h-5 w-5 text-chart-4" />
+                    Key Observations
+                  </CardTitle>
+                  <CardDescription>AI-generated insights from this week's calls</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {data.keyObservations.map((observation, index) => (
+                      <div key={index} className="flex gap-3 p-3 rounded-lg bg-muted/50">
+                        <div className="flex-shrink-0 w-6 h-6 rounded-full bg-chart-4/20 flex items-center justify-center text-xs font-medium text-chart-4">
+                          {index + 1}
+                        </div>
+                        <p className="text-sm">{observation}</p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 4. Common Objections */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-warning" />
+                  Common Objections (Weekly Themes)
+                </CardTitle>
+                <CardDescription>
+                  {data.commonObjections.totalObjections} total objections tracked this week
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {data.commonObjections.themes.length > 0 ? (
+                  <div className="space-y-3">
+                    {data.commonObjections.themes.map((theme, index) => (
+                      <div key={index} className="flex items-center gap-4 p-3 rounded-lg border">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-warning/10 flex items-center justify-center font-bold text-warning text-sm">
+                          {theme.count}
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">{theme.objection}</p>
+                          <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Target className="h-3 w-3" />
+                              {theme.resolutionRate}% resolved
+                            </span>
+                            <span className={`flex items-center gap-1 ${getChangeColor(theme.changeFromLastWeek)}`}>
+                              {getChangeIcon(theme.changeFromLastWeek)}
+                              {theme.changeFromLastWeek > 0 ? '+' : ''}{theme.changeFromLastWeek}% vs last week
+                            </span>
+                          </div>
+                        </div>
+                        <Progress value={theme.resolutionRate} className="w-20" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Not enough objection data to display themes
+                  </p>
+                )}
               </CardContent>
             </Card>
 
             <div className="grid gap-6 lg:grid-cols-2">
-              {/* What's Working */}
+              {/* 5. Program Strengths */}
               <Card className="border-success/30">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-success" />
-                    What's Working
+                    <ThumbsUp className="h-5 w-5 text-success" />
+                    Program Strengths
                   </CardTitle>
-                  <CardDescription>Successful patterns to scale</CardDescription>
+                  <CardDescription>What's working well this week</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  {summary.whats_working.map((item, index) => (
-                    <div key={index} className="p-4 rounded-lg bg-success/5 border border-success/20 space-y-2">
-                      <div className="flex items-start justify-between">
-                        <p className="font-medium">{item.pattern}</p>
-                        {item.example_call_id && (
-                          <Button variant="ghost" size="sm" className="h-7">
-                            <Play className="h-3 w-3 mr-1" />
-                            Example
-                          </Button>
-                        )}
-                      </div>
-                      <p className="text-sm text-success font-medium">{item.impact}</p>
-                      <p className="text-sm text-muted-foreground">→ {item.recommendation}</p>
+                <CardContent className="space-y-3">
+                  {data.programStrengths.map((strength, index) => (
+                    <div key={index} className="p-3 rounded-lg bg-success/5 border border-success/20">
+                      <p className="font-medium text-sm">{strength.strength}</p>
+                      <p className="text-xs text-success mt-1">{strength.impact}</p>
+                      {strength.example && (
+                        <p className="text-xs text-muted-foreground mt-1">→ {strength.example}</p>
+                      )}
                     </div>
                   ))}
                 </CardContent>
               </Card>
 
-              {/* Areas Needing Attention */}
-              <Card className="border-warning/30">
+              {/* 6. Program Weaknesses */}
+              <Card className="border-destructive/30">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <AlertTriangle className="h-5 w-5 text-warning" />
-                    Areas Needing Attention
+                    <ThumbsDown className="h-5 w-5 text-destructive" />
+                    Program Weaknesses & Gaps
                   </CardTitle>
-                  <CardDescription>Issues to address this week</CardDescription>
+                  <CardDescription>Areas needing improvement</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  {summary.areas_needing_attention.map((item, index) => (
-                    <div key={index} className="p-4 rounded-lg bg-warning/5 border border-warning/20 space-y-2">
-                      <div className="flex items-start justify-between">
-                        <p className="font-medium">{item.issue}</p>
-                        {getPriorityBadge(item.priority)}
+                <CardContent className="space-y-3">
+                  {data.programWeaknesses.map((weakness, index) => (
+                    <div key={index} className="p-3 rounded-lg bg-destructive/5 border border-destructive/20">
+                      <p className="font-medium text-sm">{weakness.weakness}</p>
+                      <div className="flex items-center gap-4 mt-1 text-xs">
+                        <span className="text-muted-foreground">{weakness.frequency}</span>
+                        <span className="text-destructive">{weakness.impact}</span>
                       </div>
-                      <p className="text-sm text-muted-foreground">{item.data}</p>
-                      <div className="pt-2 border-t border-warning/20">
-                        <p className="text-xs text-muted-foreground">Root Cause</p>
-                        <p className="text-sm">{item.root_cause}</p>
-                      </div>
-                      <p className="text-sm font-medium">→ {item.recommendation}</p>
                     </div>
                   ))}
                 </CardContent>
               </Card>
             </div>
 
-            {/* Weekly Focus Recommendations */}
+            {/* 7. Improvement Opportunities */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5 text-primary" />
-                  Weekly Focus Recommendations
+                  <Zap className="h-5 w-5 text-primary" />
+                  Improvement Opportunities
                 </CardTitle>
-                <CardDescription>Prioritized action items for this week</CardDescription>
+                <CardDescription>Actionable recommendations for next week</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {summary.weekly_focus_recommendations.map((rec, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center gap-4 p-4 rounded-lg border hover:border-primary/50 transition-colors"
-                    >
+                  {data.improvementOpportunities.map((opp, index) => (
+                    <div key={index} className="flex items-center gap-4 p-4 rounded-lg border hover:border-primary/50 transition-colors">
                       <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center font-bold text-primary">
                         {index + 1}
                       </div>
                       <div className="flex-1">
-                        <p className="font-medium">{rec.action}</p>
-                        <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            {rec.owner}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {rec.due_date}
-                          </span>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{opp.area}</p>
+                          <Badge className={getPriorityColor(opp.priority)}>{opp.priority}</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">{opp.recommendation}</p>
+                      </div>
+                      <Badge variant="outline">{opp.owner}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 8. AI Recommendations for Next Week */}
+            <Card className="bg-gradient-to-br from-primary/5 to-chart-4/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Rocket className="h-5 w-5 text-primary" />
+                  AI Recommendations for Next Week
+                </CardTitle>
+                <CardDescription>Strategic priorities based on this week's data</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {data.aiRecommendations.map((rec, index) => (
+                    <div key={index} className="p-4 rounded-lg bg-background border">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                          {getRecommendationTypeIcon(rec.type)}
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">{rec.action}</p>
+                          <div className="flex items-center gap-2 mt-2">
+                            <Badge variant="outline" className="bg-success/10 text-success border-success/30 text-xs">
+                              {rec.predictedImpact}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">{rec.dueDate}</span>
+                          </div>
                         </div>
                       </div>
-                      <Badge variant="outline" className="bg-success/5 text-success border-success/30">
-                        {rec.predicted_impact}
-                      </Badge>
                     </div>
                   ))}
                 </div>
