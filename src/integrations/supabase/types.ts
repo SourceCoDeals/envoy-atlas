@@ -469,23 +469,32 @@ export type Database = {
       call_ai_scores: {
         Row: {
           buyer_type_preference: string | null
+          call_category: string | null
           call_id: string
           composite_score: number | null
           created_at: string
+          decision_maker_identification: number | null
           engagement_justification: string | null
           engagement_score: number | null
           id: string
+          initial_valuation_discussion: number | null
+          mandatory_question_details: Json | null
           mandatory_questions_adherence: number | null
           mandatory_questions_asked: Json | null
           next_step_clarity_justification: string | null
           next_step_clarity_score: number | null
+          not_interested_reason: string | null
           objection_handling_justification: string | null
           objection_handling_score: number | null
+          objection_resolution_rate: number | null
           objections_list: Json | null
+          objections_text: string | null
           opening_type: string | null
+          overall_quality_score: number | null
           personal_insights: string | null
           rapport_building_justification: string | null
           rapport_building_score: number | null
+          referral_generation_rate: number | null
           scoring_model: string | null
           script_adherence_justification: string | null
           script_adherence_score: number | null
@@ -502,23 +511,32 @@ export type Database = {
         }
         Insert: {
           buyer_type_preference?: string | null
+          call_category?: string | null
           call_id: string
           composite_score?: number | null
           created_at?: string
+          decision_maker_identification?: number | null
           engagement_justification?: string | null
           engagement_score?: number | null
           id?: string
+          initial_valuation_discussion?: number | null
+          mandatory_question_details?: Json | null
           mandatory_questions_adherence?: number | null
           mandatory_questions_asked?: Json | null
           next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
+          not_interested_reason?: string | null
           objection_handling_justification?: string | null
           objection_handling_score?: number | null
+          objection_resolution_rate?: number | null
           objections_list?: Json | null
+          objections_text?: string | null
           opening_type?: string | null
+          overall_quality_score?: number | null
           personal_insights?: string | null
           rapport_building_justification?: string | null
           rapport_building_score?: number | null
+          referral_generation_rate?: number | null
           scoring_model?: string | null
           script_adherence_justification?: string | null
           script_adherence_score?: number | null
@@ -535,23 +553,32 @@ export type Database = {
         }
         Update: {
           buyer_type_preference?: string | null
+          call_category?: string | null
           call_id?: string
           composite_score?: number | null
           created_at?: string
+          decision_maker_identification?: number | null
           engagement_justification?: string | null
           engagement_score?: number | null
           id?: string
+          initial_valuation_discussion?: number | null
+          mandatory_question_details?: Json | null
           mandatory_questions_adherence?: number | null
           mandatory_questions_asked?: Json | null
           next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
+          not_interested_reason?: string | null
           objection_handling_justification?: string | null
           objection_handling_score?: number | null
+          objection_resolution_rate?: number | null
           objections_list?: Json | null
+          objections_text?: string | null
           opening_type?: string | null
+          overall_quality_score?: number | null
           personal_insights?: string | null
           rapport_building_justification?: string | null
           rapport_building_score?: number | null
+          referral_generation_rate?: number | null
           scoring_model?: string | null
           script_adherence_justification?: string | null
           script_adherence_score?: number | null
@@ -694,6 +721,57 @@ export type Database = {
           },
         ]
       }
+      call_summaries: {
+        Row: {
+          call_id: string
+          created_at: string
+          followup_due_date: string | null
+          followup_task_name: string | null
+          id: string
+          is_followup_completed: boolean | null
+          summary: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          call_id: string
+          created_at?: string
+          followup_due_date?: string | null
+          followup_task_name?: string | null
+          id?: string
+          is_followup_completed?: boolean | null
+          summary?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          call_id?: string
+          created_at?: string
+          followup_due_date?: string | null
+          followup_task_name?: string | null
+          id?: string
+          is_followup_completed?: boolean | null
+          summary?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_summaries_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "phoneburner_calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_summaries_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       call_transcripts: {
         Row: {
           call_id: string
@@ -753,6 +831,9 @@ export type Database = {
       }
       calling_deals: {
         Row: {
+          annual_revenue_raw: number | null
+          business_description: string | null
+          business_history: string | null
           buyer_preferences: string | null
           company_name: string
           company_size_score: number | null
@@ -762,30 +843,47 @@ export type Database = {
           contact_title: string | null
           created_at: string | null
           created_by: string | null
+          ebitda_raw: number | null
           employees: number | null
           engagement_id: string | null
+          exit_reason: string | null
+          financial_data: string | null
+          future_growth_plans: string | null
+          growth_information: string | null
           id: string
           industry: string | null
+          interest_level: string | null
           key_concerns: string[] | null
+          key_points: string | null
           last_contact_at: string | null
           lead_id: string | null
           location: string | null
+          ma_discussions: string | null
+          mobile_number: string | null
           motivation_factors: string[] | null
           motivation_score: number | null
           next_action: string | null
           next_action_date: string | null
+          ownership_details: string | null
+          ownership_information: string | null
           revenue: number | null
+          revenue_ebitda_history: string | null
           seller_interest_score: number | null
           seller_interest_summary: string | null
           status: string | null
+          target_pain_points: string | null
           timeline_score: number | null
           timeline_to_sell: string | null
           total_deal_score: number | null
+          transaction_goals: string | null
           updated_at: string | null
           valuation_expectations: string | null
           workspace_id: string
         }
         Insert: {
+          annual_revenue_raw?: number | null
+          business_description?: string | null
+          business_history?: string | null
           buyer_preferences?: string | null
           company_name: string
           company_size_score?: number | null
@@ -795,30 +893,47 @@ export type Database = {
           contact_title?: string | null
           created_at?: string | null
           created_by?: string | null
+          ebitda_raw?: number | null
           employees?: number | null
           engagement_id?: string | null
+          exit_reason?: string | null
+          financial_data?: string | null
+          future_growth_plans?: string | null
+          growth_information?: string | null
           id?: string
           industry?: string | null
+          interest_level?: string | null
           key_concerns?: string[] | null
+          key_points?: string | null
           last_contact_at?: string | null
           lead_id?: string | null
           location?: string | null
+          ma_discussions?: string | null
+          mobile_number?: string | null
           motivation_factors?: string[] | null
           motivation_score?: number | null
           next_action?: string | null
           next_action_date?: string | null
+          ownership_details?: string | null
+          ownership_information?: string | null
           revenue?: number | null
+          revenue_ebitda_history?: string | null
           seller_interest_score?: number | null
           seller_interest_summary?: string | null
           status?: string | null
+          target_pain_points?: string | null
           timeline_score?: number | null
           timeline_to_sell?: string | null
           total_deal_score?: number | null
+          transaction_goals?: string | null
           updated_at?: string | null
           valuation_expectations?: string | null
           workspace_id: string
         }
         Update: {
+          annual_revenue_raw?: number | null
+          business_description?: string | null
+          business_history?: string | null
           buyer_preferences?: string | null
           company_name?: string
           company_size_score?: number | null
@@ -828,25 +943,39 @@ export type Database = {
           contact_title?: string | null
           created_at?: string | null
           created_by?: string | null
+          ebitda_raw?: number | null
           employees?: number | null
           engagement_id?: string | null
+          exit_reason?: string | null
+          financial_data?: string | null
+          future_growth_plans?: string | null
+          growth_information?: string | null
           id?: string
           industry?: string | null
+          interest_level?: string | null
           key_concerns?: string[] | null
+          key_points?: string | null
           last_contact_at?: string | null
           lead_id?: string | null
           location?: string | null
+          ma_discussions?: string | null
+          mobile_number?: string | null
           motivation_factors?: string[] | null
           motivation_score?: number | null
           next_action?: string | null
           next_action_date?: string | null
+          ownership_details?: string | null
+          ownership_information?: string | null
           revenue?: number | null
+          revenue_ebitda_history?: string | null
           seller_interest_score?: number | null
           seller_interest_summary?: string | null
           status?: string | null
+          target_pain_points?: string | null
           timeline_score?: number | null
           timeline_to_sell?: string | null
           total_deal_score?: number | null
+          transaction_goals?: string | null
           updated_at?: string | null
           valuation_expectations?: string | null
           workspace_id?: string
