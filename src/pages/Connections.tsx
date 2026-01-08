@@ -65,8 +65,6 @@ export default function Connections() {
   const [smartleadApiKey, setSmartleadApiKey] = useState("");
   const [replyioApiKey, setReplyioApiKey] = useState("");
   const [phoneburnerToken, setPhoneburnerToken] = useState("");
-  const [nocodbToken, setNocodbToken] = useState("");
-  const [nocodbTableId, setNocodbTableId] = useState("");
 
   const [isConnecting, setIsConnecting] = useState<{ [k: string]: boolean }>({});
   const [isSyncing, setIsSyncing] = useState<{ [k: string]: boolean }>({});
@@ -364,38 +362,10 @@ export default function Connections() {
     }
   };
 
-  const handleNocodbSync = async () => {
-    if (!currentWorkspace || !nocodbToken.trim()) {
-      setError("Please enter a NocoDB API token");
-      return;
-    }
-
-    setError(null);
-    setSuccess(null);
+  const handleRefreshStats = async () => {
     setIsSyncing((s) => ({ ...s, nocodb: true }));
-
-    try {
-      const token = await getAccessToken();
-      const res = await supabase.functions.invoke("nocodb-sync", {
-        body: {
-          workspace_id: currentWorkspace.id,
-          nocodb_api_token: nocodbToken.trim(),
-          table_id: nocodbTableId.trim() || undefined,
-        },
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.error) throw new Error(res.error.message || "Sync failed");
-
-      const data = res.data;
-      setSuccess(`NocoDB sync complete! Imported ${data.imported} of ${data.total_fetched} records.`);
-      await fetchNocodbStats();
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message || "Failed to sync NocoDB");
-    } finally {
-      setIsSyncing((s) => ({ ...s, nocodb: false }));
-    }
+    await fetchNocodbStats();
+    setIsSyncing((s) => ({ ...s, nocodb: false }));
   };
 
   const handleFetchTranscripts = async () => {
@@ -1038,7 +1008,7 @@ export default function Connections() {
                   </CardContent>
                 </Card>
 
-                {/* NocoDB / Fireflies Integration */}
+                {/* External Calls / Fireflies Integration */}
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
@@ -1047,138 +1017,125 @@ export default function Connections() {
                           <Database className="h-5 w-5 text-primary" />
                         </div>
                         <div>
-                          <CardTitle className="text-lg">NocoDB / Fireflies</CardTitle>
-                          <CardDescription>Import external call recordings</CardDescription>
+                          <CardTitle className="text-lg">External Calls (Test Data)</CardTitle>
+                          <CardDescription>Fireflies call recordings for AI Summary</CardDescription>
                         </div>
                       </div>
                       {nocodbStats && nocodbStats.totalCalls > 0 && (
-                        <Badge variant="outline" className="border-success text-success">
-                          {nocodbStats.totalCalls} calls
+                        <Badge variant="outline" className="border-green-500 text-green-500">
+                          <CheckCircle2 className="mr-1 h-3 w-3" />
+                          {nocodbStats.totalCalls} calls loaded
                         </Badge>
                       )}
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {/* Import Section */}
-                    <div className="space-y-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="nocodb-token">NocoDB API Token</Label>
-                        <Input
-                          id="nocodb-token"
-                          value={nocodbToken}
-                          onChange={(e) => setNocodbToken(e.target.value)}
-                          placeholder="xc-token..."
-                          type="password"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="nocodb-table">Table ID (optional)</Label>
-                        <Input
-                          id="nocodb-table"
-                          value={nocodbTableId}
-                          onChange={(e) => setNocodbTableId(e.target.value)}
-                          placeholder="tblExternalCalls"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Leave empty for default "External Calls" table
-                        </p>
-                      </div>
-                      <Button
-                        onClick={handleNocodbSync}
-                        disabled={!!isSyncing.nocodb || !nocodbToken.trim()}
-                        className="w-full"
-                      >
-                        {isSyncing.nocodb ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Importing...
-                          </>
-                        ) : (
-                          <>
-                            <Download className="mr-2 h-4 w-4" />
-                            Import from NocoDB
-                          </>
-                        )}
-                      </Button>
-                    </div>
-
                     {/* Stats Display */}
-                    {nocodbStats && nocodbStats.totalCalls > 0 && (
-                      <div className="space-y-2 rounded-lg bg-accent/20 p-3 text-sm">
-                        <p className="font-medium mb-2">Import Status</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full bg-amber-500" />
-                            <span className="text-muted-foreground">Pending:</span>
-                            <span className="font-medium">{nocodbStats.pending}</span>
+                    {nocodbStats && nocodbStats.totalCalls > 0 ? (
+                      <>
+                        <div className="space-y-2 rounded-lg bg-accent/20 p-3 text-sm">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="font-medium">Processing Status</p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleRefreshStats}
+                              disabled={!!isSyncing.nocodb}
+                            >
+                              {isSyncing.nocodb ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" />
+                              )}
+                            </Button>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full bg-blue-500" />
-                            <span className="text-muted-foreground">Transcripts:</span>
-                            <span className="font-medium">{nocodbStats.transcriptFetched}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full bg-green-500" />
-                            <span className="text-muted-foreground">Scored:</span>
-                            <span className="font-medium">{nocodbStats.scored}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full bg-red-500" />
-                            <span className="text-muted-foreground">Errors:</span>
-                            <span className="font-medium">{nocodbStats.errors}</span>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 w-2 rounded-full bg-amber-500" />
+                              <span className="text-muted-foreground">Pending:</span>
+                              <span className="font-medium">{nocodbStats.pending}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 w-2 rounded-full bg-blue-500" />
+                              <span className="text-muted-foreground">Transcripts:</span>
+                              <span className="font-medium">{nocodbStats.transcriptFetched}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 w-2 rounded-full bg-green-500" />
+                              <span className="text-muted-foreground">Scored:</span>
+                              <span className="font-medium">{nocodbStats.scored}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 w-2 rounded-full bg-red-500" />
+                              <span className="text-muted-foreground">Errors:</span>
+                              <span className="font-medium">{nocodbStats.errors}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
 
-                    {/* Processing Actions */}
-                    {nocodbStats && nocodbStats.pending > 0 && (
-                      <div className="flex gap-2">
+                        {/* Processing Actions */}
+                        {nocodbStats.pending > 0 && (
+                          <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={handleFetchTranscripts}
+                            disabled={!!isSyncing.transcripts}
+                          >
+                            {isSyncing.transcripts ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Fetching Transcripts...
+                              </>
+                            ) : (
+                              <>
+                                <FileText className="mr-2 h-4 w-4" />
+                                Fetch Transcripts ({nocodbStats.pending} pending)
+                              </>
+                            )}
+                          </Button>
+                        )}
+
+                        {nocodbStats.transcriptFetched > 0 && (
+                          <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={handleScoreExternalCalls}
+                            disabled={!!isSyncing.scoring}
+                          >
+                            {isSyncing.scoring ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Scoring...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                AI Score Calls ({nocodbStats.transcriptFetched} ready)
+                              </>
+                            )}
+                          </Button>
+                        )}
+
+                        <p className="text-xs text-muted-foreground text-center">
+                          Test data pre-loaded • Process transcripts → AI Score → View in AI Summary
+                        </p>
+                      </>
+                    ) : (
+                      <div className="text-center py-4 text-muted-foreground">
+                        <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No test data loaded</p>
                         <Button
-                          variant="outline"
-                          className="flex-1"
-                          onClick={handleFetchTranscripts}
-                          disabled={!!isSyncing.transcripts}
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2"
+                          onClick={handleRefreshStats}
+                          disabled={!!isSyncing.nocodb}
                         >
-                          {isSyncing.transcripts ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Fetching...
-                            </>
-                          ) : (
-                            <>
-                              <FileText className="mr-2 h-4 w-4" />
-                              Fetch Transcripts
-                            </>
-                          )}
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Refresh
                         </Button>
                       </div>
                     )}
-
-                    {nocodbStats && nocodbStats.transcriptFetched > 0 && (
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={handleScoreExternalCalls}
-                        disabled={!!isSyncing.scoring}
-                      >
-                        {isSyncing.scoring ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Scoring...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="mr-2 h-4 w-4" />
-                            AI Score Calls ({nocodbStats.transcriptFetched} ready)
-                          </>
-                        )}
-                      </Button>
-                    )}
-
-                    <p className="text-xs text-muted-foreground text-center">
-                      Import call data from NocoDB, fetch Fireflies transcripts, and score with AI
-                    </p>
                   </CardContent>
                 </Card>
               </>
