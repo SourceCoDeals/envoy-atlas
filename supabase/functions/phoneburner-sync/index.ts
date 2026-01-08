@@ -607,6 +607,74 @@ serve(async (req) => {
         };
       }
 
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 6: Try getting members with entire_team parameter
+      try {
+        const teamMembersRes = await phoneburnerRequest(
+          `/members?entire_team=1`,
+          apiKey
+        );
+
+        const rawTeamMembers = teamMembersRes?.members?.members ?? teamMembersRes?.members ?? [];
+        const teamMemberArr = Array.isArray(rawTeamMembers)
+          ? (Array.isArray(rawTeamMembers[0]) ? rawTeamMembers[0] : rawTeamMembers)
+          : [];
+
+        results.tests.members_entire_team = {
+          success: true,
+          count: teamMemberArr.length,
+          note: teamMemberArr.length > (results.tests.members?.count || 0)
+            ? "entire_team=1 returns more members!"
+            : "Same member count with entire_team param",
+        };
+      } catch (e: any) {
+        results.tests.members_entire_team = {
+          success: false,
+          error: e.message
+        };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 7: Check voicemails endpoint (might show call activity)
+      try {
+        const voicemailsRes = await phoneburnerRequest(`/voicemails`, apiKey);
+
+        results.tests.voicemails = {
+          success: true,
+          response_keys: Object.keys(voicemailsRes || {}),
+          raw_preview: JSON.stringify(voicemailsRes).slice(0, 300),
+        };
+
+        const voicemails = voicemailsRes?.voicemails ?? [];
+        const vmArr = Array.isArray(voicemails) ? voicemails : [];
+        results.tests.voicemails.count = vmArr.length;
+      } catch (e: any) {
+        results.tests.voicemails = {
+          success: false,
+          error: e.message
+        };
+      }
+
+      await delay(RATE_LIMIT_DELAY_MS);
+
+      // Test 8: Check dialsession settings (understand user's config)
+      try {
+        const settingsRes = await phoneburnerRequest(`/dialsession/settings`, apiKey);
+
+        results.tests.dialsession_settings = {
+          success: true,
+          response_keys: Object.keys(settingsRes || {}),
+          raw_preview: JSON.stringify(settingsRes).slice(0, 400),
+        };
+      } catch (e: any) {
+        results.tests.dialsession_settings = {
+          success: false,
+          error: e.message
+        };
+      }
+
       // Generate recommendation
       const dialTest = results.tests.dial_sessions;
       const usageTest = results.tests.usage;
