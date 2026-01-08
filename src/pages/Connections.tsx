@@ -798,6 +798,36 @@ export default function Connections() {
                                 </span>
                               </div>
                             )}
+                            {diagnosticResult.tests?.contact_activities && (
+                              <div className="flex flex-col gap-1">
+                                <div className="flex justify-between">
+                                  <span>Contact Activities:</span>
+                                  <span className={diagnosticResult.tests.contact_activities.success ? "text-green-500" : "text-red-500"}>
+                                    {diagnosticResult.tests.contact_activities.success
+                                      ? `${diagnosticResult.tests.contact_activities.total_results} total`
+                                      : diagnosticResult.tests.contact_activities.error || "Failed"}
+                                  </span>
+                                </div>
+                                {diagnosticResult.tests.contact_activities.call_activities_found !== undefined && (
+                                  <div className="flex justify-between pl-2 text-muted-foreground">
+                                    <span>└ Call activities:</span>
+                                    <span>{diagnosticResult.tests.contact_activities.call_activities_found}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {diagnosticResult.tests?.contact_auditlog && (
+                              <div className="flex flex-col gap-1">
+                                <div className="flex justify-between">
+                                  <span>Contact Audit Log:</span>
+                                  <span className={diagnosticResult.tests.contact_auditlog.success ? "text-green-500" : "text-red-500"}>
+                                    {diagnosticResult.tests.contact_auditlog.success
+                                      ? `${diagnosticResult.tests.contact_auditlog.entries_on_page} entries`
+                                      : diagnosticResult.tests.contact_auditlog.error || "Failed"}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                             {diagnosticResult.tests?.usage && (
                               <div className="flex justify-between">
                                 <span>Usage (90 days):</span>
