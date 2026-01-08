@@ -541,39 +541,24 @@ serve(async (req) => {
         let detail: any = null;
         try {
           detail = await phoneburnerRequest(`/dialsession/${externalSessionId}`, apiKey);
-          console.log(`Session ${externalSessionId} detail keys:`, Object.keys(detail || {}));
           console.log(`Session ${externalSessionId} detail keys: ${Object.keys(detail || {}).join(", ")}`);
         } catch (e) {
           console.error("Dial session detail fetch error", e);
           continue;
         }
 
-        // Try multiple possible response structures
-        const calls = detail?.calls ?? detail?.dial_session?.calls ?? detail?.dialsession?.calls ??
-                      detail?.dialsession?.dialsession?.calls ?? [];
-        // The detail response has dialsessions.dialsessions which contains the session with calls
-        const detailSession = detail?.dialsessions?.dialsessions ?? detail?.dialsessions ?? detail?.dial_session ?? {};
+        // The detail response structure: { dialsessions: { dialsessions: { calls: [...] } } }
+        const detailSession = detail?.dialsessions?.dialsessions ?? detail?.dialsessions ?? detail?.dial_session ?? detail ?? {};
         const calls = detailSession?.calls ?? detail?.calls ?? [];
         const callArr: any[] = Array.isArray(calls) ? calls : [];
-        console.log(`Session ${externalSessionId}: found ${callArr.length} calls`);
-
         console.log(`Session ${externalSessionId} has ${callArr.length} calls`);
 
         for (const c of callArr) {
           const externalCallId = String(c?.call_id ?? c?.id ?? "");
           if (!externalCallId) continue;
 
-          // Fetch individual call details to get recording URL
-          let recordingUrl = c?.recording_url ?? c?.recording ?? null;
-          if (!recordingUrl && externalCallId) {
-            try {
-              const callDetail = await phoneburnerRequest(
-                `/dialsession/call/${externalCallId}?include_recording=1`,
-                apiKey
-              );
-              recordingUrl = callDetail?.call?.recording_url ?? callDetail?.recording_url ?? null;
           // Try to get recording URL for this call
-          let recordingUrl = c?.recording_url ?? null;
+          let recordingUrl = c?.recording_url ?? c?.recording ?? null;
           if (!recordingUrl) {
             try {
               const callDetail = await phoneburnerRequest(`/dialsession/call/${externalCallId}?include_recording=1`, apiKey);
@@ -593,17 +578,9 @@ serve(async (req) => {
               phone_number: c?.phone ?? c?.phone_number ?? null,
               start_at: c?.start_when ?? c?.start_at ?? null,
               end_at: c?.end_when ?? c?.end_at ?? null,
-              duration_seconds: c?.duration_seconds ?? c?.duration ?? null,
+              duration_seconds: c?.duration ?? c?.duration_seconds ?? null,
               disposition: c?.disposition ?? c?.disposition_name ?? null,
               disposition_id: c?.disposition_id ? String(c.disposition_id) : null,
-              is_connected: typeof c?.connected === "boolean" ? c.connected :
-                           (c?.disposition?.toLowerCase()?.includes("connect") ?? null),
-              is_voicemail: typeof c?.voicemail === "boolean" ? c.voicemail :
-                           (c?.disposition?.toLowerCase()?.includes("voicemail") ?? null),
-              notes: c?.notes ?? c?.call_notes ?? null,
-              duration_seconds: c?.duration ?? c?.duration_seconds ?? null,
-              disposition: c?.disposition ?? null,
-              disposition_id: null,
               is_connected: c?.connected === "1" || c?.connected === 1 || c?.connected === true,
               is_voicemail: c?.voicemail === "1" || c?.voicemail === 1 || c?.voicemail === true,
               notes: c?.note ?? c?.notes ?? null,
