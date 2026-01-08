@@ -449,29 +449,11 @@ serve(async (req) => {
     const endYmd = formatDateYMD(new Date());
     const startYmd = formatDateYMD(daysAgo(DAYS_TO_SYNC));
 
-    // ================== PHASE 1: DIAL SESSIONS (per-member) ==================
+    // ================== PHASE 1: DIAL SESSIONS ==================
     console.log(`Starting dial sessions sync from ${startYmd} to ${endYmd}`);
 
-    // First, get all team members to iterate through their sessions individually
-    let memberUserIds: string[] = [];
-    try {
-      const membersRes = await phoneburnerRequest(`/members`, apiKey);
-      const rawMembers = membersRes?.members?.members ?? membersRes?.members ?? [];
-      const memberArr: any[] = Array.isArray(rawMembers)
-        ? (Array.isArray(rawMembers[0]) ? rawMembers[0] : rawMembers)
-        : [];
-      
-      memberUserIds = memberArr
-        .map((m: any) => String(m?.member_user_id ?? m?.user_id ?? m?.member_id ?? m?.id ?? ""))
-        .filter(Boolean);
-      
-      console.log(`Found ${memberUserIds.length} team members to sync dial sessions for: ${memberUserIds.join(", ")}`);
-    } catch (e: any) {
-      console.error("Failed to fetch members for per-member sync:", e.message);
-    }
-
-    // Try global dial sessions first
-    let globalSessionsFound = false;
+    // Try to fetch dial sessions (works if user has their own sessions)
+    let sessionsFoundCount = 0;
     
     while (phase === "dialsessions" && Date.now() - startedAt < TIME_BUDGET_MS) {
       const list = await phoneburnerRequest(
@@ -479,32 +461,28 @@ serve(async (req) => {
         apiKey
       );
 
-      console.log(`Dial sessions response keys: ${Object.keys(list || {}).join(", ")}`);
+      console.log(`Dial sessions response: ${JSON.stringify(list).slice(0, 500)}`);
 
-      const sessions = list?.dialsessions?.dialsessions ?? list?.dialsessions ?? list?.dial_sessions ?? [];
-      const sessionArr: any[] = Array.isArray(sessions) ? sessions : [];
+      const sessionsData = list?.dialsessions ?? {};
+      const sessions = sessionsData?.dialsessions ?? list?.dial_sessions ?? [];
+      const sessionArr: any[] = Array.isArray(sessions) ? sessions : (sessions ? [sessions] : []);
 
-      console.log(`Dial sessions page ${sessionPage}: ${sessionArr.length} sessions found`);
+      console.log(`Dial sessions page ${sessionPage}: ${sessionArr.length} sessions found (total_results: ${sessionsData.total_results || 'unknown'})`);
 
-      if (sessionArr.length === 0 && sessionPage === 1) {
-        console.log("No global dial sessions found on first page, trying per-member sync...");
-        globalSessionsFound = false;
-        break;
-      } else if (sessionArr.length === 0) {
+      if (sessionArr.length === 0) {
         console.log("No more dial sessions, moving to contacts phase");
         phase = "contacts";
-        globalSessionsFound = true;
         await persistProgress({ phase });
         break;
       }
 
-      globalSessionsFound = true;
-
       for (const s of sessionArr) {
         if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
 
-        const externalSessionId = String(s?.id ?? s?.dial_session_id ?? s?.dialsession_id ?? "");
+        const externalSessionId = String(s?.dialsession_id ?? s?.id ?? s?.dial_session_id ?? "");
         if (!externalSessionId) continue;
+
+        sessionsFoundCount++;
 
         const { data: sessionRow, error: sessionUpsertErr } = await supabaseAdmin
           .from("phoneburner_dial_sessions")
@@ -512,11 +490,11 @@ serve(async (req) => {
             {
               workspace_id: workspaceId,
               external_session_id: externalSessionId,
-              member_id: s?.member_id ? String(s.member_id) : null,
-              member_name: s?.member_name ?? null,
+              member_id: null, // Will be populated later if available
+              member_name: null,
               start_at: s?.start_when ?? s?.start_at ?? null,
               end_at: s?.end_when ?? s?.end_at ?? null,
-              call_count: s?.call_count ?? s?.calls_count ?? null,
+              call_count: s?.call_count ?? null,
               updated_at: new Date().toISOString(),
             },
             { onConflict: "workspace_id,external_session_id" }
@@ -531,21 +509,38 @@ serve(async (req) => {
 
         sessionsSynced += 1;
 
-        // Fetch detail to get calls array
+        // Fetch session detail to get individual calls
         let detail: any = null;
         try {
           detail = await phoneburnerRequest(`/dialsession/${externalSessionId}`, apiKey);
+          console.log(`Session ${externalSessionId} detail keys: ${Object.keys(detail || {}).join(", ")}`);
         } catch (e) {
           console.error("Dial session detail fetch error", e);
           continue;
         }
 
-        const calls = detail?.calls ?? detail?.dial_session?.calls ?? detail?.dialsession?.calls ?? [];
+        // The detail response has dialsessions.dialsessions which contains the session with calls
+        const detailSession = detail?.dialsessions?.dialsessions ?? detail?.dialsessions ?? detail?.dial_session ?? {};
+        const calls = detailSession?.calls ?? detail?.calls ?? [];
         const callArr: any[] = Array.isArray(calls) ? calls : [];
 
+        console.log(`Session ${externalSessionId} has ${callArr.length} calls`);
+
         for (const c of callArr) {
-          const externalCallId = String(c?.id ?? c?.call_id ?? c?.callId ?? "");
+          const externalCallId = String(c?.call_id ?? c?.id ?? "");
           if (!externalCallId) continue;
+
+          // Try to get recording URL for this call
+          let recordingUrl = c?.recording_url ?? null;
+          if (!recordingUrl) {
+            try {
+              const callDetail = await phoneburnerRequest(`/dialsession/call/${externalCallId}?include_recording=1`, apiKey);
+              const callData = callDetail?.call?.call ?? callDetail?.call ?? {};
+              recordingUrl = callData?.recording_url ?? callData?.recording ?? null;
+            } catch (e) {
+              // Recording fetch failed, continue without it
+            }
+          }
 
           const { error: callErr } = await supabaseAdmin.from("phoneburner_calls").upsert(
             {
@@ -556,13 +551,13 @@ serve(async (req) => {
               phone_number: c?.phone ?? c?.phone_number ?? null,
               start_at: c?.start_when ?? c?.start_at ?? null,
               end_at: c?.end_when ?? c?.end_at ?? null,
-              duration_seconds: c?.duration_seconds ?? c?.duration ?? null,
+              duration_seconds: c?.duration ?? c?.duration_seconds ?? null,
               disposition: c?.disposition ?? null,
-              disposition_id: c?.disposition_id ? String(c.disposition_id) : null,
-              is_connected: typeof c?.connected === "boolean" ? c.connected : null,
-              is_voicemail: typeof c?.voicemail === "boolean" ? c.voicemail : null,
-              notes: c?.notes ?? null,
-              recording_url: c?.recording_url ?? null,
+              disposition_id: null,
+              is_connected: c?.connected === "1" || c?.connected === 1 || c?.connected === true,
+              is_voicemail: c?.voicemail === "1" || c?.voicemail === 1 || c?.voicemail === true,
+              notes: c?.note ?? c?.notes ?? null,
+              recording_url: recordingUrl,
               updated_at: new Date().toISOString(),
             },
             { onConflict: "workspace_id,external_call_id" }
@@ -577,134 +572,10 @@ serve(async (req) => {
       sessionPage += 1;
       await persistProgress({});
 
-      // Conservative exit: page forward until time budget, continuation will resume
       if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
     }
 
-    // ================== PHASE 1b: PER-MEMBER DIAL SESSIONS ==================
-    // If global dial sessions returned nothing, try fetching per-member
-    if (!globalSessionsFound && memberUserIds.length > 0 && Date.now() - startedAt < TIME_BUDGET_MS) {
-      console.log("Attempting per-member dial session sync...");
-
-      for (const memberId of memberUserIds) {
-        if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
-
-        console.log(`Fetching dial sessions for member ${memberId}...`);
-
-        let memberPage = 1;
-        let hasMore = true;
-
-        while (hasMore && Date.now() - startedAt < TIME_BUDGET_MS) {
-          try {
-            // Try member-specific dial sessions endpoint
-            const list = await phoneburnerRequest(
-              `/dialsession?page=${memberPage}&page_size=${DIALSESSION_PAGE_SIZE}&date_start=${startYmd}&date_end=${endYmd}&member_user_id=${memberId}`,
-              apiKey
-            );
-
-            const sessions = list?.dialsessions?.dialsessions ?? list?.dialsessions ?? list?.dial_sessions ?? [];
-            const sessionArr: any[] = Array.isArray(sessions) ? sessions : [];
-
-            console.log(`Member ${memberId} page ${memberPage}: ${sessionArr.length} sessions found`);
-
-            if (sessionArr.length === 0) {
-              hasMore = false;
-              break;
-            }
-
-            for (const s of sessionArr) {
-              if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
-
-              const externalSessionId = String(s?.id ?? s?.dial_session_id ?? s?.dialsession_id ?? "");
-              if (!externalSessionId) continue;
-
-              const { data: sessionRow, error: sessionUpsertErr } = await supabaseAdmin
-                .from("phoneburner_dial_sessions")
-                .upsert(
-                  {
-                    workspace_id: workspaceId,
-                    external_session_id: externalSessionId,
-                    member_id: memberId,
-                    member_name: s?.member_name ?? null,
-                    start_at: s?.start_when ?? s?.start_at ?? null,
-                    end_at: s?.end_when ?? s?.end_at ?? null,
-                    call_count: s?.call_count ?? s?.calls_count ?? null,
-                    updated_at: new Date().toISOString(),
-                  },
-                  { onConflict: "workspace_id,external_session_id" }
-                )
-                .select("id")
-                .single();
-
-              if (sessionUpsertErr) {
-                console.error("Dial session upsert error", sessionUpsertErr);
-                continue;
-              }
-
-              sessionsSynced += 1;
-
-              // Fetch detail to get calls array
-              let detail: any = null;
-              try {
-                detail = await phoneburnerRequest(`/dialsession/${externalSessionId}`, apiKey);
-              } catch (e) {
-                console.error("Dial session detail fetch error", e);
-                continue;
-              }
-
-              const calls = detail?.calls ?? detail?.dial_session?.calls ?? detail?.dialsession?.calls ?? [];
-              const callArr: any[] = Array.isArray(calls) ? calls : [];
-
-              for (const c of callArr) {
-                const externalCallId = String(c?.id ?? c?.call_id ?? c?.callId ?? "");
-                if (!externalCallId) continue;
-
-                const { error: callErr } = await supabaseAdmin.from("phoneburner_calls").upsert(
-                  {
-                    workspace_id: workspaceId,
-                    dial_session_id: sessionRow.id,
-                    external_call_id: externalCallId,
-                    external_contact_id: c?.contact_id ? String(c.contact_id) : null,
-                    phone_number: c?.phone ?? c?.phone_number ?? null,
-                    start_at: c?.start_when ?? c?.start_at ?? null,
-                    end_at: c?.end_when ?? c?.end_at ?? null,
-                    duration_seconds: c?.duration_seconds ?? c?.duration ?? null,
-                    disposition: c?.disposition ?? null,
-                    disposition_id: c?.disposition_id ? String(c.disposition_id) : null,
-                    is_connected: typeof c?.connected === "boolean" ? c.connected : null,
-                    is_voicemail: typeof c?.voicemail === "boolean" ? c.voicemail : null,
-                    notes: c?.notes ?? null,
-                    recording_url: c?.recording_url ?? null,
-                    updated_at: new Date().toISOString(),
-                  },
-                  { onConflict: "workspace_id,external_call_id" }
-                );
-
-                if (!callErr) callsSynced += 1;
-              }
-
-              await persistProgress({});
-            }
-
-            memberPage += 1;
-          } catch (e: any) {
-            console.error(`Error fetching sessions for member ${memberId}:`, e.message);
-            hasMore = false;
-          }
-        }
-      }
-
-      // Move to contacts phase after per-member sync
-      if (phase === "dialsessions") {
-        phase = "contacts";
-        await persistProgress({ phase });
-      }
-    } else if (!globalSessionsFound && memberUserIds.length === 0 && phase === "dialsessions") {
-      // No members found, skip to contacts
-      console.log("No members found for per-member sync, moving to contacts phase");
-      phase = "contacts";
-      await persistProgress({ phase });
-    }
+    console.log(`Dial sessions phase complete. Found ${sessionsFoundCount} sessions, synced ${callsSynced} calls.`);
 
     // ================== PHASE 2: CONTACTS (light) ==================
     while (phase === "contacts" && Date.now() - startedAt < TIME_BUDGET_MS) {
