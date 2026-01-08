@@ -19,12 +19,12 @@ interface QueryContext {
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/copy-insights-chat`;
 
-// Page-specific suggested prompts
+// Page-specific suggested prompts - trained on State of Cold Calling 2025
 const PAGE_SUGGESTIONS: Record<string, string[]> = {
   'dashboard': [
-    "Give me a performance summary",
+    "Give me a performance summary vs 2025 benchmarks",
     "What needs my attention today?",
-    "How are we trending vs last month?",
+    "How are we trending vs industry averages?",
     "What's our biggest opportunity right now?",
   ],
   'campaigns': [
@@ -64,12 +64,42 @@ const PAGE_SUGGESTIONS: Record<string, string[]> = {
     "How many positive replies today?",
     "Show me meeting requests",
   ],
+  // Cold Calling specific pages
+  'calling/ai-summary': [
+    "What's our connect rate vs 2025 benchmark?",
+    "Which objections are we struggling with?",
+    "How does our call duration compare to optimal?",
+    "What gatekeeper techniques work best?",
+    "Are reps talking too much on calls?",
+  ],
+  'calling/caller-dashboard': [
+    "What's my connect rate vs 25-35% benchmark?",
+    "Am I calling at the best times?",
+    "How many attempts are we making per prospect?",
+    "What's our gatekeeper transfer rate?",
+    "How do I compare to top performers (6.7% success)?",
+  ],
+  'calling/data-insights': [
+    "Is our data quality causing issues?",
+    "What's our wrong number rate?",
+    "How does our connect rate compare to benchmark?",
+    "Are we reaching prospects by the 3rd attempt?",
+    "What's our data decay rate?",
+  ],
+  'calling/call-analytics': [
+    "What's our average call duration vs 93 sec benchmark?",
+    "Are reps asking 11-14 questions per call?",
+    "What's our objection handling success rate?",
+    "How effective is our opening line?",
+    "What call patterns lead to meetings?",
+  ],
   'default': [
-    "What's my reply rate?",
+    "What's my reply rate vs 2025 benchmarks?",
     "Which campaigns are performing best?",
-    "Why did performance change?",
-    "What should I focus on?",
+    "What objection handling techniques should I use?",
+    "What should I focus on this week?",
     "Give me actionable recommendations",
+    "How do I navigate gatekeepers better?",
   ],
 };
 
