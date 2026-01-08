@@ -2262,6 +2262,68 @@ export type Database = {
           },
         ]
       }
+      external_calls: {
+        Row: {
+          all_participants: string | null
+          call_title: string | null
+          call_type: string | null
+          created_at: string | null
+          date_time: string | null
+          error_message: string | null
+          fireflies_url: string | null
+          host_email: string | null
+          id: string
+          import_status: string | null
+          nocodb_row_id: string | null
+          phoneburner_recording_url: string | null
+          transcript_text: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          all_participants?: string | null
+          call_title?: string | null
+          call_type?: string | null
+          created_at?: string | null
+          date_time?: string | null
+          error_message?: string | null
+          fireflies_url?: string | null
+          host_email?: string | null
+          id?: string
+          import_status?: string | null
+          nocodb_row_id?: string | null
+          phoneburner_recording_url?: string | null
+          transcript_text?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          all_participants?: string | null
+          call_title?: string | null
+          call_type?: string | null
+          created_at?: string | null
+          date_time?: string | null
+          error_message?: string | null
+          fireflies_url?: string | null
+          host_email?: string | null
+          id?: string
+          import_status?: string | null
+          nocodb_row_id?: string | null
+          phoneburner_recording_url?: string | null
+          transcript_text?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_calls_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hourly_metrics: {
         Row: {
           campaign_id: string | null
