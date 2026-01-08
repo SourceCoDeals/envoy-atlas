@@ -106,8 +106,8 @@ serve(async (req) => {
       try {
         console.log(`[score-external-calls] Scoring call ${call.id}`);
 
-        // Call AI for scoring
-        const aiResponse = await fetch("https://api.lovable.dev/v1/chat/completions", {
+        // Call Lovable AI for scoring
+        const aiResponse = await fetch("https://ai.lovable.dev/api/v1/chat/completions", {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${lovableApiKey}`,
@@ -121,7 +121,7 @@ serve(async (req) => {
                 content: SCORING_PROMPT + call.transcript_text,
               },
             ],
-            max_tokens: 2000,
+            max_completion_tokens: 2000,
             response_format: { type: "json_object" },
           }),
         });
@@ -195,11 +195,27 @@ serve(async (req) => {
         // For external calls, we'll store scores directly in the external_calls table
         // and aggregate them in the useAISummary hook
 
+        // Update external_calls with scores directly
         const { error: updateError } = await supabase
           .from("external_calls")
           .update({
             import_status: "scored",
             error_message: null,
+            seller_interest_score: scores.seller_interest_score || null,
+            seller_interest_justification: scores.seller_interest_justification || null,
+            objection_handling_score: scores.objection_handling_score || null,
+            rapport_building_score: scores.rapport_building_score || null,
+            value_proposition_score: scores.value_proposition_score || null,
+            engagement_score: scores.engagement_score || null,
+            quality_of_conversation_score: scores.quality_of_conversation_score || null,
+            next_step_clarity_score: scores.next_step_clarity_score || null,
+            composite_score: scores.composite_score || null,
+            key_topics_discussed: scores.key_topics_discussed || [],
+            key_concerns: scores.key_concerns || [],
+            motivation_factors: scores.motivation_factors || [],
+            timeline_to_sell: scores.timeline_to_sell || null,
+            call_summary: scores.call_summary || null,
+            call_category: scores.call_category || null,
           })
           .eq("id", call.id);
 
@@ -208,10 +224,6 @@ serve(async (req) => {
           errors++;
           continue;
         }
-
-        // Store scores in a separate table or JSON field
-        // For now, we'll create a record in a new field structure
-        // The useAISummary hook will need to be updated to include these
         
         scored++;
         console.log(`[score-external-calls] Scored call ${call.id}: composite=${scores.composite_score}`);
