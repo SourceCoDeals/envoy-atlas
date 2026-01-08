@@ -1,0 +1,387 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { useWorkspace } from '@/hooks/useWorkspace';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { supabase } from '@/integrations/supabase/client';
+import {
+  Building2,
+  DollarSign,
+  Users,
+  MapPin,
+  Calendar,
+  Star,
+  Phone,
+  Mail,
+  ChevronRight,
+  Loader2,
+  TrendingUp,
+  Clock,
+  Heart,
+} from 'lucide-react';
+
+interface Deal {
+  id: string;
+  company_name: string;
+  contact_name: string | null;
+  contact_title: string | null;
+  industry: string | null;
+  location: string | null;
+  revenue: number | null;
+  employees: number | null;
+  seller_interest_score: number | null;
+  seller_interest_summary: string | null;
+  timeline_to_sell: string | null;
+  motivation_factors: string[] | null;
+  valuation_expectations: string | null;
+  buyer_preferences: string | null;
+  total_deal_score: number;
+  status: string;
+  last_contact_at: string | null;
+  next_action: string | null;
+  next_action_date: string | null;
+}
+
+export default function TopDeals() {
+  const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+  const { currentWorkspace } = useWorkspace();
+  const [loading, setLoading] = useState(true);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/auth');
+    }
+  }, [user, authLoading, navigate]);
+
+  useEffect(() => {
+    if (currentWorkspace?.id) {
+      fetchDeals();
+    }
+  }, [currentWorkspace?.id]);
+
+  const fetchDeals = async () => {
+    if (!currentWorkspace?.id) return;
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('calling_deals')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .order('total_deal_score', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      setDeals(data || []);
+    } catch (err) {
+      console.error('Error fetching deals:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return 'text-success';
+    if (score >= 60) return 'text-chart-4';
+    if (score >= 40) return 'text-chart-2';
+    return 'text-muted-foreground';
+  };
+
+  const getScoreBg = (score: number) => {
+    if (score >= 80) return 'bg-success/10 border-success/30';
+    if (score >= 60) return 'bg-chart-4/10 border-chart-4/30';
+    if (score >= 40) return 'bg-chart-2/10 border-chart-2/30';
+    return 'bg-muted/10 border-muted/30';
+  };
+
+  const formatRevenue = (revenue: number | null) => {
+    if (!revenue) return 'N/A';
+    if (revenue >= 1000000) return `$${(revenue / 1000000).toFixed(1)}M`;
+    if (revenue >= 1000) return `$${(revenue / 1000).toFixed(0)}K`;
+    return `$${revenue}`;
+  };
+
+  const getInterestLabel = (score: number | null) => {
+    if (!score) return 'Unknown';
+    if (score >= 9) return 'Very High';
+    if (score >= 7) return 'High';
+    if (score >= 5) return 'Medium';
+    if (score >= 3) return 'Low';
+    return 'Very Low';
+  };
+
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) return null;
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Top Deals</h1>
+          <p className="text-muted-foreground">Best opportunities ranked by size + motivation</p>
+        </div>
+
+        {/* Score Legend */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Deal Score Formula (0-100)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-chart-1" />
+                <span>Company Size: 0-40 pts</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Heart className="h-4 w-4 text-chart-2" />
+                <span>Seller Motivation: 0-40 pts</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-chart-3" />
+                <span>Timeline: 0-20 pts</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {loading ? (
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <Card key={i}>
+                <CardContent className="pt-6">
+                  <Skeleton className="h-24 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : deals.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+                <TrendingUp className="h-8 w-8 text-primary" />
+              </div>
+              <h2 className="text-xl font-semibold mb-2">No Deals Yet</h2>
+              <p className="text-muted-foreground text-center max-w-md">
+                Deals are created from calls where AI detects seller interest. Keep dialing!
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {deals.map((deal, index) => (
+              <Card
+                key={deal.id}
+                className={`hover:border-primary/50 transition-colors cursor-pointer ${getScoreBg(deal.total_deal_score)}`}
+                onClick={() => setSelectedDeal(deal)}
+              >
+                <CardContent className="py-4">
+                  <div className="flex items-center gap-4">
+                    {/* Rank */}
+                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-background flex items-center justify-center font-bold">
+                      {index < 3 ? (
+                        <Star className={`h-5 w-5 ${index === 0 ? 'text-yellow-500' : index === 1 ? 'text-gray-400' : 'text-amber-600'}`} />
+                      ) : (
+                        <span className="text-muted-foreground">{index + 1}</span>
+                      )}
+                    </div>
+
+                    {/* Company Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold truncate">{deal.company_name}</h3>
+                        <Badge variant="outline" className="text-xs">
+                          {deal.status}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+                        {deal.contact_name && (
+                          <span className="flex items-center gap-1">
+                            <Users className="h-3 w-3" />
+                            {deal.contact_name}
+                          </span>
+                        )}
+                        {deal.industry && (
+                          <span className="flex items-center gap-1">
+                            <Building2 className="h-3 w-3" />
+                            {deal.industry}
+                          </span>
+                        )}
+                        {deal.location && (
+                          <span className="flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {deal.location}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Metrics */}
+                    <div className="hidden md:flex items-center gap-6 text-sm">
+                      <div className="text-center">
+                        <p className="font-medium">{formatRevenue(deal.revenue)}</p>
+                        <p className="text-xs text-muted-foreground">Revenue</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="font-medium">{deal.seller_interest_score || '-'}/10</p>
+                        <p className="text-xs text-muted-foreground">Interest</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="font-medium">{deal.timeline_to_sell || 'TBD'}</p>
+                        <p className="text-xs text-muted-foreground">Timeline</p>
+                      </div>
+                    </div>
+
+                    {/* Score */}
+                    <div className="flex-shrink-0 text-right">
+                      <p className={`text-2xl font-bold ${getScoreColor(deal.total_deal_score)}`}>
+                        {deal.total_deal_score}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Deal Score</p>
+                    </div>
+
+                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Deal Detail Dialog */}
+      <Dialog open={!!selectedDeal} onOpenChange={() => setSelectedDeal(null)}>
+        <DialogContent className="max-w-2xl">
+          {selectedDeal && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {selectedDeal.company_name}
+                  <Badge className={getScoreBg(selectedDeal.total_deal_score)}>
+                    Score: {selectedDeal.total_deal_score}
+                  </Badge>
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-6 py-4">
+                {/* Company Info */}
+                <div>
+                  <h4 className="font-medium mb-2">Company Information</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      <span>Revenue: {formatRevenue(selectedDeal.revenue)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-muted-foreground" />
+                      <span>Employees: {selectedDeal.employees || 'N/A'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      <span>Industry: {selectedDeal.industry || 'N/A'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      <span>Location: {selectedDeal.location || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Seller Profile */}
+                <div>
+                  <h4 className="font-medium mb-2">Seller Profile</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-accent/50">
+                      <span>Interest Level</span>
+                      <div className="flex items-center gap-2">
+                        <Progress value={(selectedDeal.seller_interest_score || 0) * 10} className="w-24 h-2" />
+                        <Badge variant="outline">
+                          {selectedDeal.seller_interest_score}/10 - {getInterestLabel(selectedDeal.seller_interest_score)}
+                        </Badge>
+                      </div>
+                    </div>
+                    {selectedDeal.seller_interest_summary && (
+                      <p className="text-sm text-muted-foreground">{selectedDeal.seller_interest_summary}</p>
+                    )}
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="p-3 rounded-lg bg-accent/30">
+                        <p className="font-medium">Timeline</p>
+                        <p className="text-muted-foreground">{selectedDeal.timeline_to_sell || 'Not discussed'}</p>
+                      </div>
+                      <div className="p-3 rounded-lg bg-accent/30">
+                        <p className="font-medium">Valuation Expectations</p>
+                        <p className="text-muted-foreground">{selectedDeal.valuation_expectations || 'Not discussed'}</p>
+                      </div>
+                      <div className="p-3 rounded-lg bg-accent/30">
+                        <p className="font-medium">Buyer Preferences</p>
+                        <p className="text-muted-foreground">{selectedDeal.buyer_preferences || 'Not discussed'}</p>
+                      </div>
+                      <div className="p-3 rounded-lg bg-accent/30">
+                        <p className="font-medium">Motivation</p>
+                        <p className="text-muted-foreground">
+                          {selectedDeal.motivation_factors?.join(', ') || 'Not identified'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Next Action */}
+                {selectedDeal.next_action && (
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/10 border border-primary/30">
+                    <Calendar className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="font-medium">{selectedDeal.next_action}</p>
+                      {selectedDeal.next_action_date && (
+                        <p className="text-sm text-muted-foreground">
+                          {new Date(selectedDeal.next_action_date).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick Actions */}
+                <div className="flex gap-2">
+                  <Button variant="outline" className="flex-1">
+                    <Phone className="h-4 w-4 mr-2" />
+                    Call
+                  </Button>
+                  <Button variant="outline" className="flex-1">
+                    <Mail className="h-4 w-4 mr-2" />
+                    Email
+                  </Button>
+                  <Button className="flex-1">
+                    View Full Record
+                    <ChevronRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </DashboardLayout>
+  );
+}

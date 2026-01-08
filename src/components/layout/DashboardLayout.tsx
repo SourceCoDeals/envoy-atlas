@@ -81,16 +81,17 @@ const emailExperimentNavItems: NavItem[] = [
   { title: 'Playbook', href: '/playbook', icon: BookOpen },
 ];
 
-// Calling channel navigation
+// Calling channel navigation - 9 pages from requirements
 const callingMainNavItems: NavItem[] = [
-  { title: 'Overview', href: '/calling', icon: LayoutDashboard },
-  { title: 'Call Search', href: '/calling/search', icon: Phone },
-  { title: 'Best/Worst Calls', href: '/calling/best-worst', icon: BarChart3 },
-  { title: 'Call Sessions', href: '/calling/sessions', icon: PhoneCall },
-  { title: 'Rep Insights', href: '/calling/reps', icon: PieChart },
+  { title: 'Caller Dashboard', href: '/calling', icon: LayoutDashboard },
+  { title: 'Engagements', href: '/calling/engagements', icon: Briefcase },
+  { title: 'Top Deals', href: '/calling/deals', icon: BarChart3 },
+  { title: 'Top Calls', href: '/calling/top-calls', icon: PhoneCall },
+  { title: 'Data Insights', href: '/calling/insights', icon: PieChart },
   { title: 'Call Library', href: '/calling/library', icon: Library },
-  { title: 'Pattern Analysis', href: '/calling/patterns', icon: FlaskConical },
-  { title: 'Timing Insights', href: '/calling/timing', icon: CalendarDays },
+  { title: 'Call Information', href: '/calling/information', icon: FileText },
+  { title: 'AI Summary', href: '/calling/ai-summary', icon: Sparkles },
+  { title: 'AI Chatbot', href: '/calling/chatbot', icon: HelpCircle },
 ];
 
 // Contacts channel navigation
