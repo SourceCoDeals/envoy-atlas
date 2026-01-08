@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.score-external-calls]
 verify_jwt = false
+
+[functions.import-json-calls]
+verify_jwt = false

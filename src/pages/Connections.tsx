@@ -28,6 +28,7 @@ import {
   Plug,
   RefreshCw,
   Sparkles,
+  Upload,
   XCircle,
 } from "lucide-react";
 
@@ -425,6 +426,48 @@ export default function Connections() {
       setError(e?.message || "Failed to score calls");
     } finally {
       setIsSyncing((s) => ({ ...s, scoring: false }));
+    }
+  };
+
+  // Handle JSON file upload for external calls
+  const handleJsonUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !currentWorkspace) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncing((s) => ({ ...s, upload: true }));
+
+    try {
+      const text = await file.text();
+      const calls = JSON.parse(text);
+
+      if (!Array.isArray(calls)) {
+        throw new Error("Invalid JSON: expected an array of calls");
+      }
+
+      const token = await getAccessToken();
+      const res = await supabase.functions.invoke("import-json-calls", {
+        body: {
+          calls,
+          workspaceId: currentWorkspace.id,
+          clearExisting: true,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || "Import failed");
+
+      const data = res.data;
+      setSuccess(`Imported ${data.inserted} calls (${data.withTranscripts} with transcripts).`);
+      await fetchNocodbStats();
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to import JSON file");
+    } finally {
+      setIsSyncing((s) => ({ ...s, upload: false }));
+      // Reset the file input
+      event.target.value = "";
     }
   };
 
@@ -1117,23 +1160,78 @@ export default function Connections() {
                         )}
 
                         <p className="text-xs text-muted-foreground text-center">
-                          Test data pre-loaded • Process transcripts → AI Score → View in AI Summary
+                          Process transcripts → AI Score → View in AI Summary
                         </p>
+                        
+                        {/* JSON Upload */}
+                        <div className="pt-2 border-t">
+                          <Label htmlFor="json-upload" className="text-xs text-muted-foreground">
+                            Upload JSON file to replace data:
+                          </Label>
+                          <div className="mt-1">
+                            <input
+                              type="file"
+                              id="json-upload"
+                              accept=".json"
+                              onChange={handleJsonUpload}
+                              disabled={!!isSyncing.upload}
+                              className="hidden"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full"
+                              onClick={() => document.getElementById('json-upload')?.click()}
+                              disabled={!!isSyncing.upload}
+                            >
+                              {isSyncing.upload ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Importing...
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="mr-2 h-4 w-4" />
+                                  Upload JSON
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
                       </>
                     ) : (
                       <div className="text-center py-4 text-muted-foreground">
                         <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">No test data loaded</p>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2"
-                          onClick={handleRefreshStats}
-                          disabled={!!isSyncing.nocodb}
-                        >
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          Refresh
-                        </Button>
+                        <p className="text-sm">No data loaded</p>
+                        <p className="text-xs mt-1">Upload a JSON file to import calls</p>
+                        <div className="mt-3">
+                          <input
+                            type="file"
+                            id="json-upload-empty"
+                            accept=".json"
+                            onChange={handleJsonUpload}
+                            disabled={!!isSyncing.upload}
+                            className="hidden"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => document.getElementById('json-upload-empty')?.click()}
+                            disabled={!!isSyncing.upload}
+                          >
+                            {isSyncing.upload ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Importing...
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="mr-2 h-4 w-4" />
+                                Upload JSON
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </CardContent>
