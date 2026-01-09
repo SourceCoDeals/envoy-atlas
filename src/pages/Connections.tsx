@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useChannel } from "@/hooks/useChannel";
+import { useToast } from "@/hooks/use-toast";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +58,7 @@ export default function Connections() {
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { channel } = useChannel();
+  const { toast } = useToast();
 
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -437,12 +439,20 @@ export default function Connections() {
       const data = res.data;
       if (data.success) {
         const stats = data.stats;
-        setSyncProgress({ phase: "complete", current: stats.inserted, total: stats.inserted, percent: 100, message: "Complete!" });
-        setSuccess(
-          action === "full_sync"
-            ? `Full sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`
-            : `Sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`
-        );
+        setSyncProgress({ phase: "complete", current: stats.inserted, total: stats.fetched, percent: 100, message: "Complete!" });
+        
+        const syncMessage = action === "full_sync"
+          ? `Full sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`
+          : `Sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`;
+        
+        setSuccess(syncMessage);
+        
+        // Show toast notification
+        toast({
+          title: "✅ NocoDB Sync Complete",
+          description: `Imported ${stats.inserted} of ${stats.fetched} records${stats.errors > 0 ? ` (${stats.errors} errors)` : ""}. Created ${stats.leads_created} contacts.`,
+          duration: 6000,
+        });
       } else {
         throw new Error(data.error || "Sync failed");
       }
@@ -453,6 +463,13 @@ export default function Connections() {
       console.error(e);
       setError(e?.message || "Failed to sync NocoDB");
       setSyncProgress(null);
+      
+      toast({
+        title: "❌ Sync Failed",
+        description: e?.message || "Failed to sync NocoDB",
+        variant: "destructive",
+        duration: 5000,
+      });
     } finally {
       clearInterval(pollInterval);
       setIsSyncing((s) => ({ ...s, nocodb: false }));
