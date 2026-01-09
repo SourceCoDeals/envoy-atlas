@@ -75,6 +75,7 @@ export default function Connections() {
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
   const [showPATInput, setShowPATInput] = useState(false);
+  const [isProcessingBackground, setIsProcessingBackground] = useState(false);
   
   // NocoDB sync stats
   const [nocodbStats, setNocodbStats] = useState<{
@@ -84,6 +85,9 @@ export default function Connections() {
     scored: number;
     errors: number;
   } | null>(null);
+
+  // Check if there's pending work
+  const hasPendingWork = nocodbStats && (nocodbStats.pending > 0 || nocodbStats.transcriptFetched > 0);
 
   const smartleadConnection = useMemo(
     () => connections.find((c) => c.platform === "smartlead"),
@@ -430,21 +434,20 @@ export default function Connections() {
     }
   };
 
-  // Handle JSON file upload for external calls - auto-processes everything
+  // Handle JSON file upload for external calls - imports quickly, processes in background
   const handleJsonUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !currentWorkspace) return;
 
     setError(null);
     setSuccess(null);
-    setUploadProgress("Importing...");
+    setUploadProgress("Reading file...");
     setIsSyncing((s) => ({ ...s, upload: true }));
 
     try {
       const token = await getAccessToken();
       
-      // Step 1: Import JSON in chunks to avoid timeouts
-      setUploadProgress("Step 1/3: Reading file...");
+      // Read and parse JSON
       console.log("[JSON Upload] Reading file:", file.name);
       const text = await file.text();
       const calls = JSON.parse(text);
@@ -455,25 +458,26 @@ export default function Connections() {
 
       console.log("[JSON Upload] Parsed", calls.length, "calls");
       
-      // Chunk the calls to avoid edge function timeouts
+      // Import in chunks to avoid edge function timeouts
       const CHUNK_SIZE = 1000;
       let totalInserted = 0;
       let totalWithTranscripts = 0;
       let totalScored = 0;
+      let totalLeads = 0;
       
       for (let i = 0; i < calls.length; i += CHUNK_SIZE) {
         const chunk = calls.slice(i, i + CHUNK_SIZE);
         const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
         const totalChunks = Math.ceil(calls.length / CHUNK_SIZE);
         
-        setUploadProgress(`Step 1/3: Importing ${i + chunk.length}/${calls.length}...`);
+        setUploadProgress(`Importing ${i + chunk.length}/${calls.length}...`);
         console.log(`[JSON Upload] Uploading chunk ${chunkNum}/${totalChunks} (${chunk.length} calls)`);
         
         const importRes = await supabase.functions.invoke("import-json-calls", {
           body: {
             calls: chunk,
             workspaceId: currentWorkspace.id,
-            clearExisting: i === 0 ? false : false, // Never clear on subsequent chunks
+            clearExisting: false,
           },
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -484,68 +488,19 @@ export default function Connections() {
         totalInserted += importRes.data.inserted || 0;
         totalWithTranscripts += importRes.data.withTranscripts || 0;
         totalScored += importRes.data.scored || 0;
+        totalLeads += importRes.data.leadsCreated || 0;
       }
       
-      const imported = { inserted: totalInserted, withTranscripts: totalWithTranscripts, scored: totalScored };
-      console.log("[JSON Upload] Total imported:", imported);
-
-      // Step 2: Fetch transcripts for any pending calls
-      setUploadProgress(`Step 2/3: Fetching transcripts...`);
-      let transcriptsFetched = 0;
-      let transcriptLoops = 0;
-      const maxTranscriptLoops = 10; // Process up to 200 calls (20 per batch)
-      
-      while (transcriptLoops < maxTranscriptLoops) {
-        const transcriptRes = await supabase.functions.invoke("fetch-transcripts", {
-          body: { workspace_id: currentWorkspace.id, limit: 20 },
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        if (transcriptRes.error) {
-          console.error("[JSON Upload] Transcript fetch error:", transcriptRes.error);
-          break;
-        }
-        
-        const processed = transcriptRes.data?.processed || 0;
-        transcriptsFetched += processed;
-        console.log(`[JSON Upload] Transcript batch: ${processed} processed, total: ${transcriptsFetched}`);
-        
-        if (processed === 0) break; // No more to process
-        transcriptLoops++;
-        
-        setUploadProgress(`Step 2/3: Transcripts (${transcriptsFetched})`);
-      }
-
-      // Step 3: Score all calls with transcripts
-      setUploadProgress(`Step 3/3: AI Scoring...`);
-      let callsScored = 0;
-      let scoreLoops = 0;
-      const maxScoreLoops = 20; // Process up to 100 calls (5 per batch)
-      
-      while (scoreLoops < maxScoreLoops) {
-        const scoreRes = await supabase.functions.invoke("score-external-calls", {
-          body: { workspace_id: currentWorkspace.id, limit: 5 },
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        if (scoreRes.error) {
-          console.error("[JSON Upload] Scoring error:", scoreRes.error);
-          break;
-        }
-        
-        const scored = scoreRes.data?.scored || 0;
-        callsScored += scored;
-        console.log(`[JSON Upload] Score batch: ${scored} scored, total: ${callsScored}`);
-        
-        if (scored === 0) break; // No more to score
-        scoreLoops++;
-        
-        setUploadProgress(`Step 3/3: Scored ${callsScored}`);
-      }
+      console.log("[JSON Upload] Import complete:", { totalInserted, totalWithTranscripts, totalScored, totalLeads });
 
       setUploadProgress(null);
-      setSuccess(`✓ Complete! Imported ${imported.inserted} calls, fetched ${transcriptsFetched} transcripts, scored ${callsScored} calls`);
+      setSuccess(`✓ Imported ${totalInserted} calls (${totalWithTranscripts} with transcripts, ${totalScored} already scored, ${totalLeads} contacts created). Background processing will continue.`);
       await fetchNocodbStats();
+      
+      // Start background processing automatically if there's work to do
+      if (totalInserted > totalScored) {
+        startBackgroundProcessing();
+      }
     } catch (e: any) {
       console.error("[JSON Upload] Error:", e);
       setError(e?.message || "Failed to process JSON file");
@@ -556,12 +511,91 @@ export default function Connections() {
     }
   };
 
-  // Fetch NocoDB stats on mount
+  // Background processing for transcripts and scoring
+  const startBackgroundProcessing = async () => {
+    if (!currentWorkspace || isProcessingBackground) return;
+    
+    setIsProcessingBackground(true);
+    console.log("[Background] Starting background processing...");
+    
+    const processLoop = async () => {
+      try {
+        const token = await getAccessToken();
+        let hasMoreWork = true;
+        
+        while (hasMoreWork) {
+          // Refresh stats
+          await fetchNocodbStats();
+          
+          // Check for pending transcripts
+          const { data: pendingCalls } = await supabase
+            .from("external_calls")
+            .select("id")
+            .eq("workspace_id", currentWorkspace.id)
+            .eq("import_status", "pending")
+            .not("fireflies_url", "is", null)
+            .limit(1);
+          
+          if (pendingCalls && pendingCalls.length > 0) {
+            console.log("[Background] Fetching transcripts...");
+            await supabase.functions.invoke("fetch-transcripts", {
+              body: { workspace_id: currentWorkspace.id, limit: 10 },
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            continue;
+          }
+          
+          // Check for calls needing scoring
+          const { data: unscoredCalls } = await supabase
+            .from("external_calls")
+            .select("id")
+            .eq("workspace_id", currentWorkspace.id)
+            .eq("import_status", "transcript_fetched")
+            .limit(1);
+          
+          if (unscoredCalls && unscoredCalls.length > 0) {
+            console.log("[Background] Scoring calls...");
+            await supabase.functions.invoke("score-external-calls", {
+              body: { workspace_id: currentWorkspace.id, limit: 5 },
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            continue;
+          }
+          
+          // No more work
+          hasMoreWork = false;
+        }
+        
+        console.log("[Background] Processing complete");
+        await fetchNocodbStats();
+      } catch (e) {
+        console.error("[Background] Error:", e);
+      } finally {
+        setIsProcessingBackground(false);
+      }
+    };
+    
+    // Run in background (don't await)
+    processLoop();
+  };
+
+  // Fetch NocoDB stats on mount and auto-refresh during background processing
   useEffect(() => {
     if (currentWorkspace?.id && channel === "calling") {
       fetchNocodbStats();
     }
   }, [currentWorkspace?.id, channel]);
+
+  // Auto-refresh stats while background processing is active
+  useEffect(() => {
+    if (!isProcessingBackground || !currentWorkspace?.id) return;
+    
+    const interval = setInterval(() => {
+      fetchNocodbStats();
+    }, 5000); // Refresh every 5 seconds
+    
+    return () => clearInterval(interval);
+  }, [isProcessingBackground, currentWorkspace?.id]);
 
   const phoneburnerProgress = (phoneburnerConnection?.sync_progress as any) || null;
   const pbPhase = phoneburnerProgress?.phase;
@@ -1229,8 +1263,33 @@ export default function Connections() {
                               </>
                             )}
                           </Button>
+                          
+                          {/* Process Pending Button */}
+                          {hasPendingWork && (
+                            <Button
+                              variant="outline"
+                              className="w-full mt-2"
+                              onClick={startBackgroundProcessing}
+                              disabled={isProcessingBackground}
+                            >
+                              {isProcessingBackground ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Processing... ({nocodbStats?.pending || 0} pending, {nocodbStats?.transcriptFetched || 0} to score)
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="mr-2 h-4 w-4" />
+                                  Process {(nocodbStats?.pending || 0) + (nocodbStats?.transcriptFetched || 0)} Pending
+                                </>
+                              )}
+                            </Button>
+                          )}
+                          
                           <p className="text-xs text-muted-foreground text-center mt-2">
-                            Auto-fetches transcripts & AI scores all calls
+                            {isProcessingBackground 
+                              ? "Background processing in progress. Stats refresh every 5s." 
+                              : "Upload JSON to import calls. Processing happens in background."}
                           </p>
                         </div>
                       </>
