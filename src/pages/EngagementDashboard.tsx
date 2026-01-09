@@ -1,13 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -18,44 +15,47 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import {
-  Plus,
-  Building2,
-  Target,
-  Calendar,
-  Users,
-  TrendingUp,
-  TrendingDown,
-  AlertTriangle,
-  ChevronRight,
-  Loader2,
-  Phone,
-  CalendarDays,
-} from 'lucide-react';
+import { Plus, Building2, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface Engagement {
   id: string;
-  client_name: string;
-  engagement_name: string;
+  sponsor: string | null;
   industry_focus: string | null;
+  client_name: string;
+  deal_lead: string | null;
+  associate_vp: string | null;
+  analyst: string | null;
+  priority: 'high' | 'medium' | 'low' | null;
+  engagement_name: string;
   geography: string | null;
   start_date: string;
   end_date: string | null;
-  total_calls_target: number;
-  meetings_target: number;
-  connect_rate_target: number;
-  meeting_rate_target: number;
   status: string;
-  // Computed
-  current_calls: number;
-  current_meetings: number;
-  current_connect_rate: number;
-  days_elapsed: number;
-  days_total: number;
-  pace_status: 'ahead' | 'on_track' | 'behind';
 }
+
+const priorityColors: Record<string, string> = {
+  high: 'bg-green-900/40 hover:bg-green-900/50',
+  medium: 'bg-amber-900/30 hover:bg-amber-900/40',
+  low: 'bg-red-900/30 hover:bg-red-900/40',
+};
 
 export default function EngagementDashboard() {
   const navigate = useNavigate();
@@ -65,20 +65,23 @@ export default function EngagementDashboard() {
   const [engagements, setEngagements] = useState<Engagement[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  // New engagement form
-  const [newEngagement, setNewEngagement] = useState({
-    client_name: '',
-    engagement_name: '',
+  const emptyForm = {
+    sponsor: '',
     industry_focus: '',
+    client_name: '',
+    deal_lead: '',
+    associate_vp: '',
+    analyst: '',
+    priority: 'medium' as 'high' | 'medium' | 'low',
+    engagement_name: '',
     geography: '',
     start_date: new Date().toISOString().split('T')[0],
     end_date: '',
-    total_calls_target: 1000,
-    meetings_target: 20,
-    connect_rate_target: 20,
-    meeting_rate_target: 5,
-  });
+  };
+
+  const [formData, setFormData] = useState(emptyForm);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -101,43 +104,11 @@ export default function EngagementDashboard() {
         .from('engagements')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
+        .order('priority', { ascending: true })
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      // Calculate progress for each engagement
-      const enrichedEngagements = (data || []).map((e) => {
-        const start = new Date(e.start_date);
-        const end = e.end_date ? new Date(e.end_date) : new Date();
-        const today = new Date();
-        const daysTotal = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-        const daysElapsed = Math.ceil((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-
-        // These would come from actual metrics
-        const currentCalls = Math.floor(Math.random() * e.total_calls_target * 0.6);
-        const currentMeetings = Math.floor(Math.random() * e.meetings_target * 0.7);
-        const currentConnectRate = 15 + Math.random() * 15;
-
-        const expectedProgress = daysElapsed / daysTotal;
-        const actualProgress = currentCalls / e.total_calls_target;
-        const paceStatus = actualProgress >= expectedProgress * 1.1 
-          ? 'ahead' 
-          : actualProgress >= expectedProgress * 0.9 
-            ? 'on_track' 
-            : 'behind';
-
-        return {
-          ...e,
-          current_calls: currentCalls,
-          current_meetings: currentMeetings,
-          current_connect_rate: currentConnectRate,
-          days_elapsed: daysElapsed,
-          days_total: daysTotal,
-          pace_status: paceStatus,
-        } as Engagement;
-      });
-
-      setEngagements(enrichedEngagements);
+      setEngagements((data || []) as Engagement[]);
     } catch (err) {
       console.error('Error fetching engagements:', err);
       toast.error('Failed to load engagements');
@@ -146,70 +117,105 @@ export default function EngagementDashboard() {
     }
   };
 
-  const createEngagement = async () => {
+  const openCreate = () => {
+    setEditingId(null);
+    setFormData(emptyForm);
+    setDialogOpen(true);
+  };
+
+  const openEdit = (engagement: Engagement) => {
+    setEditingId(engagement.id);
+    setFormData({
+      sponsor: engagement.sponsor || '',
+      industry_focus: engagement.industry_focus || '',
+      client_name: engagement.client_name,
+      deal_lead: engagement.deal_lead || '',
+      associate_vp: engagement.associate_vp || '',
+      analyst: engagement.analyst || '',
+      priority: engagement.priority || 'medium',
+      engagement_name: engagement.engagement_name,
+      geography: engagement.geography || '',
+      start_date: engagement.start_date,
+      end_date: engagement.end_date || '',
+    });
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
     if (!currentWorkspace?.id || !user?.id) return;
-    if (!newEngagement.client_name || !newEngagement.engagement_name) {
-      toast.error('Please fill in required fields');
+    if (!formData.client_name) {
+      toast.error('Client name is required');
       return;
     }
 
     setCreating(true);
     try {
-      const { error } = await supabase.from('engagements').insert({
-        workspace_id: currentWorkspace.id,
-        created_by: user.id,
-        ...newEngagement,
-        end_date: newEngagement.end_date || null,
-      });
+      if (editingId) {
+        const { error } = await supabase
+          .from('engagements')
+          .update({
+            sponsor: formData.sponsor || null,
+            industry_focus: formData.industry_focus || null,
+            client_name: formData.client_name,
+            deal_lead: formData.deal_lead || null,
+            associate_vp: formData.associate_vp || null,
+            analyst: formData.analyst || null,
+            priority: formData.priority,
+            engagement_name: formData.engagement_name || formData.client_name,
+            geography: formData.geography || null,
+            start_date: formData.start_date,
+            end_date: formData.end_date || null,
+          })
+          .eq('id', editingId);
 
-      if (error) throw error;
+        if (error) throw error;
+        toast.success('Engagement updated');
+      } else {
+        const { error } = await supabase.from('engagements').insert({
+          workspace_id: currentWorkspace.id,
+          created_by: user.id,
+          sponsor: formData.sponsor || null,
+          industry_focus: formData.industry_focus || null,
+          client_name: formData.client_name,
+          deal_lead: formData.deal_lead || null,
+          associate_vp: formData.associate_vp || null,
+          analyst: formData.analyst || null,
+          priority: formData.priority,
+          engagement_name: formData.engagement_name || formData.client_name,
+          geography: formData.geography || null,
+          start_date: formData.start_date,
+          end_date: formData.end_date || null,
+          total_calls_target: 1000,
+          meetings_target: 20,
+          connect_rate_target: 20,
+          meeting_rate_target: 5,
+        });
 
-      toast.success('Engagement created successfully');
+        if (error) throw error;
+        toast.success('Engagement created');
+      }
+
       setDialogOpen(false);
-      setNewEngagement({
-        client_name: '',
-        engagement_name: '',
-        industry_focus: '',
-        geography: '',
-        start_date: new Date().toISOString().split('T')[0],
-        end_date: '',
-        total_calls_target: 1000,
-        meetings_target: 20,
-        connect_rate_target: 20,
-        meeting_rate_target: 5,
-      });
       fetchEngagements();
     } catch (err) {
-      console.error('Error creating engagement:', err);
-      toast.error('Failed to create engagement');
+      console.error('Error saving engagement:', err);
+      toast.error('Failed to save engagement');
     } finally {
       setCreating(false);
     }
   };
 
-  const getPaceColor = (status: string) => {
-    switch (status) {
-      case 'ahead':
-        return 'text-success';
-      case 'on_track':
-        return 'text-chart-4';
-      case 'behind':
-        return 'text-destructive';
-      default:
-        return 'text-muted-foreground';
-    }
-  };
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this engagement?')) return;
 
-  const getPaceBadge = (status: string) => {
-    switch (status) {
-      case 'ahead':
-        return <Badge className="bg-success/10 text-success border-success/30">Ahead</Badge>;
-      case 'on_track':
-        return <Badge className="bg-chart-4/10 text-chart-4 border-chart-4/30">On Track</Badge>;
-      case 'behind':
-        return <Badge className="bg-destructive/10 text-destructive border-destructive/30">Behind</Badge>;
-      default:
-        return null;
+    try {
+      const { error } = await supabase.from('engagements').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Engagement deleted');
+      fetchEngagements();
+    } catch (err) {
+      console.error('Error deleting engagement:', err);
+      toast.error('Failed to delete engagement');
     }
   };
 
@@ -229,154 +235,129 @@ export default function EngagementDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Engagement Dashboard</h1>
-            <p className="text-muted-foreground">Track PE firm engagements and targets</p>
+            <h1 className="text-2xl font-bold tracking-tight">Engagements</h1>
+            <p className="text-muted-foreground">Track PE firm engagements and team assignments</p>
           </div>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                New Engagement
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Create New Engagement</DialogTitle>
-                <DialogDescription>Set up a new PE firm project with targets</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="client_name">Client Name *</Label>
-                    <Input
-                      id="client_name"
-                      placeholder="e.g., Blackstone"
-                      value={newEngagement.client_name}
-                      onChange={(e) => setNewEngagement({ ...newEngagement, client_name: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="engagement_name">Engagement Name *</Label>
-                    <Input
-                      id="engagement_name"
-                      placeholder="e.g., Manufacturing Roll-Up"
-                      value={newEngagement.engagement_name}
-                      onChange={(e) => setNewEngagement({ ...newEngagement, engagement_name: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="industry_focus">Industry Focus</Label>
-                    <Input
-                      id="industry_focus"
-                      placeholder="e.g., Manufacturing"
-                      value={newEngagement.industry_focus}
-                      onChange={(e) => setNewEngagement({ ...newEngagement, industry_focus: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="geography">Geography</Label>
-                    <Input
-                      id="geography"
-                      placeholder="e.g., Midwest US"
-                      value={newEngagement.geography}
-                      onChange={(e) => setNewEngagement({ ...newEngagement, geography: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="start_date">Start Date</Label>
-                    <Input
-                      id="start_date"
-                      type="date"
-                      value={newEngagement.start_date}
-                      onChange={(e) => setNewEngagement({ ...newEngagement, start_date: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="end_date">End Date</Label>
-                    <Input
-                      id="end_date"
-                      type="date"
-                      value={newEngagement.end_date}
-                      onChange={(e) => setNewEngagement({ ...newEngagement, end_date: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="total_calls_target">Total Calls Target</Label>
-                    <Input
-                      id="total_calls_target"
-                      type="number"
-                      value={newEngagement.total_calls_target}
-                      onChange={(e) =>
-                        setNewEngagement({ ...newEngagement, total_calls_target: parseInt(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="meetings_target">Meetings Target</Label>
-                    <Input
-                      id="meetings_target"
-                      type="number"
-                      value={newEngagement.meetings_target}
-                      onChange={(e) =>
-                        setNewEngagement({ ...newEngagement, meetings_target: parseInt(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="connect_rate_target">Connect Rate Target (%)</Label>
-                    <Input
-                      id="connect_rate_target"
-                      type="number"
-                      value={newEngagement.connect_rate_target}
-                      onChange={(e) =>
-                        setNewEngagement({ ...newEngagement, connect_rate_target: parseInt(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="meeting_rate_target">Meeting Rate Target (%)</Label>
-                    <Input
-                      id="meeting_rate_target"
-                      type="number"
-                      value={newEngagement.meeting_rate_target}
-                      onChange={(e) =>
-                        setNewEngagement({ ...newEngagement, meeting_rate_target: parseInt(e.target.value) || 0 })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={createEngagement} disabled={creating}>
-                  {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Create Engagement
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Engagement
+          </Button>
         </div>
 
+        {/* Dialog */}
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{editingId ? 'Edit Engagement' : 'Create New Engagement'}</DialogTitle>
+              <DialogDescription>Fill in the engagement details</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Sponsor</Label>
+                  <Input
+                    placeholder="e.g., Baum Capital"
+                    value={formData.sponsor}
+                    onChange={(e) => setFormData({ ...formData, sponsor: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Industry</Label>
+                  <Input
+                    placeholder="e.g., Healthcare"
+                    value={formData.industry_focus}
+                    onChange={(e) => setFormData({ ...formData, industry_focus: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Client *</Label>
+                  <Input
+                    placeholder="e.g., Level Education"
+                    value={formData.client_name}
+                    onChange={(e) => setFormData({ ...formData, client_name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Priority</Label>
+                  <Select
+                    value={formData.priority}
+                    onValueChange={(val) => setFormData({ ...formData, priority: val as 'high' | 'medium' | 'low' })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Deal Lead</Label>
+                  <Input
+                    placeholder="Name"
+                    value={formData.deal_lead}
+                    onChange={(e) => setFormData({ ...formData, deal_lead: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Associate / VP</Label>
+                  <Input
+                    placeholder="Name"
+                    value={formData.associate_vp}
+                    onChange={(e) => setFormData({ ...formData, associate_vp: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Analyst</Label>
+                  <Input
+                    placeholder="Name"
+                    value={formData.analyst}
+                    onChange={(e) => setFormData({ ...formData, analyst: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Start Date</Label>
+                  <Input
+                    type="date"
+                    value={formData.start_date}
+                    onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>End Date</Label>
+                  <Input
+                    type="date"
+                    value={formData.end_date}
+                    onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSave} disabled={creating}>
+                {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {editingId ? 'Update' : 'Create'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Table */}
         {loading ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {[...Array(4)].map((_, i) => (
-              <Card key={i}>
-                <CardContent className="pt-6">
-                  <Skeleton className="h-40 w-full" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">Loading...</CardContent>
+          </Card>
         ) : engagements.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-12">
@@ -385,109 +366,75 @@ export default function EngagementDashboard() {
               </div>
               <h2 className="text-xl font-semibold mb-2">No Engagements Yet</h2>
               <p className="text-muted-foreground text-center max-w-md mb-6">
-                Create your first PE firm engagement to track calls, meetings, and targets.
+                Create your first PE firm engagement to track clients and team assignments.
               </p>
-              <Button onClick={() => setDialogOpen(true)}>
+              <Button onClick={openCreate}>
                 <Plus className="h-4 w-4 mr-2" />
                 Create First Engagement
               </Button>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {engagements.map((engagement) => (
-              <Card key={engagement.id} className="hover:border-primary/50 transition-colors">
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <CardTitle className="text-lg">{engagement.engagement_name}</CardTitle>
-                      <CardDescription className="flex items-center gap-2 mt-1">
-                        <Building2 className="h-3 w-3" />
-                        {engagement.client_name}
-                        {engagement.industry_focus && (
-                          <>
-                            <span>•</span>
-                            {engagement.industry_focus}
-                          </>
-                        )}
-                      </CardDescription>
-                    </div>
-                    {getPaceBadge(engagement.pace_status)}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Progress bars */}
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          Calls
-                        </span>
-                        <span className="text-muted-foreground">
-                          {engagement.current_calls.toLocaleString()} / {engagement.total_calls_target.toLocaleString()}
-                        </span>
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[160px]">Sponsor</TableHead>
+                  <TableHead>Industry</TableHead>
+                  <TableHead>Client</TableHead>
+                  <TableHead>Deal Lead</TableHead>
+                  <TableHead>Associate / VP</TableHead>
+                  <TableHead>Analyst</TableHead>
+                  <TableHead className="w-[80px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {engagements.map((engagement) => (
+                  <TableRow
+                    key={engagement.id}
+                    className={cn(
+                      'transition-colors cursor-pointer',
+                      priorityColors[engagement.priority || 'medium']
+                    )}
+                    onClick={() => openEdit(engagement)}
+                  >
+                    <TableCell className="font-medium">{engagement.sponsor || '-'}</TableCell>
+                    <TableCell>{engagement.industry_focus || '-'}</TableCell>
+                    <TableCell>{engagement.client_name}</TableCell>
+                    <TableCell className="text-primary">{engagement.deal_lead || '-'}</TableCell>
+                    <TableCell>{engagement.associate_vp || '-'}</TableCell>
+                    <TableCell>{engagement.analyst || '-'}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(engagement);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(engagement.id);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
-                      <Progress
-                        value={(engagement.current_calls / engagement.total_calls_target) * 100}
-                        className="h-2"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="flex items-center gap-1">
-                          <CalendarDays className="h-3 w-3" />
-                          Meetings
-                        </span>
-                        <span className="text-muted-foreground">
-                          {engagement.current_meetings} / {engagement.meetings_target}
-                        </span>
-                      </div>
-                      <Progress
-                        value={(engagement.current_meetings / engagement.meetings_target) * 100}
-                        className="h-2"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Metrics */}
-                  <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                    <div className="p-2 rounded-lg bg-accent/50">
-                      <p className="font-medium">{engagement.current_connect_rate.toFixed(1)}%</p>
-                      <p className="text-xs text-muted-foreground">Connect Rate</p>
-                    </div>
-                    <div className="p-2 rounded-lg bg-accent/50">
-                      <p className="font-medium">
-                        {engagement.days_elapsed} / {engagement.days_total}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Days</p>
-                    </div>
-                    <div className="p-2 rounded-lg bg-accent/50">
-                      <p className={`font-medium ${getPaceColor(engagement.pace_status)}`}>
-                        {engagement.pace_status === 'ahead' && <TrendingUp className="h-4 w-4 inline" />}
-                        {engagement.pace_status === 'behind' && <TrendingDown className="h-4 w-4 inline" />}
-                        {engagement.pace_status === 'on_track' && '→'}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Pace</p>
-                    </div>
-                  </div>
-
-                  {/* Alerts */}
-                  {engagement.pace_status === 'behind' && (
-                    <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-                      <AlertTriangle className="h-4 w-4" />
-                      <span>Behind pace - need {Math.ceil((engagement.total_calls_target - engagement.current_calls) / (engagement.days_total - engagement.days_elapsed))} calls/day</span>
-                    </div>
-                  )}
-
-                  <Button variant="ghost" size="sm" className="w-full">
-                    View Details
-                    <ChevronRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
         )}
       </div>
     </DashboardLayout>

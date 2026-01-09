@@ -2046,10 +2046,13 @@ export type Database = {
       }
       engagements: {
         Row: {
+          analyst: string | null
+          associate_vp: string | null
           client_name: string
           connect_rate_target: number | null
           created_at: string | null
           created_by: string | null
+          deal_lead: string | null
           end_date: string | null
           engagement_name: string
           geography: string | null
@@ -2059,8 +2062,10 @@ export type Database = {
           meetings_target: number | null
           notes: string | null
           pipeline_value_target: number | null
+          priority: string | null
           revenue_max: number | null
           revenue_min: number | null
+          sponsor: string | null
           start_date: string
           status: string | null
           total_calls_target: number | null
@@ -2068,10 +2073,13 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          analyst?: string | null
+          associate_vp?: string | null
           client_name: string
           connect_rate_target?: number | null
           created_at?: string | null
           created_by?: string | null
+          deal_lead?: string | null
           end_date?: string | null
           engagement_name: string
           geography?: string | null
@@ -2081,8 +2089,10 @@ export type Database = {
           meetings_target?: number | null
           notes?: string | null
           pipeline_value_target?: number | null
+          priority?: string | null
           revenue_max?: number | null
           revenue_min?: number | null
+          sponsor?: string | null
           start_date: string
           status?: string | null
           total_calls_target?: number | null
@@ -2090,10 +2100,13 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          analyst?: string | null
+          associate_vp?: string | null
           client_name?: string
           connect_rate_target?: number | null
           created_at?: string | null
           created_by?: string | null
+          deal_lead?: string | null
           end_date?: string | null
           engagement_name?: string
           geography?: string | null
@@ -2103,8 +2116,10 @@ export type Database = {
           meetings_target?: number | null
           notes?: string | null
           pipeline_value_target?: number | null
+          priority?: string | null
           revenue_max?: number | null
           revenue_min?: number | null
+          sponsor?: string | null
           start_date?: string
           status?: string | null
           total_calls_target?: number | null
