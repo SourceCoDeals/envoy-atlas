@@ -83,6 +83,15 @@ export default function Connections() {
     scored: number;
     errors: number;
   } | null>(null);
+  
+  // NocoDB sync progress (real-time)
+  const [syncProgress, setSyncProgress] = useState<{
+    phase: string;
+    current: number;
+    total: number;
+    percent: number;
+    message: string;
+  } | null>(null);
 
   // Check if there's pending work
   const hasPendingWork = nocodbStats && (nocodbStats.pending > 0 || nocodbStats.transcriptFetched > 0);
@@ -386,6 +395,32 @@ export default function Connections() {
     setError(null);
     setSuccess(null);
     setIsSyncing((s) => ({ ...s, nocodb: true }));
+    setSyncProgress({ phase: "starting", current: 0, total: 0, percent: 0, message: "Starting sync..." });
+
+    // Poll for progress updates while sync is running
+    const pollInterval = setInterval(async () => {
+      try {
+        const { data } = await supabase
+          .from("api_connections")
+          .select("sync_progress, sync_status")
+          .eq("workspace_id", currentWorkspace.id)
+          .eq("platform", "nocodb")
+          .single();
+        
+        if (data?.sync_progress && data.sync_status === "syncing") {
+          const progress = data.sync_progress as any;
+          setSyncProgress({
+            phase: progress.phase || "syncing",
+            current: progress.current || 0,
+            total: progress.total || 0,
+            percent: progress.percent || 0,
+            message: progress.message || "Syncing...",
+          });
+        }
+      } catch (e) {
+        // Ignore polling errors
+      }
+    }, 1000);
 
     try {
       const token = await getAccessToken();
@@ -402,6 +437,7 @@ export default function Connections() {
       const data = res.data;
       if (data.success) {
         const stats = data.stats;
+        setSyncProgress({ phase: "complete", current: stats.inserted, total: stats.inserted, percent: 100, message: "Complete!" });
         setSuccess(
           action === "full_sync"
             ? `Full sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`
@@ -416,8 +452,12 @@ export default function Connections() {
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Failed to sync NocoDB");
+      setSyncProgress(null);
     } finally {
+      clearInterval(pollInterval);
       setIsSyncing((s) => ({ ...s, nocodb: false }));
+      // Clear progress after a short delay
+      setTimeout(() => setSyncProgress(null), 3000);
     }
   };
 
@@ -1180,6 +1220,22 @@ export default function Connections() {
                                 <span className="font-medium text-foreground">{nocodbStats.totalCalls}</span>
                               </div>
                             </div>
+                          </div>
+                        )}
+
+                        {/* Progress Bar during Sync */}
+                        {syncProgress && isSyncing.nocodb && (
+                          <div className="space-y-2 rounded-lg bg-primary/5 border border-primary/20 p-3">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium text-primary">{syncProgress.message}</span>
+                              <span className="text-muted-foreground">{syncProgress.percent}%</span>
+                            </div>
+                            <Progress value={syncProgress.percent} className="h-2" />
+                            {syncProgress.total > 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                {syncProgress.current} / {syncProgress.total} records
+                              </p>
+                            )}
                           </div>
                         )}
 

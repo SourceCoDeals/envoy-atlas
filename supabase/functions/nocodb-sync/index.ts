@@ -218,6 +218,28 @@ serve(async (req) => {
       console.log("[nocodb-sync] Existing data cleared");
     }
 
+    // Helper to update sync progress in real-time
+    const updateSyncProgress = async (phase: string, current: number, total: number, message: string) => {
+      await supabase
+        .from("api_connections")
+        .update({
+          sync_status: "syncing",
+          sync_progress: {
+            phase,
+            current,
+            total,
+            percent: total > 0 ? Math.round((current / total) * 100) : 0,
+            message,
+            updated_at: new Date().toISOString(),
+          },
+        })
+        .eq("workspace_id", workspace_id)
+        .eq("platform", "nocodb");
+    };
+
+    // Set initial syncing status
+    await updateSyncProgress("fetching", 0, 0, "Connecting to NocoDB...");
+
     // Fetch all records from NocoDB with pagination
     let allRecords: Record<string, any>[] = [];
     let offset = 0;
@@ -226,7 +248,24 @@ serve(async (req) => {
 
     console.log("[nocodb-sync] Fetching records from NocoDB...");
 
+    // First, get total count
+    const countUrl = `${NOCODB_BASE_URL}/api/v2/tables/${NOCODB_TABLE_ID}/records?limit=1&offset=0`;
+    const countResponse = await fetch(countUrl, {
+      headers: {
+        "xc-token": nocodbApiToken,
+        "Content-Type": "application/json",
+      },
+    });
+    
+    let estimatedTotal = 0;
+    if (countResponse.ok) {
+      const countData = await countResponse.json();
+      estimatedTotal = countData.pageInfo?.totalRows || 500; // Fallback estimate
+    }
+
     while (hasMore) {
+      await updateSyncProgress("fetching", allRecords.length, estimatedTotal, `Fetching records... (${allRecords.length}/${estimatedTotal})`);
+      
       const url = `${NOCODB_BASE_URL}/api/v2/tables/${NOCODB_TABLE_ID}/records?limit=${limit}&offset=${offset}`;
       console.log(`[nocodb-sync] Fetching: offset=${offset}`);
       
@@ -246,6 +285,11 @@ serve(async (req) => {
       const records = data.list || [];
       allRecords = allRecords.concat(records);
       
+      // Update estimated total from actual pageInfo if available
+      if (data.pageInfo?.totalRows) {
+        estimatedTotal = data.pageInfo.totalRows;
+      }
+      
       console.log(`[nocodb-sync] Fetched ${records.length} records (total: ${allRecords.length})`);
       
       if (records.length < limit) {
@@ -258,6 +302,7 @@ serve(async (req) => {
     console.log(`[nocodb-sync] Total records fetched: ${allRecords.length}`);
 
     // Map and upsert records
+    await updateSyncProgress("processing", 0, allRecords.length, "Processing records...");
     const mappedRecords = allRecords.map(r => mapNocoDBRecord(r, workspace_id));
     
     let inserted = 0;
@@ -268,6 +313,9 @@ serve(async (req) => {
     const BATCH_SIZE = 50;
     for (let i = 0; i < mappedRecords.length; i += BATCH_SIZE) {
       const batch = mappedRecords.slice(i, i + BATCH_SIZE);
+      
+      // Update progress for each batch
+      await updateSyncProgress("saving", i, mappedRecords.length, `Saving records... (${i}/${mappedRecords.length})`);
       
       const { data, error } = await supabase
         .from("external_calls")
