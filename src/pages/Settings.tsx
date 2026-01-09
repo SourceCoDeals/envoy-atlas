@@ -1,26 +1,49 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useWorkspaceSettings } from '@/hooks/useWorkspaceSettings';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, User, Building2, Users, Shield } from 'lucide-react';
+import { InviteTeamMemberDialog } from '@/components/settings/InviteTeamMemberDialog';
+import { TeamMembersList } from '@/components/settings/TeamMembersList';
+import { Loader2, User, Building2, Users, Shield, Check } from 'lucide-react';
 
 export default function Settings() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
   const { currentWorkspace, userRole } = useWorkspace();
+  const {
+    members,
+    loadingMembers,
+    updateWorkspaceName,
+    inviteTeamMember,
+    updateMemberRole,
+    removeMember,
+  } = useWorkspaceSettings();
+
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [hasNameChanges, setHasNameChanges] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
       navigate('/auth');
     }
   }, [user, loading, navigate]);
+
+  useEffect(() => {
+    if (currentWorkspace) {
+      setWorkspaceName(currentWorkspace.name);
+    }
+  }, [currentWorkspace]);
+
+  useEffect(() => {
+    setHasNameChanges(workspaceName !== currentWorkspace?.name);
+  }, [workspaceName, currentWorkspace?.name]);
 
   if (loading || !user) {
     return (
@@ -30,10 +53,29 @@ export default function Settings() {
     );
   }
 
-  const roleColors = {
+  const roleColors: Record<string, string> = {
     admin: 'bg-primary/20 text-primary',
-    analyst: 'bg-info/20 text-info',
+    manager: 'bg-blue-500/20 text-blue-600',
+    rep: 'bg-green-500/20 text-green-600',
+    analyst: 'bg-purple-500/20 text-purple-600',
     viewer: 'bg-muted text-muted-foreground',
+  };
+
+  const handleUpdateWorkspaceName = async () => {
+    if (!workspaceName.trim() || !hasNameChanges) return;
+    await updateWorkspaceName.mutateAsync(workspaceName.trim());
+  };
+
+  const handleInvite = async (email: string, role: any) => {
+    await inviteTeamMember.mutateAsync({ email, role });
+  };
+
+  const handleUpdateRole = async (memberId: string, newRole: any) => {
+    await updateMemberRole.mutateAsync({ memberId, newRole });
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    await removeMember.mutateAsync(memberId);
   };
 
   return (
@@ -79,55 +121,83 @@ export default function Settings() {
                   <Building2 className="h-5 w-5 text-muted-foreground" />
                   <div>
                     <CardTitle className="text-lg">Workspace</CardTitle>
-                    <CardDescription>{currentWorkspace.name}</CardDescription>
+                    <CardDescription>Workspace settings and configuration</CardDescription>
                   </div>
                 </div>
                 {userRole && (
-                  <Badge className={roleColors[userRole]}>
+                  <Badge className={roleColors[userRole] || roleColors.viewer}>
                     {userRole.charAt(0).toUpperCase() + userRole.slice(1)}
                   </Badge>
                 )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {userRole === 'admin' && (
+              {userRole === 'admin' ? (
                 <>
                   <div className="space-y-2">
                     <Label>Workspace Name</Label>
-                    <Input value={currentWorkspace.name} />
+                    <Input 
+                      value={workspaceName} 
+                      onChange={(e) => setWorkspaceName(e.target.value)}
+                      placeholder="Enter workspace name"
+                    />
                   </div>
-                  <Button>Update Workspace</Button>
+                  <Button 
+                    onClick={handleUpdateWorkspaceName}
+                    disabled={!hasNameChanges || updateWorkspaceName.isPending}
+                  >
+                    {updateWorkspaceName.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : hasNameChanges ? null : (
+                      <Check className="mr-2 h-4 w-4" />
+                    )}
+                    {hasNameChanges ? 'Update Workspace' : 'Saved'}
+                  </Button>
                 </>
-              )}
-              {userRole !== 'admin' && (
-                <p className="text-sm text-muted-foreground">
-                  Contact a workspace admin to update workspace settings.
-                </p>
+              ) : (
+                <div className="space-y-2">
+                  <Label>Workspace Name</Label>
+                  <Input value={currentWorkspace.name} disabled />
+                  <p className="text-sm text-muted-foreground">
+                    Contact a workspace admin to update workspace settings.
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
         )}
 
-        {/* Team Members (Admin only) */}
-        {userRole === 'admin' && (
+        {/* Team Members */}
+        {currentWorkspace && (
           <Card>
             <CardHeader>
-              <div className="flex items-center gap-3">
-                <Users className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <CardTitle className="text-lg">Team Members</CardTitle>
-                  <CardDescription>Manage who has access to this workspace</CardDescription>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Users className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <CardTitle className="text-lg">Team Members</CardTitle>
+                    <CardDescription>
+                      {members.length} member{members.length !== 1 ? 's' : ''} in this workspace
+                    </CardDescription>
+                  </div>
                 </div>
+                {userRole === 'admin' && (
+                  <InviteTeamMemberDialog 
+                    onInvite={handleInvite}
+                    isLoading={inviteTeamMember.isPending}
+                  />
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground mb-4">
-                Team management coming soon. You'll be able to invite team members 
-                and assign roles (Admin, Analyst, Viewer).
-              </p>
-              <Button variant="outline" disabled>
-                Invite Team Member
-              </Button>
+              <TeamMembersList
+                members={members}
+                isLoading={loadingMembers}
+                onUpdateRole={handleUpdateRole}
+                onRemove={handleRemoveMember}
+                isUpdating={updateMemberRole.isPending}
+                isRemoving={removeMember.isPending}
+              />
             </CardContent>
           </Card>
         )}
