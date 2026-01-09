@@ -307,7 +307,10 @@ export function useCallInformation() {
         });
 
         // Business intelligence from deals
-        const interestedDeals = deals?.filter((d) => d.interest_level?.toLowerCase() === 'yes') || [];
+        const interestedDeals = deals?.filter((d) => {
+          const level = d.interest_level?.toLowerCase() || '';
+          return level === 'hot' || level === 'warm' || level === 'yes' || level === 'interested';
+        }) || [];
         const totalPipelineRevenue = interestedDeals.reduce((sum, d) => sum + (d.annual_revenue_raw || d.revenue || 0), 0);
         const totalPipelineEbitda = interestedDeals.reduce((sum, d) => sum + (d.ebitda_raw || 0), 0);
 
