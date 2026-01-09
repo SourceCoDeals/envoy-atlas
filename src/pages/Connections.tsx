@@ -1177,87 +1177,37 @@ export default function Connections() {
                           </div>
                         </div>
 
-                        {/* Processing Actions */}
-                        {nocodbStats.pending > 0 && (
+                        {/* JSON Upload - handles everything automatically */}
+                        <div className="pt-2">
+                          <input
+                            type="file"
+                            id="json-upload"
+                            accept=".json"
+                            onChange={handleJsonUpload}
+                            disabled={!!isSyncing.upload}
+                            className="hidden"
+                          />
                           <Button
-                            variant="outline"
+                            variant="default"
                             className="w-full"
-                            onClick={handleFetchTranscripts}
-                            disabled={!!isSyncing.transcripts}
+                            onClick={() => document.getElementById('json-upload')?.click()}
+                            disabled={!!isSyncing.upload}
                           >
-                            {isSyncing.transcripts ? (
+                            {isSyncing.upload ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Fetching Transcripts...
+                                Processing...
                               </>
                             ) : (
                               <>
-                                <FileText className="mr-2 h-4 w-4" />
-                                Fetch Transcripts ({nocodbStats.pending} pending)
+                                <Upload className="mr-2 h-4 w-4" />
+                                Upload JSON
                               </>
                             )}
                           </Button>
-                        )}
-
-                        {nocodbStats.transcriptFetched > 0 && (
-                          <Button
-                            variant="outline"
-                            className="w-full"
-                            onClick={handleScoreExternalCalls}
-                            disabled={!!isSyncing.scoring}
-                          >
-                            {isSyncing.scoring ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Scoring...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="mr-2 h-4 w-4" />
-                                AI Score Calls ({nocodbStats.transcriptFetched} ready)
-                              </>
-                            )}
-                          </Button>
-                        )}
-
-                        <p className="text-xs text-muted-foreground text-center">
-                          Process transcripts → AI Score → View in AI Summary
-                        </p>
-                        
-                        {/* JSON Upload */}
-                        <div className="pt-2 border-t">
-                          <Label htmlFor="json-upload" className="text-xs text-muted-foreground">
-                            Upload JSON file to add more calls:
-                          </Label>
-                          <div className="mt-1">
-                            <input
-                              type="file"
-                              id="json-upload"
-                              accept=".json"
-                              onChange={handleJsonUpload}
-                              disabled={!!isSyncing.upload}
-                              className="hidden"
-                            />
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => document.getElementById('json-upload')?.click()}
-                              disabled={!!isSyncing.upload}
-                            >
-                              {isSyncing.upload ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Importing...
-                                </>
-                              ) : (
-                                <>
-                                  <Upload className="mr-2 h-4 w-4" />
-                                  Upload JSON
-                                </>
-                              )}
-                            </Button>
-                          </div>
+                          <p className="text-xs text-muted-foreground text-center mt-2">
+                            Auto-fetches transcripts & AI scores all calls
+                          </p>
                         </div>
                       </>
                     ) : (
