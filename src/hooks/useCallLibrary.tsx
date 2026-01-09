@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
@@ -116,24 +117,88 @@ export function useCallLibrary() {
     enabled: !!workspace?.id,
   });
 
-  const { data: suggestedCalls = [], isLoading: isLoadingSuggested } = useQuery({
-    queryKey: ['call-library-suggested', workspace?.id],
+  // Fetch ALL calls with scores to categorize best/worst examples
+  const { data: allScoredCalls = [], isLoading: isLoadingSuggested } = useQuery({
+    queryKey: ['call-library-all-scored', workspace?.id],
     queryFn: async () => {
       if (!workspace?.id) return [];
 
-      const { data, error: suggestedError } = await supabase
+      const { data, error: callsError } = await supabase
         .from('external_calls')
-        .select('id, call_title, contact_name, company_name, host_email, date_time, phoneburner_recording_url, composite_score, seller_interest_score, objection_handling_score, rapport_building_score')
+        .select('id, call_title, contact_name, company_name, host_email, date_time, phoneburner_recording_url, composite_score, seller_interest_score, objection_handling_score, rapport_building_score, quality_of_conversation_score, value_proposition_score, engagement_score, next_step_clarity_score')
         .eq('workspace_id', workspace.id)
-        .not('composite_score', 'is', null)
-        .order('composite_score', { ascending: false })
-        .limit(24);
+        .order('composite_score', { ascending: false });
 
-      if (suggestedError) throw suggestedError;
-      return (data || []) as SuggestedCall[];
+      if (callsError) throw callsError;
+      return (data || []) as (SuggestedCall & {
+        quality_of_conversation_score?: number | null;
+        value_proposition_score?: number | null;
+        engagement_score?: number | null;
+        next_step_clarity_score?: number | null;
+      })[];
     },
     enabled: !!workspace?.id,
   });
+
+  // Categorize calls into best/worst for each category
+  const categorizedSuggestions = useMemo(() => {
+    const validCalls = allScoredCalls.filter(c => c.composite_score != null);
+    
+    const getTopBottom = (
+      sortFn: (a: typeof validCalls[0], b: typeof validCalls[0]) => number,
+      count = 5
+    ) => {
+      const sorted = [...validCalls].sort(sortFn);
+      return {
+        best: sorted.slice(0, count),
+        worst: sorted.slice(-count).reverse(),
+      };
+    };
+
+    return {
+      // Best Openings - high engagement + rapport
+      best_openings: getTopBottom((a, b) => 
+        ((b.engagement_score || 0) + (b.rapport_building_score || 0)) - 
+        ((a.engagement_score || 0) + (a.rapport_building_score || 0))
+      ),
+      // Discovery Excellence - high quality conversation + seller interest
+      discovery_excellence: getTopBottom((a, b) => 
+        ((b.quality_of_conversation_score || 0) + (b.seller_interest_score || 0)) - 
+        ((a.quality_of_conversation_score || 0) + (a.seller_interest_score || 0))
+      ),
+      // Objection Handling - by objection handling score
+      objection_handling: getTopBottom((a, b) => 
+        (b.objection_handling_score || 0) - (a.objection_handling_score || 0)
+      ),
+      // Strong Closes - next step clarity + seller interest
+      strong_closes: getTopBottom((a, b) => 
+        ((b.next_step_clarity_score || 0) + (b.seller_interest_score || 0)) - 
+        ((a.next_step_clarity_score || 0) + (a.seller_interest_score || 0))
+      ),
+      // Rapport Building - by rapport score
+      rapport_building: getTopBottom((a, b) => 
+        (b.rapport_building_score || 0) - (a.rapport_building_score || 0)
+      ),
+      // Value Proposition - by value prop score
+      value_proposition: getTopBottom((a, b) => 
+        (b.value_proposition_score || 0) - (a.value_proposition_score || 0)
+      ),
+      // Training Examples - overall composite (top performers)
+      training_examples: getTopBottom((a, b) => 
+        (b.composite_score || 0) - (a.composite_score || 0)
+      ),
+      // What to Avoid - overall composite (bottom performers)
+      avoid_examples: {
+        best: [...validCalls].sort((a, b) => (a.composite_score || 0) - (b.composite_score || 0)).slice(0, 5),
+        worst: [], // Not applicable for this category
+      },
+    };
+  }, [allScoredCalls]);
+
+  // Flatten for backward compatibility
+  const suggestedCalls = useMemo(() => {
+    return allScoredCalls.filter(c => c.composite_score != null).slice(0, 24);
+  }, [allScoredCalls]);
 
   const addToLibrary = useMutation({
     mutationFn: async (params: {
@@ -207,6 +272,7 @@ export function useCallLibrary() {
     entries,
     entriesByCategory,
     suggestedCalls,
+    categorizedSuggestions,
     isLoading,
     isLoadingSuggested,
     error,
