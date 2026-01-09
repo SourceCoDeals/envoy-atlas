@@ -32,6 +32,7 @@ interface TopCall {
   call_date: string;
   outcome: string;
   opening_type: string | null;
+  salesforce_url?: string;
   key_techniques: string[];
   why_it_worked: string;
 }
@@ -67,42 +68,50 @@ export default function TopCallsWeek() {
     setLoading(true);
 
     try {
-      // Fetch top scored calls from this week from external_calls
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-
+      // Fetch top scored calls from external_calls (all time, top performers)
       const { data: scores, error } = await supabase
         .from('external_calls')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
-        .eq('import_status', 'scored')
         .not('composite_score', 'is', null)
-        .gte('date_time', weekAgo.toISOString())
         .order('composite_score', { ascending: false })
         .limit(10);
 
       if (error) throw error;
 
-      // Transform data
-      const calls: TopCall[] = (scores || []).map((s: any) => ({
-        id: s.id,
-        call_id: s.id,
-        composite_score: s.composite_score || 0,
-        rep_name: s.host_email?.split('@')[0] || 'Unknown',
-        contact_name: s.contact_name || s.call_title?.split(' to ')?.[1]?.split('(')?.[0]?.trim() || 'Unknown',
-        company_name: s.company_name || 'Company',
-        duration_seconds: 0, // Not available in external_calls
-        call_date: s.date_time || s.created_at,
-        outcome: s.call_category || 'Connection',
-        opening_type: s.opening_type,
-        key_techniques: [
-          s.seller_interest_score >= 8 ? 'Strong seller qualification' : null,
-          s.objection_handling_score >= 8 ? 'Excellent objection handling' : null,
-          s.rapport_building_score >= 8 ? 'Great rapport building' : null,
-          s.next_step_clarity_score >= 8 ? 'Clear next steps' : null,
-        ].filter(Boolean) as string[],
-        why_it_worked: s.seller_interest_justification || s.call_summary || 'High overall quality',
-      }));
+      // Transform data - parse company name from call_title format: "Company <ext> Client"
+      const calls: TopCall[] = (scores || []).map((s: any) => {
+        // Parse call_title to extract company name (before <ext>)
+        const callTitle = s.call_title || '';
+        const companyFromTitle = callTitle.split('<ext>')[0]?.trim() || callTitle.split(' - ')[0]?.trim();
+        
+        // Get rep name from host_email
+        const repEmail = s.host_email || '';
+        const repName = repEmail ? repEmail.split('@')[0].split('.').map((n: string) => 
+          n.charAt(0).toUpperCase() + n.slice(1)
+        ).join(' ') : 'Unknown';
+
+        return {
+          id: s.id,
+          call_id: s.id,
+          composite_score: s.composite_score || 0,
+          rep_name: repName,
+          contact_name: companyFromTitle || s.company_name || 'Unknown Company',
+          company_name: s.company_name || companyFromTitle || 'Company',
+          duration_seconds: 0,
+          call_date: s.date_time || s.created_at,
+          outcome: s.call_category || 'Connection',
+          opening_type: s.opening_type,
+          salesforce_url: s.salesforce_url,
+          key_techniques: [
+            s.seller_interest_score >= 8 ? 'Strong seller qualification' : null,
+            s.objection_handling_score >= 8 ? 'Excellent objection handling' : null,
+            s.rapport_building_score >= 8 ? 'Great rapport building' : null,
+            s.next_step_clarity_score >= 8 ? 'Clear next steps' : null,
+          ].filter(Boolean) as string[],
+          why_it_worked: s.seller_interest_justification || s.call_summary || 'High overall quality',
+        };
+      });
 
       setTopCalls(calls);
 
@@ -220,16 +229,15 @@ export default function TopCallsWeek() {
                               <User className="h-3 w-3" />
                               {call.rep_name}
                             </span>
-                            {call.duration_seconds > 0 && (
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {formatDuration(call.duration_seconds)}
-                              </span>
-                            )}
-                            {call.opening_type && (
-                              <Badge variant="secondary" className="text-xs">
-                                {call.opening_type}
-                              </Badge>
+                            {call.salesforce_url && (
+                              <a 
+                                href={call.salesforce_url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-primary hover:underline truncate max-w-[200px]"
+                              >
+                                Salesforce URL
+                              </a>
                             )}
                           </div>
                         </div>
