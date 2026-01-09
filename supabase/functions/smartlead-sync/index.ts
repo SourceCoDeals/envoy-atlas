@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
-const RATE_LIMIT_DELAY = 150; // Reduced from 300ms for faster sync
+const RATE_LIMIT_DELAY = 450; // 5 requests per 2 seconds = 400ms minimum, adding buffer // Reduced from 300ms for faster sync
 const BATCH_SIZE = 20; // Increased from 5 - process more campaigns per invocation
 const TIME_BUDGET_MS = 55000; // Increased to 55 seconds (edge functions allow 60s)
 const SYNC_LOCK_TIMEOUT_MS = 30000; // 30 seconds - if last heartbeat is older, allow new sync
