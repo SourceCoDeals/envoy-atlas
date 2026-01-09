@@ -300,12 +300,27 @@ export function useContactTimeline(contactId: string | null) {
           .eq('lead_id', contactId)
           .order('occurred_at', { ascending: false });
 
-        // Fetch call events
-        const { data: callEvents } = await supabase
-          .from('phoneburner_calls')
-          .select('*, call_ai_scores(*)')
-          .eq('contact_id', contactId)
-          .order('start_at', { ascending: false });
+        // Get lead info to find matching calls
+        const { data: lead } = await supabase
+          .from('leads')
+          .select('first_name, last_name, company')
+          .eq('id', contactId)
+          .single();
+
+        // Fetch call events from external_calls based on contact name match
+        let callEvents: any[] = [];
+        if (lead) {
+          const fullName = [lead.first_name, lead.last_name].filter(Boolean).join(' ');
+          if (fullName) {
+            const { data: calls } = await supabase
+              .from('external_calls')
+              .select('*')
+              .eq('workspace_id', currentWorkspace.id)
+              .ilike('contact_name', `%${fullName}%`)
+              .order('date_time', { ascending: false });
+            callEvents = calls || [];
+          }
+        }
 
         // Combine and sort
         const combined = [
@@ -315,10 +330,10 @@ export function useContactTimeline(contactId: string | null) {
             timestamp: e.occurred_at,
             data: e as Record<string, unknown>,
           })),
-          ...(callEvents || []).map(c => ({
+          ...callEvents.map(c => ({
             type: 'call' as const,
             id: c.id,
-            timestamp: c.start_at || c.created_at,
+            timestamp: c.date_time || c.created_at,
             data: c as Record<string, unknown>,
           })),
         ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
