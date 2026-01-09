@@ -34,6 +34,20 @@ export interface CallLibraryEntry {
   };
 }
 
+export interface SuggestedCall {
+  id: string;
+  call_title: string | null;
+  contact_name: string | null;
+  company_name: string | null;
+  host_email: string | null;
+  date_time: string | null;
+  phoneburner_recording_url: string | null;
+  composite_score: number | null;
+  seller_interest_score: number | null;
+  objection_handling_score: number | null;
+  rapport_building_score: number | null;
+}
+
 export const LIBRARY_CATEGORIES = [
   { value: 'best_openings', label: 'Best Openings', description: 'Strong call openers that set the right tone' },
   { value: 'discovery_excellence', label: 'Discovery Excellence', description: 'Masterful discovery question sequences' },
@@ -66,7 +80,7 @@ export function useCallLibrary() {
 
       // Get call IDs to fetch from external_calls
       const callIds = libraryEntries.map(e => e.call_id).filter(Boolean);
-      
+
       if (callIds.length === 0) return libraryEntries as CallLibraryEntry[];
 
       // Fetch call details from external_calls
@@ -98,6 +112,25 @@ export function useCallLibrary() {
           } : undefined,
         };
       }) as CallLibraryEntry[];
+    },
+    enabled: !!workspace?.id,
+  });
+
+  const { data: suggestedCalls = [], isLoading: isLoadingSuggested } = useQuery({
+    queryKey: ['call-library-suggested', workspace?.id],
+    queryFn: async () => {
+      if (!workspace?.id) return [];
+
+      const { data, error: suggestedError } = await supabase
+        .from('external_calls')
+        .select('id, call_title, contact_name, company_name, host_email, date_time, phoneburner_recording_url, composite_score, seller_interest_score, objection_handling_score, rapport_building_score')
+        .eq('workspace_id', workspace.id)
+        .not('composite_score', 'is', null)
+        .order('composite_score', { ascending: false })
+        .limit(24);
+
+      if (suggestedError) throw suggestedError;
+      return (data || []) as SuggestedCall[];
     },
     enabled: !!workspace?.id,
   });
@@ -136,6 +169,7 @@ export function useCallLibrary() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['call-library'] });
+      queryClient.invalidateQueries({ queryKey: ['call-library-suggested'] });
       toast.success('Call added to library');
     },
     onError: (error) => {
@@ -155,6 +189,7 @@ export function useCallLibrary() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['call-library'] });
+      queryClient.invalidateQueries({ queryKey: ['call-library-suggested'] });
       toast.success('Removed from library');
     },
     onError: (error) => {
@@ -171,7 +206,9 @@ export function useCallLibrary() {
   return {
     entries,
     entriesByCategory,
+    suggestedCalls,
     isLoading,
+    isLoadingSuggested,
     error,
     addToLibrary,
     removeFromLibrary,
