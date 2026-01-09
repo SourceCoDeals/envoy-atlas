@@ -238,10 +238,13 @@ export default function CallLibrary() {
               </div>
 
               <div className="mt-4 grid gap-2 md:grid-cols-2">
-                {(isLoadingSuggested ? Array.from({ length: 6 }) : suggestedCalls.slice(0, 12)).map((c, idx) => {
-                  if (!c) return <div key={idx} className="h-10 rounded-lg bg-muted/40" />;
-                  return <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} />;
-                })}
+                {isLoadingSuggested
+                  ? Array.from({ length: 6 }).map((_, idx) => (
+                      <div key={`placeholder-${idx}`} className="h-10 rounded-lg bg-muted/40" />
+                    ))
+                  : suggestedCalls.slice(0, 12).map((c) => (
+                      <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} />
+                    ))}
               </div>
             </CardContent>
           </Card>
