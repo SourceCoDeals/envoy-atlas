@@ -443,8 +443,8 @@ export default function Connections() {
     try {
       const token = await getAccessToken();
       
-      // Step 1: Import JSON
-      setUploadProgress("Step 1/3: Importing...");
+      // Step 1: Import JSON in chunks to avoid timeouts
+      setUploadProgress("Step 1/3: Reading file...");
       console.log("[JSON Upload] Reading file:", file.name);
       const text = await file.text();
       const calls = JSON.parse(text);
@@ -453,21 +453,41 @@ export default function Connections() {
         throw new Error("Invalid JSON: expected an array of calls");
       }
 
-      console.log("[JSON Upload] Parsed", calls.length, "calls, uploading...");
-      const importRes = await supabase.functions.invoke("import-json-calls", {
-        body: {
-          calls,
-          workspaceId: currentWorkspace.id,
-          clearExisting: false,
-        },
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (importRes.error) throw new Error(importRes.error.message || "Import failed");
-      if (!importRes.data.success) throw new Error(importRes.data.error || "Import returned unsuccessful");
+      console.log("[JSON Upload] Parsed", calls.length, "calls");
       
-      const imported = importRes.data;
-      console.log("[JSON Upload] Imported:", imported);
+      // Chunk the calls to avoid edge function timeouts
+      const CHUNK_SIZE = 1000;
+      let totalInserted = 0;
+      let totalWithTranscripts = 0;
+      let totalScored = 0;
+      
+      for (let i = 0; i < calls.length; i += CHUNK_SIZE) {
+        const chunk = calls.slice(i, i + CHUNK_SIZE);
+        const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
+        const totalChunks = Math.ceil(calls.length / CHUNK_SIZE);
+        
+        setUploadProgress(`Step 1/3: Importing ${i + chunk.length}/${calls.length}...`);
+        console.log(`[JSON Upload] Uploading chunk ${chunkNum}/${totalChunks} (${chunk.length} calls)`);
+        
+        const importRes = await supabase.functions.invoke("import-json-calls", {
+          body: {
+            calls: chunk,
+            workspaceId: currentWorkspace.id,
+            clearExisting: i === 0 ? false : false, // Never clear on subsequent chunks
+          },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (importRes.error) throw new Error(importRes.error.message || "Import failed");
+        if (!importRes.data.success) throw new Error(importRes.data.error || "Import returned unsuccessful");
+        
+        totalInserted += importRes.data.inserted || 0;
+        totalWithTranscripts += importRes.data.withTranscripts || 0;
+        totalScored += importRes.data.scored || 0;
+      }
+      
+      const imported = { inserted: totalInserted, withTranscripts: totalWithTranscripts, scored: totalScored };
+      console.log("[JSON Upload] Total imported:", imported);
 
       // Step 2: Fetch transcripts for any pending calls
       setUploadProgress(`Step 2/3: Fetching transcripts...`);
