@@ -108,88 +108,191 @@ export default function CallerDashboard() {
     setLoading(true);
 
     try {
+      // Get user's email for matching with external_calls host_email
+      const userEmail = user.email || '';
+
       // Fetch rep profile
       const { data: profile } = await supabase
         .from('rep_profiles')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (profile) {
         setRepProfile(profile);
-
-        // Fetch today's metrics from engagement_daily_metrics
-        const today = new Date().toISOString().split('T')[0];
-        const { data: todayMetrics } = await supabase
-          .from('engagement_daily_metrics')
-          .select('*')
-          .eq('rep_profile_id', profile.id)
-          .eq('date', today);
-
-        if (todayMetrics && todayMetrics.length > 0) {
-          const totals = todayMetrics.reduce(
-            (acc, m) => ({
-              dials: acc.dials + (m.dials || 0),
-              connects: acc.connects + (m.connects || 0),
-              conversations: acc.conversations + (m.conversations || 0),
-              meetings: acc.meetings + (m.meetings_set || 0),
-              talkTimeSeconds: acc.talkTimeSeconds + (m.talk_time_seconds || 0),
-            }),
-            { dials: 0, connects: 0, conversations: 0, meetings: 0, talkTimeSeconds: 0 }
-          );
-          setTodayActivity(totals);
-        }
-
-        // Fetch goals
-        const { data: repGoals } = await supabase
-          .from('rep_goals')
-          .select('*')
-          .eq('rep_profile_id', profile.id);
-
-        if (repGoals) {
-          setGoals(
-            repGoals.map((g) => ({
-              label: g.goal_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
-              current: 0, // Would calculate from actual data
-              target: g.target_value,
-              unit: g.goal_type === 'ai_score' ? 'pts' : g.goal_type.includes('rate') ? '%' : '',
-            }))
-          );
-        }
-
-        // Fetch coaching recommendations
-        const { data: coaching } = await supabase
-          .from('ai_coaching_recommendations')
-          .select('*')
-          .eq('rep_profile_id', profile.id)
-          .eq('is_acknowledged', false)
-          .order('created_at', { ascending: false })
-          .limit(4);
-
-        if (coaching) {
-          setCoachingTips(
-            coaching.map((c) => ({
-              type: c.recommendation_type as 'strength' | 'improvement',
-              title: c.title,
-              description: c.description,
-            }))
-          );
-        }
       }
 
-      // Generate sample trend data (would come from real data)
-      const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-      setTrendData(
-        weeks.map((week, i) => ({
-          week,
-          meetingRate: 3 + Math.random() * 2,
-          aiScore: 65 + i * 5 + Math.random() * 5,
-        }))
+      // Fetch all calls from external_calls
+      const { data: allCalls } = await supabase
+        .from('external_calls')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .not('composite_score', 'is', null);
+
+      if (!allCalls || allCalls.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Filter for user's calls (match by email)
+      const myCalls = allCalls.filter(c => 
+        c.host_email?.toLowerCase().includes(userEmail.toLowerCase().split('@')[0] || '')
       );
 
-      // Sample team rank
-      setTeamRank({ rank: 3, total: 8, vsAvg: '+12%' });
+      // Today's activity
+      const today = new Date().toISOString().split('T')[0];
+      const todayCalls = myCalls.filter(c => c.date_time?.startsWith(today));
+      
+      const dials = todayCalls.length;
+      const connects = todayCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
+      const conversations = todayCalls.filter(c => (c.composite_score || 0) >= 5).length;
+      const meetings = todayCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
+      const talkTimeSeconds = todayCalls.reduce((sum, c) => sum + (parseInt(String(c.duration || '0')) || 0), 0);
+
+      setTodayActivity({ dials, connects, conversations, meetings, talkTimeSeconds });
+
+      // Goals - calculate from actual data
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const weekCalls = myCalls.filter(c => c.date_time && new Date(c.date_time) >= weekAgo);
+      const weekDials = weekCalls.length;
+      const weekConnects = weekCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
+      const weekMeetings = weekCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
+      const avgScore = weekCalls.length > 0 
+        ? weekCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekCalls.length 
+        : 0;
+
+      setGoals([
+        { label: 'Weekly Dials', current: weekDials, target: 100, unit: '' },
+        { label: 'Connects', current: weekConnects, target: 30, unit: '' },
+        { label: 'Meetings Set', current: weekMeetings, target: 5, unit: '' },
+        { label: 'AI Score Avg', current: Math.round(avgScore * 10) / 10, target: 7, unit: 'pts' },
+      ]);
+
+      // Coaching tips from call patterns
+      const lowScoreCalls = weekCalls.filter(c => (c.composite_score || 0) < 5);
+      const highScoreCalls = weekCalls.filter(c => (c.composite_score || 0) >= 7);
+      const tips: CoachingTip[] = [];
+
+      if (highScoreCalls.length > 0) {
+        tips.push({
+          type: 'strength',
+          title: `${highScoreCalls.length} high-quality calls this week`,
+          description: 'Your conversation quality is strong. Keep building rapport early.',
+        });
+      }
+      if (lowScoreCalls.length > 3) {
+        tips.push({
+          type: 'improvement',
+          title: 'Focus on objection handling',
+          description: `${lowScoreCalls.length} calls scored below 5. Review objection responses.`,
+        });
+      }
+      if (weekConnects > 0 && weekMeetings === 0) {
+        tips.push({
+          type: 'improvement',
+          title: 'Convert connections to meetings',
+          description: 'You had connects but no meetings. Work on stronger closes.',
+        });
+      }
+      if (avgScore >= 6.5) {
+        tips.push({
+          type: 'strength',
+          title: `Strong AI score: ${avgScore.toFixed(1)}`,
+          description: 'Your call quality is above average. Great work!',
+        });
+      }
+      setCoachingTips(tips.slice(0, 4));
+
+      // 4-week trend data
+      const fourWeeksAgo = new Date();
+      fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+      const recentCalls = myCalls.filter(c => c.date_time && new Date(c.date_time) >= fourWeeksAgo);
+      
+      const weeklyData: { week: string; meetingRate: number; aiScore: number }[] = [];
+      for (let i = 3; i >= 0; i--) {
+        const weekStart = new Date();
+        weekStart.setDate(weekStart.getDate() - (i + 1) * 7);
+        const weekEnd = new Date();
+        weekEnd.setDate(weekEnd.getDate() - i * 7);
+        
+        const weekCalls = recentCalls.filter(c => {
+          const d = new Date(c.date_time!);
+          return d >= weekStart && d < weekEnd;
+        });
+        
+        const weekConnects = weekCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
+        const weekMeetings = weekCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
+        const avgScore = weekCalls.length > 0 
+          ? weekCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekCalls.length 
+          : 0;
+        
+        weeklyData.push({
+          week: `Week ${4 - i}`,
+          meetingRate: weekConnects > 0 ? (weekMeetings / weekConnects) * 100 : 0,
+          aiScore: avgScore,
+        });
+      }
+      setTrendData(weeklyData);
+
+      // Team rank calculation
+      const repStats = new Map<string, { calls: number; totalScore: number }>();
+      allCalls.forEach(c => {
+        const rep = c.host_email || 'Unknown';
+        if (!repStats.has(rep)) repStats.set(rep, { calls: 0, totalScore: 0 });
+        const stats = repStats.get(rep)!;
+        stats.calls++;
+        stats.totalScore += c.composite_score || 0;
+      });
+
+      const rankings = Array.from(repStats.entries())
+        .map(([email, stats]) => ({
+          email,
+          avgScore: stats.calls > 0 ? stats.totalScore / stats.calls : 0,
+        }))
+        .sort((a, b) => b.avgScore - a.avgScore);
+
+      const myRankIdx = rankings.findIndex(r => 
+        r.email.toLowerCase().includes(userEmail.toLowerCase().split('@')[0] || 'NOMATCH')
+      );
+      const teamAvg = rankings.reduce((sum, r) => sum + r.avgScore, 0) / rankings.length;
+      const myAvg = myRankIdx >= 0 ? rankings[myRankIdx].avgScore : 0;
+      const vsAvgPct = teamAvg > 0 ? ((myAvg - teamAvg) / teamAvg) * 100 : 0;
+
+      setTeamRank({
+        rank: myRankIdx >= 0 ? myRankIdx + 1 : rankings.length,
+        total: rankings.length,
+        vsAvg: `${vsAvgPct >= 0 ? '+' : ''}${vsAvgPct.toFixed(0)}%`,
+      });
+
+      // Best and worst calls this week
+      const sortedWeekCalls = [...weekCalls].sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
+      
+      if (sortedWeekCalls.length > 0) {
+        const best = sortedWeekCalls[0];
+        setBestCall({
+          id: best.id,
+          time: best.date_time || '',
+          contact: best.contact_name || 'Unknown Contact',
+          company: best.company_name || 'Unknown Company',
+          outcome: best.call_category || 'Scored',
+          aiScore: best.composite_score,
+        });
+      }
+
+      if (sortedWeekCalls.length > 1) {
+        const worst = sortedWeekCalls[sortedWeekCalls.length - 1];
+        setWorstCall({
+          id: worst.id,
+          time: worst.date_time || '',
+          contact: worst.contact_name || 'Unknown Contact',
+          company: worst.company_name || 'Unknown Company',
+          outcome: worst.call_category || 'Needs Review',
+          aiScore: worst.composite_score,
+        });
+      }
+
     } catch (err) {
       console.error('Error fetching caller data:', err);
     } finally {
