@@ -71,11 +71,18 @@ function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemo
   );
 }
 
-function SuggestedCallRow({ call, onAdd }: { call: SuggestedCall; onAdd: () => void }) {
+function SuggestedCallRow({ call, onAdd, type }: { call: SuggestedCall; onAdd: () => void; type?: 'best' | 'worst' }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-sm font-medium truncate">{call.company_name || call.call_title || 'Untitled call'}</p>
+    <div className={`flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 ${type === 'worst' ? 'border-destructive/30' : type === 'best' ? 'border-green-500/30' : ''}`}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {type && (
+            <Badge variant={type === 'best' ? 'default' : 'destructive'} className="text-xs shrink-0">
+              {type === 'best' ? '✓ Best' : '✗ Avoid'}
+            </Badge>
+          )}
+          <p className="text-sm font-medium truncate">{call.company_name || call.call_title || 'Untitled call'}</p>
+        </div>
         <p className="text-xs text-muted-foreground truncate">
           {call.host_email || 'Unknown rep'}
           {call.composite_score != null ? ` • Score ${call.composite_score}` : ''}
@@ -114,6 +121,7 @@ export default function CallLibrary() {
     entriesByCategory,
     entries,
     suggestedCalls,
+    categorizedSuggestions,
     isLoading,
     isLoadingSuggested,
     addToLibrary,
@@ -222,33 +230,70 @@ export default function CallLibrary() {
           </CardContent>
         </Card>
 
-        {/* Suggestions (when empty) */}
-        {entries.length === 0 && !searchQuery && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-medium">Suggested calls to seed your library</p>
-                  <p className="text-sm text-muted-foreground">Top scored calls from your imported data</p>
-                </div>
-                <Badge variant="outline" className="gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  {suggestedCalls.length} suggested
-                </Badge>
+        {/* Category-specific Suggestions */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <p className="font-medium">AI-Categorized Call Suggestions</p>
+                <p className="text-sm text-muted-foreground">Best and worst examples for each skill area, based on AI scoring</p>
               </div>
+              <Badge variant="outline" className="gap-2">
+                <Sparkles className="h-4 w-4" />
+                {suggestedCalls.length} analyzed
+              </Badge>
+            </div>
 
-              <div className="mt-4 grid gap-2 md:grid-cols-2">
-                {isLoadingSuggested
-                  ? Array.from({ length: 6 }).map((_, idx) => (
-                      <div key={`placeholder-${idx}`} className="h-10 rounded-lg bg-muted/40" />
-                    ))
-                  : suggestedCalls.slice(0, 12).map((c) => (
-                      <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} />
-                    ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+            <Tabs defaultValue="best_openings" className="mt-4">
+              <TabsList className="flex flex-wrap h-auto gap-1 mb-4">
+                {LIBRARY_CATEGORIES.map((cat) => (
+                  <TabsTrigger key={cat.value} value={cat.value} className="text-xs">
+                    {cat.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              {LIBRARY_CATEGORIES.map((cat) => {
+                const suggestions = categorizedSuggestions[cat.value as keyof typeof categorizedSuggestions];
+                return (
+                  <TabsContent key={cat.value} value={cat.value} className="space-y-4">
+                    <p className="text-sm text-muted-foreground">{cat.description}</p>
+                    
+                    {cat.value === 'avoid_examples' ? (
+                      <div>
+                        <h4 className="text-sm font-medium text-destructive mb-2">Calls to Avoid (Lowest Scores)</h4>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          {suggestions?.best.slice(0, 6).map((c) => (
+                            <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} type="worst" />
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <h4 className="text-sm font-medium text-green-600 mb-2">Best Examples</h4>
+                          <div className="space-y-2">
+                            {suggestions?.best.slice(0, 3).map((c) => (
+                              <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} type="best" />
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-medium text-destructive mb-2">Worst Examples</h4>
+                          <div className="space-y-2">
+                            {suggestions?.worst.slice(0, 3).map((c) => (
+                              <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} type="worst" />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+                );
+              })}
+            </Tabs>
+          </CardContent>
+        </Card>
 
         {/* Add dialog */}
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
