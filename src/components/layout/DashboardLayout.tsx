@@ -85,6 +85,7 @@ const emailExperimentNavItems: NavItem[] = [
 const callingMainNavItems: NavItem[] = [
   { title: 'Caller Dashboard', href: '/calling', icon: LayoutDashboard },
   { title: 'Engagements', href: '/calling/engagements', icon: Briefcase },
+  { title: 'Team', href: '/calling/team', icon: Users },
   { title: 'Top Deals', href: '/calling/deals', icon: BarChart3 },
   { title: 'Top Calls', href: '/calling/top-calls', icon: PhoneCall },
   { title: 'Data Insights', href: '/calling/insights', icon: PieChart },

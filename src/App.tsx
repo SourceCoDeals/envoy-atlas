@@ -45,6 +45,7 @@ import TimingInsights from "./pages/TimingInsights";
 import TrainingQueue from "./pages/TrainingQueue";
 import OnboardingProgress from "./pages/OnboardingProgress";
 import Contacts from "./pages/Contacts";
+import Team from "./pages/Team";
 import PhoneBurnerCallback from "./pages/PhoneBurnerCallback";
 import NotFound from "./pages/NotFound";
 
@@ -106,6 +107,7 @@ const App = () => (
                   <Route path="/calling/timing" element={<TimingInsights />} />
                   <Route path="/calling/training" element={<TrainingQueue />} />
                   <Route path="/calling/onboarding" element={<OnboardingProgress />} />
+                  <Route path="/calling/team" element={<Team />} />
 
                   {/* Shared routes */}
                   <Route path="/contacts" element={<Contacts />} />

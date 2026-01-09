@@ -3330,6 +3330,7 @@ export type Database = {
           last_name: string
           phone: string | null
           phoneburner_member_id: string | null
+          role: Database["public"]["Enums"]["app_role"] | null
           updated_at: string | null
           user_id: string | null
           workspace_id: string
@@ -3345,6 +3346,7 @@ export type Database = {
           last_name: string
           phone?: string | null
           phoneburner_member_id?: string | null
+          role?: Database["public"]["Enums"]["app_role"] | null
           updated_at?: string | null
           user_id?: string | null
           workspace_id: string
@@ -3360,6 +3362,7 @@ export type Database = {
           last_name?: string
           phone?: string | null
           phoneburner_member_id?: string | null
+          role?: Database["public"]["Enums"]["app_role"] | null
           updated_at?: string | null
           user_id?: string | null
           workspace_id?: string
@@ -3596,20 +3599,31 @@ export type Database = {
           id: string
           role: Database["public"]["Enums"]["app_role"]
           user_id: string
+          workspace_id: string | null
         }
         Insert: {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id: string
+          workspace_id?: string | null
         }
         Update: {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+          workspace_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_roles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       variant_decay_tracking: {
         Row: {
@@ -4028,7 +4042,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "analyst" | "viewer"
+      app_role: "admin" | "analyst" | "viewer" | "manager" | "rep"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -4156,7 +4170,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "analyst", "viewer"],
+      app_role: ["admin", "analyst", "viewer", "manager", "rep"],
     },
   },
 } as const
