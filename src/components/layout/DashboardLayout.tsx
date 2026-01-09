@@ -51,6 +51,7 @@ import {
   Users,
 } from 'lucide-react';
 import { HelpButton } from '@/components/onboarding';
+import { ChatPanel } from '@/components/copyinsights/ChatPanel';
 
 interface NavItem {
   title: string;
@@ -92,7 +93,6 @@ const callingMainNavItems: NavItem[] = [
   { title: 'Call Library', href: '/calling/library', icon: Library },
   { title: 'Call Information', href: '/calling/information', icon: FileText },
   { title: 'AI Summary', href: '/calling/ai-summary', icon: Sparkles },
-  { title: 'AI Chatbot', href: '/calling/chatbot', icon: HelpCircle },
 ];
 
 // Contacts channel navigation
@@ -451,6 +451,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         </main>
       </div>
+
+      {/* Global floating chat widget */}
+      <ChatPanel />
     </div>
   );
 }
