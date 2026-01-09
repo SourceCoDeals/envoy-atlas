@@ -6,8 +6,147 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// This function returns the count and status of external calls for a workspace
-// The data was pre-imported as test data - no NocoDB API needed
+const NOCODB_BASE_URL = "https://nocodb-1b0ku-u5603.vm.elestio.app";
+const NOCODB_TABLE_ID = "mc5kej8avjporvh";
+
+// Column mapping from NocoDB to our database
+const COLUMN_MAP: Record<string, string> = {
+  "Id": "nocodb_row_id",
+  "Call Title": "call_title",
+  "Fireflies URL": "fireflies_url",
+  "Date Time": "date_time",
+  "Date": "date_time", // fallback
+  "Host Email": "host_email",
+  "All Participants": "all_participants",
+  "Duration": "duration",
+  "Transcript": "transcript_text",
+  "Summary": "call_summary",
+  "Seller Interest Score": "seller_interest_score",
+  "Seller Interest Justification": "seller_interest_justification",
+  "Objection Handling Score": "objection_handling_score",
+  "Objection Handling Justification": "objection_handling_justification",
+  "Objection to Resolution Rate Percentage": "objection_resolution_rate",
+  "Resolution Rate Justification": "resolution_rate_justification",
+  "Valuation Discussion Score": "valuation_discussion_score",
+  "Valuation Discussion Justification": "valuation_discussion_justification",
+  "Rapport Building Score": "rapport_building_score",
+  "Rapport Building Justification": "rapport_building_justification",
+  "Value Proposition Score": "value_proposition_score",
+  "Value Proposition Justification": "value_proposition_justification",
+  "Conversation Quality Score": "quality_of_conversation_score",
+  "Conversation Quality Justification": "conversation_quality_justification",
+  "Script Adherence Score": "script_adherence_score",
+  "Script Adherence Justification": "script_adherence_justification",
+  "Overall Quality Score": "overall_quality_score",
+  "Overall Quality Justification": "overall_quality_justification",
+  "Question Adherence Score": "question_adherence_score",
+  "Question Adherence Justification": "question_adherence_justification",
+  "Next Steps Clarity Score": "next_step_clarity_score",
+  "Next Steps Clarity Justification": "next_step_clarity_justification",
+  "Personal Insights Score": "personal_insights_score",
+  "Personal Insights Justification": "personal_insights_justification",
+  "Personal Insights": "personal_insights",
+  "Annual Revenue": "annual_revenue",
+  "Ownership Details": "ownership_details",
+  "EBITDA": "ebitda",
+  "Business History": "business_history",
+  "Transaction Goals": "transaction_goals",
+  "Ownership Information": "ownership_information",
+  "Business Description": "business_description",
+  "Growth Information": "growth_information",
+  "Valuation Expectations": "valuation_expectations",
+  "M&A Discussions": "ma_discussions",
+  "Financial Data": "financial_data",
+  "No of Employees": "employee_count",
+  "Interest in Selling": "interest_in_selling",
+  "Exit Reason": "exit_reason",
+  "Revenue/EBITDA from past few years": "historical_financials",
+  "Target Pain Points": "target_pain_points",
+  "Future Growth Plans": "future_growth_plans",
+  "Mobile Number": "mobile_number",
+  "List of Objections": "objections_list_text",
+  "Number of Objections": "objections_count",
+  "Objections Resolved Count": "objections_resolved_count",
+  "Questions Covered Count": "questions_covered_count",
+  "Timeline To Sell": "timeline_to_sell",
+  "Buyer Type Preference": "buyer_type_preference",
+};
+
+function mapNocoDBRecord(record: Record<string, any>, workspaceId: string): Record<string, any> {
+  const mapped: Record<string, any> = {
+    workspace_id: workspaceId,
+    import_status: "scored", // NocoDB data is already fully processed
+  };
+
+  for (const [nocoKey, dbKey] of Object.entries(COLUMN_MAP)) {
+    if (record[nocoKey] !== undefined && record[nocoKey] !== null && record[nocoKey] !== "") {
+      let value = record[nocoKey];
+      
+      // Handle numeric conversions
+      if (["duration", "employee_count", "objections_count", "objections_resolved_count", "questions_covered_count"].includes(dbKey)) {
+        value = parseInt(value, 10) || null;
+      } else if (dbKey.includes("_score") || dbKey.includes("_rate")) {
+        value = parseFloat(value) || null;
+      }
+      
+      // Don't overwrite date_time if already set (Date is fallback)
+      if (dbKey === "date_time" && mapped.date_time) continue;
+      
+      mapped[dbKey] = value;
+    }
+  }
+
+  // Set composite_score from overall_quality_score if available
+  if (mapped.overall_quality_score && !mapped.composite_score) {
+    mapped.composite_score = mapped.overall_quality_score;
+  }
+
+  // Extract contact name from call title if possible
+  const callTitle = mapped.call_title || "";
+  const contactMatch = callTitle.match(/(?:with|call with|meeting with)\s+(.+?)(?:\s+from|\s+-|$)/i);
+  if (contactMatch) {
+    mapped.contact_name = contactMatch[1].trim();
+  }
+
+  // Extract company name from call title or participants
+  const companyMatch = callTitle.match(/(?:from|at|@)\s+(.+?)(?:\s+-|$)/i);
+  if (companyMatch) {
+    mapped.company_name = companyMatch[1].trim();
+  }
+
+  return mapped;
+}
+
+function extractContactInfo(record: Record<string, any>): { name: string; company: string | null; email: string | null } | null {
+  const callTitle = record.call_title || "";
+  const participants = record.all_participants || "";
+  
+  // Try to extract contact name
+  let name = record.contact_name;
+  if (!name) {
+    const match = callTitle.match(/(?:with|call with|meeting with)\s+(.+?)(?:\s+from|\s+-|$)/i);
+    if (match) name = match[1].trim();
+  }
+  
+  if (!name && participants) {
+    // Use first participant that's not the host
+    const hostEmail = record.host_email || "";
+    const parts = participants.split(/[,;]/).map((p: string) => p.trim()).filter((p: string) => p && !p.includes(hostEmail));
+    if (parts.length > 0) name = parts[0];
+  }
+  
+  if (!name) return null;
+  
+  // Extract company
+  let company = record.company_name;
+  if (!company) {
+    const companyMatch = callTitle.match(/(?:from|at|@)\s+(.+?)(?:\s+-|$)/i);
+    if (companyMatch) company = companyMatch[1].trim();
+  }
+  
+  return { name, company, email: null };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -16,45 +155,219 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const nocodbApiToken = Deno.env.get("NOCODB_API_TOKEN");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { workspace_id } = await req.json();
+    const { workspace_id, action = "stats" } = await req.json();
 
     if (!workspace_id) {
       throw new Error("workspace_id is required");
     }
 
-    console.log(`[nocodb-sync] Getting stats for workspace ${workspace_id}`);
+    console.log(`[nocodb-sync] Action: ${action} for workspace ${workspace_id}`);
 
-    // Get counts by status
-    const { data: calls, error } = await supabase
-      .from("external_calls")
-      .select("id, import_status, call_type")
-      .eq("workspace_id", workspace_id);
+    // Stats action - return current processing status
+    if (action === "stats") {
+      const { data: calls, error } = await supabase
+        .from("external_calls")
+        .select("id, import_status")
+        .eq("workspace_id", workspace_id);
 
-    if (error) {
-      throw error;
+      if (error) throw error;
+
+      const stats = {
+        total: calls?.length || 0,
+        pending: calls?.filter(c => c.import_status === "pending").length || 0,
+        transcript_fetched: calls?.filter(c => c.import_status === "transcript_fetched").length || 0,
+        scored: calls?.filter(c => c.import_status === "scored").length || 0,
+        error: calls?.filter(c => c.import_status === "error").length || 0,
+      };
+
+      return new Response(
+        JSON.stringify({ success: true, stats }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    const stats = {
-      total: calls?.length || 0,
-      pending: calls?.filter(c => c.import_status === "pending").length || 0,
-      transcript_fetched: calls?.filter(c => c.import_status === "transcript_fetched").length || 0,
-      scored: calls?.filter(c => c.import_status === "scored").length || 0,
-      error: calls?.filter(c => c.import_status === "error").length || 0,
-      by_type: {
-        sales: calls?.filter(c => c.call_type === "sales").length || 0,
-        remarketing: calls?.filter(c => c.call_type === "remarketing").length || 0,
-        external: calls?.filter(c => c.call_type === "external").length || 0,
-      }
-    };
+    // Sync and full_sync actions require API token
+    if (!nocodbApiToken) {
+      throw new Error("NOCODB_API_TOKEN is not configured. Please add it in the Connections settings.");
+    }
 
-    console.log(`[nocodb-sync] Stats:`, stats);
+    // Full sync - clear existing data first
+    if (action === "full_sync") {
+      console.log("[nocodb-sync] Full sync: clearing existing data...");
+      
+      // Delete existing leads from external_calls platform
+      const { error: leadsError } = await supabase
+        .from("leads")
+        .delete()
+        .eq("workspace_id", workspace_id)
+        .eq("platform", "external_calls");
+      
+      if (leadsError) console.error("[nocodb-sync] Error deleting leads:", leadsError);
+      
+      // Delete existing external_calls
+      const { error: callsError } = await supabase
+        .from("external_calls")
+        .delete()
+        .eq("workspace_id", workspace_id);
+      
+      if (callsError) throw callsError;
+      
+      console.log("[nocodb-sync] Existing data cleared");
+    }
+
+    // Fetch all records from NocoDB with pagination
+    let allRecords: Record<string, any>[] = [];
+    let offset = 0;
+    const limit = 100;
+    let hasMore = true;
+
+    console.log("[nocodb-sync] Fetching records from NocoDB...");
+
+    while (hasMore) {
+      const url = `${NOCODB_BASE_URL}/api/v2/tables/${NOCODB_TABLE_ID}/records?limit=${limit}&offset=${offset}`;
+      console.log(`[nocodb-sync] Fetching: offset=${offset}`);
+      
+      const response = await fetch(url, {
+        headers: {
+          "xc-token": nocodbApiToken,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`NocoDB API error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      const records = data.list || [];
+      allRecords = allRecords.concat(records);
+      
+      console.log(`[nocodb-sync] Fetched ${records.length} records (total: ${allRecords.length})`);
+      
+      if (records.length < limit) {
+        hasMore = false;
+      } else {
+        offset += limit;
+      }
+    }
+
+    console.log(`[nocodb-sync] Total records fetched: ${allRecords.length}`);
+
+    // Map and upsert records
+    const mappedRecords = allRecords.map(r => mapNocoDBRecord(r, workspace_id));
+    
+    let inserted = 0;
+    let updated = 0;
+    let errors = 0;
+
+    // Upsert in batches
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < mappedRecords.length; i += BATCH_SIZE) {
+      const batch = mappedRecords.slice(i, i + BATCH_SIZE);
+      
+      const { data, error } = await supabase
+        .from("external_calls")
+        .upsert(batch, { 
+          onConflict: "nocodb_row_id,workspace_id",
+          ignoreDuplicates: false 
+        })
+        .select("id");
+
+      if (error) {
+        console.error(`[nocodb-sync] Batch upsert error:`, error);
+        errors += batch.length;
+      } else {
+        inserted += data?.length || 0;
+      }
+    }
+
+    // Create/update leads for contacts
+    let leadsCreated = 0;
+    const contactsToCreate: Record<string, any>[] = [];
+    
+    for (const record of mappedRecords) {
+      const contact = extractContactInfo(record);
+      if (contact && contact.name) {
+        // Create a unique key for deduplication
+        const key = `${contact.name.toLowerCase()}-${(contact.company || "").toLowerCase()}`;
+        
+        // Generate placeholder email
+        const emailSlug = contact.name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+        const email = `ext_${emailSlug}@external-calls.local`;
+        
+        // Parse name into first/last
+        const nameParts = contact.name.split(" ");
+        const firstName = nameParts[0] || contact.name;
+        const lastName = nameParts.slice(1).join(" ") || "";
+        
+        contactsToCreate.push({
+          workspace_id,
+          email,
+          first_name: firstName,
+          last_name: lastName,
+          company: contact.company || null,
+          platform: "external_calls",
+        });
+      }
+    }
+
+    // Deduplicate and upsert leads
+    const uniqueContacts = Array.from(
+      new Map(contactsToCreate.map(c => [c.email, c])).values()
+    );
+
+    if (uniqueContacts.length > 0) {
+      for (let i = 0; i < uniqueContacts.length; i += BATCH_SIZE) {
+        const batch = uniqueContacts.slice(i, i + BATCH_SIZE);
+        
+        const { data, error } = await supabase
+          .from("leads")
+          .upsert(batch, { 
+            onConflict: "workspace_id,email",
+            ignoreDuplicates: false 
+          })
+          .select("id");
+
+        if (error) {
+          console.error("[nocodb-sync] Lead upsert error:", error);
+        } else {
+          leadsCreated += data?.length || 0;
+        }
+      }
+    }
+
+    // Update API connection record with sync status
+    await supabase
+      .from("api_connections")
+      .update({
+        last_sync_at: new Date().toISOString(),
+        sync_status: "completed",
+        sync_progress: {
+          records_synced: inserted,
+          leads_created: leadsCreated,
+          errors,
+          last_sync: new Date().toISOString(),
+        },
+      })
+      .eq("workspace_id", workspace_id)
+      .eq("platform", "nocodb");
+
+    console.log(`[nocodb-sync] Sync complete: ${inserted} records, ${leadsCreated} leads, ${errors} errors`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        stats,
+        action,
+        stats: {
+          fetched: allRecords.length,
+          inserted,
+          leads_created: leadsCreated,
+          errors,
+        },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

@@ -21,14 +21,12 @@ import {
   Database,
   Download,
   ExternalLink,
-  FileText,
   KeyRound,
   Loader2,
   Phone,
   Plug,
   RefreshCw,
   Sparkles,
-  Upload,
   XCircle,
 } from "lucide-react";
 
@@ -66,13 +64,13 @@ export default function Connections() {
   const [smartleadApiKey, setSmartleadApiKey] = useState("");
   const [replyioApiKey, setReplyioApiKey] = useState("");
   const [phoneburnerToken, setPhoneburnerToken] = useState("");
+  const [nocodbApiToken, setNocodbApiToken] = useState("");
 
   const [isConnecting, setIsConnecting] = useState<{ [k: string]: boolean }>({});
   const [isSyncing, setIsSyncing] = useState<{ [k: string]: boolean }>({});
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
   const [showPATInput, setShowPATInput] = useState(false);
   const [isProcessingBackground, setIsProcessingBackground] = useState(false);
@@ -101,14 +99,16 @@ export default function Connections() {
     () => connections.find((c) => c.platform === "phoneburner"),
     [connections]
   );
+  const nocodbConnection = useMemo(
+    () => connections.find((c) => c.platform === "nocodb"),
+    [connections]
+  );
 
   const fetchConnections = async () => {
     if (!currentWorkspace) return;
 
     try {
       setLoading(true);
-      // Only select non-sensitive columns - api_key_encrypted is intentionally excluded
-      // for security. Edge functions access keys directly using service role.
       const { data, error } = await supabase
         .from("api_connections")
         .select("id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at")
@@ -136,9 +136,7 @@ export default function Connections() {
 
     if (successParam === "phoneburner_connected") {
       setSuccess("PhoneBurner connected successfully! You can now sync your data.");
-      // Clear the query params
       setSearchParams({}, { replace: true });
-      // Refresh connections
       if (currentWorkspace?.id) fetchConnections();
     } else if (errorParam) {
       const errorMessages: Record<string, string> = {
@@ -150,12 +148,10 @@ export default function Connections() {
       setError(errorMessages[errorParam] || "An error occurred during PhoneBurner connection.");
       setSearchParams({}, { replace: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   useEffect(() => {
     if (currentWorkspace?.id) void fetchConnections();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWorkspace?.id]);
 
   // light polling when any sync is running
@@ -168,10 +164,9 @@ export default function Connections() {
     }, 2000);
 
     return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connections.map((c) => c.sync_status).join("|")]);
 
-  const handleConnect = async (platform: "smartlead" | "replyio" | "phoneburner") => {
+  const handleConnect = async (platform: "smartlead" | "replyio" | "phoneburner" | "nocodb") => {
     if (!currentWorkspace || !user) return;
 
     const apiKey =
@@ -179,10 +174,12 @@ export default function Connections() {
         ? smartleadApiKey.trim()
         : platform === "replyio"
           ? replyioApiKey.trim()
-          : phoneburnerToken.trim();
+          : platform === "nocodb"
+            ? nocodbApiToken.trim()
+            : phoneburnerToken.trim();
 
     if (!apiKey) {
-      setError(platform === "phoneburner" ? "Please enter a PhoneBurner access token" : "Please enter an API key");
+      setError(platform === "nocodb" ? "Please enter your NocoDB API Token" : platform === "phoneburner" ? "Please enter a PhoneBurner access token" : "Please enter an API key");
       return;
     }
 
@@ -205,12 +202,25 @@ export default function Connections() {
 
       if (error) throw error;
 
-      setSuccess(`${platform === "phoneburner" ? "PhoneBurner" : platform === "replyio" ? "Reply.io" : "Smartlead"} connected successfully!`);
+      const platformNames: Record<string, string> = {
+        smartlead: "Smartlead",
+        replyio: "Reply.io",
+        phoneburner: "PhoneBurner",
+        nocodb: "NocoDB",
+      };
+      setSuccess(`${platformNames[platform]} connected successfully!`);
+      
       if (platform === "smartlead") setSmartleadApiKey("");
       if (platform === "replyio") setReplyioApiKey("");
       if (platform === "phoneburner") setPhoneburnerToken("");
+      if (platform === "nocodb") setNocodbApiToken("");
 
       await fetchConnections();
+      
+      // Auto-trigger sync for NocoDB after connecting
+      if (platform === "nocodb") {
+        handleNocoDBSync("sync");
+      }
     } catch (e: any) {
       console.error(e);
       setError(e?.message || `Failed to connect ${platform}`);
@@ -244,11 +254,7 @@ export default function Connections() {
         throw new Error("OAuth not configured. Please contact support or use a Personal Access Token.");
       }
 
-      // Store state in sessionStorage for verification on callback
       sessionStorage.setItem("phoneburner_oauth_state", state);
-
-      // PhoneBurner blocks being embedded in iframes (X-Frame-Options/CSP).
-      // Open OAuth in a new tab/window.
       window.open(authorization_url, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       console.error(e);
@@ -369,9 +375,50 @@ export default function Connections() {
   };
 
   const handleRefreshStats = async () => {
-    setIsSyncing((s) => ({ ...s, nocodb: true }));
+    setIsSyncing((s) => ({ ...s, nocodb_stats: true }));
     await fetchNocodbStats();
-    setIsSyncing((s) => ({ ...s, nocodb: false }));
+    setIsSyncing((s) => ({ ...s, nocodb_stats: false }));
+  };
+
+  const handleNocoDBSync = async (action: "sync" | "full_sync") => {
+    if (!currentWorkspace) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncing((s) => ({ ...s, nocodb: true }));
+
+    try {
+      const token = await getAccessToken();
+      const res = await supabase.functions.invoke("nocodb-sync", {
+        body: {
+          workspace_id: currentWorkspace.id,
+          action,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || "Sync failed");
+
+      const data = res.data;
+      if (data.success) {
+        const stats = data.stats;
+        setSuccess(
+          action === "full_sync"
+            ? `Full sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`
+            : `Sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`
+        );
+      } else {
+        throw new Error(data.error || "Sync failed");
+      }
+
+      await fetchConnections();
+      await fetchNocodbStats();
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to sync NocoDB");
+    } finally {
+      setIsSyncing((s) => ({ ...s, nocodb: false }));
+    }
   };
 
   const handleFetchTranscripts = async () => {
@@ -434,83 +481,6 @@ export default function Connections() {
     }
   };
 
-  // Handle JSON file upload for external calls - imports quickly, processes in background
-  const handleJsonUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !currentWorkspace) return;
-
-    setError(null);
-    setSuccess(null);
-    setUploadProgress("Reading file...");
-    setIsSyncing((s) => ({ ...s, upload: true }));
-
-    try {
-      const token = await getAccessToken();
-      
-      // Read and parse JSON
-      console.log("[JSON Upload] Reading file:", file.name);
-      const text = await file.text();
-      const calls = JSON.parse(text);
-
-      if (!Array.isArray(calls)) {
-        throw new Error("Invalid JSON: expected an array of calls");
-      }
-
-      console.log("[JSON Upload] Parsed", calls.length, "calls");
-      
-      // Import in chunks to avoid edge function timeouts
-      const CHUNK_SIZE = 1000;
-      let totalInserted = 0;
-      let totalWithTranscripts = 0;
-      let totalScored = 0;
-      let totalLeads = 0;
-      
-      for (let i = 0; i < calls.length; i += CHUNK_SIZE) {
-        const chunk = calls.slice(i, i + CHUNK_SIZE);
-        const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
-        const totalChunks = Math.ceil(calls.length / CHUNK_SIZE);
-        
-        setUploadProgress(`Importing ${i + chunk.length}/${calls.length}...`);
-        console.log(`[JSON Upload] Uploading chunk ${chunkNum}/${totalChunks} (${chunk.length} calls)`);
-        
-        const importRes = await supabase.functions.invoke("import-json-calls", {
-          body: {
-            calls: chunk,
-            workspaceId: currentWorkspace.id,
-            clearExisting: false,
-          },
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (importRes.error) throw new Error(importRes.error.message || "Import failed");
-        if (!importRes.data.success) throw new Error(importRes.data.error || "Import returned unsuccessful");
-        
-        totalInserted += importRes.data.inserted || 0;
-        totalWithTranscripts += importRes.data.withTranscripts || 0;
-        totalScored += importRes.data.scored || 0;
-        totalLeads += importRes.data.leadsCreated || 0;
-      }
-      
-      console.log("[JSON Upload] Import complete:", { totalInserted, totalWithTranscripts, totalScored, totalLeads });
-
-      setUploadProgress(null);
-      setSuccess(`✓ Imported ${totalInserted} calls (${totalWithTranscripts} with transcripts, ${totalScored} already scored, ${totalLeads} contacts created). Background processing will continue.`);
-      await fetchNocodbStats();
-      
-      // Start background processing automatically if there's work to do
-      if (totalInserted > totalScored) {
-        startBackgroundProcessing();
-      }
-    } catch (e: any) {
-      console.error("[JSON Upload] Error:", e);
-      setError(e?.message || "Failed to process JSON file");
-      setUploadProgress(null);
-    } finally {
-      setIsSyncing((s) => ({ ...s, upload: false }));
-      event.target.value = "";
-    }
-  };
-
   // Background processing for transcripts and scoring
   const startBackgroundProcessing = async () => {
     if (!currentWorkspace || isProcessingBackground) return;
@@ -524,10 +494,8 @@ export default function Connections() {
         let hasMoreWork = true;
         
         while (hasMoreWork) {
-          // Refresh stats
           await fetchNocodbStats();
           
-          // Check for pending transcripts
           const { data: pendingCalls } = await supabase
             .from("external_calls")
             .select("id")
@@ -545,7 +513,6 @@ export default function Connections() {
             continue;
           }
           
-          // Check for calls needing scoring
           const { data: unscoredCalls } = await supabase
             .from("external_calls")
             .select("id")
@@ -562,7 +529,6 @@ export default function Connections() {
             continue;
           }
           
-          // No more work
           hasMoreWork = false;
         }
         
@@ -575,7 +541,6 @@ export default function Connections() {
       }
     };
     
-    // Run in background (don't await)
     processLoop();
   };
 
@@ -592,7 +557,7 @@ export default function Connections() {
     
     const interval = setInterval(() => {
       fetchNocodbStats();
-    }, 5000); // Refresh every 5 seconds
+    }, 5000);
     
     return () => clearInterval(interval);
   }, [isProcessingBackground, currentWorkspace?.id]);
@@ -819,7 +784,6 @@ export default function Connections() {
                   <CardContent className="space-y-4">
                     {!phoneburnerConnection ? (
                       <>
-                        {/* Primary: OAuth Connection */}
                         <Button
                           onClick={handlePhoneBurnerOAuth}
                           disabled={!!isConnecting.phoneburner_oauth}
@@ -838,7 +802,6 @@ export default function Connections() {
                           )}
                         </Button>
 
-                        {/* Secondary: PAT for developers */}
                         <div className="relative">
                           <div className="absolute inset-0 flex items-center">
                             <span className="w-full border-t" />
@@ -910,8 +873,53 @@ export default function Connections() {
                             </>
                           ) : (
                             <>
-                              <RefreshCw className="mr-2 h-4 w-4" />
+                              <ExternalLink className="mr-2 h-4 w-4" />
                               Reconnect PhoneBurner
+                            </>
+                          )}
+                        </Button>
+                      </>
+                    ) : phoneburnerConnection.sync_status === "syncing" ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="capitalize font-medium">
+                              {pbPhase === "dialsessions"
+                                ? "Syncing dial sessions..."
+                                : pbPhase === "contacts"
+                                  ? "Syncing contacts..."
+                                  : pbPhase === "metrics"
+                                    ? "Calculating metrics..."
+                                    : pbPhase === "linking"
+                                      ? "Linking contacts..."
+                                      : "Starting sync..."}
+                            </span>
+                            <span className="text-muted-foreground">{pbProgressPercent}%</span>
+                          </div>
+                          <Progress value={pbProgressPercent} />
+                          <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                            <span>{pbSessions} sessions</span>
+                            <span>{pbContacts} contacts</span>
+                            <span>{pbCalls} calls</span>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="w-full"
+                          onClick={handleStopPhoneburnerSync}
+                          disabled={!!isSyncing.phoneburner_stop}
+                        >
+                          {isSyncing.phoneburner_stop ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Stopping...
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Stop Sync
                             </>
                           )}
                         </Button>
@@ -932,73 +940,45 @@ export default function Connections() {
                               </span>
                             </div>
                           )}
-                        </div>
-
-                        {(phoneburnerConnection.sync_status === "syncing" || isSyncing.phoneburner) && (
-                          <div className="space-y-2 rounded-lg bg-accent/20 p-3">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-muted-foreground">Dial Sessions</span>
-                              <span className="font-medium">{Number(pbSessions).toLocaleString()}</span>
+                          {phoneburnerProgress && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Records</span>
+                              <span className="text-xs">
+                                {pbSessions} sessions, {pbContacts} contacts, {pbCalls} calls
+                              </span>
                             </div>
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-muted-foreground">Contacts</span>
-                              <span className="font-medium">{Number(pbContacts).toLocaleString()}</span>
-                            </div>
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-muted-foreground">Calls</span>
-                              <span className="font-medium">{Number(pbCalls).toLocaleString()}</span>
-                            </div>
-                            <Progress value={pbProgressPercent} className="h-2" />
-                            <p className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              {pbPhase ? `Phase: ${pbPhase}` : "Starting..."}
-                            </p>
-                          </div>
-                        )}
-
-                        <div className="flex gap-2">
-                          {phoneburnerConnection.sync_status === "syncing" ? (
-                            <Button
-                              variant="outline"
-                              className="flex-1 text-destructive hover:text-destructive"
-                              onClick={handleStopPhoneburnerSync}
-                              disabled={!!isSyncing.phoneburner_stop}
-                            >
-                              {isSyncing.phoneburner_stop ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Stopping...
-                                </>
-                              ) : (
-                                <>
-                                  <XCircle className="mr-2 h-4 w-4" />
-                                  Stop
-                                </>
-                              )}
-                            </Button>
-                          ) : (
-                            <>
-                              <Button variant="outline" className="flex-1" onClick={() => handleSyncPhoneburner(false)} disabled={!!isSyncing.phoneburner}>
-                                {isSyncing.phoneburner ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Syncing...
-                                  </>
-                                ) : (
-                                  <>
-                                    <RefreshCw className="mr-2 h-4 w-4" />
-                                    Sync
-                                  </>
-                                )}
-                              </Button>
-                              <Button variant="outline" className="flex-1" onClick={() => handleSyncPhoneburner(true)} disabled={!!isSyncing.phoneburner}>
-                                Reset & Sync
-                              </Button>
-                            </>
                           )}
                         </div>
 
-                        {/* Upgrade to OAuth for individual call records */}
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            className="flex-1"
+                            onClick={() => handleSyncPhoneburner(false)}
+                            disabled={!!isSyncing.phoneburner}
+                          >
+                            {isSyncing.phoneburner ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Syncing...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                                Sync
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSyncPhoneburner(true)}
+                            disabled={!!isSyncing.phoneburner}
+                          >
+                            Full Reset
+                          </Button>
+                        </div>
+
                         <Button
                           variant="outline"
                           className="w-full"
@@ -1070,96 +1050,6 @@ export default function Connections() {
                                 </span>
                               </div>
                             )}
-                            {diagnosticResult.tests?.contact_activities && (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex justify-between">
-                                  <span>Contact Activities:</span>
-                                  <span className={diagnosticResult.tests.contact_activities.success ? "text-green-500" : "text-red-500"}>
-                                    {diagnosticResult.tests.contact_activities.success
-                                      ? `${diagnosticResult.tests.contact_activities.total_results} total`
-                                      : diagnosticResult.tests.contact_activities.error || "Failed"}
-                                  </span>
-                                </div>
-                                {diagnosticResult.tests.contact_activities.call_activities_found !== undefined && (
-                                  <div className="flex justify-between pl-2 text-muted-foreground">
-                                    <span>└ Call activities:</span>
-                                    <span>{diagnosticResult.tests.contact_activities.call_activities_found}</span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.contact_auditlog && (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex justify-between">
-                                  <span>Contact Audit Log:</span>
-                                  <span className={diagnosticResult.tests.contact_auditlog.success ? "text-green-500" : "text-red-500"}>
-                                    {diagnosticResult.tests.contact_auditlog.success
-                                      ? `${diagnosticResult.tests.contact_auditlog.entries_on_page} entries`
-                                      : diagnosticResult.tests.contact_auditlog.error || "Failed"}
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.dial_sessions_no_date_filter && (
-                              <div className="flex justify-between">
-                                <span>Dial Sessions (no filter):</span>
-                                <span className={diagnosticResult.tests.dial_sessions_no_date_filter.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.dial_sessions_no_date_filter.success
-                                    ? `${diagnosticResult.tests.dial_sessions_no_date_filter.total_results} found`
-                                    : diagnosticResult.tests.dial_sessions_no_date_filter.error || "Failed"}
-                                </span>
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.members_entire_team && (
-                              <div className="flex justify-between">
-                                <span>Entire Team Members:</span>
-                                <span className={diagnosticResult.tests.members_entire_team.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.members_entire_team.success
-                                    ? `${diagnosticResult.tests.members_entire_team.count} found`
-                                    : diagnosticResult.tests.members_entire_team.error || "Failed"}
-                                </span>
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.voicemails && (
-                              <div className="flex justify-between">
-                                <span>Voicemails:</span>
-                                <span className={diagnosticResult.tests.voicemails.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.voicemails.success
-                                    ? `${diagnosticResult.tests.voicemails.total_results} found`
-                                    : diagnosticResult.tests.voicemails.error || "Failed"}
-                                </span>
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.dialsession_settings && (
-                              <div className="flex justify-between">
-                                <span>Dialsession Settings:</span>
-                                <span className={diagnosticResult.tests.dialsession_settings.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.dialsession_settings.success ? "Retrieved" : diagnosticResult.tests.dialsession_settings.error || "Failed"}
-                                </span>
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.usage && (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex justify-between">
-                                  <span>Usage (90 days):</span>
-                                  <span className={diagnosticResult.tests.usage.success ? "text-green-500" : "text-red-500"}>
-                                    {diagnosticResult.tests.usage.success
-                                      ? `${diagnosticResult.tests.usage.total_calls} calls`
-                                      : "Failed"}
-                                  </span>
-                                </div>
-                                {diagnosticResult.tests.usage.member_breakdown && (
-                                  <div className="pl-2 text-muted-foreground space-y-0.5">
-                                    {diagnosticResult.tests.usage.member_breakdown.map((m: any, i: number) => (
-                                      <div key={i} className="flex justify-between">
-                                        <span>└ {m.name}:</span>
-                                        <span>{m.total_calls} calls</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
                             {diagnosticResult.recommendation && (
                               <p className="mt-2 text-muted-foreground italic">{diagnosticResult.recommendation}</p>
                             )}
@@ -1170,8 +1060,8 @@ export default function Connections() {
                   </CardContent>
                 </Card>
 
-                {/* External Calls / Fireflies Integration */}
-                <Card>
+                {/* NocoDB Connection */}
+                <Card className={nocodbConnection ? "border-success/30" : ""}>
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -1179,154 +1069,178 @@ export default function Connections() {
                           <Database className="h-5 w-5 text-primary" />
                         </div>
                         <div>
-                          <CardTitle className="text-lg">External Calls (Test Data)</CardTitle>
-                          <CardDescription>Fireflies call recordings for AI Summary</CardDescription>
+                          <CardTitle className="text-lg">NocoDB</CardTitle>
+                          <CardDescription>Call data from Fireflies.ai</CardDescription>
                         </div>
                       </div>
-                      {nocodbStats && nocodbStats.totalCalls > 0 && (
-                        <Badge variant="outline" className="border-green-500 text-green-500">
+                      {nocodbConnection && (
+                        <Badge variant="outline" className="border-success text-success">
                           <CheckCircle2 className="mr-1 h-3 w-3" />
-                          {nocodbStats.totalCalls} calls loaded
+                          Connected
                         </Badge>
                       )}
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {/* Stats Display */}
-                    {nocodbStats && nocodbStats.totalCalls > 0 ? (
+                    {!nocodbConnection ? (
                       <>
-                        <div className="space-y-2 rounded-lg bg-accent/20 p-3 text-sm">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="font-medium">Processing Status</p>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={handleRefreshStats}
-                              disabled={!!isSyncing.nocodb}
-                            >
-                              {isSyncing.nocodb ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <RefreshCw className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 w-2 rounded-full bg-amber-500" />
-                              <span className="text-muted-foreground">Pending:</span>
-                              <span className="font-medium">{nocodbStats.pending}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 w-2 rounded-full bg-blue-500" />
-                              <span className="text-muted-foreground">Transcripts:</span>
-                              <span className="font-medium">{nocodbStats.transcriptFetched}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 w-2 rounded-full bg-green-500" />
-                              <span className="text-muted-foreground">Scored:</span>
-                              <span className="font-medium">{nocodbStats.scored}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 w-2 rounded-full bg-red-500" />
-                              <span className="text-muted-foreground">Errors:</span>
-                              <span className="font-medium">{nocodbStats.errors}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* JSON Upload - handles everything automatically */}
-                        <div className="pt-2">
-                          <input
-                            type="file"
-                            id="json-upload"
-                            accept=".json"
-                            onChange={handleJsonUpload}
-                            disabled={!!isSyncing.upload}
-                            className="hidden"
+                        <div className="space-y-2">
+                          <Label htmlFor="nocodb-token">API Token</Label>
+                          <Input
+                            id="nocodb-token"
+                            type="password"
+                            value={nocodbApiToken}
+                            onChange={(e) => setNocodbApiToken(e.target.value)}
+                            placeholder="Paste NocoDB API Token"
                           />
-                          <Button
-                            variant="default"
-                            className="w-full"
-                            onClick={() => document.getElementById('json-upload')?.click()}
-                            disabled={!!isSyncing.upload}
-                          >
-                            {isSyncing.upload ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                {uploadProgress || "Processing..."}
-                              </>
-                            ) : (
-                              <>
-                                <Upload className="mr-2 h-4 w-4" />
-                                Upload JSON
-                              </>
-                            )}
-                          </Button>
-                          
-                          {/* Process Pending Button */}
-                          {hasPendingWork && (
-                            <Button
-                              variant="outline"
-                              className="w-full mt-2"
-                              onClick={startBackgroundProcessing}
-                              disabled={isProcessingBackground}
-                            >
-                              {isProcessingBackground ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Processing... ({nocodbStats?.pending || 0} pending, {nocodbStats?.transcriptFetched || 0} to score)
-                                </>
-                              ) : (
-                                <>
-                                  <Sparkles className="mr-2 h-4 w-4" />
-                                  Process {(nocodbStats?.pending || 0) + (nocodbStats?.transcriptFetched || 0)} Pending
-                                </>
-                              )}
-                            </Button>
-                          )}
-                          
-                          <p className="text-xs text-muted-foreground text-center mt-2">
-                            {isProcessingBackground 
-                              ? "Background processing in progress. Stats refresh every 5s." 
-                              : "Upload JSON to import calls. Processing happens in background."}
+                          <p className="text-xs text-muted-foreground">
+                            Get your API token from NocoDB Settings → API Tokens
                           </p>
                         </div>
+                        <Button
+                          onClick={() => handleConnect("nocodb")}
+                          disabled={!!isConnecting.nocodb}
+                          className="w-full"
+                        >
+                          {isConnecting.nocodb ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Connecting...
+                            </>
+                          ) : (
+                            <>
+                              <Database className="mr-2 h-4 w-4" />
+                              Connect NocoDB
+                            </>
+                          )}
+                        </Button>
                       </>
                     ) : (
-                      <div className="text-center py-4 text-muted-foreground">
-                        <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">No data loaded</p>
-                        <p className="text-xs mt-1">Upload a JSON file to import calls</p>
-                        <div className="mt-3">
-                          <input
-                            type="file"
-                            id="json-upload-empty"
-                            accept=".json"
-                            onChange={handleJsonUpload}
-                            disabled={!!isSyncing.upload}
-                            className="hidden"
-                          />
+                      <>
+                        {/* Status and Last Sync */}
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Status</span>
+                            <span className="capitalize">{nocodbConnection.sync_status || "active"}</span>
+                          </div>
+                          {nocodbConnection.last_sync_at && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Last Sync</span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {new Date(nocodbConnection.last_sync_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Stats Display */}
+                        {nocodbStats && (
+                          <div className="space-y-2 rounded-lg bg-accent/20 p-3 text-sm">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="font-medium">Processing Status</p>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleRefreshStats}
+                                disabled={!!isSyncing.nocodb_stats}
+                              >
+                                {isSyncing.nocodb_stats ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-amber-500" />
+                                <span className="text-muted-foreground">Pending:</span>
+                                <span className="font-medium">{nocodbStats.pending}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-blue-500" />
+                                <span className="text-muted-foreground">Transcripts:</span>
+                                <span className="font-medium">{nocodbStats.transcriptFetched}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-green-500" />
+                                <span className="text-muted-foreground">Scored:</span>
+                                <span className="font-medium">{nocodbStats.scored}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-red-500" />
+                                <span className="text-muted-foreground">Errors:</span>
+                                <span className="font-medium">{nocodbStats.errors}</span>
+                              </div>
+                            </div>
+                            <div className="mt-2 pt-2 border-t border-border/50">
+                              <div className="flex items-center justify-between text-muted-foreground">
+                                <span>Total Calls:</span>
+                                <span className="font-medium text-foreground">{nocodbStats.totalCalls}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sync Buttons */}
+                        <div className="flex gap-2">
                           <Button
                             variant="outline"
-                            size="sm"
-                            onClick={() => document.getElementById('json-upload-empty')?.click()}
-                            disabled={!!isSyncing.upload}
+                            className="flex-1"
+                            onClick={() => handleNocoDBSync("sync")}
+                            disabled={!!isSyncing.nocodb}
                           >
-                            {isSyncing.upload ? (
+                            {isSyncing.nocodb ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Importing...
+                                Syncing...
                               </>
                             ) : (
                               <>
-                                <Upload className="mr-2 h-4 w-4" />
-                                Upload JSON
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                                Sync Now
                               </>
                             )}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleNocoDBSync("full_sync")}
+                            disabled={!!isSyncing.nocodb}
+                          >
+                            Full Re-sync
+                          </Button>
                         </div>
-                      </div>
+
+                        {/* Process Pending Button */}
+                        {hasPendingWork && (
+                          <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={startBackgroundProcessing}
+                            disabled={isProcessingBackground}
+                          >
+                            {isProcessingBackground ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Processing... ({nocodbStats?.pending || 0} pending, {nocodbStats?.transcriptFetched || 0} to score)
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                Process {(nocodbStats?.pending || 0) + (nocodbStats?.transcriptFetched || 0)} Pending
+                              </>
+                            )}
+                          </Button>
+                        )}
+
+                        <p className="text-xs text-muted-foreground text-center">
+                          {isProcessingBackground 
+                            ? "Background processing in progress. Stats refresh every 5s." 
+                            : "Sync to fetch latest data from NocoDB."}
+                        </p>
+                      </>
                     )}
                   </CardContent>
                 </Card>
