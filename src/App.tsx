@@ -34,7 +34,7 @@ import DataInsights from "./pages/DataInsights";
 import CallLibrary from "./pages/CallLibrary";
 import CallingInformation from "./pages/CallingInformation";
 import AISummary from "./pages/AISummary";
-import AIChatbot from "./pages/AIChatbot";
+import { Navigate } from "react-router-dom";
 import CallSessions from "./pages/CallSessions";
 import CallAnalytics from "./pages/CallAnalytics";
 import CallSearch from "./pages/CallSearch";
@@ -96,7 +96,7 @@ const App = () => (
                   <Route path="/calling/library" element={<CallLibrary />} />
                   <Route path="/calling/information" element={<CallingInformation />} />
                   <Route path="/calling/ai-summary" element={<AISummary />} />
-                  <Route path="/calling/chatbot" element={<AIChatbot />} />
+                  <Route path="/calling/chatbot" element={<Navigate to="/calling" replace />} />
                   {/* Legacy calling routes */}
                   <Route path="/calling/search" element={<CallSearch />} />
                   <Route path="/calling/best-worst" element={<BestWorstCalls />} />
