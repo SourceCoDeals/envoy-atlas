@@ -2265,6 +2265,10 @@ export type Database = {
       external_calls: {
         Row: {
           all_participants: string | null
+          annual_revenue: string | null
+          business_description: string | null
+          business_history: string | null
+          buyer_type_preference: string | null
           call_category: string | null
           call_summary: string | null
           call_title: string | null
@@ -2272,35 +2276,77 @@ export type Database = {
           company_name: string | null
           composite_score: number | null
           contact_name: string | null
+          conversation_quality_justification: string | null
           created_at: string | null
           date_time: string | null
+          duration: number | null
+          ebitda: string | null
+          employee_count: number | null
           engagement_score: number | null
           error_message: string | null
+          exit_reason: string | null
+          financial_data: string | null
           fireflies_url: string | null
+          future_growth_plans: string | null
+          growth_information: string | null
+          historical_financials: string | null
           host_email: string | null
           id: string
           import_status: string | null
+          interest_in_selling: string | null
           key_concerns: string[] | null
           key_topics_discussed: string[] | null
+          ma_discussions: string | null
+          mobile_number: string | null
           motivation_factors: string[] | null
+          next_step_clarity_justification: string | null
           next_step_clarity_score: number | null
           nocodb_row_id: string | null
+          objection_handling_justification: string | null
           objection_handling_score: number | null
+          objection_resolution_rate: number | null
+          objections_count: number | null
           objections_list: Json | null
+          objections_list_text: string | null
+          objections_resolved_count: number | null
           opening_type: string | null
+          overall_quality_justification: string | null
+          overall_quality_score: number | null
+          ownership_details: string | null
+          ownership_information: string | null
+          personal_insights: string | null
+          personal_insights_justification: string | null
+          personal_insights_score: number | null
           phoneburner_recording_url: string | null
           quality_of_conversation_score: number | null
+          question_adherence_justification: string | null
+          question_adherence_score: number | null
+          questions_covered_count: number | null
+          rapport_building_justification: string | null
           rapport_building_score: number | null
+          resolution_rate_justification: string | null
+          script_adherence_justification: string | null
+          script_adherence_score: number | null
           seller_interest_justification: string | null
           seller_interest_score: number | null
+          target_pain_points: string | null
           timeline_to_sell: string | null
+          transaction_goals: string | null
           transcript_text: string | null
           updated_at: string | null
+          valuation_discussion_justification: string | null
+          valuation_discussion_score: number | null
+          valuation_expectations: string | null
+          value_proposition_justification: string | null
           value_proposition_score: number | null
           workspace_id: string
         }
         Insert: {
           all_participants?: string | null
+          annual_revenue?: string | null
+          business_description?: string | null
+          business_history?: string | null
+          buyer_type_preference?: string | null
           call_category?: string | null
           call_summary?: string | null
           call_title?: string | null
@@ -2308,35 +2354,77 @@ export type Database = {
           company_name?: string | null
           composite_score?: number | null
           contact_name?: string | null
+          conversation_quality_justification?: string | null
           created_at?: string | null
           date_time?: string | null
+          duration?: number | null
+          ebitda?: string | null
+          employee_count?: number | null
           engagement_score?: number | null
           error_message?: string | null
+          exit_reason?: string | null
+          financial_data?: string | null
           fireflies_url?: string | null
+          future_growth_plans?: string | null
+          growth_information?: string | null
+          historical_financials?: string | null
           host_email?: string | null
           id?: string
           import_status?: string | null
+          interest_in_selling?: string | null
           key_concerns?: string[] | null
           key_topics_discussed?: string[] | null
+          ma_discussions?: string | null
+          mobile_number?: string | null
           motivation_factors?: string[] | null
+          next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
           nocodb_row_id?: string | null
+          objection_handling_justification?: string | null
           objection_handling_score?: number | null
+          objection_resolution_rate?: number | null
+          objections_count?: number | null
           objections_list?: Json | null
+          objections_list_text?: string | null
+          objections_resolved_count?: number | null
           opening_type?: string | null
+          overall_quality_justification?: string | null
+          overall_quality_score?: number | null
+          ownership_details?: string | null
+          ownership_information?: string | null
+          personal_insights?: string | null
+          personal_insights_justification?: string | null
+          personal_insights_score?: number | null
           phoneburner_recording_url?: string | null
           quality_of_conversation_score?: number | null
+          question_adherence_justification?: string | null
+          question_adherence_score?: number | null
+          questions_covered_count?: number | null
+          rapport_building_justification?: string | null
           rapport_building_score?: number | null
+          resolution_rate_justification?: string | null
+          script_adherence_justification?: string | null
+          script_adherence_score?: number | null
           seller_interest_justification?: string | null
           seller_interest_score?: number | null
+          target_pain_points?: string | null
           timeline_to_sell?: string | null
+          transaction_goals?: string | null
           transcript_text?: string | null
           updated_at?: string | null
+          valuation_discussion_justification?: string | null
+          valuation_discussion_score?: number | null
+          valuation_expectations?: string | null
+          value_proposition_justification?: string | null
           value_proposition_score?: number | null
           workspace_id: string
         }
         Update: {
           all_participants?: string | null
+          annual_revenue?: string | null
+          business_description?: string | null
+          business_history?: string | null
+          buyer_type_preference?: string | null
           call_category?: string | null
           call_summary?: string | null
           call_title?: string | null
@@ -2344,30 +2432,68 @@ export type Database = {
           company_name?: string | null
           composite_score?: number | null
           contact_name?: string | null
+          conversation_quality_justification?: string | null
           created_at?: string | null
           date_time?: string | null
+          duration?: number | null
+          ebitda?: string | null
+          employee_count?: number | null
           engagement_score?: number | null
           error_message?: string | null
+          exit_reason?: string | null
+          financial_data?: string | null
           fireflies_url?: string | null
+          future_growth_plans?: string | null
+          growth_information?: string | null
+          historical_financials?: string | null
           host_email?: string | null
           id?: string
           import_status?: string | null
+          interest_in_selling?: string | null
           key_concerns?: string[] | null
           key_topics_discussed?: string[] | null
+          ma_discussions?: string | null
+          mobile_number?: string | null
           motivation_factors?: string[] | null
+          next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
           nocodb_row_id?: string | null
+          objection_handling_justification?: string | null
           objection_handling_score?: number | null
+          objection_resolution_rate?: number | null
+          objections_count?: number | null
           objections_list?: Json | null
+          objections_list_text?: string | null
+          objections_resolved_count?: number | null
           opening_type?: string | null
+          overall_quality_justification?: string | null
+          overall_quality_score?: number | null
+          ownership_details?: string | null
+          ownership_information?: string | null
+          personal_insights?: string | null
+          personal_insights_justification?: string | null
+          personal_insights_score?: number | null
           phoneburner_recording_url?: string | null
           quality_of_conversation_score?: number | null
+          question_adherence_justification?: string | null
+          question_adherence_score?: number | null
+          questions_covered_count?: number | null
+          rapport_building_justification?: string | null
           rapport_building_score?: number | null
+          resolution_rate_justification?: string | null
+          script_adherence_justification?: string | null
+          script_adherence_score?: number | null
           seller_interest_justification?: string | null
           seller_interest_score?: number | null
+          target_pain_points?: string | null
           timeline_to_sell?: string | null
+          transaction_goals?: string | null
           transcript_text?: string | null
           updated_at?: string | null
+          valuation_discussion_justification?: string | null
+          valuation_discussion_score?: number | null
+          valuation_expectations?: string | null
+          value_proposition_justification?: string | null
           value_proposition_score?: number | null
           workspace_id?: string
         }
