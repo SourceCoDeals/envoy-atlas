@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useSyncData } from '@/hooks/useSyncData';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,11 +44,17 @@ export default function Inbox() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
+  const { syncing, triggerSync } = useSyncData();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<PriorityLevel | 'all'>('all');
+
+  const handleRefresh = async () => {
+    await triggerSync();
+    fetchInboxItems();
+  };
   const [sortBy, setSortBy] = useState<'priority' | 'time'>('priority');
   const [quickFilter, setQuickFilter] = useState<'overdue' | 'due_soon' | 'unassigned' | null>(null);
 
@@ -153,7 +160,10 @@ export default function Inbox() {
             <h1 className="text-2xl font-bold tracking-tight">Master Inbox</h1>
             <p className="text-muted-foreground">Revenue Operations Command Center – Who needs attention right now?</p>
           </div>
-          <Button variant="outline" size="sm" onClick={fetchInboxItems}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={syncing || loading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Syncing...' : 'Refresh Data'}
+          </Button>
         </div>
 
         <InboxMetricsBar metrics={metrics} />

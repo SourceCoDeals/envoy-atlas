@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
+import { useSyncData } from '@/hooks/useSyncData';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfolioOverview';
 import { EnhancedCampaignTable } from '@/components/campaigns/EnhancedCampaignTable';
@@ -13,7 +14,13 @@ export default function Campaigns() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { campaigns, loading, error, refetch } = useCampaigns();
+  const { syncing, triggerSync } = useSyncData();
   const [tierFilter, setTierFilter] = useState('all');
+
+  const handleRefresh = async () => {
+    await triggerSync();
+    refetch();
+  };
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -41,9 +48,14 @@ export default function Campaigns() {
           </div>
           {campaigns.length > 0 && (
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={refetch} disabled={loading}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleRefresh} 
+                disabled={loading || syncing}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? 'Syncing...' : 'Refresh Data'}
               </Button>
             </div>
           )}
