@@ -146,11 +146,14 @@ serve(async (req) => {
       const batch = leadBatches.slice(i, i + batchSize);
       const leadRecords = batch.map(contact => {
         const nameParts = contact.contact_name.split(' ');
+        const platformLeadId = `ext_${contact.contact_name.toLowerCase().replace(/\s+/g, '_')}`;
+        // Generate placeholder email since leads.email is NOT NULL
+        const placeholderEmail = `${platformLeadId}@external-calls.local`;
         return {
           workspace_id: workspaceId,
           platform: 'external_calls',
-          platform_lead_id: `ext_${contact.contact_name.toLowerCase().replace(/\s+/g, '_')}`,
-          email: '', // No email from call records
+          platform_lead_id: platformLeadId,
+          email: placeholderEmail,
           first_name: nameParts[0] || null,
           last_name: nameParts.slice(1).join(' ') || null,
           company: contact.company_name,
@@ -161,13 +164,11 @@ serve(async (req) => {
         };
       });
 
-      // Upsert - skip conflicts on platform_lead_id
-      const { error: leadError, data: leadData } = await supabase
+      // Use insert with on-conflict ignore since unique index has WHERE clause
+      const { error: leadError } = await supabase
         .from("leads")
-        .upsert(leadRecords, { 
-          onConflict: 'workspace_id,platform,platform_lead_id',
-          ignoreDuplicates: true 
-        });
+        .insert(leadRecords)
+        .select();
       
       if (leadError) {
         console.error(`[import-json-calls] Lead batch error:`, leadError.message);
