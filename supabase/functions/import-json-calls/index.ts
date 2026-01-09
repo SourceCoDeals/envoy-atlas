@@ -164,12 +164,14 @@ serve(async (req) => {
         };
       });
 
-      // Use insert with on-conflict ignore since unique index has WHERE clause
+      // Upsert leads so repeated imports don't fail on unique constraints
       const { error: leadError } = await supabase
         .from("leads")
-        .insert(leadRecords)
-        .select();
-      
+        .upsert(leadRecords, {
+          onConflict: "workspace_id,platform,platform_lead_id",
+          ignoreDuplicates: true,
+        });
+
       if (leadError) {
         console.error(`[import-json-calls] Lead batch error:`, leadError.message);
       } else {
