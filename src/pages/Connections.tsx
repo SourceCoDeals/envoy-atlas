@@ -72,6 +72,7 @@ export default function Connections() {
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
   const [showPATInput, setShowPATInput] = useState(false);
   
@@ -436,13 +437,14 @@ export default function Connections() {
 
     setError(null);
     setSuccess(null);
+    setUploadProgress("Importing...");
     setIsSyncing((s) => ({ ...s, upload: true }));
 
     try {
       const token = await getAccessToken();
       
       // Step 1: Import JSON
-      setSuccess("Step 1/3: Importing calls...");
+      setUploadProgress("Step 1/3: Importing...");
       console.log("[JSON Upload] Reading file:", file.name);
       const text = await file.text();
       const calls = JSON.parse(text);
@@ -468,7 +470,7 @@ export default function Connections() {
       console.log("[JSON Upload] Imported:", imported);
 
       // Step 2: Fetch transcripts for any pending calls
-      setSuccess(`Step 2/3: Fetching transcripts... (imported ${imported.inserted} calls)`);
+      setUploadProgress(`Step 2/3: Fetching transcripts...`);
       let transcriptsFetched = 0;
       let transcriptLoops = 0;
       const maxTranscriptLoops = 10; // Process up to 200 calls (20 per batch)
@@ -491,11 +493,11 @@ export default function Connections() {
         if (processed === 0) break; // No more to process
         transcriptLoops++;
         
-        setSuccess(`Step 2/3: Fetching transcripts... (${transcriptsFetched} fetched)`);
+        setUploadProgress(`Step 2/3: Transcripts (${transcriptsFetched})`);
       }
 
       // Step 3: Score all calls with transcripts
-      setSuccess(`Step 3/3: AI scoring calls... (${transcriptsFetched} transcripts)`);
+      setUploadProgress(`Step 3/3: AI Scoring...`);
       let callsScored = 0;
       let scoreLoops = 0;
       const maxScoreLoops = 20; // Process up to 100 calls (5 per batch)
@@ -518,14 +520,16 @@ export default function Connections() {
         if (scored === 0) break; // No more to score
         scoreLoops++;
         
-        setSuccess(`Step 3/3: AI scoring calls... (${callsScored} scored)`);
+        setUploadProgress(`Step 3/3: Scored ${callsScored}`);
       }
 
+      setUploadProgress(null);
       setSuccess(`✓ Complete! Imported ${imported.inserted} calls, fetched ${transcriptsFetched} transcripts, scored ${callsScored} calls`);
       await fetchNocodbStats();
     } catch (e: any) {
       console.error("[JSON Upload] Error:", e);
       setError(e?.message || "Failed to process JSON file");
+      setUploadProgress(null);
     } finally {
       setIsSyncing((s) => ({ ...s, upload: false }));
       event.target.value = "";
@@ -1196,7 +1200,7 @@ export default function Connections() {
                             {isSyncing.upload ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Processing...
+                                {uploadProgress || "Processing..."}
                               </>
                             ) : (
                               <>
