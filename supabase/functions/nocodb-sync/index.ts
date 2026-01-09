@@ -397,7 +397,7 @@ serve(async (req) => {
         const { data, error } = await supabase
           .from("leads")
           .upsert(batch, { 
-            onConflict: "leads_workspace_email_unique",
+            onConflict: "workspace_id,email",
             ignoreDuplicates: false 
           })
           .select("id");
