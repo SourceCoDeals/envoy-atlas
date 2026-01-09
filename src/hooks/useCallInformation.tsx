@@ -139,12 +139,12 @@ export function useCallInformation() {
       setError(null);
 
       try {
-        // Fetch scored external calls
+        // Fetch all external calls with scores (not just import_status='scored')
         const { data: externalCalls, error: callsError } = await supabase
           .from('external_calls')
           .select('*')
           .eq('workspace_id', currentWorkspace.id)
-          .eq('import_status', 'scored');
+          .not('composite_score', 'is', null);
 
         if (callsError) throw callsError;
 
@@ -167,7 +167,7 @@ export function useCallInformation() {
         const aiScores = externalCalls || [];
         const totalCallsScored = aiScores.length;
 
-        // Call category distribution
+        // Call category distribution - infer from call_category or seller_interest_score
         const callCategories: CallCategoryDistribution = {
           voicemail: 0,
           gatekeeper: 0,
@@ -176,9 +176,23 @@ export function useCallInformation() {
         };
         aiScores.forEach((score) => {
           const category = (score.call_category || '').toLowerCase();
-          if (category.includes('voicemail')) callCategories.voicemail++;
-          else if (category.includes('gatekeeper')) callCategories.gatekeeper++;
-          else callCategories.connection++;
+          if (category.includes('voicemail')) {
+            callCategories.voicemail++;
+          } else if (category.includes('gatekeeper')) {
+            callCategories.gatekeeper++;
+          } else if (category) {
+            callCategories.connection++;
+          } else {
+            // Infer from seller_interest_score when call_category is null
+            const interest = score.seller_interest_score || 0;
+            if (interest >= 3) {
+              callCategories.connection++; // Connected and had a conversation
+            } else if (interest === 0 || !score.seller_interest_score) {
+              callCategories.voicemail++; // Likely no connection
+            } else {
+              callCategories.gatekeeper++; // Low interest but some contact
+            }
+          }
         });
 
         // Interest distribution based on seller_interest_score
