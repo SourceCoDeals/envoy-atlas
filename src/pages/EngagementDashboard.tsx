@@ -648,10 +648,7 @@ export default function EngagementDashboard() {
                     <>
                       <TableRow
                         key={engagement.id}
-                        className={cn(
-                          'transition-colors cursor-pointer',
-                          priorityColors[engagement.priority || 'medium']
-                        )}
+                        className="transition-colors cursor-pointer hover:bg-muted/50"
                         onClick={() => toggleRow(engagement.id)}
                       >
                         <TableCell>
