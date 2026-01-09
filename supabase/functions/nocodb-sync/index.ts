@@ -117,34 +117,61 @@ function mapNocoDBRecord(record: Record<string, any>, workspaceId: string): Reco
   return mapped;
 }
 
-function extractContactInfo(record: Record<string, any>): { name: string; company: string | null; email: string | null } | null {
+function extractContactInfo(record: Record<string, any>): { name: string; company: string | null; email: string } | null {
   const callTitle = record.call_title || "";
   const participants = record.all_participants || "";
+  const hostEmail = (record.host_email || "").toLowerCase().trim();
   
-  // Try to extract contact name
-  let name = record.contact_name;
+  // Parse participants to find non-host emails (prospects)
+  const participantList = participants
+    .split(/[,;]/)
+    .map((p: string) => p.trim().toLowerCase())
+    .filter((p: string) => p && p.includes("@"));
+  
+  // Find the first non-SourceCo email (the prospect)
+  const prospectEmail = participantList.find((email: string) => 
+    !email.includes("sourcecodeals.com") && 
+    email !== hostEmail
+  );
+  
+  if (!prospectEmail) return null;
+  
+  // Extract name from call title - pattern: "Company Name <ext> SourceCo"
+  let name = "";
+  let company = "";
+  
+  // Try to get company from call title (before <ext>)
+  const extMatch = callTitle.match(/^(.+?)\s*<ext>/i);
+  if (extMatch) {
+    company = extMatch[1].trim();
+    // Use company as display name for the contact
+    name = company;
+  }
+  
+  // If no company extracted, try to get name from email
   if (!name) {
-    const match = callTitle.match(/(?:with|call with|meeting with)\s+(.+?)(?:\s+from|\s+-|$)/i);
-    if (match) name = match[1].trim();
+    const emailPrefix = prospectEmail.split("@")[0];
+    // Convert email prefix to name (e.g., mike.smith -> Mike Smith)
+    name = emailPrefix
+      .replace(/[._-]/g, " ")
+      .split(" ")
+      .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
   }
   
-  if (!name && participants) {
-    // Use first participant that's not the host
-    const hostEmail = record.host_email || "";
-    const parts = participants.split(/[,;]/).map((p: string) => p.trim()).filter((p: string) => p && !p.includes(hostEmail));
-    if (parts.length > 0) name = parts[0];
-  }
-  
-  if (!name) return null;
-  
-  // Extract company
-  let company = record.company_name;
+  // Extract company from email domain if not already set
   if (!company) {
-    const companyMatch = callTitle.match(/(?:from|at|@)\s+(.+?)(?:\s+-|$)/i);
-    if (companyMatch) company = companyMatch[1].trim();
+    const domain = prospectEmail.split("@")[1];
+    if (domain) {
+      company = domain.split(".")[0]
+        .replace(/[-_]/g, " ")
+        .split(" ")
+        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
   }
   
-  return { name, company, email: null };
+  return { name, company, email: prospectEmail };
 }
 
 serve(async (req) => {
@@ -333,20 +360,15 @@ serve(async (req) => {
       }
     }
 
-    // Create/update leads for contacts
+    // Create/update leads for contacts using email as unique identifier
+    await updateSyncProgress("contacts", 0, mappedRecords.length, "Creating contacts...");
+    
     let leadsCreated = 0;
     const contactsToCreate: Record<string, any>[] = [];
     
     for (const record of mappedRecords) {
       const contact = extractContactInfo(record);
-      if (contact && contact.name) {
-        // Create a unique key for deduplication
-        const key = `${contact.name.toLowerCase()}-${(contact.company || "").toLowerCase()}`;
-        
-        // Generate placeholder email
-        const emailSlug = contact.name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-        const email = `ext_${emailSlug}@external-calls.local`;
-        
+      if (contact && contact.email) {
         // Parse name into first/last
         const nameParts = contact.name.split(" ");
         const firstName = nameParts[0] || contact.name;
@@ -354,7 +376,7 @@ serve(async (req) => {
         
         contactsToCreate.push({
           workspace_id,
-          email,
+          email: contact.email, // Use actual prospect email
           first_name: firstName,
           last_name: lastName,
           company: contact.company || null,
