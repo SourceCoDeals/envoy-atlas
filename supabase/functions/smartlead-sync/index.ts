@@ -8,9 +8,9 @@ const corsHeaders = {
 };
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
-const RATE_LIMIT_DELAY = 300; // Increased from 150ms to reduce rate limiting errors
-const BATCH_SIZE = 5; // Campaigns per invocation
-const TIME_BUDGET_MS = 45000; // 45 seconds
+const RATE_LIMIT_DELAY = 150; // Reduced from 300ms for faster sync
+const BATCH_SIZE = 20; // Increased from 5 - process more campaigns per invocation
+const TIME_BUDGET_MS = 55000; // Increased to 55 seconds (edge functions allow 60s)
 const SYNC_LOCK_TIMEOUT_MS = 30000; // 30 seconds - if last heartbeat is older, allow new sync
 
 // Personal email domains for classification
@@ -484,8 +484,19 @@ serve(async (req) => {
 
     try {
       console.log('Fetching campaigns...');
-      const campaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
-      console.log(`Found ${campaigns.length} campaigns`);
+      const campaignsRaw: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
+      
+      // Sort campaigns: active first, then by created_at desc (newest first)
+      // This prioritizes syncing active campaigns before drafts/paused
+      const campaigns = [...campaignsRaw].sort((a, b) => {
+        const statusOrder = { active: 0, paused: 1, drafted: 2, completed: 3 };
+        const aOrder = statusOrder[a.status?.toLowerCase() as keyof typeof statusOrder] ?? 4;
+        const bOrder = statusOrder[b.status?.toLowerCase() as keyof typeof statusOrder] ?? 4;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      
+      console.log(`Found ${campaigns.length} campaigns (sorted: active first)`);
 
       const totalCampaigns = campaigns.length;
       const startIndex = resumeFromCampaign;
@@ -556,6 +567,9 @@ serve(async (req) => {
         }).eq('id', connection.id);
 
         try {
+          // Check if this is an active/paused campaign (worth full sync) or a draft (light sync)
+          const isActiveCampaign = ['active', 'paused'].includes(campaign.status?.toLowerCase() || '');
+          
           // 1. Upsert campaign
           const { data: upsertedCampaign, error: campError } = await supabase
             .from('campaigns')
@@ -580,6 +594,36 @@ serve(async (req) => {
 
           const campaignDbId = upsertedCampaign.id;
           progress.campaigns_synced++;
+          
+          // For drafted campaigns, skip heavy operations (sequences, leads, events)
+          // Just sync basic campaign info and analytics
+          if (!isActiveCampaign) {
+            console.log(`  Skipping detailed sync for non-active campaign: ${campaign.status}`);
+            
+            // Still fetch analytics for non-active campaigns
+            try {
+              const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
+              const today = new Date().toISOString().split('T')[0];
+              
+              await supabase.from('daily_metrics').upsert({
+                workspace_id, 
+                campaign_id: campaignDbId, 
+                date: today,
+                sent_count: analytics.sent_count || 0,
+                delivered_count: analytics.unique_sent_count || 0,
+                opened_count: analytics.unique_open_count || 0,
+                clicked_count: analytics.unique_click_count || 0,
+                replied_count: analytics.reply_count || 0,
+                bounced_count: analytics.bounce_count || 0,
+              }, { onConflict: 'workspace_id,campaign_id,date' });
+              
+              progress.metrics_created++;
+            } catch (e) {
+              console.error(`  Analytics fetch failed for ${campaign.name}:`, e);
+            }
+            
+            continue; // Skip to next campaign
+          }
 
           // 2. Fetch sequences (email copy variants)
           try {
@@ -1134,13 +1178,42 @@ serve(async (req) => {
         }
       }
 
+      // If not complete, schedule auto-continue using waitUntil
+      if (!isComplete) {
+        console.log('Scheduling auto-continue for next batch...');
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        
+        // Use waitUntil to trigger next batch in background
+        (globalThis as any).EdgeRuntime?.waitUntil?.(
+          (async () => {
+            // Small delay to avoid rate limiting
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${supabaseServiceKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ workspace_id, sync_type }),
+              });
+              console.log('Auto-continue triggered');
+            } catch (e) {
+              console.error('Auto-continue failed:', e);
+            }
+          })()
+        );
+      }
+
       return new Response(JSON.stringify({
         success: true, 
         done: isComplete, 
         campaign_index: nextCampaignIndex,
         total: totalCampaigns,
-        message: isComplete ? 'Sync completed successfully' : `Processed to campaign ${nextCampaignIndex}; call again to continue`,
+        message: isComplete ? 'Sync completed successfully' : `Processed to campaign ${nextCampaignIndex}; auto-continuing...`,
         patterns_triggered: isComplete,
+        auto_continue: !isComplete,
         ...progress,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
