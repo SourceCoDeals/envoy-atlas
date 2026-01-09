@@ -1,17 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,9 +31,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Plus, Building2, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { 
+  Plus, Building2, Loader2, Pencil, Trash2, ChevronDown, ChevronRight,
+  Phone, Target, TrendingUp, Users, Calendar
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Engagement {
@@ -49,12 +58,31 @@ interface Engagement {
   start_date: string;
   end_date: string | null;
   status: string;
+  meetings_target: number | null;
+  total_calls_target: number | null;
+  connect_rate_target: number | null;
+  meeting_rate_target: number | null;
+}
+
+interface EngagementMetrics {
+  totalCalls: number;
+  avgScore: number;
+  interestedLeads: number;
+  conversations: number;
+  meetingsSet: number;
+}
+
+interface CampaignSummary {
+  clientProject: string;
+  totalCalls: number;
+  avgScore: number;
+  interestedLeads: number;
 }
 
 const priorityColors: Record<string, string> = {
-  high: 'bg-green-900/40 hover:bg-green-900/50',
-  medium: 'bg-amber-900/30 hover:bg-amber-900/40',
-  low: 'bg-red-900/30 hover:bg-red-900/40',
+  high: 'bg-green-900/40 hover:bg-green-900/50 border-l-4 border-l-green-500',
+  medium: 'bg-amber-900/30 hover:bg-amber-900/40 border-l-4 border-l-amber-500',
+  low: 'bg-red-900/30 hover:bg-red-900/40 border-l-4 border-l-red-500',
 };
 
 export default function EngagementDashboard() {
@@ -63,9 +91,12 @@ export default function EngagementDashboard() {
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [engagements, setEngagements] = useState<Engagement[]>([]);
+  const [campaignSummaries, setCampaignSummaries] = useState<CampaignSummary[]>([]);
+  const [engagementMetrics, setEngagementMetrics] = useState<Record<string, EngagementMetrics>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const emptyForm = {
     sponsor: '',
@@ -79,6 +110,10 @@ export default function EngagementDashboard() {
     geography: '',
     start_date: new Date().toISOString().split('T')[0],
     end_date: '',
+    meetings_target: 20,
+    total_calls_target: 500,
+    connect_rate_target: 15,
+    meeting_rate_target: 3,
   };
 
   const [formData, setFormData] = useState(emptyForm);
@@ -92,6 +127,7 @@ export default function EngagementDashboard() {
   useEffect(() => {
     if (currentWorkspace?.id) {
       fetchEngagements();
+      fetchCampaignSummaries();
     }
   }, [currentWorkspace?.id]);
 
@@ -109,12 +145,121 @@ export default function EngagementDashboard() {
 
       if (error) throw error;
       setEngagements((data || []) as Engagement[]);
+
+      // Fetch metrics for each engagement
+      if (data && data.length > 0) {
+        await fetchEngagementMetrics(data as Engagement[]);
+      }
     } catch (err) {
       console.error('Error fetching engagements:', err);
       toast.error('Failed to load engagements');
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchEngagementMetrics = async (engagementList: Engagement[]) => {
+    if (!currentWorkspace?.id) return;
+
+    try {
+      // For each engagement, get call data matching client name
+      const metricsMap: Record<string, EngagementMetrics> = {};
+      
+      for (const eng of engagementList) {
+        const clientPattern = `%${eng.client_name}%`;
+        
+        const { data: callData } = await supabase
+          .from('external_calls')
+          .select('composite_score, seller_interest_score, call_category')
+          .eq('workspace_id', currentWorkspace.id)
+          .or(`call_title.ilike.${clientPattern},company_name.ilike.${clientPattern}`)
+          .not('composite_score', 'is', null);
+
+        if (callData) {
+          const totalCalls = callData.length;
+          const avgScore = totalCalls > 0 
+            ? callData.reduce((sum, c) => sum + (c.composite_score || 0), 0) / totalCalls 
+            : 0;
+          const interestedLeads = callData.filter(c => (c.seller_interest_score || 0) >= 7).length;
+          const conversations = callData.filter(c => 
+            c.call_category && ['conversation', 'interested', 'meeting'].some(cat => 
+              c.call_category?.toLowerCase().includes(cat)
+            )
+          ).length;
+
+          metricsMap[eng.id] = {
+            totalCalls,
+            avgScore: Math.round(avgScore * 10) / 10,
+            interestedLeads,
+            conversations,
+            meetingsSet: Math.round(interestedLeads * 0.15), // Estimate
+          };
+        }
+      }
+      
+      setEngagementMetrics(metricsMap);
+    } catch (err) {
+      console.error('Error fetching engagement metrics:', err);
+    }
+  };
+
+  const fetchCampaignSummaries = async () => {
+    if (!currentWorkspace?.id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('external_calls')
+        .select('call_title, company_name, composite_score, seller_interest_score')
+        .eq('workspace_id', currentWorkspace.id)
+        .not('composite_score', 'is', null);
+
+      if (error) throw error;
+
+      // Group by client/project extracted from call_title
+      const grouped: Record<string, { calls: number; scores: number[]; interested: number }> = {};
+      
+      (data || []).forEach(call => {
+        // Extract project from call_title format: "Company <ext> Project"
+        const title = call.call_title || '';
+        const projectMatch = title.split('<ext>')[1]?.trim() || call.company_name || 'Other';
+        const project = projectMatch.split('(')[0]?.trim() || projectMatch;
+        
+        if (!grouped[project]) {
+          grouped[project] = { calls: 0, scores: [], interested: 0 };
+        }
+        grouped[project].calls++;
+        grouped[project].scores.push(call.composite_score || 0);
+        if ((call.seller_interest_score || 0) >= 7) {
+          grouped[project].interested++;
+        }
+      });
+
+      const summaries: CampaignSummary[] = Object.entries(grouped)
+        .map(([clientProject, data]) => ({
+          clientProject,
+          totalCalls: data.calls,
+          avgScore: Math.round((data.scores.reduce((a, b) => a + b, 0) / data.scores.length) * 10) / 10,
+          interestedLeads: data.interested,
+        }))
+        .sort((a, b) => b.totalCalls - a.totalCalls)
+        .slice(0, 25);
+
+      setCampaignSummaries(summaries);
+    } catch (err) {
+      console.error('Error fetching campaign summaries:', err);
+    }
+  };
+
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   const openCreate = () => {
@@ -137,6 +282,10 @@ export default function EngagementDashboard() {
       geography: engagement.geography || '',
       start_date: engagement.start_date,
       end_date: engagement.end_date || '',
+      meetings_target: engagement.meetings_target || 20,
+      total_calls_target: engagement.total_calls_target || 500,
+      connect_rate_target: engagement.connect_rate_target || 15,
+      meeting_rate_target: engagement.meeting_rate_target || 3,
     });
     setDialogOpen(true);
   };
@@ -165,6 +314,10 @@ export default function EngagementDashboard() {
             geography: formData.geography || null,
             start_date: formData.start_date,
             end_date: formData.end_date || null,
+            meetings_target: formData.meetings_target,
+            total_calls_target: formData.total_calls_target,
+            connect_rate_target: formData.connect_rate_target,
+            meeting_rate_target: formData.meeting_rate_target,
           })
           .eq('id', editingId);
 
@@ -185,10 +338,10 @@ export default function EngagementDashboard() {
           geography: formData.geography || null,
           start_date: formData.start_date,
           end_date: formData.end_date || null,
-          total_calls_target: 1000,
-          meetings_target: 20,
-          connect_rate_target: 20,
-          meeting_rate_target: 5,
+          meetings_target: formData.meetings_target,
+          total_calls_target: formData.total_calls_target,
+          connect_rate_target: formData.connect_rate_target,
+          meeting_rate_target: formData.meeting_rate_target,
         });
 
         if (error) throw error;
@@ -219,6 +372,17 @@ export default function EngagementDashboard() {
     }
   };
 
+  // Summary totals
+  const totals = useMemo(() => {
+    return campaignSummaries.reduce(
+      (acc, c) => ({
+        calls: acc.calls + c.totalCalls,
+        interested: acc.interested + c.interestedLeads,
+      }),
+      { calls: 0, interested: 0 }
+    );
+  }, [campaignSummaries]);
+
   if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -235,8 +399,8 @@ export default function EngagementDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Engagements</h1>
-            <p className="text-muted-foreground">Track PE firm engagements and team assignments</p>
+            <h1 className="text-2xl font-bold tracking-tight">Campaign Summary</h1>
+            <p className="text-muted-foreground">Track engagements and performance against targets</p>
           </div>
           <Button onClick={openCreate}>
             <Plus className="h-4 w-4 mr-2" />
@@ -244,12 +408,70 @@ export default function EngagementDashboard() {
           </Button>
         </div>
 
+        {/* Summary Cards */}
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Phone className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{totals.calls.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">Total Calls</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center">
+                  <Users className="h-5 w-5 text-success" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{totals.interested}</p>
+                  <p className="text-xs text-muted-foreground">Interested Leads</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-chart-4/10 flex items-center justify-center">
+                  <Target className="h-5 w-5 text-chart-4" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{campaignSummaries.length}</p>
+                  <p className="text-xs text-muted-foreground">Active Campaigns</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-chart-2/10 flex items-center justify-center">
+                  <TrendingUp className="h-5 w-5 text-chart-2" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">
+                    {totals.calls > 0 ? ((totals.interested / totals.calls) * 100).toFixed(1) : 0}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">Interest Rate</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingId ? 'Edit Engagement' : 'Create New Engagement'}</DialogTitle>
-              <DialogDescription>Fill in the engagement details</DialogDescription>
+              <DialogDescription>Fill in the engagement details and targets</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-4">
@@ -322,6 +544,46 @@ export default function EngagementDashboard() {
                   />
                 </div>
               </div>
+
+              {/* Targets Section */}
+              <div className="border-t pt-4 mt-4">
+                <Label className="text-base font-semibold mb-3 block">Performance Targets</Label>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Total Calls Target</Label>
+                    <Input
+                      type="number"
+                      value={formData.total_calls_target}
+                      onChange={(e) => setFormData({ ...formData, total_calls_target: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Meetings Target</Label>
+                    <Input
+                      type="number"
+                      value={formData.meetings_target}
+                      onChange={(e) => setFormData({ ...formData, meetings_target: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Connect Rate % Target</Label>
+                    <Input
+                      type="number"
+                      value={formData.connect_rate_target}
+                      onChange={(e) => setFormData({ ...formData, connect_rate_target: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Meeting Rate % Target</Label>
+                    <Input
+                      type="number"
+                      value={formData.meeting_rate_target}
+                      onChange={(e) => setFormData({ ...formData, meeting_rate_target: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Start Date</Label>
@@ -353,89 +615,194 @@ export default function EngagementDashboard() {
           </DialogContent>
         </Dialog>
 
-        {/* Table */}
-        {loading ? (
+        {/* Engagements Table with Expanded Metrics */}
+        {engagements.length > 0 && (
           <Card>
-            <CardContent className="py-12 text-center text-muted-foreground">Loading...</CardContent>
-          </Card>
-        ) : engagements.length === 0 ? (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-                <Building2 className="h-8 w-8 text-primary" />
-              </div>
-              <h2 className="text-xl font-semibold mb-2">No Engagements Yet</h2>
-              <p className="text-muted-foreground text-center max-w-md mb-6">
-                Create your first PE firm engagement to track clients and team assignments.
-              </p>
-              <Button onClick={openCreate}>
-                <Plus className="h-4 w-4 mr-2" />
-                Create First Engagement
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Managed Engagements</CardTitle>
+            </CardHeader>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[160px]">Sponsor</TableHead>
+                  <TableHead className="w-8"></TableHead>
+                  <TableHead className="w-[140px]">Sponsor</TableHead>
                   <TableHead>Industry</TableHead>
                   <TableHead>Client</TableHead>
                   <TableHead>Deal Lead</TableHead>
-                  <TableHead>Associate / VP</TableHead>
+                  <TableHead>Associate/VP</TableHead>
                   <TableHead>Analyst</TableHead>
+                  <TableHead className="text-right">Calls</TableHead>
+                  <TableHead className="text-right">Interested</TableHead>
                   <TableHead className="w-[80px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {engagements.map((engagement) => (
-                  <TableRow
-                    key={engagement.id}
-                    className={cn(
-                      'transition-colors cursor-pointer',
-                      priorityColors[engagement.priority || 'medium']
-                    )}
-                    onClick={() => openEdit(engagement)}
-                  >
-                    <TableCell className="font-medium">{engagement.sponsor || '-'}</TableCell>
-                    <TableCell>{engagement.industry_focus || '-'}</TableCell>
-                    <TableCell>{engagement.client_name}</TableCell>
-                    <TableCell className="text-primary">{engagement.deal_lead || '-'}</TableCell>
-                    <TableCell>{engagement.associate_vp || '-'}</TableCell>
-                    <TableCell>{engagement.analyst || '-'}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEdit(engagement);
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(engagement.id);
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {engagements.map((engagement) => {
+                  const metrics = engagementMetrics[engagement.id];
+                  const isExpanded = expandedRows.has(engagement.id);
+                  const callsProgress = metrics && engagement.total_calls_target 
+                    ? (metrics.totalCalls / engagement.total_calls_target) * 100 
+                    : 0;
+
+                  return (
+                    <>
+                      <TableRow
+                        key={engagement.id}
+                        className={cn(
+                          'transition-colors cursor-pointer',
+                          priorityColors[engagement.priority || 'medium']
+                        )}
+                        onClick={() => toggleRow(engagement.id)}
+                      >
+                        <TableCell>
+                          {isExpanded ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">{engagement.sponsor || '-'}</TableCell>
+                        <TableCell>{engagement.industry_focus || '-'}</TableCell>
+                        <TableCell className="font-medium">{engagement.client_name}</TableCell>
+                        <TableCell className="text-primary">{engagement.deal_lead || '-'}</TableCell>
+                        <TableCell>{engagement.associate_vp || '-'}</TableCell>
+                        <TableCell>{engagement.analyst || '-'}</TableCell>
+                        <TableCell className="text-right font-mono">
+                          {metrics?.totalCalls || 0}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant={metrics?.interestedLeads > 0 ? 'default' : 'secondary'}>
+                            {metrics?.interestedLeads || 0}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEdit(engagement);
+                              }}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(engagement.id);
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded && (
+                        <TableRow className="bg-muted/30">
+                          <TableCell colSpan={10} className="p-4">
+                            <div className="grid grid-cols-4 gap-6">
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">Calls Progress</p>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-sm">
+                                    <span>{metrics?.totalCalls || 0}</span>
+                                    <span className="text-muted-foreground">/ {engagement.total_calls_target || 500}</span>
+                                  </div>
+                                  <Progress value={Math.min(callsProgress, 100)} className="h-2" />
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">Avg AI Score</p>
+                                <p className="text-2xl font-bold">{metrics?.avgScore || '-'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">Conversations</p>
+                                <p className="text-2xl font-bold">{metrics?.conversations || 0}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">Meetings Target</p>
+                                <p className="text-2xl font-bold">
+                                  <span className="text-success">{metrics?.meetingsSet || 0}</span>
+                                  <span className="text-muted-foreground text-base"> / {engagement.meetings_target || 20}</span>
+                                </p>
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
+                  );
+                })}
               </TableBody>
             </Table>
           </Card>
         )}
+
+        {/* Campaign Summary Table (from call data) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">All Campaigns Performance</CardTitle>
+          </CardHeader>
+          {loading ? (
+            <CardContent className="py-12 text-center text-muted-foreground">Loading...</CardContent>
+          ) : campaignSummaries.length === 0 ? (
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+                <Building2 className="h-8 w-8 text-primary" />
+              </div>
+              <h2 className="text-xl font-semibold mb-2">No Campaign Data Yet</h2>
+              <p className="text-muted-foreground text-center max-w-md mb-6">
+                Import calls to see campaign performance summaries.
+              </p>
+            </CardContent>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Campaign / Project</TableHead>
+                  <TableHead className="text-right">Total Calls</TableHead>
+                  <TableHead className="text-right">Avg Score</TableHead>
+                  <TableHead className="text-right">Interested Leads</TableHead>
+                  <TableHead className="text-right">Interest Rate</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {campaignSummaries.map((campaign, idx) => {
+                  const interestRate = campaign.totalCalls > 0 
+                    ? ((campaign.interestedLeads / campaign.totalCalls) * 100).toFixed(1)
+                    : '0';
+                  
+                  return (
+                    <TableRow key={idx}>
+                      <TableCell className="font-medium">{campaign.clientProject || 'Other'}</TableCell>
+                      <TableCell className="text-right font-mono">{campaign.totalCalls}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant={campaign.avgScore >= 7 ? 'default' : 'secondary'}>
+                          {campaign.avgScore}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{campaign.interestedLeads}</TableCell>
+                      <TableCell className="text-right">
+                        <span className={cn(
+                          "font-medium",
+                          parseFloat(interestRate) >= 30 ? "text-success" : 
+                          parseFloat(interestRate) >= 15 ? "text-chart-4" : "text-muted-foreground"
+                        )}>
+                          {interestRate}%
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </Card>
       </div>
     </DashboardLayout>
   );
