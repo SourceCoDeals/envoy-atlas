@@ -429,7 +429,7 @@ export default function Connections() {
     }
   };
 
-  // Handle JSON file upload for external calls
+  // Handle JSON file upload for external calls - auto-processes everything
   const handleJsonUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !currentWorkspace) return;
@@ -439,6 +439,10 @@ export default function Connections() {
     setIsSyncing((s) => ({ ...s, upload: true }));
 
     try {
+      const token = await getAccessToken();
+      
+      // Step 1: Import JSON
+      setSuccess("Step 1/3: Importing calls...");
       console.log("[JSON Upload] Reading file:", file.name);
       const text = await file.text();
       const calls = JSON.parse(text);
@@ -448,8 +452,7 @@ export default function Connections() {
       }
 
       console.log("[JSON Upload] Parsed", calls.length, "calls, uploading...");
-      const token = await getAccessToken();
-      const res = await supabase.functions.invoke("import-json-calls", {
+      const importRes = await supabase.functions.invoke("import-json-calls", {
         body: {
           calls,
           workspaceId: currentWorkspace.id,
@@ -458,23 +461,73 @@ export default function Connections() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      console.log("[JSON Upload] Response:", res);
-
-      if (res.error) throw new Error(res.error.message || "Import failed");
-
-      const data = res.data;
-      if (!data.success) {
-        throw new Error(data.error || "Import returned unsuccessful");
-      }
+      if (importRes.error) throw new Error(importRes.error.message || "Import failed");
+      if (!importRes.data.success) throw new Error(importRes.data.error || "Import returned unsuccessful");
       
-      setSuccess(`✓ Added ${data.inserted} calls (${data.withTranscripts} with transcripts, ${data.scored || 0} pre-scored)`);
+      const imported = importRes.data;
+      console.log("[JSON Upload] Imported:", imported);
+
+      // Step 2: Fetch transcripts for any pending calls
+      setSuccess(`Step 2/3: Fetching transcripts... (imported ${imported.inserted} calls)`);
+      let transcriptsFetched = 0;
+      let transcriptLoops = 0;
+      const maxTranscriptLoops = 10; // Process up to 200 calls (20 per batch)
+      
+      while (transcriptLoops < maxTranscriptLoops) {
+        const transcriptRes = await supabase.functions.invoke("fetch-transcripts", {
+          body: { workspace_id: currentWorkspace.id, limit: 20 },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        if (transcriptRes.error) {
+          console.error("[JSON Upload] Transcript fetch error:", transcriptRes.error);
+          break;
+        }
+        
+        const processed = transcriptRes.data?.processed || 0;
+        transcriptsFetched += processed;
+        console.log(`[JSON Upload] Transcript batch: ${processed} processed, total: ${transcriptsFetched}`);
+        
+        if (processed === 0) break; // No more to process
+        transcriptLoops++;
+        
+        setSuccess(`Step 2/3: Fetching transcripts... (${transcriptsFetched} fetched)`);
+      }
+
+      // Step 3: Score all calls with transcripts
+      setSuccess(`Step 3/3: AI scoring calls... (${transcriptsFetched} transcripts)`);
+      let callsScored = 0;
+      let scoreLoops = 0;
+      const maxScoreLoops = 20; // Process up to 100 calls (5 per batch)
+      
+      while (scoreLoops < maxScoreLoops) {
+        const scoreRes = await supabase.functions.invoke("score-external-calls", {
+          body: { workspace_id: currentWorkspace.id, limit: 5 },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        if (scoreRes.error) {
+          console.error("[JSON Upload] Scoring error:", scoreRes.error);
+          break;
+        }
+        
+        const scored = scoreRes.data?.scored || 0;
+        callsScored += scored;
+        console.log(`[JSON Upload] Score batch: ${scored} scored, total: ${callsScored}`);
+        
+        if (scored === 0) break; // No more to score
+        scoreLoops++;
+        
+        setSuccess(`Step 3/3: AI scoring calls... (${callsScored} scored)`);
+      }
+
+      setSuccess(`✓ Complete! Imported ${imported.inserted} calls, fetched ${transcriptsFetched} transcripts, scored ${callsScored} calls`);
       await fetchNocodbStats();
     } catch (e: any) {
       console.error("[JSON Upload] Error:", e);
-      setError(e?.message || "Failed to import JSON file");
+      setError(e?.message || "Failed to process JSON file");
     } finally {
       setIsSyncing((s) => ({ ...s, upload: false }));
-      // Reset the file input
       event.target.value = "";
     }
   };
