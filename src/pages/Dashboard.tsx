@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useDashboardData } from '@/hooks/useDashboardData';
+import { useSyncData } from '@/hooks/useSyncData';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CreateWorkspace } from '@/components/onboarding/CreateWorkspace';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
@@ -34,13 +35,20 @@ import {
   Zap,
   Users,
   Clock,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { workspaces, currentWorkspace, loading: workspaceLoading } = useWorkspace();
-  const { loading: dataLoading, hasData, stats, trendData, topCampaigns, timeData } = useDashboardData();
+  const { loading: dataLoading, hasData, stats, trendData, topCampaigns, timeData, refetch } = useDashboardData();
+  const { syncing, triggerSync } = useSyncData();
+
+  const handleRefresh = async () => {
+    await triggerSync();
+    refetch();
+  };
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -117,12 +125,23 @@ export default function Dashboard() {
             </p>
           </div>
           {hasData && (
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/inbox">
-                View Inbox
-                <ExternalLink className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleRefresh}
+                disabled={syncing || dataLoading}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? 'Syncing...' : 'Refresh Data'}
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/inbox">
+                  View Inbox
+                  <ExternalLink className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
           )}
         </div>
 
