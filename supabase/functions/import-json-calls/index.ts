@@ -93,7 +93,7 @@ serve(async (req) => {
       };
     });
 
-    // Insert in batches of 500
+    // Insert external_calls in batches of 500
     const batchSize = 500;
     let inserted = 0;
     let errors = 0;
@@ -111,10 +111,77 @@ serve(async (req) => {
       }
     }
 
+    // Step 2: Create/update leads from the imported calls
+    console.log(`[import-json-calls] Creating leads from ${records.length} call records...`);
+    
+    // Build unique contacts from records
+    const contactMap = new Map<string, {
+      contact_name: string;
+      company_name: string | null;
+      seller_interest_score: number | null;
+      last_call_at: string | null;
+    }>();
+    
+    records.forEach((r: any) => {
+      if (r.contact_name) {
+        const key = r.contact_name.toLowerCase().trim();
+        const existing = contactMap.get(key);
+        // Keep the record with highest interest score or most recent call
+        if (!existing || (r.seller_interest_score || 0) > (existing.seller_interest_score || 0)) {
+          contactMap.set(key, {
+            contact_name: r.contact_name,
+            company_name: r.company_name,
+            seller_interest_score: r.seller_interest_score,
+            last_call_at: r.date_time,
+          });
+        }
+      }
+    });
+
+    // Insert unique leads
+    let leadsCreated = 0;
+    const leadBatches = Array.from(contactMap.values());
+    
+    for (let i = 0; i < leadBatches.length; i += batchSize) {
+      const batch = leadBatches.slice(i, i + batchSize);
+      const leadRecords = batch.map(contact => {
+        const nameParts = contact.contact_name.split(' ');
+        return {
+          workspace_id: workspaceId,
+          platform: 'external_calls',
+          platform_lead_id: `ext_${contact.contact_name.toLowerCase().replace(/\s+/g, '_')}`,
+          email: '', // No email from call records
+          first_name: nameParts[0] || null,
+          last_name: nameParts.slice(1).join(' ') || null,
+          company: contact.company_name,
+          contact_status: (contact.seller_interest_score || 0) >= 7 ? 'interested' : 'contacted',
+          seller_interest_score: contact.seller_interest_score ? Math.round(contact.seller_interest_score) : null,
+          last_call_at: contact.last_call_at,
+          last_contact_at: contact.last_call_at,
+        };
+      });
+
+      // Upsert - skip conflicts on platform_lead_id
+      const { error: leadError, data: leadData } = await supabase
+        .from("leads")
+        .upsert(leadRecords, { 
+          onConflict: 'workspace_id,platform,platform_lead_id',
+          ignoreDuplicates: true 
+        });
+      
+      if (leadError) {
+        console.error(`[import-json-calls] Lead batch error:`, leadError.message);
+      } else {
+        leadsCreated += batch.length;
+      }
+    }
+
+    console.log(`[import-json-calls] Created ${leadsCreated} leads`);
+
     const withTranscripts = records.filter((r: any) => r.transcript_text).length;
     const scored = records.filter((r: any) => r.import_status === "scored").length;
     
-    console.log(`[import-json-calls] Done: ${inserted} inserted (${withTranscripts} with transcripts, ${scored} scored), ${errors} errors`);
+    console.log(`[import-json-calls] Done: ${inserted} inserted (${withTranscripts} with transcripts, ${scored} scored), ${leadsCreated} leads, ${errors} errors`);
 
     return new Response(
       JSON.stringify({ 
@@ -123,6 +190,7 @@ serve(async (req) => {
         inserted, 
         withTranscripts,
         scored,
+        leadsCreated,
         errors 
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
