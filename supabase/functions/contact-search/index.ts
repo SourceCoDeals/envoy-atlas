@@ -300,8 +300,8 @@ async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResu
           hasReply,
           isSequenceOwner: seq.isSequenceOwner || false,
           emails,
-          // Updated URL format - Reply.io inbox with contact filter
-          platformUrl: `https://run.reply.io/inbox?search=${encodeURIComponent(email)}`,
+          // URL to Reply.io sequence/campaign page with contact search
+          platformUrl: `https://run.reply.io/sequences/${seq.sequenceId}/contacts?search=${encodeURIComponent(email)}`,
         });
       } catch (seqError) {
         console.error(`Reply.io: Error processing sequence ${seq.sequenceId}:`, seqError);
@@ -312,7 +312,7 @@ async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResu
           hasReply: false,
           isSequenceOwner: seq.isSequenceOwner || false,
           emails: [],
-          platformUrl: `https://run.reply.io/inbox?search=${encodeURIComponent(email)}`,
+          platformUrl: `https://run.reply.io/sequences/${seq.sequenceId}/contacts?search=${encodeURIComponent(email)}`,
         });
       }
     }
