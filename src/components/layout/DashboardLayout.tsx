@@ -98,6 +98,7 @@ const callingMainNavItems: NavItem[] = [
 // Contacts channel navigation
 const contactsMainNavItems: NavItem[] = [
   { title: 'All Contacts', href: '/contacts', icon: Users },
+  { title: 'Contacts Search', href: '/contacts/search', icon: Mail },
 ];
 
 const callingCoachingNavItems: NavItem[] = [
