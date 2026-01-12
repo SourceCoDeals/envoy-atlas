@@ -10,7 +10,7 @@ interface CampaignTableProps {
   campaigns: CampaignWithMetrics[];
 }
 
-type SortField = 'name' | 'total_sent' | 'open_rate' | 'click_rate' | 'reply_rate' | 'bounce_rate';
+type SortField = 'name' | 'total_leads' | 'updated_at' | 'total_sent' | 'open_rate' | 'click_rate' | 'reply_rate' | 'bounce_rate';
 type SortDirection = 'asc' | 'desc';
 
 export function CampaignTable({ campaigns }: CampaignTableProps) {
@@ -38,8 +38,15 @@ export function CampaignTable({ campaigns }: CampaignTableProps) {
       result = result.filter(c => c.status === statusFilter);
     }
 
-    // Sort
+    // Sort: always keep active statuses first, then by selected field
+    const activeStatuses = ['active', 'started', 'running'];
     result.sort((a, b) => {
+      const aIsActive = activeStatuses.includes(a.status.toLowerCase());
+      const bIsActive = activeStatuses.includes(b.status.toLowerCase());
+      
+      if (aIsActive && !bIsActive) return -1;
+      if (!aIsActive && bIsActive) return 1;
+      
       const aVal = a[sortField];
       const bVal = b[sortField];
       
@@ -123,19 +130,21 @@ export function CampaignTable({ campaigns }: CampaignTableProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <SortableHeader field="name" className="w-[300px]">Campaign</SortableHeader>
+              <SortableHeader field="name" className="w-[280px]">Campaign</SortableHeader>
               <TableHead>Status</TableHead>
+              <SortableHeader field="total_leads" className="text-right">Leads</SortableHeader>
+              <SortableHeader field="updated_at" className="text-right">Last Updated</SortableHeader>
               <SortableHeader field="total_sent" className="text-right">Sent</SortableHeader>
-              <SortableHeader field="open_rate" className="text-right">Open Rate</SortableHeader>
-              <SortableHeader field="click_rate" className="text-right">Click Rate</SortableHeader>
-              <SortableHeader field="reply_rate" className="text-right">Reply Rate</SortableHeader>
-              <SortableHeader field="bounce_rate" className="text-right">Bounce Rate</SortableHeader>
+              <SortableHeader field="open_rate" className="text-right">Open %</SortableHeader>
+              <SortableHeader field="click_rate" className="text-right">Click %</SortableHeader>
+              <SortableHeader field="reply_rate" className="text-right">Reply %</SortableHeader>
+              <SortableHeader field="bounce_rate" className="text-right">Bounce %</SortableHeader>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredAndSortedCampaigns.length === 0 ? (
               <TableRow>
-                <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                <td colSpan={9} className="text-center py-8 text-muted-foreground">
                   No campaigns match your filters
                 </td>
               </TableRow>

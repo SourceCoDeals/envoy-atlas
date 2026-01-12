@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
+import { format } from 'date-fns';
 
 interface CampaignRowProps {
   campaign: CampaignWithMetrics;
@@ -31,12 +32,20 @@ export function CampaignRow({ campaign }: CampaignRowProps) {
     return `${num.toFixed(1)}%`;
   };
 
+  const formatDate = (dateString: string) => {
+    try {
+      return format(new Date(dateString), 'MMM d, yyyy');
+    } catch {
+      return '-';
+    }
+  };
+
   return (
     <TableRow className="cursor-pointer hover:bg-accent/50">
       <TableCell className="font-medium">
         <Link to={`/campaigns/${campaign.id}`} className="block">
           <div className="flex flex-col">
-            <span className="truncate max-w-[280px] hover:text-primary">{campaign.name}</span>
+            <span className="truncate max-w-[260px] hover:text-primary">{campaign.name}</span>
             <span className="text-xs text-muted-foreground">{campaign.platform}</span>
           </div>
         </Link>
@@ -45,6 +54,12 @@ export function CampaignRow({ campaign }: CampaignRowProps) {
         <Badge variant={getStatusVariant(campaign.status)}>
           {campaign.status}
         </Badge>
+      </TableCell>
+      <TableCell className="text-right font-mono">
+        {formatNumber(campaign.total_leads)}
+      </TableCell>
+      <TableCell className="text-right text-sm text-muted-foreground">
+        {formatDate(campaign.updated_at)}
       </TableCell>
       <TableCell className="text-right font-mono">
         {formatNumber(campaign.total_sent)}
