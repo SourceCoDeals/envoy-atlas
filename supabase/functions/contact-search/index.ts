@@ -123,7 +123,11 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
           // The API returns { history: [...], from: "...", to: "..." }
           const historyArray = history?.history || [];
           
-          console.log(`SmartLead: Campaign ${campaign.name} - Raw history:`, JSON.stringify(historyArray.map((m: any) => ({ type: m.type, hasBody: !!m.email_body }))));
+          // Log full raw history to debug body content
+          console.log(`SmartLead: Campaign ${campaign.name} - Raw history count: ${historyArray.length}`);
+          historyArray.forEach((m: any, i: number) => {
+            console.log(`SmartLead: Message ${i} - type: ${m.type}, hasBody: ${!!m.email_body}, bodyLength: ${(m.email_body || '').length}`);
+          });
           
           // Check for replies - SmartLead uses 'REPLY' type (case insensitive)
           const hasReply = historyArray.some((msg: any) => {
@@ -139,7 +143,7 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             const msgType = (msg.type || '').toUpperCase();
             const isReply = msgType === 'REPLY' || msgType === 'RECEIVED' || msgType === 'INBOUND';
             
-            return {
+            const mappedMsg = {
               id: `${idx}-${msg.stats_id || msg.message_id || 'msg'}`,
               type: isReply ? 'REPLY' : 'SENT',
               time: msg.time || msg.created_at || msg.timestamp,
@@ -148,6 +152,9 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
               email_subject: msg.email_subject || msg.subject || null,
               seq_number: msg.seq_number || msg.step_number || msg.sequence_number,
             };
+            
+            console.log(`SmartLead: Mapped message ${idx} - type: ${mappedMsg.type}, hasBody: ${!!mappedMsg.email_body}`);
+            return mappedMsg;
           });
           
           return {
