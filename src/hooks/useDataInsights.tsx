@@ -130,20 +130,37 @@ export function useDataInsights() {
       const calls = externalCalls || [];
       const totalDials = calls.length;
 
-      // Group by date for daily trend
+      // Group by date for daily trend - use date_time or call_date
       const dateMap = new Map<string, { calls: number; connects: number; voicemails: number }>();
       const hourlyMap = new Map<number, { calls: number; connects: number }>();
       
       calls.forEach(call => {
-        // Daily grouping
-        const date = call.date_time ? new Date(call.date_time).toISOString().split('T')[0] : null;
+        // Get date from date_time or call_date
+        let date: string | null = null;
+        if (call.date_time) {
+          date = new Date(call.date_time).toISOString().split('T')[0];
+        } else if (call.call_date) {
+          date = call.call_date;
+        }
+        
         if (date) {
           const existing = dateMap.get(date) || { calls: 0, connects: 0, voicemails: 0 };
           existing.calls += 1;
-          // A call is a "connect" if seller_interest_score >= 3 (had a conversation)
-          if ((call.seller_interest_score || 0) >= 3) existing.connects += 1;
-          // Track voicemails by low engagement or no transcript
-          if ((call.seller_interest_score || 0) < 3 && !call.transcript_text) existing.voicemails += 1;
+          
+          // Use call_category for more accurate classification
+          const category = (call.call_category || '').toLowerCase();
+          
+          // A call is a "connect" if category is Connection or seller_interest_score >= 3
+          if (category === 'connection' || category.includes('interested') || (call.seller_interest_score || 0) >= 3) {
+            existing.connects += 1;
+          }
+          
+          // Track voicemails by category or low engagement
+          if (category.includes('voicemail') || category.includes('vm') || 
+              ((call.seller_interest_score || 0) < 2 && !call.transcript_text)) {
+            existing.voicemails += 1;
+          }
+          
           dateMap.set(date, existing);
         }
         
@@ -152,7 +169,11 @@ export function useDataInsights() {
           const hour = new Date(call.date_time).getHours();
           const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
           hourExisting.calls += 1;
-          if ((call.seller_interest_score || 0) >= 3) hourExisting.connects += 1;
+          
+          const category = (call.call_category || '').toLowerCase();
+          if (category === 'connection' || (call.seller_interest_score || 0) >= 3) {
+            hourExisting.connects += 1;
+          }
           hourlyMap.set(hour, hourExisting);
         }
       });
@@ -167,8 +188,18 @@ export function useDataInsights() {
         .sort((a, b) => a.hour - b.hour);
 
       const uniqueDays = dateMap.size || 1;
-      const totalConnects = calls.filter(s => (s.seller_interest_score || 0) >= 3).length;
-      const voicemailCount = calls.filter(c => (c.seller_interest_score || 0) < 3 && !c.transcript_text).length;
+      
+      // Use call_category for more accurate connect counting
+      const totalConnects = calls.filter(c => {
+        const category = (c.call_category || '').toLowerCase();
+        return category === 'connection' || category.includes('interested') || (c.seller_interest_score || 0) >= 3;
+      }).length;
+      
+      const voicemailCount = calls.filter(c => {
+        const category = (c.call_category || '').toLowerCase();
+        return category.includes('voicemail') || category.includes('vm') || 
+               ((c.seller_interest_score || 0) < 2 && !c.transcript_text);
+      }).length;
 
       // Calculate unique leads for attempts per lead
       const uniqueCompanies = new Set(calls.map(c => c.company_name).filter(Boolean)).size || 1;
@@ -270,20 +301,31 @@ export function useDataInsights() {
         meetingTrend 
       });
 
-      // Prospect Metrics - by rep/host
+      // Prospect Metrics - by rep/host using rep_name or host_email
       const repMap = new Map<string, { calls: number; connects: number; meetings: number }>();
       calls.forEach(call => {
-        const rep = call.host_email?.replace('@sourcecodeals.com', '').split('.').map((s: string) => 
-          s.charAt(0).toUpperCase() + s.slice(1)
-        ).join(' ') || 'Unknown';
+        // Use rep_name (Analyst from NocoDB) if available, otherwise parse from host_email
+        let rep = call.rep_name;
+        if (!rep && call.host_email) {
+          rep = call.host_email.replace('@sourcecodeals.com', '').split('.').map((s: string) => 
+            s.charAt(0).toUpperCase() + s.slice(1)
+          ).join(' ');
+        }
+        rep = rep || 'Unknown';
         
-        // Skip non-email entries (Salesforce URLs, etc.)
-        if (rep.includes('Salesforce') || !call.host_email?.includes('@')) return;
+        // Skip invalid entries
+        if (rep.includes('Salesforce') || rep === 'Unknown') return;
         
         const existing = repMap.get(rep) || { calls: 0, connects: 0, meetings: 0 };
         existing.calls += 1;
-        if ((call.seller_interest_score || 0) >= 3) existing.connects += 1;
-        if ((call.seller_interest_score || 0) >= 7) existing.meetings += 1;
+        
+        const category = (call.call_category || '').toLowerCase();
+        if (category === 'connection' || (call.seller_interest_score || 0) >= 3) {
+          existing.connects += 1;
+        }
+        if ((call.seller_interest_score || 0) >= 7) {
+          existing.meetings += 1;
+        }
         repMap.set(rep, existing);
       });
 
@@ -292,13 +334,18 @@ export function useDataInsights() {
         .sort((a, b) => b.calls - a.calls)
         .slice(0, 10);
 
-      // Pain points from key_concerns
+      // Pain points from key_concerns or target_pain_points
       const painPointMap = new Map<string, number>();
       calls.forEach(call => {
         const concerns = call.key_concerns as string[] | null;
         concerns?.forEach(concern => {
           if (concern) painPointMap.set(concern, (painPointMap.get(concern) || 0) + 1);
         });
+        // Also check target_pain_points text field
+        const painPointsText = call.target_pain_points;
+        if (painPointsText && typeof painPointsText === 'string') {
+          painPointMap.set(painPointsText, (painPointMap.get(painPointsText) || 0) + 1);
+        }
       });
       const topPainPoints = Array.from(painPointMap.entries())
         .map(([painPoint, count]) => ({ painPoint, count }))
@@ -331,11 +378,13 @@ export function useDataInsights() {
         pendingFollowUps: pendingFollowups?.length || 0 
       });
 
-      // Gatekeeper Metrics - identify gatekeeper calls by low seller_interest but conversation happened
-      const gatekeeperCalls = calls.filter(c => 
-        c.call_category?.toLowerCase().includes('gatekeeper') || 
-        ((c.seller_interest_score || 0) < 3 && c.transcript_text && (c.duration || 0) > 30)
-      );
+      // Gatekeeper Metrics - use call_category for accurate identification
+      const gatekeeperCalls = calls.filter(c => {
+        const category = (c.call_category || '').toLowerCase();
+        return category.includes('gatekeeper') || 
+               category === 'receptionist' ||
+               ((c.seller_interest_score || 0) < 3 && c.transcript_text && (c.duration || 0) > 30);
+      });
       
       // Estimate outcomes
       const transferred = gatekeeperCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
