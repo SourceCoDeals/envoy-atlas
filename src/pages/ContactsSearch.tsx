@@ -115,14 +115,17 @@ function MessageThread({ messages, platform }: { messages: MessageHistoryItem[];
 
   if (sortedMessages.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground italic">No messages found</p>
+      <p className="text-sm text-muted-foreground italic">No message history available from the API</p>
     );
   }
 
   return (
     <div className="space-y-3">
       {sortedMessages.map((msg, idx) => {
-        const isSent = msg.type === 'SENT' || msg.type === 'sent';
+        // Check for reply - handle different type formats
+        const msgType = (msg.type || '').toUpperCase();
+        const isSent = msgType === 'SENT' || msgType === 'OUTBOUND' || msgType === 'OUT';
+        const isReply = msgType === 'REPLY' || msgType === 'RECEIVED' || msgType === 'INBOUND' || msgType === 'IN';
         const messageTime = msg.time || msg.date;
         const subject = msg.email_subject || msg.subject;
         const body = msg.email_body || msg.body || '';
@@ -132,19 +135,19 @@ function MessageThread({ messages, platform }: { messages: MessageHistoryItem[];
             key={msg.id || idx}
             className={cn(
               "p-3 rounded-lg border",
-              isSent 
-                ? "bg-muted/50 border-border ml-4" 
-                : "bg-primary/5 border-primary/20 mr-4"
+              isReply 
+                ? "bg-primary/5 border-primary/20 mr-4" 
+                : "bg-muted/50 border-border ml-4"
             )}
           >
             <div className="flex items-center gap-2 mb-2">
-              {isSent ? (
-                <Send className="h-3.5 w-3.5 text-muted-foreground" />
-              ) : (
+              {isReply ? (
                 <ReplyIcon className="h-3.5 w-3.5 text-primary" />
+              ) : (
+                <Send className="h-3.5 w-3.5 text-muted-foreground" />
               )}
               <span className="text-xs font-medium">
-                {isSent ? 'Sent' : 'Reply'}
+                {isReply ? 'Reply Received' : 'Sent'}
               </span>
               {messageTime && (
                 <span className="text-xs text-muted-foreground">
@@ -160,10 +163,16 @@ function MessageThread({ messages, platform }: { messages: MessageHistoryItem[];
             {subject && (
               <p className="text-sm font-medium mb-1">{subject}</p>
             )}
-            <div 
-              className="text-sm text-muted-foreground prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: body }}
-            />
+            {body ? (
+              <div 
+                className="text-sm text-muted-foreground prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: body }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground italic">
+                {isReply ? 'Reply content not available via API' : 'Email content not available'}
+              </p>
+            )}
           </div>
         );
       })}
@@ -536,15 +545,59 @@ export default function ContactsSearch() {
           </Card>
         )}
 
-        {/* Results */}
-        {hasResults && (
+        {/* Results - Show both sections when at least one has data */}
+        {results && (results.hasSmartleadConnection || results.hasReplyioConnection) && (
           <div className="space-y-4">
-            {results.smartlead && (
-              <SmartleadSection result={results.smartlead} />
+            {/* SmartLead Section */}
+            {results.hasSmartleadConnection && (
+              results.smartlead ? (
+                <SmartleadSection result={results.smartlead} />
+              ) : (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-md flex items-center justify-center">
+                        <Mail className="h-4 w-4 text-white" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg">SmartLead</CardTitle>
+                        <CardDescription>No contact found</CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      No contact found for <span className="font-medium">{results.email}</span> in SmartLead
+                    </p>
+                  </CardContent>
+                </Card>
+              )
             )}
             
-            {results.replyio && (
-              <ReplyioSection result={results.replyio} />
+            {/* Reply.io Section */}
+            {results.hasReplyioConnection && (
+              results.replyio ? (
+                <ReplyioSection result={results.replyio} />
+              ) : (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 bg-gradient-to-br from-purple-500 to-purple-600 rounded-md flex items-center justify-center">
+                        <Mail className="h-4 w-4 text-white" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg">Reply.io</CardTitle>
+                        <CardDescription>No contact found</CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      No contact found for <span className="font-medium">{results.email}</span> in Reply.io
+                    </p>
+                  </CardContent>
+                </Card>
+              )
             )}
           </div>
         )}
