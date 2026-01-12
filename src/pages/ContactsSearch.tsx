@@ -27,7 +27,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface MessageHistoryItem {
-  id: number;
+  id: string | number;
   type: string;
   time: string;
   date?: string;
@@ -106,12 +106,17 @@ function validateEmail(email: string): { valid: boolean; error?: string } {
 }
 
 function MessageThread({ messages, platform }: { messages: MessageHistoryItem[]; platform: 'smartlead' | 'replyio' }) {
+  // Debug: Log received messages
+  console.log('MessageThread received messages:', messages?.length, messages);
+  
   // Sort by time
-  const sortedMessages = [...messages].sort((a, b) => {
+  const sortedMessages = [...(messages || [])].sort((a, b) => {
     const timeA = new Date(a.time || a.date || 0).getTime();
     const timeB = new Date(b.time || b.date || 0).getTime();
     return timeA - timeB;
   });
+
+  console.log('MessageThread sorted messages:', sortedMessages?.length);
 
   if (sortedMessages.length === 0) {
     return (
