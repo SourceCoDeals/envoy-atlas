@@ -250,9 +250,7 @@ function CampaignCard({
         <CollapsibleContent>
           <Separator />
           <div className="p-4 bg-muted/20">
-            <ScrollArea className="max-h-[400px]">
-              <MessageThread messages={messages} platform={type} />
-            </ScrollArea>
+            <MessageThread messages={messages} platform={type} />
           </div>
         </CollapsibleContent>
       </div>
