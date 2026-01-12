@@ -126,6 +126,9 @@ function MessageThread({ messages, platform }: { messages: MessageHistoryItem[];
 
   return (
     <div className="space-y-3">
+      <div className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+        Showing {sortedMessages.length} message{sortedMessages.length !== 1 ? 's' : ''} in thread
+      </div>
       {sortedMessages.map((msg, idx) => {
         // Check for reply - handle different type formats
         const msgType = (msg.type || '').toUpperCase();
@@ -135,9 +138,11 @@ function MessageThread({ messages, platform }: { messages: MessageHistoryItem[];
         const subject = msg.email_subject || msg.subject;
         const body = msg.email_body || msg.body || '';
         
+        console.log(`Rendering message ${idx}: id=${msg.id}, type=${msgType}, isReply=${isReply}, hasBody=${!!body}`);
+        
         return (
           <div 
-            key={msg.id || idx}
+            key={`message-${idx}-${msg.id}`}
             className={cn(
               "p-3 rounded-lg border",
               isReply 
