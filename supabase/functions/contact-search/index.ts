@@ -134,12 +134,13 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
           console.log(`SmartLead: Campaign ${campaign.name} - ${historyArray.length} messages, hasReply: ${hasReply}`);
           
           // Map messages preserving original type and body
+          // Use index in ID to ensure uniqueness - SmartLead can return same stats_id for sent and reply
           const messageHistory = historyArray.map((msg: any, idx: number) => {
             const msgType = (msg.type || '').toUpperCase();
             const isReply = msgType === 'REPLY' || msgType === 'RECEIVED' || msgType === 'INBOUND';
             
             return {
-              id: msg.stats_id || msg.message_id || idx,
+              id: `${idx}-${msg.stats_id || msg.message_id || 'msg'}`,
               type: isReply ? 'REPLY' : 'SENT',
               time: msg.time || msg.created_at || msg.timestamp,
               // Preserve email body - SmartLead returns HTML in email_body field
