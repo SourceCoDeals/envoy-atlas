@@ -118,25 +118,45 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             apiKey
           );
           
-          const hasReply = history?.history?.some((msg: any) => msg.type === 'REPLY') || false;
+          const historyArray = history?.history || [];
+          
+          // Check for replies - SmartLead uses 'REPLY' or 'reply' type
+          const hasReply = historyArray.some((msg: any) => 
+            msg.type?.toUpperCase() === 'REPLY' || 
+            msg.type?.toLowerCase() === 'received' ||
+            msg.type?.toLowerCase() === 'inbound'
+          );
+          
+          console.log(`SmartLead: Campaign ${campaign.name} - ${historyArray.length} messages, hasReply: ${hasReply}`);
           
           return {
             id: campaign.id,
             name: campaign.name,
-            status: campaign.status,
+            status: campaign.status || 'unknown',
             hasReply,
-            messageHistory: history?.history || [],
-            platformUrl: `https://app.smartlead.ai/app/email-campaign/${campaign.id}/leads?leadId=${lead.id}`,
+            messageHistory: historyArray.map((msg: any) => ({
+              id: msg.id || Math.random(),
+              type: msg.type?.toUpperCase() === 'REPLY' || 
+                    msg.type?.toLowerCase() === 'received' || 
+                    msg.type?.toLowerCase() === 'inbound' 
+                    ? 'REPLY' : 'SENT',
+              time: msg.time || msg.created_at || msg.timestamp,
+              email_body: msg.email_body || msg.body || msg.content || msg.message,
+              email_subject: msg.email_subject || msg.subject,
+              seq_number: msg.seq_number || msg.step_number || msg.sequence_number,
+            })),
+            // Updated URL format for SmartLead
+            platformUrl: `https://app.smartlead.ai/app/email-campaign/${campaign.id}/leads/${lead.id}`,
           };
         } catch (error) {
           console.error(`SmartLead: Error fetching history for campaign ${campaign.id}:`, error);
           return {
             id: campaign.id,
             name: campaign.name,
-            status: campaign.status,
+            status: campaign.status || 'unknown',
             hasReply: false,
             messageHistory: [],
-            platformUrl: `https://app.smartlead.ai/app/email-campaign/${campaign.id}/leads?leadId=${lead.id}`,
+            platformUrl: `https://app.smartlead.ai/app/email-campaign/${campaign.id}/leads/${lead.id}`,
           };
         }
       })
@@ -155,84 +175,172 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
 
 async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResult | null> {
   try {
-    // Step 1: Search for contact by email
-    // Reply.io v3 API: GET /people?email={email}
-    const peopleResponse = await replyioRequest(`/people?email=${encodeURIComponent(email)}`, apiKey);
+    console.log('Reply.io: Starting search for email:', email);
     
-    if (!peopleResponse || !Array.isArray(peopleResponse) || peopleResponse.length === 0) {
-      console.log('Reply.io: No contact found for email:', email);
-      return null;
-    }
+    // Step 1: Fetch all sequences
+    let allSequences: any[] = [];
+    let hasMoreSequences = true;
+    let skip = 0;
     
-    const contact = peopleResponse[0];
-    console.log('Reply.io: Found contact:', contact.id);
-    
-    // Step 2: Get all sequences
-    const sequences = await replyioRequest('/sequences?top=100&skip=0', apiKey);
-    
-    if (!sequences || !Array.isArray(sequences) || sequences.length === 0) {
-      return {
-        platform: 'replyio',
-        contact,
-        sequences: [],
-      };
-    }
-    
-    // Step 3: For each sequence, check if contact is part of it and get emails
-    const sequencesWithEmails: ReplyioResult['sequences'] = [];
-    
-    for (const sequence of sequences) {
-      try {
-        // Get contacts in sequence filtered by email
-        const contactsInSeq = await replyioRequest(
-          `/sequences/${sequence.id}/people?email=${encodeURIComponent(email)}`,
-          apiKey
-        );
-        
-        if (contactsInSeq && Array.isArray(contactsInSeq) && contactsInSeq.length > 0) {
-          // Get email activities for this contact in this sequence
-          const personInSeq = contactsInSeq[0];
-          
-          // Get person's email history from the sequence
-          const emailActivities = await replyioRequest(
-            `/people/${contact.id}/emails`,
-            apiKey
-          );
-          
-          // Filter emails for this sequence
-          const sequenceEmails = (emailActivities || []).filter(
-            (e: any) => e.sequenceId === sequence.id
-          );
-          
-          const hasReply = sequenceEmails.some((e: any) => 
-            e.direction === 'in' || e.type === 'reply' || e.isReply
-          );
-          
-          sequencesWithEmails.push({
-            id: sequence.id,
-            name: sequence.name,
-            status: sequence.status,
-            hasReply,
-            emails: sequenceEmails.map((e: any) => ({
-              id: e.id,
-              type: e.direction === 'out' ? 'SENT' : 'REPLY',
-              date: e.date || e.sentAt || e.receivedAt,
-              subject: e.subject,
-              body: e.body || e.htmlBody || e.textBody,
-              stepNumber: e.stepNumber,
-            })),
-            platformUrl: `https://app.reply.io/app/sequences/${sequence.id}/contacts?search=${encodeURIComponent(email)}`,
-          });
-        }
-      } catch (error) {
-        console.error(`Reply.io: Error checking sequence ${sequence.id}:`, error);
+    while (hasMoreSequences) {
+      const response = await replyioRequest(`/sequences?top=100&skip=${skip}`, apiKey);
+      
+      // Handle various response formats
+      let sequences: any[] = [];
+      const normalized = response?.response ?? response;
+      if (Array.isArray(normalized)) {
+        sequences = normalized;
+      } else if (normalized?.sequences && Array.isArray(normalized.sequences)) {
+        sequences = normalized.sequences;
+      } else if (normalized?.items && Array.isArray(normalized.items)) {
+        sequences = normalized.items;
+      }
+      
+      if (sequences.length === 0) {
+        hasMoreSequences = false;
+      } else {
+        allSequences = allSequences.concat(sequences);
+        skip += sequences.length;
+        hasMoreSequences = sequences.length >= 100;
       }
     }
     
+    console.log(`Reply.io: Found ${allSequences.length} sequences to search`);
+    
+    if (allSequences.length === 0) {
+      return null;
+    }
+    
+    // Step 2: Search each sequence for the contact
+    const foundSequences: ReplyioResult['sequences'] = [];
+    let contactInfo: any = null;
+    
+    for (const sequence of allSequences) {
+      try {
+        // Try extended endpoint first, fallback to regular
+        let contactsResponse: any;
+        try {
+          contactsResponse = await replyioRequest(
+            `/sequences/${sequence.id}/contacts/extended?email=${encodeURIComponent(email)}`,
+            apiKey
+          );
+        } catch (e) {
+          const msg = (e as Error).message || '';
+          if (msg.includes('API error 404') || msg.includes('API error 400')) {
+            // Try without extended and search through results
+            contactsResponse = await replyioRequest(
+              `/sequences/${sequence.id}/contacts?top=100&skip=0`,
+              apiKey
+            );
+          } else {
+            throw e;
+          }
+        }
+        
+        const normalizedContacts = contactsResponse?.response ?? contactsResponse;
+        let contacts = normalizedContacts?.items || normalizedContacts || [];
+        
+        if (!Array.isArray(contacts)) {
+          contacts = [];
+        }
+        
+        // Find contact by email
+        const matchingContact = contacts.find((c: any) => 
+          c.email?.toLowerCase() === email.toLowerCase()
+        );
+        
+        if (matchingContact) {
+          console.log(`Reply.io: Found contact in sequence: ${sequence.name}`);
+          
+          if (!contactInfo) {
+            contactInfo = {
+              id: matchingContact.id || matchingContact.personId,
+              email: matchingContact.email,
+              firstName: matchingContact.firstName,
+              lastName: matchingContact.lastName,
+              company: matchingContact.company,
+            };
+          }
+          
+          // Get email activities for this contact in this sequence
+          let emailActivities: any[] = [];
+          try {
+            // Try to get emails from the contact status/activities
+            const contactStatus = matchingContact.status || {};
+            const sent = contactStatus.sent || 0;
+            const replied = contactStatus.replied || contactStatus.repliedContacts > 0;
+            
+            // The contact data from sequence often includes lastEmailSent, lastEmailOpened, etc.
+            const messages: any[] = [];
+            
+            // Add sent emails info if available
+            if (matchingContact.lastEmailSent) {
+              messages.push({
+                id: 1,
+                type: 'SENT',
+                date: matchingContact.lastEmailSent,
+                subject: matchingContact.lastEmailSubject || 'Email sent',
+                body: matchingContact.lastEmailBody || '',
+                stepNumber: matchingContact.currentStep || 1,
+              });
+            }
+            
+            // Check if replied
+            const hasReplied = replied || 
+                             matchingContact.replied === true || 
+                             contactStatus.status === 'Replied' ||
+                             matchingContact.status?.status === 'Replied';
+            
+            if (hasReplied && matchingContact.lastReplyDate) {
+              messages.push({
+                id: 2,
+                type: 'REPLY',
+                date: matchingContact.lastReplyDate,
+                subject: 'Re: ' + (matchingContact.lastEmailSubject || ''),
+                body: matchingContact.lastReplyBody || matchingContact.replyBody || '[Reply content not available via API]',
+                stepNumber: matchingContact.currentStep || 1,
+              });
+            }
+            
+            emailActivities = messages;
+            
+            foundSequences.push({
+              id: sequence.id,
+              name: sequence.name,
+              status: sequence.status || 'active',
+              hasReply: hasReplied,
+              emails: emailActivities,
+              platformUrl: `https://run.reply.io/app/sequences/${sequence.id}/contacts?search=${encodeURIComponent(email)}`,
+            });
+          } catch (emailError) {
+            console.error(`Reply.io: Error fetching emails for contact in sequence ${sequence.id}:`, emailError);
+            foundSequences.push({
+              id: sequence.id,
+              name: sequence.name,
+              status: sequence.status || 'active',
+              hasReply: false,
+              emails: [],
+              platformUrl: `https://run.reply.io/app/sequences/${sequence.id}/contacts?search=${encodeURIComponent(email)}`,
+            });
+          }
+        }
+      } catch (seqError) {
+        console.error(`Reply.io: Error searching sequence ${sequence.id}:`, seqError);
+        // Continue to next sequence
+      }
+    }
+    
+    if (!contactInfo) {
+      console.log('Reply.io: No contact found in any sequence for email:', email);
+      return null;
+    }
+    
+    console.log(`Reply.io: Contact found in ${foundSequences.length} sequences`);
+    
     return {
       platform: 'replyio',
-      contact,
-      sequences: sequencesWithEmails,
+      contact: contactInfo,
+      sequences: foundSequences,
     };
   } catch (error) {
     console.error('Reply.io search error:', error);
@@ -320,6 +428,10 @@ Deno.serve(async (req) => {
       .eq('is_active', true)
       .single();
 
+    console.log(`Searching for email: ${email}`);
+    console.log(`SmartLead connected: ${!!smartleadConnection}`);
+    console.log(`Reply.io connected: ${!!replyioConnection}`);
+
     // Search both platforms in parallel
     const [smartleadResult, replyioResult] = await Promise.all([
       smartleadConnection?.api_key_encrypted 
@@ -329,6 +441,9 @@ Deno.serve(async (req) => {
         ? searchReplyio(email, replyioConnection.api_key_encrypted)
         : null,
     ]);
+
+    console.log(`SmartLead result: ${smartleadResult ? 'found' : 'not found'}`);
+    console.log(`Reply.io result: ${replyioResult ? 'found' : 'not found'}`);
 
     return new Response(JSON.stringify({
       success: true,
