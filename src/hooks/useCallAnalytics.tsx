@@ -103,24 +103,30 @@ export function useCallAnalytics() {
           .map(([hour, data]) => ({ hour, ...data }))
           .sort((a, b) => a.hour - b.hour);
 
-        // Build team performance
-        const repMap = new Map<string, { calls: number; connects: number; totalScore: number }>();
+        // Build team performance - prioritize rep_name from NocoDB over host_email
+        const repMap = new Map<string, { calls: number; connects: number; totalScore: number; displayName: string }>();
         calls.forEach(call => {
-          const rep = call.host_email || 'Unknown';
-          if (!repMap.has(rep)) {
-            repMap.set(rep, { calls: 0, connects: 0, totalScore: 0 });
+          // Use rep_name (Analyst from NocoDB) if available, otherwise fall back to host_email
+          const repKey = call.rep_name || call.host_email || 'Unknown';
+          const displayName = call.rep_name || (call.host_email ? call.host_email.split('@')[0] : 'Unknown');
+          
+          if (!repMap.has(repKey)) {
+            repMap.set(repKey, { calls: 0, connects: 0, totalScore: 0, displayName });
           }
-          const current = repMap.get(rep)!;
+          const current = repMap.get(repKey)!;
           current.calls++;
           current.totalScore += call.composite_score || 0;
-          if ((call.seller_interest_score || 0) >= 3) {
+          // Use call_category if available, otherwise infer from seller_interest_score
+          const isConnect = call.call_category?.toLowerCase() === 'connection' || 
+                           (call.seller_interest_score || 0) >= 3;
+          if (isConnect) {
             current.connects++;
           }
         });
 
         const teamPerformance: RepPerformance[] = Array.from(repMap.entries())
-          .map(([email, data]) => ({
-            name: email.split('@')[0] || email,
+          .map(([_, data]) => ({
+            name: data.displayName,
             totalCalls: data.calls,
             connects: data.connects,
             connectRate: data.calls > 0 ? (data.connects / data.calls) * 100 : 0,
