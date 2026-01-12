@@ -163,8 +163,8 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             status: campaign.status || 'unknown',
             hasReply,
             messageHistory,
-            // URL to SmartLead campaign leads view with lead ID
-            platformUrl: `https://app.smartlead.ai/app/campaigns/${campaign.id}/leads?lead_id=${lead.id}`,
+            // URL to SmartLead master inbox with lead ID
+            platformUrl: `https://app.smartlead.ai/app/master-inbox?leadMap=${lead.id}`,
           };
         } catch (error) {
           console.error(`SmartLead: Error fetching history for campaign ${campaign.id}:`, error);
@@ -174,7 +174,7 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             status: campaign.status || 'unknown',
             hasReply: false,
             messageHistory: [],
-            platformUrl: `https://app.smartlead.ai/app/campaigns/${campaign.id}/leads?lead_id=${lead.id}`,
+            platformUrl: `https://app.smartlead.ai/app/master-inbox?leadMap=${lead.id}`,
           };
         }
       })
