@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Phone,
@@ -23,6 +24,8 @@ import {
   Trophy,
   Zap,
   Loader2,
+  Users,
+  Filter,
 } from 'lucide-react';
 import {
   LineChart,
@@ -70,12 +73,29 @@ interface RecentCall {
   aiScore: number | null;
 }
 
+type DateRangeOption = 'today' | 'last_week' | 'last_2_weeks' | 'last_month' | 'all_time';
+
+const DATE_RANGE_OPTIONS: { value: DateRangeOption; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: 'last_week', label: 'Last 7 Days' },
+  { value: 'last_2_weeks', label: 'Last 14 Days' },
+  { value: 'last_month', label: 'Last 30 Days' },
+  { value: 'all_time', label: 'All Time' },
+];
+
 export default function CallerDashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [repProfile, setRepProfile] = useState<RepProfile | null>(null);
+  const [allCalls, setAllCalls] = useState<any[]>([]);
+  const [analysts, setAnalysts] = useState<string[]>([]);
+  
+  // Filters
+  const [dateRange, setDateRange] = useState<DateRangeOption>('last_week');
+  const [selectedAnalyst, setSelectedAnalyst] = useState<string>('all');
+  
   const [todayActivity, setTodayActivity] = useState<TodayActivity>({
     dials: 0,
     connects: 0,
@@ -99,18 +119,44 @@ export default function CallerDashboard() {
 
   useEffect(() => {
     if (currentWorkspace?.id && user?.id) {
-      fetchCallerData();
+      fetchAllCalls();
     }
   }, [currentWorkspace?.id, user?.id]);
 
-  const fetchCallerData = async () => {
+  // Re-process data when filters change
+  useEffect(() => {
+    if (allCalls.length > 0) {
+      processCallerData();
+    }
+  }, [dateRange, selectedAnalyst, allCalls]);
+
+  const getDateRangeStart = (range: DateRangeOption): Date | null => {
+    const now = new Date();
+    switch (range) {
+      case 'today':
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      case 'last_week':
+        const weekAgo = new Date(now);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        return weekAgo;
+      case 'last_2_weeks':
+        const twoWeeksAgo = new Date(now);
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+        return twoWeeksAgo;
+      case 'last_month':
+        const monthAgo = new Date(now);
+        monthAgo.setDate(monthAgo.getDate() - 30);
+        return monthAgo;
+      case 'all_time':
+        return null;
+    }
+  };
+
+  const fetchAllCalls = async () => {
     if (!currentWorkspace?.id || !user?.id) return;
     setLoading(true);
 
     try {
-      // Get user's email for matching with external_calls host_email or rep_name
-      const userEmail = user.email || '';
-
       // Fetch rep profile
       const { data: profile } = await supabase
         .from('rep_profiles')
@@ -124,217 +170,231 @@ export default function CallerDashboard() {
       }
 
       // Fetch all calls from external_calls
-      const { data: allCalls } = await supabase
+      const { data: calls } = await supabase
         .from('external_calls')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
         .not('composite_score', 'is', null);
 
-      if (!allCalls || allCalls.length === 0) {
+      if (!calls || calls.length === 0) {
         setLoading(false);
         return;
       }
 
-      // Filter for user's calls - match by rep_name (Analyst field from NocoDB) or host_email
-      const userNamePrefix = userEmail.toLowerCase().split('@')[0] || '';
-      const profileName = profile ? `${profile.first_name} ${profile.last_name}`.toLowerCase() : '';
-      
-      const myCalls = allCalls.filter(c => {
-        // Match by rep_name (Analyst from NocoDB)
-        const repName = (c.rep_name || '').toLowerCase();
-        // Match by host_email
-        const hostEmail = (c.host_email || '').toLowerCase();
-        
-        return (
-          repName.includes(userNamePrefix) ||
-          repName.includes(profileName) ||
-          hostEmail.includes(userNamePrefix)
-        );
+      setAllCalls(calls);
+
+      // Extract unique analysts
+      const uniqueAnalysts = new Set<string>();
+      calls.forEach(c => {
+        const analyst = c.rep_name || c.host_email;
+        if (analyst) {
+          uniqueAnalysts.add(analyst);
+        }
       });
-
-      // Today's activity - use call_category for more accurate categorization
-      const today = new Date().toISOString().split('T')[0];
-      const todayCalls = myCalls.filter(c => 
-        c.date_time?.startsWith(today) || c.call_date === today
-      );
-      
-      const dials = todayCalls.length;
-      // Connections = calls with category "Connection" or seller_interest >= 3
-      const connects = todayCalls.filter(c => 
-        c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
-      ).length;
-      // Conversations = high quality calls (score >= 5) or specific categories
-      const conversations = todayCalls.filter(c => 
-        (c.composite_score || 0) >= 5 || 
-        ['conversation', 'interested', 'meeting'].includes((c.call_category || '').toLowerCase())
-      ).length;
-      // Meetings = high interest calls (seller_interest >= 7)
-      const meetings = todayCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
-      const talkTimeSeconds = todayCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
-
-      setTodayActivity({ dials, connects, conversations, meetings, talkTimeSeconds });
-
-      // Goals - calculate from actual data
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const weekCalls = myCalls.filter(c => 
-        (c.date_time && new Date(c.date_time) >= weekAgo) ||
-        (c.call_date && new Date(c.call_date) >= weekAgo)
-      );
-      const weekDials = weekCalls.length;
-      const weekConnects = weekCalls.filter(c => 
-        c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
-      ).length;
-      const weekMeetings = weekCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
-      const avgScore = weekCalls.length > 0 
-        ? weekCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekCalls.length 
-        : 0;
-
-      setGoals([
-        { label: 'Weekly Dials', current: weekDials, target: 100, unit: '' },
-        { label: 'Connects', current: weekConnects, target: 30, unit: '' },
-        { label: 'Meetings Set', current: weekMeetings, target: 5, unit: '' },
-        { label: 'AI Score Avg', current: Math.round(avgScore * 10) / 10, target: 7, unit: 'pts' },
-      ]);
-
-      // Coaching tips from call patterns
-      const lowScoreCalls = weekCalls.filter(c => (c.composite_score || 0) < 5);
-      const highScoreCalls = weekCalls.filter(c => (c.composite_score || 0) >= 7);
-      const tips: CoachingTip[] = [];
-
-      if (highScoreCalls.length > 0) {
-        tips.push({
-          type: 'strength',
-          title: `${highScoreCalls.length} high-quality calls this week`,
-          description: 'Your conversation quality is strong. Keep building rapport early.',
-        });
-      }
-      if (lowScoreCalls.length > 3) {
-        tips.push({
-          type: 'improvement',
-          title: 'Focus on objection handling',
-          description: `${lowScoreCalls.length} calls scored below 5. Review objection responses.`,
-        });
-      }
-      if (weekConnects > 0 && weekMeetings === 0) {
-        tips.push({
-          type: 'improvement',
-          title: 'Convert connections to meetings',
-          description: 'You had connects but no meetings. Work on stronger closes.',
-        });
-      }
-      if (avgScore >= 6.5) {
-        tips.push({
-          type: 'strength',
-          title: `Strong AI score: ${avgScore.toFixed(1)}`,
-          description: 'Your call quality is above average. Great work!',
-        });
-      }
-      setCoachingTips(tips.slice(0, 4));
-
-      // 4-week trend data
-      const fourWeeksAgo = new Date();
-      fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-      const recentTrendCalls = myCalls.filter(c => 
-        (c.date_time && new Date(c.date_time) >= fourWeeksAgo) ||
-        (c.call_date && new Date(c.call_date) >= fourWeeksAgo)
-      );
-      
-      const weeklyData: { week: string; meetingRate: number; aiScore: number }[] = [];
-      for (let i = 3; i >= 0; i--) {
-        const weekStart = new Date();
-        weekStart.setDate(weekStart.getDate() - (i + 1) * 7);
-        const weekEnd = new Date();
-        weekEnd.setDate(weekEnd.getDate() - i * 7);
-        
-        const weekTrendCalls = recentTrendCalls.filter(c => {
-          const d = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
-          return d && d >= weekStart && d < weekEnd;
-        });
-        
-        const weekTrendConnects = weekTrendCalls.filter(c => 
-          c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
-        ).length;
-        const weekTrendMeetings = weekTrendCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
-        const avgTrendScore = weekTrendCalls.length > 0 
-          ? weekTrendCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekTrendCalls.length 
-          : 0;
-        
-        weeklyData.push({
-          week: `Week ${4 - i}`,
-          meetingRate: weekTrendConnects > 0 ? (weekTrendMeetings / weekTrendConnects) * 100 : 0,
-          aiScore: avgTrendScore,
-        });
-      }
-      setTrendData(weeklyData);
-
-      // Team rank calculation - use rep_name for grouping
-      const repStats = new Map<string, { calls: number; totalScore: number }>();
-      allCalls.forEach(c => {
-        // Use rep_name if available, otherwise host_email
-        const rep = c.rep_name || c.host_email || 'Unknown';
-        if (!repStats.has(rep)) repStats.set(rep, { calls: 0, totalScore: 0 });
-        const stats = repStats.get(rep)!;
-        stats.calls++;
-        stats.totalScore += c.composite_score || 0;
-      });
-
-      const rankings = Array.from(repStats.entries())
-        .map(([name, stats]) => ({
-          name,
-          avgScore: stats.calls > 0 ? stats.totalScore / stats.calls : 0,
-        }))
-        .sort((a, b) => b.avgScore - a.avgScore);
-
-      // Match user by rep_name or host_email
-      const myRankIdx = rankings.findIndex(r => {
-        const repLower = r.name.toLowerCase();
-        return (
-          repLower.includes(userNamePrefix) ||
-          repLower.includes(profileName)
-        );
-      });
-      const teamAvg = rankings.reduce((sum, r) => sum + r.avgScore, 0) / rankings.length;
-      const myAvg = myRankIdx >= 0 ? rankings[myRankIdx].avgScore : 0;
-      const vsAvgPct = teamAvg > 0 ? ((myAvg - teamAvg) / teamAvg) * 100 : 0;
-
-      setTeamRank({
-        rank: myRankIdx >= 0 ? myRankIdx + 1 : rankings.length,
-        total: rankings.length,
-        vsAvg: `${vsAvgPct >= 0 ? '+' : ''}${vsAvgPct.toFixed(0)}%`,
-      });
-
-      // Best and worst calls this week
-      const sortedWeekCalls = [...weekCalls].sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
-      
-      if (sortedWeekCalls.length > 0) {
-        const best = sortedWeekCalls[0];
-        setBestCall({
-          id: best.id,
-          time: best.date_time || '',
-          contact: best.contact_name || 'Unknown Contact',
-          company: best.company_name || 'Unknown Company',
-          outcome: best.call_category || 'Scored',
-          aiScore: best.composite_score,
-        });
-      }
-
-      if (sortedWeekCalls.length > 1) {
-        const worst = sortedWeekCalls[sortedWeekCalls.length - 1];
-        setWorstCall({
-          id: worst.id,
-          time: worst.date_time || '',
-          contact: worst.contact_name || 'Unknown Contact',
-          company: worst.company_name || 'Unknown Company',
-          outcome: worst.call_category || 'Needs Review',
-          aiScore: worst.composite_score,
-        });
-      }
+      setAnalysts(Array.from(uniqueAnalysts).sort());
 
     } catch (err) {
-      console.error('Error fetching caller data:', err);
+      console.error('Error fetching calls:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const processCallerData = () => {
+    if (allCalls.length === 0) return;
+
+    const rangeStart = getDateRangeStart(dateRange);
+    
+    // Filter calls by date range and analyst
+    let filteredCalls = allCalls.filter(c => {
+      const callDate = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
+      if (!callDate) return false;
+      if (rangeStart && callDate < rangeStart) return false;
+      return true;
+    });
+
+    // Filter by selected analyst
+    if (selectedAnalyst !== 'all') {
+      filteredCalls = filteredCalls.filter(c => {
+        const analyst = c.rep_name || c.host_email || '';
+        return analyst === selectedAnalyst;
+      });
+    }
+
+    // Activity metrics for the selected period
+    const dials = filteredCalls.length;
+    const connects = filteredCalls.filter(c => 
+      c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
+    ).length;
+    const conversations = filteredCalls.filter(c => 
+      (c.composite_score || 0) >= 5 || 
+      ['conversation', 'interested', 'meeting'].includes((c.call_category || '').toLowerCase())
+    ).length;
+    const meetings = filteredCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
+    const talkTimeSeconds = filteredCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
+
+    setTodayActivity({ dials, connects, conversations, meetings, talkTimeSeconds });
+
+    // Goals - calculated from filtered data
+    const avgScore = filteredCalls.length > 0 
+      ? filteredCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / filteredCalls.length 
+      : 0;
+
+    setGoals([
+      { label: 'Total Dials', current: dials, target: 100, unit: '' },
+      { label: 'Connects', current: connects, target: 30, unit: '' },
+      { label: 'Meetings Set', current: meetings, target: 5, unit: '' },
+      { label: 'AI Score Avg', current: Math.round(avgScore * 10) / 10, target: 7, unit: 'pts' },
+    ]);
+
+    // Coaching tips from call patterns
+    const lowScoreCalls = filteredCalls.filter(c => (c.composite_score || 0) < 5);
+    const highScoreCalls = filteredCalls.filter(c => (c.composite_score || 0) >= 7);
+    const tips: CoachingTip[] = [];
+
+    if (highScoreCalls.length > 0) {
+      tips.push({
+        type: 'strength',
+        title: `${highScoreCalls.length} high-quality calls`,
+        description: 'Conversation quality is strong. Keep building rapport early.',
+      });
+    }
+    if (lowScoreCalls.length > 3) {
+      tips.push({
+        type: 'improvement',
+        title: 'Focus on objection handling',
+        description: `${lowScoreCalls.length} calls scored below 5. Review objection responses.`,
+      });
+    }
+    if (connects > 0 && meetings === 0) {
+      tips.push({
+        type: 'improvement',
+        title: 'Convert connections to meetings',
+        description: 'Had connects but no meetings. Work on stronger closes.',
+      });
+    }
+    if (avgScore >= 6.5) {
+      tips.push({
+        type: 'strength',
+        title: `Strong AI score: ${avgScore.toFixed(1)}`,
+        description: 'Call quality is above average. Great work!',
+      });
+    }
+    setCoachingTips(tips.slice(0, 4));
+
+    // 4-week trend data (uses all calls, respecting analyst filter only)
+    const fourWeeksAgo = new Date();
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    
+    let trendBaseCalls = allCalls.filter(c => {
+      const callDate = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
+      return callDate && callDate >= fourWeeksAgo;
+    });
+
+    if (selectedAnalyst !== 'all') {
+      trendBaseCalls = trendBaseCalls.filter(c => {
+        const analyst = c.rep_name || c.host_email || '';
+        return analyst === selectedAnalyst;
+      });
+    }
+    
+    const weeklyData: { week: string; meetingRate: number; aiScore: number }[] = [];
+    for (let i = 3; i >= 0; i--) {
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - (i + 1) * 7);
+      const weekEnd = new Date();
+      weekEnd.setDate(weekEnd.getDate() - i * 7);
+      
+      const weekTrendCalls = trendBaseCalls.filter(c => {
+        const d = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
+        return d && d >= weekStart && d < weekEnd;
+      });
+      
+      const weekTrendConnects = weekTrendCalls.filter(c => 
+        c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
+      ).length;
+      const weekTrendMeetings = weekTrendCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
+      const avgTrendScore = weekTrendCalls.length > 0 
+        ? weekTrendCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekTrendCalls.length 
+        : 0;
+      
+      weeklyData.push({
+        week: `Week ${4 - i}`,
+        meetingRate: weekTrendConnects > 0 ? (weekTrendMeetings / weekTrendConnects) * 100 : 0,
+        aiScore: avgTrendScore,
+      });
+    }
+    setTrendData(weeklyData);
+
+    // Team rank calculation - use all calls (not filtered by date)
+    const repStats = new Map<string, { calls: number; totalScore: number }>();
+    allCalls.forEach(c => {
+      const rep = c.rep_name || c.host_email || 'Unknown';
+      if (!repStats.has(rep)) repStats.set(rep, { calls: 0, totalScore: 0 });
+      const stats = repStats.get(rep)!;
+      stats.calls++;
+      stats.totalScore += c.composite_score || 0;
+    });
+
+    const rankings = Array.from(repStats.entries())
+      .map(([name, stats]) => ({
+        name,
+        avgScore: stats.calls > 0 ? stats.totalScore / stats.calls : 0,
+      }))
+      .sort((a, b) => b.avgScore - a.avgScore);
+
+    // Find selected analyst's rank or current user's rank
+    const targetAnalyst = selectedAnalyst !== 'all' ? selectedAnalyst : null;
+    const myRankIdx = rankings.findIndex(r => {
+      if (targetAnalyst) {
+        return r.name === targetAnalyst;
+      }
+      // Fall back to matching by user email
+      const userEmail = user?.email || '';
+      const userNamePrefix = userEmail.toLowerCase().split('@')[0] || '';
+      const repLower = r.name.toLowerCase();
+      return repLower.includes(userNamePrefix);
+    });
+    
+    const teamAvg = rankings.length > 0 ? rankings.reduce((sum, r) => sum + r.avgScore, 0) / rankings.length : 0;
+    const myAvg = myRankIdx >= 0 ? rankings[myRankIdx].avgScore : 0;
+    const vsAvgPct = teamAvg > 0 ? ((myAvg - teamAvg) / teamAvg) * 100 : 0;
+
+    setTeamRank({
+      rank: myRankIdx >= 0 ? myRankIdx + 1 : rankings.length,
+      total: rankings.length,
+      vsAvg: `${vsAvgPct >= 0 ? '+' : ''}${vsAvgPct.toFixed(0)}%`,
+    });
+
+    // Best and worst calls in the filtered period
+    const sortedCalls = [...filteredCalls].sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
+    
+    if (sortedCalls.length > 0) {
+      const best = sortedCalls[0];
+      setBestCall({
+        id: best.id,
+        time: best.date_time || '',
+        contact: best.contact_name || 'Unknown Contact',
+        company: best.company_name || 'Unknown Company',
+        outcome: best.call_category || 'Scored',
+        aiScore: best.composite_score,
+      });
+    } else {
+      setBestCall(null);
+    }
+
+    if (sortedCalls.length > 1) {
+      const worst = sortedCalls[sortedCalls.length - 1];
+      setWorstCall({
+        id: worst.id,
+        time: worst.date_time || '',
+        contact: worst.contact_name || 'Unknown Contact',
+        company: worst.company_name || 'Unknown Company',
+        outcome: worst.call_category || 'Needs Review',
+        aiScore: worst.composite_score,
+      });
+    } else {
+      setWorstCall(null);
     }
   };
 
@@ -355,15 +415,55 @@ export default function CallerDashboard() {
 
   if (!user) return null;
 
+  const dateRangeLabel = DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label || 'Selected Period';
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {repProfile ? `Welcome back, ${repProfile.first_name}` : 'Caller Dashboard'}
-          </h1>
-          <p className="text-muted-foreground">Your personal performance command center</p>
+        {/* Header with Filters */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {selectedAnalyst !== 'all' ? selectedAnalyst : repProfile ? `Welcome back, ${repProfile.first_name}` : 'Caller Dashboard'}
+            </h1>
+            <p className="text-muted-foreground">Performance metrics for {dateRangeLabel.toLowerCase()}</p>
+          </div>
+          
+          {/* Filters */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRangeOption)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Date range" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DATE_RANGE_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-muted-foreground" />
+              <Select value={selectedAnalyst} onValueChange={setSelectedAnalyst}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select analyst" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Analysts</SelectItem>
+                  {analysts.map(analyst => (
+                    <SelectItem key={analyst} value={analyst}>
+                      {analyst}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
 
         {loading ? (
@@ -378,7 +478,7 @@ export default function CallerDashboard() {
           </div>
         ) : (
           <>
-            {/* Today's Activity */}
+            {/* Activity for Selected Period */}
             <div className="grid gap-4 md:grid-cols-5">
               <Card>
                 <CardContent className="pt-6">
@@ -388,7 +488,7 @@ export default function CallerDashboard() {
                     </div>
                     <div>
                       <p className="text-2xl font-bold">{todayActivity.dials}</p>
-                      <p className="text-sm text-muted-foreground">Dials Today</p>
+                      <p className="text-sm text-muted-foreground">Total Dials</p>
                     </div>
                   </div>
                 </CardContent>
@@ -456,8 +556,8 @@ export default function CallerDashboard() {
               {/* Goal Progress */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">Goal Progress</CardTitle>
-                  <CardDescription>Your targets this week</CardDescription>
+                  <CardTitle className="text-lg">Performance Summary</CardTitle>
+                  <CardDescription>Metrics for {dateRangeLabel.toLowerCase()}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {goals.length > 0 ? (
@@ -625,7 +725,7 @@ export default function CallerDashboard() {
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Star className="h-5 w-5 text-success" />
-                    Best Call This Week
+                    Best Call ({dateRangeLabel})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
