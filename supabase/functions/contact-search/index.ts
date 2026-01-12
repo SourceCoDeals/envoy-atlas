@@ -112,8 +112,15 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
     console.log('SmartLead: Found campaigns:', campaigns.length, 'Full campaign data:', JSON.stringify(campaigns[0]));
     
     // Step 3: For each campaign, get message history
+    // Also extract the campaign_lead_map_id for the correct master inbox URL
+    const leadCampaignData = lead.lead_campaign_data || [];
+    
     const campaignsWithHistory = await Promise.all(
       campaigns.map(async (campaign: any) => {
+        // Find the campaign_lead_map_id for this campaign
+        const campaignLeadMapping = leadCampaignData.find((lcd: any) => lcd.campaign_id === campaign.id);
+        const leadMapId = campaignLeadMapping?.campaign_lead_map_id || lead.id;
+        
         try {
           const history = await smartleadRequest(
             `/campaigns/${campaign.id}/leads/${lead.id}/message-history`,
@@ -163,8 +170,8 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             status: campaign.status || 'unknown',
             hasReply,
             messageHistory,
-            // URL to SmartLead master inbox with lead ID
-            platformUrl: `https://app.smartlead.ai/app/master-inbox?leadMap=${lead.id}`,
+            // URL to SmartLead master inbox with campaign_lead_map_id
+            platformUrl: `https://app.smartlead.ai/app/master-inbox?leadMap=${leadMapId}`,
           };
         } catch (error) {
           console.error(`SmartLead: Error fetching history for campaign ${campaign.id}:`, error);
@@ -174,7 +181,7 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             status: campaign.status || 'unknown',
             hasReply: false,
             messageHistory: [],
-            platformUrl: `https://app.smartlead.ai/app/master-inbox?leadMap=${lead.id}`,
+            platformUrl: `https://app.smartlead.ai/app/master-inbox?leadMap=${leadMapId}`,
           };
         }
       })
