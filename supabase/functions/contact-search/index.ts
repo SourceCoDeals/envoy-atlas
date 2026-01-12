@@ -109,7 +109,7 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
       };
     }
     
-    console.log('SmartLead: Found campaigns:', campaigns.length);
+    console.log('SmartLead: Found campaigns:', campaigns.length, 'Full campaign data:', JSON.stringify(campaigns[0]));
     
     // Step 3: For each campaign, get message history
     const campaignsWithHistory = await Promise.all(
