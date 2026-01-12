@@ -8,7 +8,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
 import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, TrendingUp, TrendingDown, Minus, Circle } from 'lucide-react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle } from 'lucide-react';
+import { format } from 'date-fns';
 
 interface EnhancedCampaignTableProps {
   campaigns: CampaignWithMetrics[];
@@ -16,7 +17,7 @@ interface EnhancedCampaignTableProps {
   onTierFilterChange?: (tier: string) => void;
 }
 
-type SortField = 'name' | 'score' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence';
+type SortField = 'name' | 'score' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence';
 type SortDirection = 'asc' | 'desc';
 
 interface CampaignWithScore extends CampaignWithMetrics {
@@ -117,7 +118,15 @@ export function EnhancedCampaignTable({
       result = result.filter(c => c.tier.tier === localTierFilter);
     }
 
+    // Sort: active statuses first, then by selected field
+    const activeStatuses = ['active', 'started', 'running'];
     result.sort((a, b) => {
+      const aIsActive = activeStatuses.includes(a.status.toLowerCase());
+      const bIsActive = activeStatuses.includes(b.status.toLowerCase());
+      
+      if (aIsActive && !bIsActive) return -1;
+      if (!aIsActive && bIsActive) return 1;
+      
       let aVal: number | string | null;
       let bVal: number | string | null;
 
@@ -138,6 +147,10 @@ export function EnhancedCampaignTable({
           const confOrder = { high: 5, good: 4, medium: 3, low: 2, none: 1 };
           aVal = confOrder[a.tier.confidence];
           bVal = confOrder[b.tier.confidence];
+          break;
+        case 'updated_at':
+          aVal = new Date(a.updated_at).getTime();
+          bVal = new Date(b.updated_at).getTime();
           break;
         default:
           aVal = a[sortField as keyof CampaignWithMetrics] as number | string;
@@ -327,10 +340,12 @@ export function EnhancedCampaignTable({
                 />
               </TableHead>
               <SortableHeader field="name" className="min-w-[200px]">Campaign</SortableHeader>
-              <SortableHeader field="score" className="w-[80px] text-center">Score</SortableHeader>
-              <TableHead className="w-[100px] text-center">Tier</TableHead>
-              <SortableHeader field="confidence" className="w-[80px] text-center">Conf</SortableHeader>
+              <SortableHeader field="score" className="w-[70px] text-center">Score</SortableHeader>
+              <TableHead className="w-[90px] text-center">Tier</TableHead>
+              <SortableHeader field="confidence" className="w-[60px] text-center">Conf</SortableHeader>
               <TableHead className="w-[80px] text-center">Status</TableHead>
+              <SortableHeader field="total_leads" className="text-right">Leads</SortableHeader>
+              <SortableHeader field="updated_at" className="text-right">Updated</SortableHeader>
               <SortableHeader field="total_sent" className="text-right">Sent</SortableHeader>
               <SortableHeader field="reply_rate" className="text-right">Reply %</SortableHeader>
               <SortableHeader field="positive_rate" className="text-right">Pos %</SortableHeader>
@@ -341,7 +356,7 @@ export function EnhancedCampaignTable({
           <TableBody>
             {filteredAndSortedCampaigns.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
                   No campaigns match your filters
                 </TableCell>
               </TableRow>
@@ -423,6 +438,12 @@ export function EnhancedCampaignTable({
                   </TableCell>
                   <TableCell className="text-center">
                     {getStatusBadge(campaign.status)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono">
+                    {campaign.total_leads.toLocaleString()}
+                  </TableCell>
+                  <TableCell className="text-right text-sm text-muted-foreground">
+                    {format(new Date(campaign.updated_at), 'MMM d, yyyy')}
                   </TableCell>
                   <TableCell className="text-right font-mono">
                     {campaign.total_sent.toLocaleString()}
