@@ -86,6 +86,8 @@ async function replyioRequestV1(endpoint: string, apiKey: string): Promise<any> 
 
 async function searchSmartlead(email: string, apiKey: string): Promise<SmartleadResult | null> {
   try {
+    console.log('SmartLead: Starting search for email:', email);
+    
     // Step 1: Find the lead by email
     const lead = await smartleadRequest(`/leads/?email=${encodeURIComponent(email)}`, apiKey);
     
@@ -118,35 +120,43 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             apiKey
           );
           
+          // The API returns { history: [...], from: "...", to: "..." }
           const historyArray = history?.history || [];
           
-          // Check for replies - SmartLead uses 'REPLY' or 'reply' type
-          const hasReply = historyArray.some((msg: any) => 
-            msg.type?.toUpperCase() === 'REPLY' || 
-            msg.type?.toLowerCase() === 'received' ||
-            msg.type?.toLowerCase() === 'inbound'
-          );
+          console.log(`SmartLead: Campaign ${campaign.name} - Raw history:`, JSON.stringify(historyArray.map((m: any) => ({ type: m.type, hasBody: !!m.email_body }))));
+          
+          // Check for replies - SmartLead uses 'REPLY' type (case insensitive)
+          const hasReply = historyArray.some((msg: any) => {
+            const msgType = (msg.type || '').toUpperCase();
+            return msgType === 'REPLY' || msgType === 'RECEIVED' || msgType === 'INBOUND';
+          });
           
           console.log(`SmartLead: Campaign ${campaign.name} - ${historyArray.length} messages, hasReply: ${hasReply}`);
+          
+          // Map messages preserving original type and body
+          const messageHistory = historyArray.map((msg: any, idx: number) => {
+            const msgType = (msg.type || '').toUpperCase();
+            const isReply = msgType === 'REPLY' || msgType === 'RECEIVED' || msgType === 'INBOUND';
+            
+            return {
+              id: msg.stats_id || msg.message_id || idx,
+              type: isReply ? 'REPLY' : 'SENT',
+              time: msg.time || msg.created_at || msg.timestamp,
+              // Preserve email body - SmartLead returns HTML in email_body field
+              email_body: msg.email_body || null,
+              email_subject: msg.email_subject || msg.subject || null,
+              seq_number: msg.seq_number || msg.step_number || msg.sequence_number,
+            };
+          });
           
           return {
             id: campaign.id,
             name: campaign.name,
             status: campaign.status || 'unknown',
             hasReply,
-            messageHistory: historyArray.map((msg: any) => ({
-              id: msg.id || Math.random(),
-              type: msg.type?.toUpperCase() === 'REPLY' || 
-                    msg.type?.toLowerCase() === 'received' || 
-                    msg.type?.toLowerCase() === 'inbound' 
-                    ? 'REPLY' : 'SENT',
-              time: msg.time || msg.created_at || msg.timestamp,
-              email_body: msg.email_body || msg.body || msg.content || msg.message,
-              email_subject: msg.email_subject || msg.subject,
-              seq_number: msg.seq_number || msg.step_number || msg.sequence_number,
-            })),
-            // Updated URL format for SmartLead
-            platformUrl: `https://app.smartlead.ai/app/email-campaign/${campaign.id}/leads/${lead.id}`,
+            messageHistory,
+            // URL to SmartLead Master Inbox filtered by email
+            platformUrl: `https://app.smartlead.ai/app/email-accounts/master-inbox?search=${encodeURIComponent(email)}`,
           };
         } catch (error) {
           console.error(`SmartLead: Error fetching history for campaign ${campaign.id}:`, error);
@@ -156,7 +166,7 @@ async function searchSmartlead(email: string, apiKey: string): Promise<Smartlead
             status: campaign.status || 'unknown',
             hasReply: false,
             messageHistory: [],
-            platformUrl: `https://app.smartlead.ai/app/email-campaign/${campaign.id}/leads/${lead.id}`,
+            platformUrl: `https://app.smartlead.ai/app/email-accounts/master-inbox?search=${encodeURIComponent(email)}`,
           };
         }
       })
@@ -196,7 +206,7 @@ async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResu
       return null;
     }
     
-    console.log('Reply.io: Found contact with ID:', contact.id);
+    console.log('Reply.io: Found contact with ID:', contact.id, 'Full contact data:', JSON.stringify(contact));
     
     const contactInfo = {
       id: contact.id,
@@ -214,7 +224,7 @@ async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResu
     try {
       const sequencesResponse = await replyioRequestV1(`/people/${contact.id}/sequences`, apiKey);
       sequences = Array.isArray(sequencesResponse) ? sequencesResponse : [];
-      console.log(`Reply.io: Contact is in ${sequences.length} sequences`);
+      console.log(`Reply.io: Contact is in ${sequences.length} sequences. Raw:`, JSON.stringify(sequencesResponse));
     } catch (error) {
       console.error('Reply.io: Error fetching sequences for contact:', error);
       sequences = [];
@@ -228,39 +238,42 @@ async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResu
       };
     }
     
-    // Step 3: For each sequence, check for reply status and get details
+    // Step 3: For each sequence, check for reply status
+    // The sequence response includes: sequenceId, sequenceName, status, isSequenceOwner
+    // Status values: "Active", "Paused", "Finished", "Replied", etc.
     const sequencesWithDetails: ReplyioResult['sequences'] = [];
     
     for (const seq of sequences) {
       try {
-        // The sequence response includes: sequenceId, sequenceName, status, isSequenceOwner
-        const hasReply = seq.status?.toLowerCase() === 'replied';
+        const seqStatus = (seq.status || '').toLowerCase();
+        // Check for reply status - Reply.io uses "replied" status
+        const hasReply = seqStatus === 'replied';
         
-        // Try to get contact status in campaign for more details (10-second throttle but useful)
-        // We'll use the status field from sequences response instead to avoid throttling
+        console.log(`Reply.io: Sequence "${seq.sequenceName}" (ID: ${seq.sequenceId}) - raw status: "${seq.status}", hasReply: ${hasReply}`);
         
+        // Build email activity list based on status
         const emails: any[] = [];
         
-        // Add placeholder for sent emails based on status
-        if (seq.status) {
-          emails.push({
-            id: 1,
-            type: 'SENT',
-            date: new Date().toISOString(),
-            subject: 'Email sent in sequence',
-            body: '[View full conversation on Reply.io platform]',
-            stepNumber: 1,
-          });
-        }
+        // Show current status indicator
+        emails.push({
+          id: 1,
+          type: 'SENT',
+          date: new Date().toISOString(),
+          subject: `Sequence Status: ${seq.status || 'Unknown'}`,
+          body: hasReply 
+            ? '✅ Contact has replied to this sequence. View the full conversation on Reply.io.'
+            : 'Email(s) sent in this sequence. View the full conversation on Reply.io.',
+          stepNumber: 1,
+        });
         
-        // Add reply indicator if they replied
+        // If they replied, add explicit reply indicator
         if (hasReply) {
           emails.push({
             id: 2,
             type: 'REPLY',
             date: new Date().toISOString(),
-            subject: 'Contact replied',
-            body: '[View reply content on Reply.io platform]',
+            subject: 'Reply Received',
+            body: 'Contact replied to this sequence. View the reply content on Reply.io platform.',
             stepNumber: 1,
           });
         }
@@ -272,10 +285,9 @@ async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResu
           hasReply,
           isSequenceOwner: seq.isSequenceOwner || false,
           emails,
-          platformUrl: `https://run.reply.io/app/sequences/${seq.sequenceId}/contacts?search=${encodeURIComponent(email)}`,
+          // Updated URL format - Reply.io inbox with contact filter
+          platformUrl: `https://run.reply.io/inbox?search=${encodeURIComponent(email)}`,
         });
-        
-        console.log(`Reply.io: Sequence "${seq.sequenceName}" - status: ${seq.status}, hasReply: ${hasReply}`);
       } catch (seqError) {
         console.error(`Reply.io: Error processing sequence ${seq.sequenceId}:`, seqError);
         sequencesWithDetails.push({
@@ -285,7 +297,7 @@ async function searchReplyio(email: string, apiKey: string): Promise<ReplyioResu
           hasReply: false,
           isSequenceOwner: seq.isSequenceOwner || false,
           emails: [],
-          platformUrl: `https://run.reply.io/app/sequences/${seq.sequenceId}/contacts?search=${encodeURIComponent(email)}`,
+          platformUrl: `https://run.reply.io/inbox?search=${encodeURIComponent(email)}`,
         });
       }
     }
