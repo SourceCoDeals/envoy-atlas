@@ -363,41 +363,49 @@ export function useAggregateCallingMetrics() {
         };
       }
 
-      // Fetch from external_calls and group by host_email
+      // Fetch from external_calls and group by rep_name (preferred) or host_email
       const { data: calls, error } = await supabase
         .from('external_calls')
-        .select('host_email, transcript_text, composite_score')
+        .select('host_email, rep_name, transcript_text, composite_score, call_category, seller_interest_score, duration')
         .eq('workspace_id', currentWorkspace.id);
 
       if (error) throw error;
 
-      // Aggregate by host
-      const hostMap = new Map<string, RepPerformance>();
+      // Aggregate by rep - prioritize rep_name from NocoDB
+      const repMap = new Map<string, RepPerformance>();
 
       for (const call of calls || []) {
-        const hostId = call.host_email || 'unknown';
-        const existing = hostMap.get(hostId);
-        const isConnected = call.transcript_text && call.transcript_text.length > 100;
+        // Use rep_name (Analyst from NocoDB) if available, otherwise fall back to host_email
+        const repKey = call.rep_name || call.host_email || 'unknown';
+        const displayName = call.rep_name || (call.host_email ? call.host_email.split('@')[0] : 'Unknown');
+        
+        const existing = repMap.get(repKey);
+        // Use call_category if available, otherwise infer from seller_interest_score or transcript
+        const isConnected = call.call_category?.toLowerCase() === 'connection' ||
+                           (call.seller_interest_score || 0) >= 3 ||
+                           (call.transcript_text && call.transcript_text.length > 100);
+        const duration = call.duration || 0;
         
         if (existing) {
           existing.totalCalls += 1;
           existing.callsConnected += isConnected ? 1 : 0;
+          existing.totalTalkTimeSeconds += duration;
         } else {
-          hostMap.set(hostId, {
-            memberId: hostId,
-            memberName: hostId,
+          repMap.set(repKey, {
+            memberId: repKey,
+            memberName: displayName,
             totalCalls: 1,
             callsConnected: isConnected ? 1 : 0,
             connectRate: 0,
             voicemailsLeft: 0,
-            totalTalkTimeSeconds: 0,
+            totalTalkTimeSeconds: duration,
             totalSessions: 1,
           });
         }
       }
 
       // Calculate connect rates
-      const repPerformance = Array.from(hostMap.values()).map(rep => ({
+      const repPerformance = Array.from(repMap.values()).map(rep => ({
         ...rep,
         connectRate: rep.totalCalls > 0 ? (rep.callsConnected / rep.totalCalls) * 100 : 0,
       })).sort((a, b) => b.connectRate - a.connectRate);
