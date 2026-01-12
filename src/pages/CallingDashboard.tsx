@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,9 +13,14 @@ import {
   Loader2,
   Trophy,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { useAggregateCallingMetrics, useProcessCalls } from '@/hooks/useCallIntelligence';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { useWorkspace } from '@/hooks/useWorkspace';
+import { useQueryClient } from '@tanstack/react-query';
 
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -33,9 +39,44 @@ function formatDuration(seconds: number): string {
 export default function CallingDashboard() {
   const { data: metrics, isLoading: metricsLoading } = useAggregateCallingMetrics();
   const processCalls = useProcessCalls();
+  const { currentWorkspace } = useWorkspace();
+  const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
 
   const handleProcessCalls = () => {
     processCalls.mutate({ mode: 'pending', limit: 10 });
+  };
+
+  const handleSyncNocoDB = async () => {
+    if (!currentWorkspace?.id || syncing) return;
+    
+    setSyncing(true);
+    toast.info('Starting NocoDB sync...', { description: 'This may take a few minutes for large datasets.' });
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('nocodb-sync', {
+        body: { 
+          workspace_id: currentWorkspace.id,
+          action: 'sync'
+        }
+      });
+
+      if (error) throw error;
+
+      toast.success('NocoDB sync complete', {
+        description: `Synced ${data?.synced_count || 0} records successfully`
+      });
+      
+      // Refresh the metrics
+      queryClient.invalidateQueries({ queryKey: ['aggregate-calling-metrics'] });
+    } catch (err) {
+      console.error('NocoDB sync error:', err);
+      toast.error('Sync failed', {
+        description: err instanceof Error ? err.message : 'Failed to sync NocoDB data'
+      });
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (
@@ -49,17 +90,31 @@ export default function CallingDashboard() {
               Team calling performance from PhoneBurner
             </p>
           </div>
-          <Button 
-            onClick={handleProcessCalls}
-            disabled={processCalls.isPending}
-          >
-            {processCalls.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-2 h-4 w-4" />
-            )}
-            Process Calls
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline"
+              onClick={handleSyncNocoDB}
+              disabled={syncing}
+            >
+              {syncing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Sync NocoDB
+            </Button>
+            <Button 
+              onClick={handleProcessCalls}
+              disabled={processCalls.isPending}
+            >
+              {processCalls.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              Process Calls
+            </Button>
+          </div>
         </div>
 
         {/* KPI Cards */}
