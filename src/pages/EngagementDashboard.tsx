@@ -162,39 +162,51 @@ export default function EngagementDashboard() {
     if (!currentWorkspace?.id) return;
 
     try {
-      // For each engagement, get call data matching client name
+      // For each engagement, get call data matching client name or engagement_name field
       const metricsMap: Record<string, EngagementMetrics> = {};
       
       for (const eng of engagementList) {
-        const clientPattern = `%${eng.client_name}%`;
-        
+        // Match by engagement_name (Primary Opportunity from NocoDB) or client_name
         const { data: callData } = await supabase
           .from('external_calls')
-          .select('composite_score, seller_interest_score, call_category')
+          .select('composite_score, seller_interest_score, call_category, engagement_name, call_title, company_name')
           .eq('workspace_id', currentWorkspace.id)
-          .or(`call_title.ilike.${clientPattern},company_name.ilike.${clientPattern}`)
           .not('composite_score', 'is', null);
 
-        if (callData) {
-          const totalCalls = callData.length;
-          const avgScore = totalCalls > 0 
-            ? callData.reduce((sum, c) => sum + (c.composite_score || 0), 0) / totalCalls 
-            : 0;
-          const interestedLeads = callData.filter(c => (c.seller_interest_score || 0) >= 7).length;
-          const conversations = callData.filter(c => 
-            c.call_category && ['conversation', 'interested', 'meeting'].some(cat => 
-              c.call_category?.toLowerCase().includes(cat)
-            )
-          ).length;
+        // Filter calls that match this engagement
+        const matchingCalls = (callData || []).filter(c => {
+          const engName = (c.engagement_name || '').toLowerCase();
+          const callTitle = (c.call_title || '').toLowerCase();
+          const companyName = (c.company_name || '').toLowerCase();
+          const clientNameLower = eng.client_name.toLowerCase();
+          const engagementNameLower = eng.engagement_name.toLowerCase();
+          
+          return (
+            engName.includes(clientNameLower) ||
+            engName.includes(engagementNameLower) ||
+            callTitle.includes(clientNameLower) ||
+            companyName.includes(clientNameLower)
+          );
+        });
 
-          metricsMap[eng.id] = {
-            totalCalls,
-            avgScore: Math.round(avgScore * 10) / 10,
-            interestedLeads,
-            conversations,
-            meetingsSet: Math.round(interestedLeads * 0.15), // Estimate
-          };
-        }
+        const totalCalls = matchingCalls.length;
+        const avgScore = totalCalls > 0 
+          ? matchingCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / totalCalls 
+          : 0;
+        const interestedLeads = matchingCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
+        const conversations = matchingCalls.filter(c => 
+          c.call_category && ['conversation', 'interested', 'meeting', 'connection'].some(cat => 
+            c.call_category?.toLowerCase().includes(cat)
+          )
+        ).length;
+
+        metricsMap[eng.id] = {
+          totalCalls,
+          avgScore: Math.round(avgScore * 10) / 10,
+          interestedLeads,
+          conversations,
+          meetingsSet: Math.round(interestedLeads * 0.15), // Estimate
+        };
       }
       
       setEngagementMetrics(metricsMap);
@@ -209,20 +221,25 @@ export default function EngagementDashboard() {
     try {
       const { data, error } = await supabase
         .from('external_calls')
-        .select('call_title, company_name, composite_score, seller_interest_score')
+        .select('call_title, company_name, composite_score, seller_interest_score, engagement_name, rep_name')
         .eq('workspace_id', currentWorkspace.id)
         .not('composite_score', 'is', null);
 
       if (error) throw error;
 
-      // Group by client/project extracted from call_title
+      // Group by engagement_name (Primary Opportunity from NocoDB) or extracted from call_title
       const grouped: Record<string, { calls: number; scores: number[]; interested: number }> = {};
       
       (data || []).forEach(call => {
-        // Extract project from call_title format: "Company <ext> Project"
-        const title = call.call_title || '';
-        const projectMatch = title.split('<ext>')[1]?.trim() || call.company_name || 'Other';
-        const project = projectMatch.split('(')[0]?.trim() || projectMatch;
+        // Use engagement_name if available, otherwise extract from call_title
+        let project = call.engagement_name;
+        
+        if (!project) {
+          // Extract project from call_title format: "Company <ext> Project"
+          const title = call.call_title || '';
+          const projectMatch = title.split('<ext>')[1]?.trim() || call.company_name || 'Other';
+          project = projectMatch.split('(')[0]?.trim() || projectMatch;
+        }
         
         if (!grouped[project]) {
           grouped[project] = { calls: 0, scores: [], interested: 0 };

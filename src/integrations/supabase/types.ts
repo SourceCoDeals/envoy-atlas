@@ -2285,6 +2285,8 @@ export type Database = {
           business_history: string | null
           buyer_type_preference: string | null
           call_category: string | null
+          call_date: string | null
+          call_direction: string | null
           call_summary: string | null
           call_title: string | null
           call_type: string | null
@@ -2294,14 +2296,18 @@ export type Database = {
           conversation_quality_justification: string | null
           created_at: string | null
           date_time: string | null
+          decision_maker_justification: string | null
+          decision_maker_score: number | null
           duration: number | null
           ebitda: string | null
           employee_count: number | null
+          engagement_name: string | null
           engagement_score: number | null
           error_message: string | null
           exit_reason: string | null
           financial_data: string | null
           fireflies_url: string | null
+          from_number: string | null
           future_growth_plans: string | null
           growth_information: string | null
           historical_financials: string | null
@@ -2316,7 +2322,10 @@ export type Database = {
           motivation_factors: string[] | null
           next_step_clarity_justification: string | null
           next_step_clarity_score: number | null
+          nocodb_created_at: string | null
           nocodb_row_id: string | null
+          nocodb_updated_at: string | null
+          not_interested_reason: string | null
           objection_handling_justification: string | null
           objection_handling_score: number | null
           objection_resolution_rate: number | null
@@ -2339,13 +2348,18 @@ export type Database = {
           questions_covered_count: number | null
           rapport_building_justification: string | null
           rapport_building_score: number | null
+          referral_rate_justification: string | null
+          referral_rate_score: number | null
+          rep_name: string | null
           resolution_rate_justification: string | null
+          salesforce_url: string | null
           script_adherence_justification: string | null
           script_adherence_score: number | null
           seller_interest_justification: string | null
           seller_interest_score: number | null
           target_pain_points: string | null
           timeline_to_sell: string | null
+          to_number: string | null
           transaction_goals: string | null
           transcript_text: string | null
           updated_at: string | null
@@ -2363,6 +2377,8 @@ export type Database = {
           business_history?: string | null
           buyer_type_preference?: string | null
           call_category?: string | null
+          call_date?: string | null
+          call_direction?: string | null
           call_summary?: string | null
           call_title?: string | null
           call_type?: string | null
@@ -2372,14 +2388,18 @@ export type Database = {
           conversation_quality_justification?: string | null
           created_at?: string | null
           date_time?: string | null
+          decision_maker_justification?: string | null
+          decision_maker_score?: number | null
           duration?: number | null
           ebitda?: string | null
           employee_count?: number | null
+          engagement_name?: string | null
           engagement_score?: number | null
           error_message?: string | null
           exit_reason?: string | null
           financial_data?: string | null
           fireflies_url?: string | null
+          from_number?: string | null
           future_growth_plans?: string | null
           growth_information?: string | null
           historical_financials?: string | null
@@ -2394,7 +2414,10 @@ export type Database = {
           motivation_factors?: string[] | null
           next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
+          nocodb_created_at?: string | null
           nocodb_row_id?: string | null
+          nocodb_updated_at?: string | null
+          not_interested_reason?: string | null
           objection_handling_justification?: string | null
           objection_handling_score?: number | null
           objection_resolution_rate?: number | null
@@ -2417,13 +2440,18 @@ export type Database = {
           questions_covered_count?: number | null
           rapport_building_justification?: string | null
           rapport_building_score?: number | null
+          referral_rate_justification?: string | null
+          referral_rate_score?: number | null
+          rep_name?: string | null
           resolution_rate_justification?: string | null
+          salesforce_url?: string | null
           script_adherence_justification?: string | null
           script_adherence_score?: number | null
           seller_interest_justification?: string | null
           seller_interest_score?: number | null
           target_pain_points?: string | null
           timeline_to_sell?: string | null
+          to_number?: string | null
           transaction_goals?: string | null
           transcript_text?: string | null
           updated_at?: string | null
@@ -2441,6 +2469,8 @@ export type Database = {
           business_history?: string | null
           buyer_type_preference?: string | null
           call_category?: string | null
+          call_date?: string | null
+          call_direction?: string | null
           call_summary?: string | null
           call_title?: string | null
           call_type?: string | null
@@ -2450,14 +2480,18 @@ export type Database = {
           conversation_quality_justification?: string | null
           created_at?: string | null
           date_time?: string | null
+          decision_maker_justification?: string | null
+          decision_maker_score?: number | null
           duration?: number | null
           ebitda?: string | null
           employee_count?: number | null
+          engagement_name?: string | null
           engagement_score?: number | null
           error_message?: string | null
           exit_reason?: string | null
           financial_data?: string | null
           fireflies_url?: string | null
+          from_number?: string | null
           future_growth_plans?: string | null
           growth_information?: string | null
           historical_financials?: string | null
@@ -2472,7 +2506,10 @@ export type Database = {
           motivation_factors?: string[] | null
           next_step_clarity_justification?: string | null
           next_step_clarity_score?: number | null
+          nocodb_created_at?: string | null
           nocodb_row_id?: string | null
+          nocodb_updated_at?: string | null
+          not_interested_reason?: string | null
           objection_handling_justification?: string | null
           objection_handling_score?: number | null
           objection_resolution_rate?: number | null
@@ -2495,13 +2532,18 @@ export type Database = {
           questions_covered_count?: number | null
           rapport_building_justification?: string | null
           rapport_building_score?: number | null
+          referral_rate_justification?: string | null
+          referral_rate_score?: number | null
+          rep_name?: string | null
           resolution_rate_justification?: string | null
+          salesforce_url?: string | null
           script_adherence_justification?: string | null
           script_adherence_score?: number | null
           seller_interest_justification?: string | null
           seller_interest_score?: number | null
           target_pain_points?: string | null
           timeline_to_sell?: string | null
+          to_number?: string | null
           transaction_goals?: string | null
           transcript_text?: string | null
           updated_at?: string | null

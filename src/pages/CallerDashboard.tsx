@@ -108,7 +108,7 @@ export default function CallerDashboard() {
     setLoading(true);
 
     try {
-      // Get user's email for matching with external_calls host_email
+      // Get user's email for matching with external_calls host_email or rep_name
       const userEmail = user.email || '';
 
       // Fetch rep profile
@@ -135,29 +135,56 @@ export default function CallerDashboard() {
         return;
       }
 
-      // Filter for user's calls (match by email)
-      const myCalls = allCalls.filter(c => 
-        c.host_email?.toLowerCase().includes(userEmail.toLowerCase().split('@')[0] || '')
-      );
+      // Filter for user's calls - match by rep_name (Analyst field from NocoDB) or host_email
+      const userNamePrefix = userEmail.toLowerCase().split('@')[0] || '';
+      const profileName = profile ? `${profile.first_name} ${profile.last_name}`.toLowerCase() : '';
+      
+      const myCalls = allCalls.filter(c => {
+        // Match by rep_name (Analyst from NocoDB)
+        const repName = (c.rep_name || '').toLowerCase();
+        // Match by host_email
+        const hostEmail = (c.host_email || '').toLowerCase();
+        
+        return (
+          repName.includes(userNamePrefix) ||
+          repName.includes(profileName) ||
+          hostEmail.includes(userNamePrefix)
+        );
+      });
 
-      // Today's activity
+      // Today's activity - use call_category for more accurate categorization
       const today = new Date().toISOString().split('T')[0];
-      const todayCalls = myCalls.filter(c => c.date_time?.startsWith(today));
+      const todayCalls = myCalls.filter(c => 
+        c.date_time?.startsWith(today) || c.call_date === today
+      );
       
       const dials = todayCalls.length;
-      const connects = todayCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
-      const conversations = todayCalls.filter(c => (c.composite_score || 0) >= 5).length;
+      // Connections = calls with category "Connection" or seller_interest >= 3
+      const connects = todayCalls.filter(c => 
+        c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
+      ).length;
+      // Conversations = high quality calls (score >= 5) or specific categories
+      const conversations = todayCalls.filter(c => 
+        (c.composite_score || 0) >= 5 || 
+        ['conversation', 'interested', 'meeting'].includes((c.call_category || '').toLowerCase())
+      ).length;
+      // Meetings = high interest calls (seller_interest >= 7)
       const meetings = todayCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
-      const talkTimeSeconds = todayCalls.reduce((sum, c) => sum + (parseInt(String(c.duration || '0')) || 0), 0);
+      const talkTimeSeconds = todayCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
 
       setTodayActivity({ dials, connects, conversations, meetings, talkTimeSeconds });
 
       // Goals - calculate from actual data
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
-      const weekCalls = myCalls.filter(c => c.date_time && new Date(c.date_time) >= weekAgo);
+      const weekCalls = myCalls.filter(c => 
+        (c.date_time && new Date(c.date_time) >= weekAgo) ||
+        (c.call_date && new Date(c.call_date) >= weekAgo)
+      );
       const weekDials = weekCalls.length;
-      const weekConnects = weekCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
+      const weekConnects = weekCalls.filter(c => 
+        c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
+      ).length;
       const weekMeetings = weekCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
       const avgScore = weekCalls.length > 0 
         ? weekCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekCalls.length 
@@ -208,7 +235,10 @@ export default function CallerDashboard() {
       // 4-week trend data
       const fourWeeksAgo = new Date();
       fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-      const recentCalls = myCalls.filter(c => c.date_time && new Date(c.date_time) >= fourWeeksAgo);
+      const recentTrendCalls = myCalls.filter(c => 
+        (c.date_time && new Date(c.date_time) >= fourWeeksAgo) ||
+        (c.call_date && new Date(c.call_date) >= fourWeeksAgo)
+      );
       
       const weeklyData: { week: string; meetingRate: number; aiScore: number }[] = [];
       for (let i = 3; i >= 0; i--) {
@@ -217,29 +247,32 @@ export default function CallerDashboard() {
         const weekEnd = new Date();
         weekEnd.setDate(weekEnd.getDate() - i * 7);
         
-        const weekCalls = recentCalls.filter(c => {
-          const d = new Date(c.date_time!);
-          return d >= weekStart && d < weekEnd;
+        const weekTrendCalls = recentTrendCalls.filter(c => {
+          const d = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
+          return d && d >= weekStart && d < weekEnd;
         });
         
-        const weekConnects = weekCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
-        const weekMeetings = weekCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
-        const avgScore = weekCalls.length > 0 
-          ? weekCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekCalls.length 
+        const weekTrendConnects = weekTrendCalls.filter(c => 
+          c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
+        ).length;
+        const weekTrendMeetings = weekTrendCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
+        const avgTrendScore = weekTrendCalls.length > 0 
+          ? weekTrendCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekTrendCalls.length 
           : 0;
         
         weeklyData.push({
           week: `Week ${4 - i}`,
-          meetingRate: weekConnects > 0 ? (weekMeetings / weekConnects) * 100 : 0,
-          aiScore: avgScore,
+          meetingRate: weekTrendConnects > 0 ? (weekTrendMeetings / weekTrendConnects) * 100 : 0,
+          aiScore: avgTrendScore,
         });
       }
       setTrendData(weeklyData);
 
-      // Team rank calculation
+      // Team rank calculation - use rep_name for grouping
       const repStats = new Map<string, { calls: number; totalScore: number }>();
       allCalls.forEach(c => {
-        const rep = c.host_email || 'Unknown';
+        // Use rep_name if available, otherwise host_email
+        const rep = c.rep_name || c.host_email || 'Unknown';
         if (!repStats.has(rep)) repStats.set(rep, { calls: 0, totalScore: 0 });
         const stats = repStats.get(rep)!;
         stats.calls++;
@@ -247,15 +280,20 @@ export default function CallerDashboard() {
       });
 
       const rankings = Array.from(repStats.entries())
-        .map(([email, stats]) => ({
-          email,
+        .map(([name, stats]) => ({
+          name,
           avgScore: stats.calls > 0 ? stats.totalScore / stats.calls : 0,
         }))
         .sort((a, b) => b.avgScore - a.avgScore);
 
-      const myRankIdx = rankings.findIndex(r => 
-        r.email.toLowerCase().includes(userEmail.toLowerCase().split('@')[0] || 'NOMATCH')
-      );
+      // Match user by rep_name or host_email
+      const myRankIdx = rankings.findIndex(r => {
+        const repLower = r.name.toLowerCase();
+        return (
+          repLower.includes(userNamePrefix) ||
+          repLower.includes(profileName)
+        );
+      });
       const teamAvg = rankings.reduce((sum, r) => sum + r.avgScore, 0) / rankings.length;
       const myAvg = myRankIdx >= 0 ? rankings[myRankIdx].avgScore : 0;
       const vsAvgPct = teamAvg > 0 ? ((myAvg - teamAvg) / teamAvg) * 100 : 0;
