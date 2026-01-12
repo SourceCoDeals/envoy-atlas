@@ -45,6 +45,7 @@ import TimingInsights from "./pages/TimingInsights";
 import TrainingQueue from "./pages/TrainingQueue";
 import OnboardingProgress from "./pages/OnboardingProgress";
 import Contacts from "./pages/Contacts";
+import ContactsSearch from "./pages/ContactsSearch";
 import Team from "./pages/Team";
 import PhoneBurnerCallback from "./pages/PhoneBurnerCallback";
 import NotFound from "./pages/NotFound";
@@ -111,6 +112,7 @@ const App = () => (
 
                   {/* Shared routes */}
                   <Route path="/contacts" element={<Contacts />} />
+                  <Route path="/contacts/search" element={<ContactsSearch />} />
 
                   {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                   <Route path="*" element={<NotFound />} />
