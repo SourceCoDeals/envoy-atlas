@@ -15,6 +15,7 @@ export interface CampaignWithMetrics {
   total_clicked: number;
   total_replied: number;
   total_bounced: number;
+  total_leads: number;
   open_rate: number;
   click_rate: number;
   reply_rate: number;
@@ -65,6 +66,22 @@ export function useCampaigns() {
 
       if (metricsError) throw metricsError;
 
+      // Fetch leads count per campaign
+      const { data: leadsData, error: leadsError } = await supabase
+        .from('leads')
+        .select('campaign_id')
+        .in('campaign_id', campaignsData.map(c => c.id));
+
+      if (leadsError) throw leadsError;
+
+      // Count leads per campaign
+      const leadsCountMap: Record<string, number> = {};
+      (leadsData || []).forEach(lead => {
+        if (lead.campaign_id) {
+          leadsCountMap[lead.campaign_id] = (leadsCountMap[lead.campaign_id] || 0) + 1;
+        }
+      });
+
       // Aggregate metrics per campaign
       const campaignsWithMetrics: CampaignWithMetrics[] = campaignsData.map(campaign => {
         const campaignMetrics = (metricsData || []).filter(m => m.campaign_id === campaign.id);
@@ -74,6 +91,7 @@ export function useCampaigns() {
         const total_clicked = campaignMetrics.reduce((sum, m) => sum + (m.clicked_count || 0), 0);
         const total_replied = campaignMetrics.reduce((sum, m) => sum + (m.replied_count || 0), 0);
         const total_bounced = campaignMetrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
+        const total_leads = leadsCountMap[campaign.id] || 0;
 
         return {
           id: campaign.id,
@@ -88,6 +106,7 @@ export function useCampaigns() {
           total_clicked,
           total_replied,
           total_bounced,
+          total_leads,
           open_rate: total_sent > 0 ? (total_opened / total_sent) * 100 : 0,
           click_rate: total_sent > 0 ? (total_clicked / total_sent) * 100 : 0,
           reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
@@ -95,8 +114,17 @@ export function useCampaigns() {
         };
       });
 
-      // Sort by total sent descending
-      campaignsWithMetrics.sort((a, b) => b.total_sent - a.total_sent);
+      // Sort: active statuses first, then by total sent descending
+      const activeStatuses = ['active', 'started', 'running'];
+      campaignsWithMetrics.sort((a, b) => {
+        const aIsActive = activeStatuses.includes(a.status.toLowerCase());
+        const bIsActive = activeStatuses.includes(b.status.toLowerCase());
+        
+        if (aIsActive && !bIsActive) return -1;
+        if (!aIsActive && bIsActive) return 1;
+        
+        return b.total_sent - a.total_sent;
+      });
 
       setCampaigns(campaignsWithMetrics);
     } catch (err) {
