@@ -110,17 +110,19 @@ export function usePhoneBurnerData() {
     return { analysts, categories, opportunities };
   }, [allCalls]);
 
-  // Apply filters
+  // Apply filters (using called_date_time for all date-based filtering)
   const filteredCalls = useMemo(() => {
     let result = allCalls;
 
-    // Date filter
+    // Date filter - use called_date_time for accurate filtering
     if (filters.dateRange !== 'all') {
       const daysMap = { '7d': 7, '14d': 14, '30d': 30 };
       const cutoffDate = startOfDay(subDays(new Date(), daysMap[filters.dateRange]));
       result = result.filter(call => {
-        if (!call.called_date) return false;
-        return parseISO(call.called_date) >= cutoffDate;
+        // Prefer called_date_time, fallback to called_date
+        const dateStr = call.called_date_time || call.called_date;
+        if (!dateStr) return false;
+        return parseISO(dateStr) >= cutoffDate;
       });
     }
 
@@ -180,17 +182,17 @@ export function usePhoneBurnerData() {
       .sort((a, b) => b.value - a.value);
   }, [filteredCalls]);
 
-  // Get the date range for charts (all days in range, not just days with data)
+  // Get the date range for charts (all days in range, using called_date_time)
   const dateRangeForCharts = useMemo(() => {
     if (filters.dateRange === 'all') {
-      // For "all time", use actual data range
+      // For "all time", use actual data range from called_date_time
       const dates = filteredCalls
-        .filter(c => c.called_date)
-        .map(c => parseISO(c.called_date!));
+        .filter(c => c.called_date_time || c.called_date)
+        .map(c => parseISO((c.called_date_time || c.called_date)!));
       if (dates.length === 0) return [];
       const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
       const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
-      return eachDayOfInterval({ start: minDate, end: maxDate });
+      return eachDayOfInterval({ start: startOfDay(minDate), end: startOfDay(maxDate) });
     }
     
     const daysMap = { '7d': 7, '14d': 14, '30d': 30 };
@@ -200,7 +202,7 @@ export function usePhoneBurnerData() {
     return eachDayOfInterval({ start: startOfDay(startDate), end: startOfDay(endDate) });
   }, [filters.dateRange, filteredCalls]);
 
-  // Calls by analyst over time (includes all days in range)
+  // Calls by analyst over time (includes all days in range, using called_date_time)
   const callsByAnalystOverTime = useMemo(() => {
     const dataMap: Record<string, Record<string, number>> = {};
     
@@ -208,8 +210,9 @@ export function usePhoneBurnerData() {
     const analysts = [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
 
     filteredCalls.forEach(call => {
-      if (!call.called_date || !call.analyst) return;
-      const date = format(parseISO(call.called_date), 'yyyy-MM-dd');
+      const dateStr = call.called_date_time || call.called_date;
+      if (!dateStr || !call.analyst) return;
+      const date = format(parseISO(dateStr), 'yyyy-MM-dd');
       
       if (!dataMap[call.analyst]) dataMap[call.analyst] = {};
       dataMap[call.analyst][date] = (dataMap[call.analyst][date] || 0) + 1;
@@ -277,13 +280,14 @@ export function usePhoneBurnerData() {
     })).filter(r => r.value > 0);
   }, [filteredCalls]);
 
-  // Daily duration trends (includes all days in range)
+  // Daily duration trends (includes all days in range, using called_date_time)
   const durationTrends = useMemo(() => {
     const dataMap: Record<string, { total: number; count: number }> = {};
 
     filteredCalls.forEach(call => {
-      if (!call.called_date) return;
-      const date = format(parseISO(call.called_date), 'yyyy-MM-dd');
+      const dateStr = call.called_date_time || call.called_date;
+      if (!dateStr) return;
+      const date = format(parseISO(dateStr), 'yyyy-MM-dd');
       
       if (!dataMap[date]) dataMap[date] = { total: 0, count: 0 };
       if (call.call_duration_sec != null) {
