@@ -104,7 +104,8 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
               <YAxis 
                 dataKey="y" 
                 type="number"
-                domain={[6, 20]}
+                domain={[7, 20]}
+                ticks={[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]}
                 tickFormatter={formatHour}
                 className="text-xs"
                 tick={{ fill: 'hsl(var(--muted-foreground))' }}
