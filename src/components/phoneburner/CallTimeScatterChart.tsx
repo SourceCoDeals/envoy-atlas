@@ -13,7 +13,6 @@ interface CallTimeScatterChartProps {
   analysts: string[];
 }
 
-const ANALYST_COLORS: Record<string, string> = {};
 const COLOR_PALETTE = [
   'hsl(var(--primary))',
   'hsl(var(--chart-2))',
@@ -25,23 +24,12 @@ const COLOR_PALETTE = [
 
 export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartProps) {
   // Assign colors to analysts
+  const analystColors: Record<string, string> = {};
   analysts.forEach((analyst, idx) => {
-    ANALYST_COLORS[analyst] = COLOR_PALETTE[idx % COLOR_PALETTE.length];
+    analystColors[analyst] = COLOR_PALETTE[idx % COLOR_PALETTE.length];
   });
 
-  // Group data by analyst
-  const groupedData = analysts.reduce((acc, analyst) => {
-    acc[analyst] = data
-      .filter(d => d.analyst === analyst)
-      .map(d => ({
-        x: d.date,
-        y: d.hour,
-        analyst: d.analyst,
-      }));
-    return acc;
-  }, {} as Record<string, { x: string; y: number; analyst: string }[]>);
-
-  // Aggregate to count calls at each date/hour combination
+  // Aggregate calls by date, hour, and analyst - count calls at each point
   const aggregatedByAnalyst = analysts.map(analyst => {
     const counts: Record<string, number> = {};
     data.filter(d => d.analyst === analyst).forEach(d => {
@@ -53,10 +41,13 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
       analyst,
       data: Object.entries(counts).map(([key, count]) => {
         const [date, hour] = key.split('-');
-        return { x: date, y: parseInt(hour), z: count };
+        return { x: date, y: parseInt(hour), z: count, analyst };
       }),
     };
   });
+
+  // Get all unique dates for x-axis
+  const allDates = [...new Set(data.map(d => d.date))].sort();
 
   const formatHour = (hour: number) => {
     if (hour === 0) return '12 AM';
@@ -78,11 +69,17 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
     );
   }
 
+  // Calculate max count for proper bubble sizing
+  const maxCount = Math.max(
+    ...aggregatedByAnalyst.flatMap(a => a.data.map(d => d.z)),
+    1
+  );
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Call Time Distribution</CardTitle>
-        <CardDescription>Hours of day (Y-axis) vs. Date (X-axis) - bubble size = call count</CardDescription>
+        <CardDescription>Hours of day (Y-axis) vs. Date (X-axis) — bubble size = number of calls</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="h-[350px]">
@@ -111,18 +108,29 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
                 className="text-xs"
                 tick={{ fill: 'hsl(var(--muted-foreground))' }}
               />
-              <ZAxis dataKey="z" range={[20, 200]} />
+              <ZAxis 
+                dataKey="z" 
+                type="number"
+                range={[40, 400]} 
+                domain={[1, maxCount]}
+              />
               <Tooltip 
                 cursor={{ strokeDasharray: '3 3' }}
                 content={({ active, payload }) => {
                   if (active && payload && payload.length) {
                     const point = payload[0].payload;
                     return (
-                      <div className="bg-popover border border-border rounded-lg p-2 text-sm">
-                        <p className="font-medium">{point.analyst || 'Unknown'}</p>
-                        <p>Date: {point.x}</p>
-                        <p>Time: {formatHour(point.y)}</p>
-                        <p>Calls: {point.z}</p>
+                      <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
+                        <p className="font-medium text-foreground">{point.analyst || 'Unknown'}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Date: {format(parseISO(point.x), 'MMM d, yyyy')}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Time: {formatHour(point.y)}
+                        </p>
+                        <p className="text-sm font-medium text-primary mt-1">
+                          {point.z} call{point.z !== 1 ? 's' : ''}
+                        </p>
                       </div>
                     );
                   }
@@ -134,8 +142,8 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
                 <Scatter
                   key={analyst}
                   name={analyst}
-                  data={scatterData.map(d => ({ ...d, analyst }))}
-                  fill={ANALYST_COLORS[analyst] || 'hsl(var(--primary))'}
+                  data={scatterData}
+                  fill={analystColors[analyst] || 'hsl(var(--primary))'}
                 />
               ))}
             </ScatterChart>
