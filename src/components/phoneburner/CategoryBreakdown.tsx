@@ -40,7 +40,7 @@ export function CategoryBreakdown({ data, totalCalls }: CategoryBreakdownProps) 
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Pie Chart */}
+          {/* Pie Chart - no legend, show details on hover */}
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -51,7 +51,7 @@ export function CategoryBreakdown({ data, totalCalls }: CategoryBreakdownProps) 
                   innerRadius={60}
                   outerRadius={100}
                   dataKey="value"
-                  label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                  label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
                   labelLine={false}
                 >
                   {pieData.map((_, index) => (
@@ -59,14 +59,22 @@ export function CategoryBreakdown({ data, totalCalls }: CategoryBreakdownProps) 
                   ))}
                 </Pie>
                 <Tooltip 
-                  formatter={(value: number) => [value.toLocaleString(), 'Calls']}
-                  contentStyle={{ 
-                    backgroundColor: 'hsl(var(--popover))', 
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px'
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const item = payload[0].payload;
+                      const percentage = ((item.value / totalCalls) * 100).toFixed(1);
+                      return (
+                        <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
+                          <p className="font-medium text-foreground">{item.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {item.value.toLocaleString()} calls ({percentage}%)
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
                   }}
                 />
-                <Legend />
               </PieChart>
             </ResponsiveContainer>
           </div>
