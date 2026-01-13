@@ -234,15 +234,20 @@ export function usePhoneBurnerData() {
   const uniqueAnalysts = useMemo(() => {
     return [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
   }, [filteredCalls]);
-
   // Scatter plot data: time of day vs date (using nocodb_created_at with IST to EST conversion)
   const scatterData = useMemo(() => {
+    // Calculate the date cutoff for filtering (same logic as filteredCalls)
+    let dateCutoff: Date | null = null;
+    if (filters.dateRange !== 'all') {
+      const daysMap = { '7d': 7, '14d': 14, '30d': 30 };
+      dateCutoff = startOfDay(subDays(new Date(), daysMap[filters.dateRange]));
+    }
+
     return filteredCalls
       .filter(call => call.nocodb_created_at)
       .map(call => {
         const dateObj = parseISO(call.nocodb_created_at!);
         // Convert IST (UTC+5:30) to EST (UTC-5): subtract 10.5 hours
-        // getHours returns 0-23, we subtract 10.5 and handle wrap-around
         const istHour = getHours(dateObj);
         const istMinutes = dateObj.getMinutes();
         const totalMinutesIST = istHour * 60 + istMinutes;
@@ -259,18 +264,22 @@ export function usePhoneBurnerData() {
         const adjustedHour = Math.floor(adjustedMinutes / 60);
         
         // Adjust the date if we crossed midnight
-        let adjustedDate = dateObj;
-        if (dayOffset !== 0) {
-          adjustedDate = new Date(dateObj.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-        }
+        let adjustedDate = new Date(dateObj.getTime() + dayOffset * 24 * 60 * 60 * 1000);
         
         return {
           date: format(adjustedDate, 'yyyy-MM-dd'),
           hour: adjustedHour,
           analyst: call.analyst || 'Unknown',
+          adjustedDate, // Keep for filtering
         };
-      });
-  }, [filteredCalls]);
+      })
+      .filter(item => {
+        // Apply date filter based on EST-adjusted date
+        if (!dateCutoff) return true;
+        return item.adjustedDate >= dateCutoff;
+      })
+      .map(({ date, hour, analyst }) => ({ date, hour, analyst })); // Remove adjustedDate from final output
+  }, [filteredCalls, filters.dateRange]);
 
   // Calls by primary opportunity
   const callsByOpportunity = useMemo(() => {
