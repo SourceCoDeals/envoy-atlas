@@ -1404,6 +1404,7 @@ export type Database = {
           call_summary: string | null
           call_transcript: string | null
           called_date: string | null
+          called_date_time: string | null
           category: string | null
           composite_score: number | null
           created_at: string
@@ -1440,6 +1441,7 @@ export type Database = {
           call_summary?: string | null
           call_transcript?: string | null
           called_date?: string | null
+          called_date_time?: string | null
           category?: string | null
           composite_score?: number | null
           created_at?: string
@@ -1476,6 +1478,7 @@ export type Database = {
           call_summary?: string | null
           call_transcript?: string | null
           called_date?: string | null
+          called_date_time?: string | null
           category?: string | null
           composite_score?: number | null
           created_at?: string

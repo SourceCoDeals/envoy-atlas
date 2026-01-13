@@ -89,7 +89,8 @@ export function usePhoneBurnerData() {
         if (error) throw error;
         if (!data || data.length === 0) break;
         
-        allData = [...allData, ...data];
+        // Cast to ColdCall[] since we know the shape
+        allData = [...allData, ...(data as unknown as ColdCall[])];
         if (data.length < limit) break;
         offset += limit;
       }

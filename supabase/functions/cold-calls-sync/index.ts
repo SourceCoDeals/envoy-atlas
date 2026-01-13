@@ -27,6 +27,7 @@ const COLUMN_MAP: Record<string, string> = {
   "Salesforce URL": "salesforce_url",
   "Call Duration (sec)": "call_duration_sec",
   "Called Date": "called_date",
+  "Called Date Time": "called_date_time",
   "Call Transcript": "call_transcript",
   "Category": "category",
   "Analyst": "analyst",
@@ -95,7 +96,7 @@ function mapNocoDBRecord(record: Record<string, any>, workspaceId: string): Reco
       mapped[dbKey] = parseInt(value, 10) || null;
     } else if (dbKey.includes("_score")) {
       mapped[dbKey] = parseFloat(value) || null;
-    } else if (dbKey === "called_date" || dbKey === "nocodb_created_at" || dbKey === "nocodb_updated_at") {
+    } else if (dbKey === "called_date" || dbKey === "called_date_time" || dbKey === "nocodb_created_at" || dbKey === "nocodb_updated_at") {
       mapped[dbKey] = parseDateTime(value);
     } else if (dbKey === "key_concerns") {
       // Handle array field - could be string or already array
