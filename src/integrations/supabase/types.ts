@@ -3733,6 +3733,398 @@ export type Database = {
           },
         ]
       }
+      replyio_campaigns: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          platform_id: string
+          status: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          platform_id: string
+          status?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          platform_id?: string
+          status?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "replyio_campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      replyio_daily_metrics: {
+        Row: {
+          bounced_count: number | null
+          campaign_id: string
+          clicked_count: number | null
+          created_at: string
+          id: string
+          metric_date: string
+          negative_reply_count: number | null
+          opened_count: number | null
+          positive_reply_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          bounced_count?: number | null
+          campaign_id: string
+          clicked_count?: number | null
+          created_at?: string
+          id?: string
+          metric_date: string
+          negative_reply_count?: number | null
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          bounced_count?: number | null
+          campaign_id?: string
+          clicked_count?: number | null
+          created_at?: string
+          id?: string
+          metric_date?: string
+          negative_reply_count?: number | null
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "replyio_daily_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "replyio_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "replyio_daily_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      replyio_message_events: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          event_timestamp: string | null
+          event_type: string
+          id: string
+          lead_id: string | null
+          message_id: string | null
+          reply_sentiment: string | null
+          reply_text: string | null
+          variant_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          event_timestamp?: string | null
+          event_type: string
+          id?: string
+          lead_id?: string | null
+          message_id?: string | null
+          reply_sentiment?: string | null
+          reply_text?: string | null
+          variant_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          event_timestamp?: string | null
+          event_type?: string
+          id?: string
+          lead_id?: string | null
+          message_id?: string | null
+          reply_sentiment?: string | null
+          reply_text?: string | null
+          variant_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "replyio_message_events_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "replyio_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "replyio_message_events_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "replyio_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "replyio_message_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      replyio_sequence_steps: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          delay_days: number | null
+          id: string
+          step_number: number
+          step_type: string | null
+          variant_id: string | null
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          delay_days?: number | null
+          id?: string
+          step_number: number
+          step_type?: string | null
+          variant_id?: string | null
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          delay_days?: number | null
+          id?: string
+          step_number?: number
+          step_type?: string | null
+          variant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "replyio_sequence_steps_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "replyio_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "replyio_sequence_steps_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "replyio_variants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      replyio_variant_features: {
+        Row: {
+          body_avg_sentence_length: number | null
+          body_bullet_point_count: number | null
+          body_cta_position: string | null
+          body_cta_strength: string | null
+          body_cta_type: string | null
+          body_has_calendar_link: boolean | null
+          body_has_link: boolean | null
+          body_has_proof: boolean | null
+          body_link_count: number | null
+          body_paragraph_count: number | null
+          body_personalization_density: number | null
+          body_personalization_types: string[] | null
+          body_question_count: number | null
+          body_reading_grade: number | null
+          body_sentence_count: number | null
+          body_tone: string | null
+          body_value_proposition_count: number | null
+          body_word_count: number | null
+          extracted_at: string | null
+          id: string
+          subject_capitalization_style: string | null
+          subject_char_count: number | null
+          subject_first_word_type: string | null
+          subject_has_emoji: boolean | null
+          subject_has_number: boolean | null
+          subject_is_question: boolean | null
+          subject_personalization_count: number | null
+          subject_personalization_position: number | null
+          subject_spam_score: number | null
+          subject_urgency_score: number | null
+          subject_word_count: number | null
+          updated_at: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Insert: {
+          body_avg_sentence_length?: number | null
+          body_bullet_point_count?: number | null
+          body_cta_position?: string | null
+          body_cta_strength?: string | null
+          body_cta_type?: string | null
+          body_has_calendar_link?: boolean | null
+          body_has_link?: boolean | null
+          body_has_proof?: boolean | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_density?: number | null
+          body_personalization_types?: string[] | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_tone?: string | null
+          body_value_proposition_count?: number | null
+          body_word_count?: number | null
+          extracted_at?: string | null
+          id?: string
+          subject_capitalization_style?: string | null
+          subject_char_count?: number | null
+          subject_first_word_type?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_is_question?: boolean | null
+          subject_personalization_count?: number | null
+          subject_personalization_position?: number | null
+          subject_spam_score?: number | null
+          subject_urgency_score?: number | null
+          subject_word_count?: number | null
+          updated_at?: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Update: {
+          body_avg_sentence_length?: number | null
+          body_bullet_point_count?: number | null
+          body_cta_position?: string | null
+          body_cta_strength?: string | null
+          body_cta_type?: string | null
+          body_has_calendar_link?: boolean | null
+          body_has_link?: boolean | null
+          body_has_proof?: boolean | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_density?: number | null
+          body_personalization_types?: string[] | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_tone?: string | null
+          body_value_proposition_count?: number | null
+          body_word_count?: number | null
+          extracted_at?: string | null
+          id?: string
+          subject_capitalization_style?: string | null
+          subject_char_count?: number | null
+          subject_first_word_type?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_is_question?: boolean | null
+          subject_personalization_count?: number | null
+          subject_personalization_position?: number | null
+          subject_spam_score?: number | null
+          subject_urgency_score?: number | null
+          subject_word_count?: number | null
+          updated_at?: string | null
+          variant_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "replyio_variant_features_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "replyio_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "replyio_variant_features_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      replyio_variants: {
+        Row: {
+          body_preview: string | null
+          campaign_id: string
+          created_at: string
+          email_body: string | null
+          id: string
+          is_control: boolean | null
+          name: string
+          personalization_vars: Json | null
+          platform_variant_id: string | null
+          subject_line: string | null
+          updated_at: string | null
+          variant_type: string
+          word_count: number | null
+        }
+        Insert: {
+          body_preview?: string | null
+          campaign_id: string
+          created_at?: string
+          email_body?: string | null
+          id?: string
+          is_control?: boolean | null
+          name: string
+          personalization_vars?: Json | null
+          platform_variant_id?: string | null
+          subject_line?: string | null
+          updated_at?: string | null
+          variant_type?: string
+          word_count?: number | null
+        }
+        Update: {
+          body_preview?: string | null
+          campaign_id?: string
+          created_at?: string
+          email_body?: string | null
+          id?: string
+          is_control?: boolean | null
+          name?: string
+          personalization_vars?: Json | null
+          platform_variant_id?: string | null
+          subject_line?: string | null
+          updated_at?: string | null
+          variant_type?: string
+          word_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "replyio_variants_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "replyio_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sending_domains: {
         Row: {
           created_at: string
@@ -3835,6 +4227,398 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "copy_performance"
             referencedColumns: ["variant_id"]
+          },
+        ]
+      }
+      smartlead_campaigns: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          platform_id: string
+          status: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          platform_id: string
+          status?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          platform_id?: string
+          status?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smartlead_campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      smartlead_daily_metrics: {
+        Row: {
+          bounced_count: number | null
+          campaign_id: string
+          clicked_count: number | null
+          created_at: string
+          id: string
+          metric_date: string
+          negative_reply_count: number | null
+          opened_count: number | null
+          positive_reply_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          bounced_count?: number | null
+          campaign_id: string
+          clicked_count?: number | null
+          created_at?: string
+          id?: string
+          metric_date: string
+          negative_reply_count?: number | null
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          bounced_count?: number | null
+          campaign_id?: string
+          clicked_count?: number | null
+          created_at?: string
+          id?: string
+          metric_date?: string
+          negative_reply_count?: number | null
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smartlead_daily_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smartlead_daily_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      smartlead_message_events: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          event_timestamp: string | null
+          event_type: string
+          id: string
+          lead_id: string | null
+          message_id: string | null
+          reply_sentiment: string | null
+          reply_text: string | null
+          variant_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          event_timestamp?: string | null
+          event_type: string
+          id?: string
+          lead_id?: string | null
+          message_id?: string | null
+          reply_sentiment?: string | null
+          reply_text?: string | null
+          variant_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          event_timestamp?: string | null
+          event_type?: string
+          id?: string
+          lead_id?: string | null
+          message_id?: string | null
+          reply_sentiment?: string | null
+          reply_text?: string | null
+          variant_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smartlead_message_events_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smartlead_message_events_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smartlead_message_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      smartlead_sequence_steps: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          delay_days: number | null
+          id: string
+          step_number: number
+          step_type: string | null
+          variant_id: string | null
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          delay_days?: number | null
+          id?: string
+          step_number: number
+          step_type?: string | null
+          variant_id?: string | null
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          delay_days?: number | null
+          id?: string
+          step_number?: number
+          step_type?: string | null
+          variant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smartlead_sequence_steps_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smartlead_sequence_steps_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_variants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      smartlead_variant_features: {
+        Row: {
+          body_avg_sentence_length: number | null
+          body_bullet_point_count: number | null
+          body_cta_position: string | null
+          body_cta_strength: string | null
+          body_cta_type: string | null
+          body_has_calendar_link: boolean | null
+          body_has_link: boolean | null
+          body_has_proof: boolean | null
+          body_link_count: number | null
+          body_paragraph_count: number | null
+          body_personalization_density: number | null
+          body_personalization_types: string[] | null
+          body_question_count: number | null
+          body_reading_grade: number | null
+          body_sentence_count: number | null
+          body_tone: string | null
+          body_value_proposition_count: number | null
+          body_word_count: number | null
+          extracted_at: string | null
+          id: string
+          subject_capitalization_style: string | null
+          subject_char_count: number | null
+          subject_first_word_type: string | null
+          subject_has_emoji: boolean | null
+          subject_has_number: boolean | null
+          subject_is_question: boolean | null
+          subject_personalization_count: number | null
+          subject_personalization_position: number | null
+          subject_spam_score: number | null
+          subject_urgency_score: number | null
+          subject_word_count: number | null
+          updated_at: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Insert: {
+          body_avg_sentence_length?: number | null
+          body_bullet_point_count?: number | null
+          body_cta_position?: string | null
+          body_cta_strength?: string | null
+          body_cta_type?: string | null
+          body_has_calendar_link?: boolean | null
+          body_has_link?: boolean | null
+          body_has_proof?: boolean | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_density?: number | null
+          body_personalization_types?: string[] | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_tone?: string | null
+          body_value_proposition_count?: number | null
+          body_word_count?: number | null
+          extracted_at?: string | null
+          id?: string
+          subject_capitalization_style?: string | null
+          subject_char_count?: number | null
+          subject_first_word_type?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_is_question?: boolean | null
+          subject_personalization_count?: number | null
+          subject_personalization_position?: number | null
+          subject_spam_score?: number | null
+          subject_urgency_score?: number | null
+          subject_word_count?: number | null
+          updated_at?: string | null
+          variant_id: string
+          workspace_id: string
+        }
+        Update: {
+          body_avg_sentence_length?: number | null
+          body_bullet_point_count?: number | null
+          body_cta_position?: string | null
+          body_cta_strength?: string | null
+          body_cta_type?: string | null
+          body_has_calendar_link?: boolean | null
+          body_has_link?: boolean | null
+          body_has_proof?: boolean | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_density?: number | null
+          body_personalization_types?: string[] | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_tone?: string | null
+          body_value_proposition_count?: number | null
+          body_word_count?: number | null
+          extracted_at?: string | null
+          id?: string
+          subject_capitalization_style?: string | null
+          subject_char_count?: number | null
+          subject_first_word_type?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_is_question?: boolean | null
+          subject_personalization_count?: number | null
+          subject_personalization_position?: number | null
+          subject_spam_score?: number | null
+          subject_urgency_score?: number | null
+          subject_word_count?: number | null
+          updated_at?: string | null
+          variant_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smartlead_variant_features_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "smartlead_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smartlead_variant_features_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      smartlead_variants: {
+        Row: {
+          body_preview: string | null
+          campaign_id: string
+          created_at: string
+          email_body: string | null
+          id: string
+          is_control: boolean | null
+          name: string
+          personalization_vars: Json | null
+          platform_variant_id: string | null
+          subject_line: string | null
+          updated_at: string | null
+          variant_type: string
+          word_count: number | null
+        }
+        Insert: {
+          body_preview?: string | null
+          campaign_id: string
+          created_at?: string
+          email_body?: string | null
+          id?: string
+          is_control?: boolean | null
+          name: string
+          personalization_vars?: Json | null
+          platform_variant_id?: string | null
+          subject_line?: string | null
+          updated_at?: string | null
+          variant_type?: string
+          word_count?: number | null
+        }
+        Update: {
+          body_preview?: string | null
+          campaign_id?: string
+          created_at?: string
+          email_body?: string | null
+          id?: string
+          is_control?: boolean | null
+          name?: string
+          personalization_vars?: Json | null
+          platform_variant_id?: string | null
+          subject_line?: string | null
+          updated_at?: string | null
+          variant_type?: string
+          word_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smartlead_variants_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_campaigns"
+            referencedColumns: ["id"]
           },
         ]
       }

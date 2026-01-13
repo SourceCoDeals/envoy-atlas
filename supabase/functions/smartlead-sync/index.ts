@@ -8,12 +8,11 @@ const corsHeaders = {
 };
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
-const RATE_LIMIT_DELAY = 450; // 5 requests per 2 seconds = 400ms minimum, adding buffer // Reduced from 300ms for faster sync
-const BATCH_SIZE = 20; // Increased from 5 - process more campaigns per invocation
-const TIME_BUDGET_MS = 55000; // Increased to 55 seconds (edge functions allow 60s)
-const SYNC_LOCK_TIMEOUT_MS = 30000; // 30 seconds - if last heartbeat is older, allow new sync
+const RATE_LIMIT_DELAY = 450;
+const BATCH_SIZE = 20;
+const TIME_BUDGET_MS = 55000;
+const SYNC_LOCK_TIMEOUT_MS = 30000;
 
-// Personal email domains for classification
 const PERSONAL_DOMAINS = new Set([
   'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 
   'aol.com', 'icloud.com', 'protonmail.com', 'mail.com',
@@ -24,7 +23,6 @@ const PERSONAL_DOMAINS = new Set([
   'tutanota.com', 'pm.me', 'proton.me'
 ]);
 
-// Spam trigger words for subject line analysis
 const SPAM_TRIGGERS = [
   'free', 'guarantee', 'no obligation', 'winner', 'cash', 'urgent',
   'act now', 'limited time', 'exclusive deal', 'click here', 'buy now',
@@ -40,10 +38,7 @@ function extractEmailDomain(email: string): string {
   return email.split('@')[1]?.toLowerCase() || '';
 }
 
-// ========== COPY FEATURE EXTRACTION ==========
-
 interface CopyFeatures {
-  // Subject features
   subject_char_count: number;
   subject_word_count: number;
   subject_is_question: boolean;
@@ -54,7 +49,6 @@ interface CopyFeatures {
   subject_first_word_type: string;
   subject_capitalization_style: string;
   subject_spam_score: number;
-  // Body features
   body_word_count: number;
   body_sentence_count: number;
   body_avg_sentence_length: number;
@@ -77,12 +71,10 @@ function extractCopyFeatures(subjectLine: string | null, emailBody: string | nul
   const subject = subjectLine || '';
   const body = emailBody || '';
   
-  // Subject analysis
   const subjectWords = subject.split(/\s+/).filter(Boolean);
   const subjectTokens = [...subject.matchAll(/\{\{?(\w+)\}?\}/g)];
   const firstToken = subjectTokens[0];
   
-  // Detect first word type
   const firstWord = subjectWords[0]?.toLowerCase() || '';
   let firstWordType = 'other';
   if (/^(hey|hi|hello)/i.test(firstWord)) firstWordType = 'greeting';
@@ -91,7 +83,6 @@ function extractCopyFeatures(subjectLine: string | null, emailBody: string | nul
   else if (/^\{\{?first_?name\}?\}?$/i.test(subjectWords[0] || '')) firstWordType = 'name';
   else if (/^\{\{?company\}?\}?$/i.test(subjectWords[0] || '')) firstWordType = 'company';
   
-  // Capitalization style
   let capStyle = 'mixed';
   if (subject === subject.toLowerCase()) capStyle = 'lowercase';
   else if (subject === subject.toUpperCase()) capStyle = 'uppercase';
@@ -99,23 +90,18 @@ function extractCopyFeatures(subjectLine: string | null, emailBody: string | nul
   else if (subjectWords[0]?.[0] === subjectWords[0]?.[0]?.toUpperCase() && 
            subjectWords.slice(1).every(w => w[0] === w[0]?.toLowerCase() || /^\{\{/.test(w))) capStyle = 'sentence_case';
   
-  // Spam score
   const subjectLower = subject.toLowerCase();
   const spamCount = SPAM_TRIGGERS.filter(trigger => subjectLower.includes(trigger)).length;
   const spamScore = Math.min(100, spamCount * 15);
   
-  // Emoji detection (common emoji unicode ranges)
   const hasEmoji = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u.test(subject);
   
-  // Body analysis
   const bodyClean = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   const bodyWords = bodyClean.split(/\s+/).filter(Boolean);
   const sentences = bodyClean.split(/[.!?]+/).filter(s => s.trim().length > 0);
   const bodyTokens = [...body.matchAll(/\{\{?(\w+)\}?\}/g)];
   const tokenTypes = [...new Set(bodyTokens.map(m => m[1].toLowerCase()))];
   
-  // CTA classification
-  const bodyLower = body.toLowerCase();
   let ctaType = 'no_cta';
   if (/tuesday|wednesday|thursday|friday|monday/i.test(body) && /\bor\b/i.test(body)) {
     ctaType = 'choice_ask';
@@ -131,7 +117,6 @@ function extractCopyFeatures(subjectLine: string | null, emailBody: string | nul
     ctaType = 'question_only';
   }
   
-  // CTA position (find last question mark or call-to-action phrase)
   const bodyLength = bodyClean.length;
   const lastQuestionPos = bodyClean.lastIndexOf('?');
   let ctaPosition = 'end';
@@ -141,24 +126,19 @@ function extractCopyFeatures(subjectLine: string | null, emailBody: string | nul
     else if (relativePos < 0.66) ctaPosition = 'middle';
   }
   
-  // Links detection
   const linkCount = (body.match(/https?:\/\/[^\s<]+/g) || []).length;
   const hasCalendarLink = /calendly\.com|cal\.com|hubspot\.com\/meetings|chili ?piper/i.test(body);
-  
-  // Proof detection
   const hasProof = /\d+%|\d+ clients|\d+ companies|trusted by|featured in|as seen|case study/i.test(body);
   
-  // Tone classification
   let tone = 'direct';
+  const bodyLower = body.toLowerCase();
   if (/hope this|just wanted|thought i'd|reaching out/i.test(bodyLower)) tone = 'casual';
   else if (/dear|sincerely|regards|respectfully/i.test(bodyLower)) tone = 'formal';
   else if (/help you|solve|challenge|struggle|pain/i.test(bodyLower)) tone = 'consultative';
   
-  // Paragraph and bullet counts
   const paragraphs = body.split(/\n\s*\n/).filter(p => p.trim());
   const bullets = (body.match(/^[\s]*[-•*]\s/gm) || []).length;
   
-  // Reading grade (simplified Flesch-Kincaid)
   const avgSentenceLength = sentences.length > 0 ? bodyWords.length / sentences.length : 0;
   const avgWordLength = bodyWords.length > 0 ? bodyClean.replace(/\s/g, '').length / bodyWords.length : 0;
   const readingGrade = Math.max(0, Math.min(18, 0.39 * avgSentenceLength + 11.8 * (avgWordLength / 5) - 15.59));
@@ -203,7 +183,7 @@ async function upsertVariantFeatures(
   const features = extractCopyFeatures(subjectLine, emailBody);
   
   const { error } = await supabase
-    .from('campaign_variant_features')
+    .from('smartlead_variant_features')
     .upsert({
       variant_id: variantId,
       workspace_id: workspaceId,
@@ -218,8 +198,6 @@ async function upsertVariantFeatures(
   }
 }
 
-// ========== END COPY FEATURE EXTRACTION ==========
-
 interface SmartleadCampaign {
   id: number;
   name: string;
@@ -230,10 +208,8 @@ interface SmartleadCampaign {
 interface SmartleadSequence {
   seq_number: number;
   seq_delay_details: { delay_in_days: number };
-  // Direct fields for non-A/B campaigns
   subject?: string;
   email_body?: string;
-  // Array of variants for A/B test campaigns (field name from API is sequence_variants)
   sequence_variants?: Array<{
     id: number;
     variant_label: string;
@@ -282,15 +258,6 @@ interface SmartleadLead {
   industry?: string;
   company_size?: string;
   source?: string;
-}
-
-interface SmartleadLeadMessageHistory {
-  id: number;
-  type: string;
-  time: string;
-  email_body?: string;
-  email_subject?: string;
-  seq_number?: number;
 }
 
 interface SmartleadLeadMessageHistory {
@@ -395,7 +362,6 @@ serve(async (req) => {
         }
       }
 
-      // COMPLETED CHECK: Don't restart a completed sync without explicit reset
       if (existingSyncProgress.completed === true && connection.sync_status === 'success') {
         console.log(`[smartlead-sync] Sync already completed. Use reset=true to restart.`);
         return new Response(JSON.stringify({
@@ -407,29 +373,30 @@ serve(async (req) => {
       }
     }
 
-    // Handle reset - clear all synced data
+    // Handle reset - clear all synced data from SmartLead-specific tables
     if (reset) {
-      console.log('Resetting sync data for workspace:', workspace_id);
+      console.log('Resetting SmartLead sync data for workspace:', workspace_id);
       
-      // Get campaign IDs first
+      // Get SmartLead campaign IDs first
       const { data: campaigns } = await supabase
-        .from('campaigns')
+        .from('smartlead_campaigns')
         .select('id')
         .eq('workspace_id', workspace_id);
       
       const campaignIds = campaigns?.map(c => c.id) || [];
       
       if (campaignIds.length > 0) {
-        await supabase.from('message_events').delete().eq('workspace_id', workspace_id);
-        await supabase.from('daily_metrics').delete().eq('workspace_id', workspace_id);
-        await supabase.from('hourly_metrics').delete().eq('workspace_id', workspace_id);
-        await supabase.from('leads').delete().eq('workspace_id', workspace_id);
-        await supabase.from('campaign_variants').delete().in('campaign_id', campaignIds);
-        await supabase.from('sequence_steps').delete().in('campaign_id', campaignIds);
-        await supabase.from('campaigns').delete().eq('workspace_id', workspace_id);
+        await supabase.from('smartlead_message_events').delete().eq('workspace_id', workspace_id);
+        await supabase.from('smartlead_daily_metrics').delete().eq('workspace_id', workspace_id);
+        await supabase.from('smartlead_variant_features').delete().eq('workspace_id', workspace_id);
+        await supabase.from('smartlead_variants').delete().in('campaign_id', campaignIds);
+        await supabase.from('smartlead_sequence_steps').delete().in('campaign_id', campaignIds);
+        await supabase.from('smartlead_campaigns').delete().eq('workspace_id', workspace_id);
       }
       
-      await supabase.from('email_accounts').delete().eq('workspace_id', workspace_id);
+      // Also clear leads with platform = 'smartlead'
+      await supabase.from('leads').delete().eq('workspace_id', workspace_id).eq('platform', 'smartlead');
+      await supabase.from('email_accounts').delete().eq('workspace_id', workspace_id).eq('platform', 'smartlead');
       
       await supabase.from('api_connections').update({
         sync_status: 'syncing',
@@ -439,22 +406,18 @@ serve(async (req) => {
       console.log('Reset complete');
     }
 
-    // Get sync progress
     let existingProgress = reset ? { campaign_index: 0, batch_index: 0 } : (connection.sync_progress || { campaign_index: 0, batch_index: 0 });
     
-    // Prefer campaign_index, fallback to batch_index * BATCH_SIZE
     let resumeFromCampaign = typeof existingProgress.campaign_index === 'number' 
       ? existingProgress.campaign_index 
       : (existingProgress.batch_index || 0) * BATCH_SIZE;
     
-    // Force advance skips to next campaign (useful when stuck on a problematic campaign)
     if (force_advance) {
       console.log(`Force advancing from campaign ${resumeFromCampaign} to ${resumeFromCampaign + 1}`);
       resumeFromCampaign += 1;
       existingProgress = { ...existingProgress, campaign_index: resumeFromCampaign, leads_offset: 0, force_advanced: true };
     }
 
-    // Update status to syncing
     await supabase.from('api_connections').update({
       sync_status: 'syncing',
     }).eq('id', connection.id);
@@ -469,10 +432,8 @@ serve(async (req) => {
       errors: [] as string[],
     };
 
-    // Time budget tracking
     const startTime = Date.now();
 
-    // Update heartbeat immediately to claim the sync lock
     await supabase.from('api_connections').update({
       sync_status: 'syncing',
       sync_progress: {
@@ -486,8 +447,6 @@ serve(async (req) => {
       console.log('Fetching campaigns...');
       const campaignsRaw: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
       
-      // Sort campaigns: active first, then by created_at desc (newest first)
-      // This prioritizes syncing active campaigns before drafts/paused
       const campaigns = [...campaignsRaw].sort((a, b) => {
         const statusOrder = { active: 0, paused: 1, drafted: 2, completed: 3 };
         const aOrder = statusOrder[a.status?.toLowerCase() as keyof typeof statusOrder] ?? 4;
@@ -521,7 +480,6 @@ serve(async (req) => {
       let lastProcessedName = campaigns[startIndex]?.name || 'Unknown';
 
       for (let i = startIndex; i < endIndex; i++) {
-        // Check time budget before processing each campaign
         if (isTimeBudgetExceeded()) {
           console.log(`[smartlead-sync] Time budget exceeded at campaign ${i}, saving progress`);
           await supabase.from('api_connections').update({
@@ -552,7 +510,6 @@ serve(async (req) => {
         const campaign = campaigns[i];
         console.log(`Processing campaign ${i + 1}/${totalCampaigns}: ${campaign.name}`);
         
-        // Update current campaign in progress immediately
         await supabase.from('api_connections').update({
           sync_progress: {
             ...existingProgress,
@@ -567,21 +524,19 @@ serve(async (req) => {
         }).eq('id', connection.id);
 
         try {
-          // Check if this is an active/paused campaign (worth full sync) or a draft (light sync)
           const isActiveCampaign = ['active', 'paused'].includes(campaign.status?.toLowerCase() || '');
           
-          // 1. Upsert campaign
+          // 1. Upsert campaign to smartlead_campaigns table
           const { data: upsertedCampaign, error: campError } = await supabase
-            .from('campaigns')
+            .from('smartlead_campaigns')
             .upsert({ 
               workspace_id, 
-              platform: 'smartlead', 
               platform_id: String(campaign.id), 
               name: campaign.name, 
               status: campaign.status?.toLowerCase() || 'active',
               updated_at: new Date().toISOString()
             }, { 
-              onConflict: 'workspace_id,platform_id,platform' 
+              onConflict: 'workspace_id,platform_id' 
             })
             .select('id')
             .single();
@@ -595,61 +550,41 @@ serve(async (req) => {
           const campaignDbId = upsertedCampaign.id;
           progress.campaigns_synced++;
           
-          // For drafted campaigns, skip heavy operations (sequences, leads, events)
-          // Just sync basic campaign info and analytics
           if (!isActiveCampaign) {
             console.log(`  Skipping detailed sync for non-active campaign: ${campaign.status}`);
             
-            // Still fetch analytics for non-active campaigns
             try {
               const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
               const today = new Date().toISOString().split('T')[0];
               
-              await supabase.from('daily_metrics').upsert({
+              await supabase.from('smartlead_daily_metrics').upsert({
                 workspace_id, 
                 campaign_id: campaignDbId, 
-                date: today,
+                metric_date: today,
                 sent_count: analytics.sent_count || 0,
-                delivered_count: analytics.unique_sent_count || 0,
                 opened_count: analytics.unique_open_count || 0,
                 clicked_count: analytics.unique_click_count || 0,
                 replied_count: analytics.reply_count || 0,
                 bounced_count: analytics.bounce_count || 0,
-              }, { onConflict: 'workspace_id,campaign_id,date' });
+              }, { onConflict: 'campaign_id,metric_date' });
               
               progress.metrics_created++;
             } catch (e) {
               console.error(`  Analytics fetch failed for ${campaign.name}:`, e);
             }
             
-            continue; // Skip to next campaign
+            continue;
           }
 
           // 2. Fetch sequences (email copy variants)
           try {
             const sequencesRaw = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
-            // Handle case where API returns null, undefined, or non-array
             const sequences: SmartleadSequence[] = Array.isArray(sequencesRaw) ? sequencesRaw : [];
             console.log(`Campaign ${campaign.id} has ${sequences.length} sequences`);
             
-            // Log first sequence structure for debugging
-            if (sequences.length > 0) {
-              console.log(`  First sequence keys: ${Object.keys(sequences[0]).join(', ')}`);
-              console.log(`  First sequence sample:`, JSON.stringify({
-                seq_number: sequences[0].seq_number,
-                has_sequence_variants: !!sequences[0].sequence_variants,
-                sequence_variants_count: sequences[0].sequence_variants?.length || 0,
-                has_direct_subject: !!sequences[0].subject,
-                has_direct_body: !!sequences[0].email_body,
-              }));
-            }
-            
             for (const seq of sequences) {
-              // Use sequence_variants (correct field name from Smartlead API)
               let variants = Array.isArray(seq.sequence_variants) ? seq.sequence_variants : [];
               
-              // If no variants array, create one from the sequence's direct subject/body
-              // This handles non-A/B tested campaigns where copy is directly on the sequence
               if (variants.length === 0 && (seq.subject || seq.email_body)) {
                 console.log(`    Seq ${seq.seq_number}: Creating variant from sequence direct fields`);
                 variants = [{
@@ -686,7 +621,7 @@ serve(async (req) => {
                 console.log(`    Upserting variant ${variantId} (${variant.variant_label || 'Default'}) - subject: ${subjectLine ? 'yes' : 'no'}`);
 
                 const { data: upsertedVariant, error: variantError } = await supabase
-                  .from('campaign_variants')
+                  .from('smartlead_variants')
                   .upsert(variantPayload, { 
                     onConflict: 'campaign_id,platform_variant_id' 
                   })
@@ -700,21 +635,19 @@ serve(async (req) => {
                   console.log(`    Variant ${variantId} upserted successfully`);
                   progress.variants_synced++;
                   
-                  // Extract and store copy features for analytics
                   if (upsertedVariant?.id) {
                     await upsertVariantFeatures(supabase, upsertedVariant.id, workspace_id, subjectLine, emailBody);
                   }
                 }
               }
 
-              // Create sequence step - use direct sequence fields
+              // Create sequence step
               const { error: stepError } = await supabase
-                .from('sequence_steps')
+                .from('smartlead_sequence_steps')
                 .upsert({
                   campaign_id: campaignDbId,
                   step_number: seq.seq_number,
-                  subject_line: seq.subject || null,
-                  body_preview: seq.email_body?.substring(0, 200) || null,
+                  step_type: 'email',
                   delay_days: seq.seq_delay_details?.delay_in_days || 0
                 }, { 
                   onConflict: 'campaign_id,step_number' 
@@ -733,7 +666,6 @@ serve(async (req) => {
             smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey),
           ]);
 
-          // Process email accounts
           if (emailAccountsResult.status === 'fulfilled') {
             const emailAccounts: SmartleadEmailAccount[] = emailAccountsResult.value;
             for (const account of emailAccounts) {
@@ -758,92 +690,51 @@ serve(async (req) => {
             console.error(`Failed to fetch email accounts for campaign ${campaign.id}:`, emailAccountsResult.reason);
           }
 
-          // Process analytics - now with variant-level distribution
           if (analyticsResult.status === 'fulfilled') {
             const analytics: SmartleadAnalytics = analyticsResult.value;
             const today = new Date().toISOString().split('T')[0];
 
-            // Fetch all variants for this campaign to distribute metrics proportionally
             const { data: campaignVariants } = await supabase
-              .from('campaign_variants')
+              .from('smartlead_variants')
               .select('id, name')
               .eq('campaign_id', campaignDbId);
 
             const totalVariants = campaignVariants?.length || 0;
 
             if (totalVariants > 0) {
-              // Distribute metrics across variants (proportionally by count)
-              // In a real scenario, we'd use variant-level stats from the API if available
-              // For now, distribute evenly across variants
               const variantCount = totalVariants;
               
               for (const variant of (campaignVariants || [])) {
-                const variantMetrics = {
+                const { error: metricsError } = await supabase.from('smartlead_daily_metrics').upsert({
                   workspace_id,
                   campaign_id: campaignDbId,
-                  variant_id: variant.id,
-                  date: today,
+                  metric_date: today,
                   sent_count: Math.round((analytics.sent_count || 0) / variantCount),
-                  delivered_count: Math.round((analytics.unique_sent_count || 0) / variantCount),
                   opened_count: Math.round((analytics.unique_open_count || 0) / variantCount),
                   clicked_count: Math.round((analytics.unique_click_count || 0) / variantCount),
                   replied_count: Math.round((analytics.reply_count || 0) / variantCount),
                   bounced_count: Math.round((analytics.bounce_count || 0) / variantCount),
-                  unsubscribed_count: Math.round((analytics.unsubscribe_count || 0) / variantCount),
-                };
-
-                const { data: existingMetric } = await supabase
-                  .from('daily_metrics')
-                  .select('id')
-                  .eq('workspace_id', workspace_id)
-                  .eq('campaign_id', campaignDbId)
-                  .eq('variant_id', variant.id)
-                  .eq('date', today)
-                  .is('email_account_id', null)
-                  .is('segment_id', null)
-                  .maybeSingle();
-
-                const { error: metricsError } = existingMetric?.id
-                  ? await supabase.from('daily_metrics').update(variantMetrics).eq('id', existingMetric.id)
-                  : await supabase.from('daily_metrics').insert(variantMetrics);
+                }, { onConflict: 'campaign_id,metric_date' });
 
                 if (!metricsError) progress.metrics_created++;
               }
             } else {
-              // Fallback: Insert campaign-level metrics if no variants
-              const metricsPayload = {
+              const { error: metricsError } = await supabase.from('smartlead_daily_metrics').upsert({
                 workspace_id, 
                 campaign_id: campaignDbId, 
-                date: today,
+                metric_date: today,
                 sent_count: analytics.sent_count || 0,
-                delivered_count: analytics.unique_sent_count || 0,
                 opened_count: analytics.unique_open_count || 0,
                 clicked_count: analytics.unique_click_count || 0,
                 replied_count: analytics.reply_count || 0,
                 bounced_count: analytics.bounce_count || 0,
-                unsubscribed_count: analytics.unsubscribe_count || 0,
-              };
-
-              const { data: existingMetric } = await supabase
-                .from('daily_metrics')
-                .select('id')
-                .eq('workspace_id', workspace_id)
-                .eq('campaign_id', campaignDbId)
-                .eq('date', today)
-                .is('variant_id', null)
-                .is('email_account_id', null)
-                .is('segment_id', null)
-                .maybeSingle();
-
-              const { error: metricsError } = existingMetric?.id
-                ? await supabase.from('daily_metrics').update(metricsPayload).eq('id', existingMetric.id)
-                : await supabase.from('daily_metrics').insert(metricsPayload);
+              }, { onConflict: 'campaign_id,metric_date' });
 
               if (!metricsError) progress.metrics_created++;
             }
           }
 
-          // 5. Fetch ALL leads using leads-statistics endpoint (provides richer data with history)
+          // 5. Fetch leads - still use shared leads table but with platform = 'smartlead'
           try {
             const savedOffset = (existingProgress?.campaign_index === i && typeof (existingProgress as any).leads_offset === 'number')
               ? (existingProgress as any).leads_offset
@@ -853,8 +744,21 @@ serve(async (req) => {
             const pageSize = 100;
             let hasMore = true;
 
+            // Build step to variant map for message events
+            const { data: variantsForMapping } = await supabase
+              .from('smartlead_variants')
+              .select('id, name')
+              .eq('campaign_id', campaignDbId);
+            
+            const stepToVariantMap = new Map<number, string>();
+            for (const v of (variantsForMapping || [])) {
+              const match = v.name.match(/Step (\d+)/);
+              if (match) {
+                stepToVariantMap.set(parseInt(match[1]), v.id);
+              }
+            }
+
             while (hasMore) {
-              // Check time budget inside leads loop too
               if (isTimeBudgetExceeded()) {
                 console.log(`[smartlead-sync] Time budget exceeded during leads fetch for campaign ${i}`);
                 await supabase.from('api_connections').update({
@@ -883,224 +787,138 @@ serve(async (req) => {
                 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
               }
 
-              const leadsData = await smartleadRequest(
-                `/campaigns/${campaign.id}/leads-statistics?limit=${pageSize}&offset=${offset}`,
+              const leadsStats = await smartleadRequest(
+                `/campaigns/${campaign.id}/leads?offset=${offset}&limit=${pageSize}`,
                 apiKey
               );
               
-              // leads-statistics returns { hasMore: boolean, data: [...] }
-              const leads = leadsData?.data || [];
-              hasMore = leadsData?.hasMore === true;
-              
-              if (!Array.isArray(leads) || leads.length === 0) {
-                console.log(`  No leads returned at offset ${offset}`);
-                break;
+              const leadsArray = Array.isArray(leadsStats) ? leadsStats : [];
+
+              if (leadsArray.length === 0) {
+                hasMore = false;
+                continue;
               }
 
-              console.log(`  Fetched ${leads.length} leads at offset ${offset}`);
+              console.log(`  Fetched ${leadsArray.length} leads at offset ${offset}`);
 
-              // Batch arrays for bulk inserts
-              const leadPayloads: any[] = [];
-              const leadPlatformIds: string[] = [];
+              const eventPayloads: any[] = [];
 
-              for (const leadStat of leads) {
-                const email = leadStat.to?.toLowerCase();
+              for (const leadStat of leadsArray) {
+                const email = leadStat.email?.toLowerCase();
                 if (!email) continue;
 
-                const platformLeadId = String(leadStat.lead_id || leadStat.email_lead_map_id);
-                leadPayloads.push({
+                // Upsert lead to shared leads table
+                const leadPayload = {
                   workspace_id,
-                  campaign_id: campaignDbId,
                   platform: 'smartlead',
-                  platform_lead_id: platformLeadId,
-                  email: email,
-                  status: leadStat.status?.toLowerCase() || 'active',
-                });
-                leadPlatformIds.push(platformLeadId);
+                  platform_lead_id: String(leadStat.id || email),
+                  email,
+                  first_name: leadStat.first_name || null,
+                  last_name: leadStat.last_name || null,
+                  company: leadStat.company_name || leadStat.company || null,
+                  title: leadStat.designation || leadStat.title || null,
+                  linkedin_url: leadStat.linkedin_profile || leadStat.linkedin_url || null,
+                  phone: leadStat.phone_number || null,
+                  industry: leadStat.industry || null,
+                  location: leadStat.location || leadStat.city || null,
+                  email_domain: extractEmailDomain(email),
+                  email_type: classifyEmailType(email),
+                  status: leadStat.lead_status || leadStat.category || null,
+                  updated_at: new Date().toISOString(),
+                };
+
+                const { data: upsertedLead, error: leadError } = await supabase
+                  .from('leads')
+                  .upsert(leadPayload, { onConflict: 'workspace_id,platform,platform_lead_id' })
+                  .select('id')
+                  .single();
+
+                if (leadError) {
+                  console.error(`Lead upsert error:`, leadError);
+                  continue;
+                }
+
+                progress.leads_synced++;
+                const dbLeadId = upsertedLead?.id;
+
+                // Fetch message history for this lead
+                if (dbLeadId) {
+                  try {
+                    const messageHistory: SmartleadLeadMessageHistory[] = await smartleadRequest(
+                      `/campaigns/${campaign.id}/leads/${leadStat.id}/message-history`,
+                      apiKey
+                    );
+
+                    if (Array.isArray(messageHistory)) {
+                      for (const msg of messageHistory) {
+                        const msgType = msg.type?.toUpperCase();
+                        let eventType = 'unknown';
+                        let sentiment: string | null = null;
+
+                        if (msgType === 'SENT') eventType = 'sent';
+                        else if (msgType === 'OPENED' || msgType === 'OPEN') eventType = 'opened';
+                        else if (msgType === 'CLICKED' || msgType === 'CLICK') eventType = 'clicked';
+                        else if (msgType === 'REPLY' || msgType === 'REPLIED') {
+                          eventType = 'replied';
+                          const replyLower = (msg.email_body || '').toLowerCase();
+                          if (/interested|yes|sure|let's|schedule|available/i.test(replyLower)) {
+                            sentiment = 'positive';
+                          } else if (/not interested|no thanks|unsubscribe|remove|stop/i.test(replyLower)) {
+                            sentiment = 'negative';
+                          } else {
+                            sentiment = 'neutral';
+                          }
+                        } else if (msgType === 'BOUNCE' || msgType === 'BOUNCED') eventType = 'bounced';
+
+                        const occurredAt = msg.time ? new Date(msg.time).toISOString() : new Date().toISOString();
+                        const sequenceStep = msg.seq_number || 1;
+                        const variantId = stepToVariantMap.get(sequenceStep) || null;
+
+                        eventPayloads.push({
+                          workspace_id,
+                          campaign_id: campaignDbId,
+                          lead_id: dbLeadId,
+                          variant_id: variantId,
+                          event_type: eventType,
+                          event_timestamp: occurredAt,
+                          message_id: `${leadStat.id}-${msgType}-${occurredAt}`,
+                          reply_text: msgType === 'REPLY' ? (msg.email_body || null) : null,
+                          reply_sentiment: sentiment,
+                        });
+                      }
+                    }
+                  } catch (msgError) {
+                    console.error(`  Message history fetch failed for lead ${leadStat.id}:`, msgError);
+                  }
+                }
               }
 
-              // Bulk upsert leads
-              if (leadPayloads.length > 0) {
-                const { error: bulkLeadError } = await supabase
-                  .from('leads')
-                  .upsert(leadPayloads, { 
-                    onConflict: 'workspace_id,platform,platform_lead_id' 
-                  });
+              // Bulk insert events to smartlead_message_events
+              if (eventPayloads.length > 0) {
+                const batchSize = 500;
+                for (let ei = 0; ei < eventPayloads.length; ei += batchSize) {
+                  const batch = eventPayloads.slice(ei, ei + batchSize);
+                  const { error: eventError } = await supabase
+                    .from('smartlead_message_events')
+                    .insert(batch);
 
-                if (bulkLeadError) {
-                  console.error('Bulk lead upsert error:', bulkLeadError);
-                } else {
-                  progress.leads_synced += leadPayloads.length;
-                }
-
-                // Fetch all the lead IDs we just upserted
-                const { data: dbLeads } = await supabase
-                  .from('leads')
-                  .select('id, platform_lead_id')
-                  .eq('workspace_id', workspace_id)
-                  .eq('platform', 'smartlead')
-                  .in('platform_lead_id', leadPlatformIds);
-
-                const leadIdMap = new Map<string, string>();
-                for (const l of dbLeads || []) {
-                  leadIdMap.set(l.platform_lead_id, l.id);
-                }
-
-                // Collect all events for batch insert
-                const eventPayloads: any[] = [];
-                const hourlyUpdates = new Map<string, { replied: number; positive: number; hour: number; dayOfWeek: number; date: string }>();
-
-                // Build a map of step_number -> variant_id for looking up variants by sequence step
-                const { data: stepVariants } = await supabase
-                  .from('campaign_variants')
-                  .select('id, name')
-                  .eq('campaign_id', campaignDbId);
-                
-                // Create a lookup map: step number -> variant IDs (there may be multiple variants per step for A/B tests)
-                const stepToVariantMap = new Map<number, string>();
-                for (const v of (stepVariants || [])) {
-                  // Parse step number from variant name like "Step 1 - A" or "Step 2 - Default"
-                  const stepMatch = v.name.match(/Step\s+(\d+)/i);
-                  if (stepMatch) {
-                    const stepNum = parseInt(stepMatch[1], 10);
-                    // Use first variant for each step (could be enhanced to track which variant was sent)
-                    if (!stepToVariantMap.has(stepNum)) {
-                      stepToVariantMap.set(stepNum, v.id);
-                    }
-                  }
-                }
-
-                for (const leadStat of leads) {
-                  const email = leadStat.to?.toLowerCase();
-                  if (!email) continue;
-
-                  const platformLeadId = String(leadStat.lead_id || leadStat.email_lead_map_id);
-                  const dbLeadId = leadIdMap.get(platformLeadId);
-                  if (!dbLeadId) continue;
-
-                  const history = leadStat.history || [];
-                  for (const msg of history) {
-                    const msgType = (msg.type || '').toUpperCase();
-                    
-                    if (['SENT', 'OPEN', 'CLICK', 'REPLY', 'BOUNCE', 'UNSUBSCRIBE'].includes(msgType)) {
-                      let eventType = msgType.toLowerCase();
-                      let sentiment = 'neutral';
-                      
-                      if (msgType === 'REPLY') {
-                        const leadStatus = (leadStat.status || '').toLowerCase();
-                        if (leadStatus === 'interested' || leadStatus === 'meeting_booked') {
-                          sentiment = 'positive';
-                          eventType = 'positive_reply';
-                        } else if (leadStatus === 'not_interested' || leadStatus === 'wrong_person') {
-                          sentiment = 'negative';
-                          eventType = 'negative_reply';
-                        } else {
-                          eventType = 'replied';
-                        }
-                      }
-
-                      const occurredAt = msg.time ? new Date(msg.time).toISOString() : new Date().toISOString();
-                      const platformEventId = msg.stats_id || msg.message_id || `${leadStat.lead_id}-${msgType}-${occurredAt}`;
-                      const sequenceStep = parseInt(msg.email_seq_number) || 1;
-                      
-                      // Look up variant_id from sequence step
-                      const variantId = stepToVariantMap.get(sequenceStep) || null;
-
-                      eventPayloads.push({
-                        workspace_id,
-                        campaign_id: campaignDbId,
-                        lead_id: dbLeadId,
-                        variant_id: variantId,
-                        platform: 'smartlead',
-                        platform_event_id: platformEventId,
-                        event_type: eventType,
-                        occurred_at: occurredAt,
-                        sent_at: msgType === 'SENT' ? occurredAt : null,
-                        lead_email: email,
-                        reply_content: msgType === 'REPLY' ? (msg.email_body || null) : null,
-                        reply_sentiment: msgType === 'REPLY' ? sentiment : null,
-                        sequence_step: sequenceStep,
-                      });
-
-                      // Track hourly metrics for replies
-                      if (msgType === 'REPLY') {
-                        const replyDate = new Date(occurredAt);
-                        const hour = replyDate.getUTCHours();
-                        const dayOfWeek = replyDate.getUTCDay();
-                        const dateStr = occurredAt.split('T')[0];
-                        const key = `${dateStr}-${hour}`;
-                        
-                        const existing = hourlyUpdates.get(key) || { replied: 0, positive: 0, hour, dayOfWeek, date: dateStr };
-                        existing.replied += 1;
-                        existing.positive += sentiment === 'positive' ? 1 : 0;
-                        hourlyUpdates.set(key, existing);
-                      }
-                    }
-                  }
-                }
-
-                // Bulk insert events - use insert with ignoreDuplicates 
-                if (eventPayloads.length > 0) {
-                  // Insert in batches of 500 to avoid payload size limits
-                  const batchSize = 500;
-                  for (let ei = 0; ei < eventPayloads.length; ei += batchSize) {
-                    const batch = eventPayloads.slice(ei, ei + batchSize);
-                    // Use insert - duplicates will be rejected by the unique index
-                    const { error: eventError } = await supabase
-                      .from('message_events')
-                      .insert(batch);
-
-                    if (!eventError) {
-                      progress.events_created += batch.length;
-                    } else if (eventError.code !== '23505') {
-                      // Ignore unique constraint violations, log other errors
-                      console.error('Batch event insert error:', eventError);
-                    }
-                  }
-                }
-
-                // Batch upsert hourly metrics
-                for (const [, data] of hourlyUpdates) {
-                  const { data: existingHourly } = await supabase
-                    .from('hourly_metrics')
-                    .select('id, replied_count, positive_reply_count')
-                    .eq('workspace_id', workspace_id)
-                    .eq('campaign_id', campaignDbId)
-                    .eq('date', data.date)
-                    .eq('hour', data.hour)
-                    .maybeSingle();
-
-                  if (existingHourly) {
-                    await supabase
-                      .from('hourly_metrics')
-                      .update({
-                        replied_count: (existingHourly.replied_count || 0) + data.replied,
-                        positive_reply_count: (existingHourly.positive_reply_count || 0) + data.positive,
-                      })
-                      .eq('id', existingHourly.id);
-                  } else {
-                    await supabase
-                      .from('hourly_metrics')
-                      .insert({
-                        workspace_id,
-                        campaign_id: campaignDbId,
-                        date: data.date,
-                        hour: data.hour,
-                        day_of_week: data.dayOfWeek,
-                        replied_count: data.replied,
-                        positive_reply_count: data.positive,
-                      });
+                  if (!eventError) {
+                    progress.events_created += batch.length;
+                  } else if (eventError.code !== '23505') {
+                    console.error('Batch event insert error:', eventError);
                   }
                 }
               }
 
               offset += pageSize;
+              if (leadsArray.length < pageSize) {
+                hasMore = false;
+              }
             }
           } catch (leadsError) {
             console.error(`Failed to fetch leads for campaign ${campaign.id}:`, leadsError);
           }
 
-          // Update progress after each campaign - track last processed
           lastProcessedIndex = i;
           lastProcessedName = campaign.name;
           
@@ -1122,7 +940,6 @@ serve(async (req) => {
         } catch (campaignError) {
           console.error(`Error processing campaign ${campaign.id}:`, campaignError);
           progress.errors.push(`Campaign ${campaign.name}: ${String(campaignError)}`);
-          // Still advance campaign_index to avoid getting stuck
           lastProcessedIndex = i;
           lastProcessedName = campaign.name;
         }
@@ -1150,13 +967,9 @@ serve(async (req) => {
 
       console.log('Progress:', { isComplete, campaign_index: nextCampaignIndex, total: totalCampaigns, ...progress });
 
-      // Trigger pattern computation when sync completes
       if (isComplete) {
         console.log('Sync complete - triggering pattern computation...');
         try {
-          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-          const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-          
           const patternResponse = await fetch(`${supabaseUrl}/functions/v1/compute-patterns`, {
             method: 'POST',
             headers: {
@@ -1174,20 +987,14 @@ serve(async (req) => {
           }
         } catch (patternError) {
           console.error('Failed to trigger pattern computation:', patternError);
-          // Don't fail the sync if pattern computation fails
         }
       }
 
-      // If not complete, schedule auto-continue using waitUntil
       if (!isComplete) {
         console.log('Scheduling auto-continue for next batch...');
-        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         
-        // Use waitUntil to trigger next batch in background
         (globalThis as any).EdgeRuntime?.waitUntil?.(
           (async () => {
-            // Small delay to avoid rate limiting
             await new Promise(r => setTimeout(r, 1000));
             try {
               await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {

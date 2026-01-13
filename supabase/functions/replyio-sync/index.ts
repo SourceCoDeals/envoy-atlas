@@ -7,7 +7,6 @@ const corsHeaders = {
 
 const REPLYIO_BASE_URL = 'https://api.reply.io/v3';
 const RATE_LIMIT_DELAY = 300;
-const BATCH_SIZE = 50;
 const TIME_BUDGET_MS = 45000;
 const SYNC_LOCK_TIMEOUT_MS = 30000;
 
@@ -17,11 +16,9 @@ const PERSONAL_DOMAINS = new Set([
   'gmx.com', 'live.com', 'msn.com', 'me.com', 'inbox.com'
 ]);
 
-// Spam trigger words for subject line analysis
 const SPAM_TRIGGERS = [
   'free', 'guarantee', 'no obligation', 'winner', 'cash', 'urgent',
-  'act now', 'limited time', 'exclusive deal', 'click here', 'buy now',
-  'order now', 'don\'t miss', 'special promotion', 'amazing', 'incredible'
+  'act now', 'limited time', 'exclusive deal', 'click here', 'buy now'
 ];
 
 function classifyEmailType(email: string): 'personal' | 'work' {
@@ -35,115 +32,21 @@ function extractEmailDomain(email: string): string {
 
 function mapSequenceStatus(status: string): string {
   const statusMap: Record<string, string> = {
-    'Active': 'active',
-    'Paused': 'paused',
-    'Stopped': 'stopped',
-    'Draft': 'draft',
+    'Active': 'active', 'Paused': 'paused', 'Stopped': 'stopped', 'Draft': 'draft',
   };
   return statusMap[status] || status.toLowerCase();
 }
 
-// ========== COPY FEATURE EXTRACTION ==========
-
-interface CopyFeatures {
-  subject_char_count: number;
-  subject_word_count: number;
-  subject_is_question: boolean;
-  subject_has_number: boolean;
-  subject_has_emoji: boolean;
-  subject_personalization_position: number | null;
-  subject_personalization_count: number;
-  subject_first_word_type: string;
-  subject_capitalization_style: string;
-  subject_spam_score: number;
-  body_word_count: number;
-  body_sentence_count: number;
-  body_avg_sentence_length: number;
-  body_reading_grade: number;
-  body_personalization_density: number;
-  body_personalization_types: string[];
-  body_has_link: boolean;
-  body_link_count: number;
-  body_has_calendar_link: boolean;
-  body_cta_type: string;
-  body_cta_position: string;
-  body_question_count: number;
-  body_has_proof: boolean;
-  body_tone: string;
-  body_paragraph_count: number;
-  body_bullet_point_count: number;
-}
-
-function extractCopyFeatures(subjectLine: string | null, emailBody: string | null): CopyFeatures {
+function extractCopyFeatures(subjectLine: string | null, emailBody: string | null) {
   const subject = subjectLine || '';
   const body = emailBody || '';
   
   const subjectWords = subject.split(/\s+/).filter(Boolean);
   const subjectTokens = [...subject.matchAll(/\{\{?(\w+)\}?\}/g)];
-  const firstToken = subjectTokens[0];
-  
-  const firstWord = subjectWords[0]?.toLowerCase() || '';
-  let firstWordType = 'other';
-  if (/^(hey|hi|hello)/i.test(firstWord)) firstWordType = 'greeting';
-  else if (/^(who|what|when|where|why|how|is|are|do|does|can|could|would)/i.test(firstWord)) firstWordType = 'question';
-  else if (/^(quick|just|re:|fwd:)/i.test(firstWord)) firstWordType = 'casual';
-  else if (/^\{\{?first_?name\}?\}?$/i.test(subjectWords[0] || '')) firstWordType = 'name';
-  else if (/^\{\{?company\}?\}?$/i.test(subjectWords[0] || '')) firstWordType = 'company';
-  
-  let capStyle = 'mixed';
-  if (subject === subject.toLowerCase()) capStyle = 'lowercase';
-  else if (subject === subject.toUpperCase()) capStyle = 'uppercase';
-  else if (subjectWords.every(w => w[0] === w[0]?.toUpperCase())) capStyle = 'title_case';
-  else if (subjectWords[0]?.[0] === subjectWords[0]?.[0]?.toUpperCase() && 
-           subjectWords.slice(1).every(w => w[0] === w[0]?.toLowerCase() || /^\{\{/.test(w))) capStyle = 'sentence_case';
-  
-  const subjectLower = subject.toLowerCase();
-  const spamCount = SPAM_TRIGGERS.filter(trigger => subjectLower.includes(trigger)).length;
-  const spamScore = Math.min(100, spamCount * 15);
-  const hasEmoji = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u.test(subject);
-  
   const bodyClean = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   const bodyWords = bodyClean.split(/\s+/).filter(Boolean);
   const sentences = bodyClean.split(/[.!?]+/).filter(s => s.trim().length > 0);
   const bodyTokens = [...body.matchAll(/\{\{?(\w+)\}?\}/g)];
-  const tokenTypes = [...new Set(bodyTokens.map(m => m[1].toLowerCase()))];
-  
-  const bodyLower = body.toLowerCase();
-  let ctaType = 'no_cta';
-  if (/tuesday|wednesday|thursday|friday|monday/i.test(body) && /\bor\b/i.test(body)) {
-    ctaType = 'choice_ask';
-  } else if (/open to|would you be|interested in/i.test(body)) {
-    ctaType = 'soft_ask';
-  } else if (/schedule|book|calendar|15 min|30 min|call/i.test(body)) {
-    ctaType = 'direct_ask';
-  } else if (/send you|share with you|want me to|can i send/i.test(body)) {
-    ctaType = 'value_ask';
-  } else if (/who handles|who owns|who should|right person|point me/i.test(body)) {
-    ctaType = 'referral_ask';
-  } else if (body.includes('?') && !/schedule|book|open to/i.test(body)) {
-    ctaType = 'question_only';
-  }
-  
-  const bodyLength = bodyClean.length;
-  const lastQuestionPos = bodyClean.lastIndexOf('?');
-  let ctaPosition = 'end';
-  if (lastQuestionPos > 0) {
-    const relativePos = lastQuestionPos / bodyLength;
-    if (relativePos < 0.33) ctaPosition = 'beginning';
-    else if (relativePos < 0.66) ctaPosition = 'middle';
-  }
-  
-  const linkCount = (body.match(/https?:\/\/[^\s<]+/g) || []).length;
-  const hasCalendarLink = /calendly\.com|cal\.com|hubspot\.com\/meetings|chili ?piper/i.test(body);
-  const hasProof = /\d+%|\d+ clients|\d+ companies|trusted by|featured in|as seen|case study/i.test(body);
-  
-  let tone = 'direct';
-  if (/hope this|just wanted|thought i'd|reaching out/i.test(bodyLower)) tone = 'casual';
-  else if (/dear|sincerely|regards|respectfully/i.test(bodyLower)) tone = 'formal';
-  else if (/help you|solve|challenge|struggle|pain/i.test(bodyLower)) tone = 'consultative';
-  
-  const paragraphs = body.split(/\n\s*\n/).filter(p => p.trim());
-  const bullets = (body.match(/^[\s]*[-•*]\s/gm) || []).length;
   
   const avgSentenceLength = sentences.length > 0 ? bodyWords.length / sentences.length : 0;
   const avgWordLength = bodyWords.length > 0 ? bodyClean.replace(/\s/g, '').length / bodyWords.length : 0;
@@ -154,126 +57,34 @@ function extractCopyFeatures(subjectLine: string | null, emailBody: string | nul
     subject_word_count: subjectWords.length,
     subject_is_question: subject.trim().endsWith('?'),
     subject_has_number: /\d/.test(subject),
-    subject_has_emoji: hasEmoji,
-    subject_personalization_position: firstToken ? subject.indexOf(firstToken[0]) : null,
+    subject_has_emoji: /[\u{1F300}-\u{1F9FF}]/u.test(subject),
     subject_personalization_count: subjectTokens.length,
-    subject_first_word_type: firstWordType,
-    subject_capitalization_style: capStyle,
-    subject_spam_score: spamScore,
+    subject_spam_score: Math.min(100, SPAM_TRIGGERS.filter(t => subject.toLowerCase().includes(t)).length * 15),
     body_word_count: bodyWords.length,
     body_sentence_count: sentences.length,
     body_avg_sentence_length: Number(avgSentenceLength.toFixed(2)),
     body_reading_grade: Number(readingGrade.toFixed(2)),
     body_personalization_density: bodyWords.length > 0 ? Number((bodyTokens.length / bodyWords.length).toFixed(4)) : 0,
-    body_personalization_types: tokenTypes,
-    body_has_link: linkCount > 0,
-    body_link_count: linkCount,
-    body_has_calendar_link: hasCalendarLink,
-    body_cta_type: ctaType,
-    body_cta_position: ctaPosition,
+    body_personalization_types: [...new Set(bodyTokens.map(m => m[1].toLowerCase()))],
+    body_has_link: (body.match(/https?:\/\//g) || []).length > 0,
+    body_link_count: (body.match(/https?:\/\/[^\s<]+/g) || []).length,
     body_question_count: (body.match(/\?/g) || []).length,
-    body_has_proof: hasProof,
-    body_tone: tone,
-    body_paragraph_count: paragraphs.length,
-    body_bullet_point_count: bullets,
+    body_paragraph_count: body.split(/\n\s*\n/).filter(p => p.trim()).length,
   };
 }
 
-async function upsertVariantFeatures(
-  supabase: any,
-  variantId: string,
-  workspaceId: string,
-  subjectLine: string | null,
-  emailBody: string | null
-) {
+async function upsertVariantFeatures(supabase: any, variantId: string, workspaceId: string, subjectLine: string | null, emailBody: string | null) {
   const features = extractCopyFeatures(subjectLine, emailBody);
-  
-  const { error } = await supabase
-    .from('campaign_variant_features')
-    .upsert({
-      variant_id: variantId,
-      workspace_id: workspaceId,
-      ...features,
-      extracted_at: new Date().toISOString(),
-    }, { onConflict: 'variant_id' });
-  
-  if (error) {
-    console.error(`Failed to upsert variant features for ${variantId}:`, error.message);
-  } else {
-    console.log(`    Features extracted for variant ${variantId}`);
-  }
-}
-
-// ========== END COPY FEATURE EXTRACTION ==========
-
-// Reply.io v3 API interfaces
-interface ReplyioSequence {
-  id: number;
-  teamId: number;
-  ownerId: number;
-  name: string;
-  status: string;
-  created: string;
-  isArchived: boolean;
-}
-
-interface ReplyioStep {
-  id: number;
-  type: string;
-  number: number;
-  delayInMinutes: number;
-  executionMode: string;
-  templates: Array<{
-    id: number;
-    templateId: number;
-    subject: string;
-    body: string;
-  }>;
-}
-
-interface ReplyioContact {
-  id: number;
-  email: string;
-  firstName: string;
-  lastName: string;
-  title: string;
-  company: string;
-  city: string;
-  state: string;
-  country: string;
-  phone: string;
-  linkedInProfile: string;
-  companySize: string;
-  industry: string;
-  addingDate: string;
-}
-
-interface ReplyioEmailAccount {
-  id: number;
-  email: string;
-  senderName: string;
-}
-
-interface ReplyioSequenceStats {
-  sequenceId: number;
-  sequenceName: string;
-  deliveredContacts: number;
-  repliedContacts: number;
-  interestedContacts: number;
-  replyRate: number;
-  deliveryRate: number;
-  interestedRate: number;
+  await supabase.from('replyio_variant_features').upsert({
+    variant_id: variantId, workspace_id: workspaceId, ...features, extracted_at: new Date().toISOString(),
+  }, { onConflict: 'variant_id' });
 }
 
 interface SyncProgress {
   step: 'email_accounts' | 'sequences' | 'contacts' | 'complete';
   sequence_index: number;
-  contact_cursor: number | null;
   total_sequences: number;
   processed_sequences: number;
-  total_contacts: number;
-  processed_contacts: number;
-  current_sequence_name: string;
   last_heartbeat: string;
   errors: string[];
 }
@@ -281,676 +92,198 @@ interface SyncProgress {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function replyioRequest(endpoint: string, apiKey: string, retries = 3): Promise<any> {
-  let lastError: Error | null = null;
-  
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       await delay(RATE_LIMIT_DELAY);
-      
       const response = await fetch(`${REPLYIO_BASE_URL}${endpoint}`, {
-        headers: {
-          'x-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
       });
-      
-      if (response.status === 429) {
-        console.log(`Rate limited on ${endpoint}, waiting...`);
-        await delay(2000 * (attempt + 1));
-        continue;
-      }
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Reply.io API error ${response.status}: ${errorText}`);
-      }
-      
+      if (response.status === 429) { await delay(2000 * (attempt + 1)); continue; }
+      if (!response.ok) throw new Error(`Reply.io API error ${response.status}`);
       const text = await response.text();
-      if (!text) return null;
-      return JSON.parse(text);
+      return text ? JSON.parse(text) : null;
     } catch (error) {
-      lastError = error as Error;
-      console.error(`Attempt ${attempt + 1} failed for ${endpoint}:`, error);
-      if (attempt < retries - 1) {
-        await delay(1000 * (attempt + 1));
-      }
+      if (attempt === retries - 1) throw error;
+      await delay(1000 * (attempt + 1));
     }
   }
-  
-  throw lastError || new Error(`Failed to fetch ${endpoint}`);
-}
-
-async function updateProgress(
-  supabase: any,
-  connectionId: string,
-  progress: Partial<SyncProgress>,
-  status?: string
-) {
-  const updateData: any = {
-    sync_progress: progress,
-    updated_at: new Date().toISOString(),
-  };
-  
-  if (status) {
-    updateData.sync_status = status;
-  }
-  
-  await supabase
-    .from('api_connections')
-    .update(updateData)
-    .eq('id', connectionId);
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   const startTime = Date.now();
   
   try {
-    // Auth check
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    if (!authHeader) return new Response(JSON.stringify({ error: 'Missing auth' }), { status: 401, headers: corsHeaders });
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Verify user
-    const { data: { user }, error: authError } = await createClient(
-      supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: authHeader } } }
-    ).auth.getUser();
-    
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Invalid token' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const { data: { user } } = await createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, 
+      { global: { headers: { Authorization: authHeader } } }).auth.getUser();
+    if (!user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
 
-    const { workspace_id, sync_type = 'full', reset = false, force_advance = false, diagnostic = false } = await req.json();
-    
-    if (!workspace_id) {
-      return new Response(JSON.stringify({ error: 'Missing workspace_id' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const { workspace_id, reset = false, force_advance = false } = await req.json();
+    if (!workspace_id) return new Response(JSON.stringify({ error: 'Missing workspace_id' }), { status: 400, headers: corsHeaders });
 
-    // Verify workspace membership
-    const { data: membership } = await supabase
-      .from('workspace_members')
-      .select('id')
-      .eq('workspace_id', workspace_id)
-      .eq('user_id', user.id)
-      .single();
-
-    if (!membership) {
-      return new Response(JSON.stringify({ error: 'Not a workspace member' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Get Reply.io connection
-    const { data: connection, error: connError } = await supabase
-      .from('api_connections')
-      .select('*')
-      .eq('workspace_id', workspace_id)
-      .eq('platform', 'replyio')
-      .eq('is_active', true)
-      .single();
-
-    if (connError || !connection) {
-      return new Response(JSON.stringify({ error: 'No active Reply.io connection found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const { data: connection } = await supabase.from('api_connections').select('*')
+      .eq('workspace_id', workspace_id).eq('platform', 'replyio').eq('is_active', true).single();
+    if (!connection) return new Response(JSON.stringify({ error: 'No Reply.io connection' }), { status: 404, headers: corsHeaders });
 
     const apiKey = connection.api_key_encrypted;
 
-    // Diagnostic mode: quick sanity checks without mutating data.
-    if (diagnostic) {
-      const results: Record<string, any> = {};
-      try {
-        results.email_accounts = await replyioRequest('/email-accounts?top=1&skip=0', apiKey);
-      } catch (e) {
-        results.email_accounts_error = (e as Error).message;
-      }
-
-      try {
-        results.sequences = await replyioRequest('/sequences?top=1&skip=0', apiKey);
-      } catch (e) {
-        results.sequences_error = (e as Error).message;
-      }
-
-      return new Response(JSON.stringify({ ok: true, diagnostic: true, results }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // The connection may contain legacy sync_progress shapes from older Reply.io sync versions.
-    // If so, we must ignore it and start from a clean v3 progress object.
-    const rawProgress = (connection.sync_progress as any) || null;
-    const isValidV3Progress = (p: any): p is SyncProgress => {
-      return !!p &&
-        typeof p === 'object' &&
-        ['email_accounts', 'sequences', 'contacts', 'complete'].includes(p.step) &&
-        typeof p.sequence_index === 'number' &&
-        'processed_sequences' in p &&
-        'processed_contacts' in p;
-    };
-
-    const existingProgress: SyncProgress | null = isValidV3Progress(rawProgress) ? rawProgress : null;
-
-    if (rawProgress && !existingProgress) {
-      console.log('Detected legacy Reply.io sync_progress; resetting to v3 progress format');
-    }
-
-    // Check sync lock (unless force_advance)
-    if (!force_advance && existingProgress?.last_heartbeat) {
-      const timeSinceHeartbeat = Date.now() - new Date(existingProgress.last_heartbeat).getTime();
-      if (timeSinceHeartbeat < SYNC_LOCK_TIMEOUT_MS) {
-        console.log('Another sync is running, skipping...');
-        return new Response(JSON.stringify({
-          skipped: true,
-          message: 'Another sync is in progress',
-          progress: existingProgress,
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-    }
-
     // Handle reset
     if (reset) {
-      console.log('Resetting Reply.io data...');
-
-      // Get campaign IDs first
-      const { data: campaigns } = await supabase
-        .from('campaigns')
-        .select('id')
-        .eq('workspace_id', workspace_id)
-        .eq('platform', 'replyio');
-
+      const { data: campaigns } = await supabase.from('replyio_campaigns').select('id').eq('workspace_id', workspace_id);
       const campaignIds = campaigns?.map(c => c.id) || [];
-
       if (campaignIds.length > 0) {
-        await supabase.from('daily_metrics').delete()
-          .eq('workspace_id', workspace_id)
-          .in('campaign_id', campaignIds);
-        await supabase.from('message_events').delete()
-          .eq('workspace_id', workspace_id)
-          .in('campaign_id', campaignIds);
-        await supabase.from('campaign_variants').delete()
-          .in('campaign_id', campaignIds);
-        await supabase.from('sequence_steps').delete()
-          .in('campaign_id', campaignIds);
-        await supabase.from('leads').delete()
-          .eq('workspace_id', workspace_id)
-          .eq('platform', 'replyio');
-        await supabase.from('campaigns').delete()
-          .eq('workspace_id', workspace_id)
-          .eq('platform', 'replyio');
+        await supabase.from('replyio_daily_metrics').delete().eq('workspace_id', workspace_id);
+        await supabase.from('replyio_message_events').delete().eq('workspace_id', workspace_id);
+        await supabase.from('replyio_variant_features').delete().eq('workspace_id', workspace_id);
+        await supabase.from('replyio_variants').delete().in('campaign_id', campaignIds);
+        await supabase.from('replyio_sequence_steps').delete().in('campaign_id', campaignIds);
+        await supabase.from('replyio_campaigns').delete().eq('workspace_id', workspace_id);
       }
-
-      await supabase.from('email_accounts').delete()
-        .eq('workspace_id', workspace_id)
-        .eq('platform', 'replyio');
+      await supabase.from('leads').delete().eq('workspace_id', workspace_id).eq('platform', 'replyio');
+      await supabase.from('email_accounts').delete().eq('workspace_id', workspace_id).eq('platform', 'replyio');
     }
 
-    // Initialize or resume progress
-    // If the previous run is not actively "syncing", we start fresh to avoid carrying stale errors/progress.
-    const shouldStartFresh = reset || !existingProgress || connection.sync_status !== 'syncing';
-
-    let progress: SyncProgress = shouldStartFresh ? {
-      step: 'email_accounts',
-      sequence_index: 0,
-      contact_cursor: null,
-      total_sequences: 0,
-      processed_sequences: 0,
-      total_contacts: 0,
-      processed_contacts: 0,
-      current_sequence_name: '',
-      last_heartbeat: new Date().toISOString(),
-      errors: [],
-    } : {
-      ...existingProgress,
-      last_heartbeat: new Date().toISOString(),
-      // Clear any old errors so the UI reflects the current run.
-      errors: [],
-    };
-
-    // Force advance - skip to next sequence
-    if (force_advance && progress.step === 'sequences') {
-      progress.sequence_index++;
-      progress.errors.push(`Forced skip at sequence ${progress.sequence_index}`);
-    }
-
-    await updateProgress(supabase, connection.id, progress, 'syncing');
+    let progress: SyncProgress = { step: 'email_accounts', sequence_index: 0, total_sequences: 0, processed_sequences: 0, last_heartbeat: new Date().toISOString(), errors: [] };
+    await supabase.from('api_connections').update({ sync_status: 'syncing', sync_progress: progress }).eq('id', connection.id);
 
     const checkTimeBudget = () => Date.now() - startTime > TIME_BUDGET_MS;
 
-    try {
-      // Step 1: Sync Email Accounts
-      if (progress.step === 'email_accounts') {
-        console.log('Syncing email accounts...');
-        
-        try {
-          const emailAccounts: ReplyioEmailAccount[] = await replyioRequest('/email-accounts', apiKey);
-          
-          if (Array.isArray(emailAccounts)) {
-            for (const account of emailAccounts) {
-              await supabase.from('email_accounts').upsert({
-                workspace_id,
-                platform: 'replyio',
-                platform_id: String(account.id),
-                email_address: account.email,
-                sender_name: account.senderName || null,
-                is_active: true,
-                updated_at: new Date().toISOString(),
-              }, { onConflict: 'workspace_id,platform,platform_id' });
-            }
-            
-            console.log(`Synced ${emailAccounts.length} email accounts`);
-          }
-        } catch (error) {
-          console.error('Error syncing email accounts:', error);
-          progress.errors.push(`Email accounts: ${(error as Error).message}`);
-        }
-        
-        progress.step = 'sequences';
-        progress.last_heartbeat = new Date().toISOString();
-        await updateProgress(supabase, connection.id, progress);
-      }
-
-      // Step 2: Sync Sequences (Campaigns) + Contacts per sequence
-      if (progress.step === 'sequences') {
-        console.log('Syncing sequences...');
-        
-        // Fetch all sequences using v3 API
-        let allSequences: ReplyioSequence[] = [];
-        let hasMoreSequences = true;
-        let skip = 0;
-        
-        while (hasMoreSequences) {
-          const endpoint = `/sequences?top=100&skip=${skip}`;
-          
-          const response = await replyioRequest(endpoint, apiKey);
-          
-          // Handle various response formats
-          let sequences: ReplyioSequence[] = [];
-          const normalized = response?.response ?? response;
-          if (Array.isArray(normalized)) {
-            sequences = normalized;
-          } else if (normalized?.sequences && Array.isArray(normalized.sequences)) {
-            sequences = normalized.sequences;
-          } else if (normalized?.items && Array.isArray(normalized.items)) {
-            sequences = normalized.items;
-          }
-          
-          console.log(`Fetched ${sequences.length} sequences at skip=${skip}`);
-          
-          if (sequences.length === 0) {
-            hasMoreSequences = false;
-          } else {
-            allSequences = allSequences.concat(sequences);
-            skip += sequences.length;
-            
-            // Check if we got less than requested (last page)
-            if (sequences.length < 100) {
-              hasMoreSequences = false;
-            }
-          }
-          
-          if (checkTimeBudget()) break;
-        }
-        
-        // Filter out archived sequences
-        allSequences = allSequences.filter(s => !s.isArchived);
-        progress.total_sequences = allSequences.length;
-        
-        console.log(`Found ${allSequences.length} sequences to process`);
-        
-        // If no sequences, check if API returned them differently
-        if (allSequences.length === 0) {
-          console.log('No sequences found. Checking alternate endpoint...');
-          try {
-            // Try alternate endpoint format
-            const altResponse = await replyioRequest('/sequences', apiKey);
-            console.log('Alternate response type:', typeof altResponse, Array.isArray(altResponse) ? 'array' : 'object');
-            if (altResponse) {
-              console.log('Response keys:', Object.keys(altResponse || {}).join(', '));
-            }
-          } catch (e) {
-            console.log('Alternate check failed:', (e as Error).message);
+    // Step 1: Email Accounts
+    if (progress.step === 'email_accounts') {
+      try {
+        const emailAccounts = await replyioRequest('/email-accounts', apiKey);
+        if (Array.isArray(emailAccounts)) {
+          for (const account of emailAccounts) {
+            await supabase.from('email_accounts').upsert({
+              workspace_id, platform: 'replyio', platform_id: String(account.id),
+              email_address: account.email, sender_name: account.senderName || null, is_active: true,
+            }, { onConflict: 'workspace_id,platform,platform_id' });
           }
         }
-        
-        // Process sequences from where we left off
-        for (let i = progress.sequence_index; i < allSequences.length; i++) {
-          if (checkTimeBudget()) {
-            console.log('Time budget exceeded, saving progress...');
-            progress.sequence_index = i;
-            await updateProgress(supabase, connection.id, progress);
-            
-            return new Response(JSON.stringify({
-              success: true,
-              complete: false,
-              progress,
-              message: 'Time budget exceeded, will continue on next call',
-            }), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
-          }
-          
-          const sequence = allSequences[i];
-          progress.current_sequence_name = sequence.name;
-          progress.sequence_index = i;
-          progress.processed_sequences = i;
-          progress.last_heartbeat = new Date().toISOString();
-          
-          console.log(`Processing sequence ${i + 1}/${allSequences.length}: ${sequence.name}`);
-          
-          try {
-            // Upsert campaign
-            const { data: campaign, error: campaignError } = await supabase
-              .from('campaigns')
-              .upsert({
-                workspace_id,
-                platform: 'replyio',
-                platform_id: String(sequence.id),
-                name: sequence.name,
-                status: mapSequenceStatus(sequence.status),
-                updated_at: new Date().toISOString(),
-              }, { onConflict: 'workspace_id,platform,platform_id' })
-              .select('id')
-              .single();
-            
-            if (campaignError) throw campaignError;
-            const campaignId = campaign.id;
-            
-            // Fetch and sync steps (templates/variants)
-            try {
-              const steps: ReplyioStep[] = await replyioRequest(`/sequences/${sequence.id}/steps`, apiKey);
-              
-              if (Array.isArray(steps)) {
-                for (const step of steps) {
-                  // Upsert sequence step
-                  await supabase.from('sequence_steps').upsert({
-                    campaign_id: campaignId,
-                    step_number: step.number || 1,
-                    delay_days: Math.floor((step.delayInMinutes || 0) / 1440),
-                    subject_line: step.templates?.[0]?.subject || null,
-                    body_preview: step.templates?.[0]?.body?.substring(0, 200) || null,
-                  }, { onConflict: 'campaign_id,step_number' });
-                  
-                  // Upsert templates as variants
-                  if (step.templates && Array.isArray(step.templates)) {
-                    for (let ti = 0; ti < step.templates.length; ti++) {
-                      const template = step.templates[ti];
-                      const subjectLine = template.subject || null;
-                      const emailBody = template.body || null;
-                      
-                      const { data: upsertedVariant, error: variantError } = await supabase.from('campaign_variants').upsert({
-                        campaign_id: campaignId,
-                        platform_variant_id: String(template.id || template.templateId),
-                        name: `Step ${step.number} - Variant ${String.fromCharCode(65 + ti)}`,
-                        variant_type: 'email',
-                        subject_line: subjectLine,
-                        email_body: emailBody,
-                        body_preview: emailBody?.substring(0, 200) || null,
-                        is_control: ti === 0,
-                      }, { onConflict: 'campaign_id,platform_variant_id' })
-                        .select('id')
-                        .single();
-                      
-                      // Extract and store copy features for analytics
-                      if (!variantError && upsertedVariant?.id) {
-                        await upsertVariantFeatures(supabase, upsertedVariant.id, workspace_id, subjectLine, emailBody);
-                      }
-                    }
-                  }
-                }
-              }
-            } catch (stepError) {
-              console.error(`Error fetching steps for sequence ${sequence.id}:`, stepError);
-            }
-            
-            // Fetch and sync statistics - now with variant-level distribution
-            try {
-              const stats: ReplyioSequenceStats = await replyioRequest(`/statistics/sequences/${sequence.id}`, apiKey);
-              
-              if (stats) {
-                const today = new Date().toISOString().split('T')[0];
-                
-                // Fetch all variants for this campaign to distribute metrics
-                const { data: campaignVariants } = await supabase
-                  .from('campaign_variants')
-                  .select('id')
-                  .eq('campaign_id', campaignId);
-
-                const totalVariants = campaignVariants?.length || 0;
-
-                if (totalVariants > 0) {
-                  // Distribute metrics across variants proportionally
-                  const variantCount = totalVariants;
-                  
-                  for (const variant of (campaignVariants || [])) {
-                    await supabase.from('daily_metrics').upsert({
-                      workspace_id,
-                      campaign_id: campaignId,
-                      variant_id: variant.id,
-                      date: today,
-                      sent_count: Math.round((stats.deliveredContacts || 0) / variantCount),
-                      delivered_count: Math.round((stats.deliveredContacts || 0) / variantCount),
-                      replied_count: Math.round((stats.repliedContacts || 0) / variantCount),
-                      positive_reply_count: Math.round((stats.interestedContacts || 0) / variantCount),
-                      updated_at: new Date().toISOString(),
-                    }, { onConflict: 'workspace_id,campaign_id,date,email_account_id,variant_id,segment_id' });
-                  }
-                } else {
-                  // Fallback: campaign-level metrics if no variants
-                  await supabase.from('daily_metrics').upsert({
-                    workspace_id,
-                    campaign_id: campaignId,
-                    date: today,
-                    sent_count: stats.deliveredContacts || 0,
-                    delivered_count: stats.deliveredContacts || 0,
-                    replied_count: stats.repliedContacts || 0,
-                    positive_reply_count: stats.interestedContacts || 0,
-                    updated_at: new Date().toISOString(),
-                  }, { onConflict: 'workspace_id,campaign_id,date,email_account_id,variant_id,segment_id' });
-                }
-              }
-            } catch (statsError) {
-              console.error(`Error fetching stats for sequence ${sequence.id}:`, statsError);
-            }
-            
-            // Fetch contacts for this sequence (v3 API requires per-sequence contact fetch)
-            try {
-              let hasMoreContacts = true;
-              let contactSkip = 0;
-              
-              while (hasMoreContacts && !checkTimeBudget()) {
-                let contactsResponse: any;
-                try {
-                  contactsResponse = await replyioRequest(
-                    `/sequences/${sequence.id}/contacts/extended?top=50&skip=${contactSkip}`,
-                    apiKey
-                  );
-                } catch (e) {
-                  // Some Reply.io workspaces don't support the /extended variant.
-                  const msg = (e as Error).message || '';
-                  if (msg.includes('API error 404')) {
-                    contactsResponse = await replyioRequest(
-                      `/sequences/${sequence.id}/contacts?top=50&skip=${contactSkip}`,
-                      apiKey
-                    );
-                  } else {
-                    throw e;
-                  }
-                }
-
-                const normalizedContacts = contactsResponse?.response ?? contactsResponse;
-                const contacts = normalizedContacts?.items || normalizedContacts || [];
-
-                if (!Array.isArray(contacts) || contacts.length === 0) {
-                  hasMoreContacts = false;
-                  break;
-                }
-                
-                // Map contacts to leads
-                const leadsToUpsert = contacts.map((contact: any) => ({
-                  workspace_id,
-                  platform: 'replyio',
-                  platform_lead_id: contact.email, // Use email as ID since extended doesn't return ID
-                  email: contact.email,
-                  first_name: contact.firstName || null,
-                  last_name: contact.lastName || null,
-                  title: contact.title || null,
-                  campaign_id: campaignId,
-                  status: contact.status?.status || null,
-                  email_domain: extractEmailDomain(contact.email),
-                  email_type: classifyEmailType(contact.email),
-                  updated_at: new Date().toISOString(),
-                }));
-                
-                await supabase.from('leads').upsert(leadsToUpsert, {
-                  onConflict: 'workspace_id,platform,platform_lead_id',
-                });
-                
-                progress.processed_contacts += contacts.length;
-                contactSkip += contacts.length;
-                
-                hasMoreContacts = contactsResponse?.info?.hasMore || contacts.length >= 50;
-                
-                console.log(`  Synced ${contactSkip} contacts for sequence ${sequence.name}`);
-              }
-            } catch (contactError) {
-              console.error(`Error fetching contacts for sequence ${sequence.id}:`, contactError);
-              // Don't add to errors array for contact issues - continue with other sequences
-            }
-            
-          } catch (error) {
-            console.error(`Error processing sequence ${sequence.id}:`, error);
-            progress.errors.push(`Sequence ${sequence.name}: ${(error as Error).message}`);
-          }
-          
-          // Update progress after each sequence
-          await updateProgress(supabase, connection.id, progress);
-        }
-        
-        // Sequences step complete - skip to complete (no separate contacts step)
-        progress.step = 'complete';
-        progress.processed_sequences = progress.total_sequences;
-        progress.last_heartbeat = new Date().toISOString();
-        await updateProgress(supabase, connection.id, progress);
-      }
-
-      // Step 3: Legacy contacts step - now handled per-sequence, just move to complete
-      if (progress.step === 'contacts') {
-        console.log('Contacts step skipped - contacts are now synced per-sequence');
-        progress.step = 'complete';
-      }
-
-      // Complete
-      if (progress.step === 'complete') {
-        await supabase
-          .from('api_connections')
-          .update({
-            sync_status: 'completed',
-            sync_progress: progress,
-            last_sync_at: new Date().toISOString(),
-            last_full_sync_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', connection.id);
-
-        // Trigger pattern computation when sync completes
-        console.log('Sync complete - triggering pattern computation...');
-        let patternsTriggered = false;
-        try {
-          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-          const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-          
-          const patternResponse = await fetch(`${supabaseUrl}/functions/v1/compute-patterns`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${supabaseServiceKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ workspace_id }),
-          });
-          
-          if (patternResponse.ok) {
-            const patternResult = await patternResponse.json();
-            console.log('Pattern computation triggered:', patternResult);
-            patternsTriggered = true;
-          } else {
-            console.warn('Pattern computation failed:', await patternResponse.text());
-          }
-        } catch (patternError) {
-          console.error('Failed to trigger pattern computation:', patternError);
-        }
-
-        return new Response(JSON.stringify({
-          success: true,
-          complete: true,
-          progress,
-          patterns_triggered: patternsTriggered,
-          message: 'Sync completed successfully',
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Not complete - needs continuation
-      return new Response(JSON.stringify({
-        success: true,
-        complete: false,
-        progress,
-        message: 'Sync in progress, call again to continue',
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-
-    } catch (syncError) {
-      console.error('Sync error:', syncError);
-      progress.errors.push(`Sync error: ${(syncError as Error).message}`);
-      
-      await supabase
-        .from('api_connections')
-        .update({
-          sync_status: 'error',
-          sync_progress: progress,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', connection.id);
-
-      return new Response(JSON.stringify({
-        success: false,
-        error: (syncError as Error).message,
-        progress,
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      } catch (e) { progress.errors.push(`Email accounts: ${(e as Error).message}`); }
+      progress.step = 'sequences';
     }
 
+    // Step 2: Sequences
+    if (progress.step === 'sequences') {
+      let allSequences: any[] = [];
+      let skip = 0;
+      while (true) {
+        const response = await replyioRequest(`/sequences?top=100&skip=${skip}`, apiKey);
+        const sequences = Array.isArray(response) ? response : (response?.sequences || response?.items || []);
+        if (sequences.length === 0) break;
+        allSequences = allSequences.concat(sequences);
+        skip += sequences.length;
+        if (sequences.length < 100 || checkTimeBudget()) break;
+      }
+      
+      allSequences = allSequences.filter(s => !s.isArchived);
+      progress.total_sequences = allSequences.length;
+
+      for (let i = progress.sequence_index; i < allSequences.length; i++) {
+        if (checkTimeBudget()) {
+          progress.sequence_index = i;
+          await supabase.from('api_connections').update({ sync_progress: progress }).eq('id', connection.id);
+          return new Response(JSON.stringify({ success: true, complete: false, progress }), { headers: corsHeaders });
+        }
+
+        const sequence = allSequences[i];
+        try {
+          const { data: campaign } = await supabase.from('replyio_campaigns').upsert({
+            workspace_id, platform_id: String(sequence.id), name: sequence.name,
+            status: mapSequenceStatus(sequence.status),
+          }, { onConflict: 'workspace_id,platform_id' }).select('id').single();
+          
+          const campaignId = campaign?.id;
+          if (!campaignId) continue;
+
+          // Sync steps and variants
+          try {
+            const steps = await replyioRequest(`/sequences/${sequence.id}/steps`, apiKey);
+            if (Array.isArray(steps)) {
+              for (const step of steps) {
+                await supabase.from('replyio_sequence_steps').upsert({
+                  campaign_id: campaignId, step_number: step.number || 1,
+                  delay_days: Math.floor((step.delayInMinutes || 0) / 1440),
+                }, { onConflict: 'campaign_id,step_number' });
+                
+                if (step.templates) {
+                  for (let ti = 0; ti < step.templates.length; ti++) {
+                    const t = step.templates[ti];
+                    const { data: v } = await supabase.from('replyio_variants').upsert({
+                      campaign_id: campaignId, platform_variant_id: String(t.id || t.templateId),
+                      name: `Step ${step.number} - Var ${String.fromCharCode(65 + ti)}`,
+                      variant_type: 'email', subject_line: t.subject, email_body: t.body,
+                      body_preview: t.body?.substring(0, 200), is_control: ti === 0,
+                    }, { onConflict: 'campaign_id,platform_variant_id' }).select('id').single();
+                    if (v?.id) await upsertVariantFeatures(supabase, v.id, workspace_id, t.subject, t.body);
+                  }
+                }
+              }
+            }
+          } catch (e) { console.error('Steps error:', e); }
+
+          // Sync stats
+          try {
+            const stats = await replyioRequest(`/statistics/sequences/${sequence.id}`, apiKey);
+            if (stats) {
+              const today = new Date().toISOString().split('T')[0];
+              await supabase.from('replyio_daily_metrics').upsert({
+                workspace_id, campaign_id: campaignId, metric_date: today,
+                sent_count: stats.deliveredContacts || 0, replied_count: stats.repliedContacts || 0,
+                positive_reply_count: stats.interestedContacts || 0,
+              }, { onConflict: 'campaign_id,metric_date' });
+            }
+          } catch (e) { console.error('Stats error:', e); }
+
+          // Sync contacts
+          try {
+            let contactSkip = 0;
+            while (!checkTimeBudget()) {
+              let contactsResponse;
+              try {
+                contactsResponse = await replyioRequest(`/sequences/${sequence.id}/contacts/extended?top=50&skip=${contactSkip}`, apiKey);
+              } catch {
+                contactsResponse = await replyioRequest(`/sequences/${sequence.id}/contacts?top=50&skip=${contactSkip}`, apiKey);
+              }
+              const contacts = contactsResponse?.items || contactsResponse || [];
+              if (!Array.isArray(contacts) || contacts.length === 0) break;
+              
+              await supabase.from('leads').upsert(contacts.map((c: any) => ({
+                workspace_id, platform: 'replyio', platform_lead_id: c.email,
+                email: c.email, first_name: c.firstName, last_name: c.lastName,
+                title: c.title, email_domain: extractEmailDomain(c.email),
+                email_type: classifyEmailType(c.email),
+              })), { onConflict: 'workspace_id,platform,platform_lead_id' });
+              
+              contactSkip += contacts.length;
+              if (contacts.length < 50) break;
+            }
+          } catch (e) { console.error('Contacts error:', e); }
+
+        } catch (e) { progress.errors.push(`Sequence ${sequence.name}: ${(e as Error).message}`); }
+        progress.processed_sequences = i + 1;
+      }
+      progress.step = 'complete';
+    }
+
+    // Complete
+    await supabase.from('api_connections').update({
+      sync_status: 'completed', sync_progress: progress,
+      last_sync_at: new Date().toISOString(), last_full_sync_at: new Date().toISOString(),
+    }).eq('id', connection.id);
+
+    return new Response(JSON.stringify({ success: true, complete: true, progress }), { headers: corsHeaders });
+
   } catch (error) {
-    console.error('Request error:', error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error('Reply.io sync error:', error);
+    return new Response(JSON.stringify({ error: (error as Error).message }), { status: 500, headers: corsHeaders });
   }
 });
