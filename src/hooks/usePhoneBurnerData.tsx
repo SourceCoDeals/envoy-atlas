@@ -29,34 +29,61 @@ export interface ColdCall {
   seller_interest_score: number | null;
 }
 
-// Normalize category by removing "- X seconds" patterns
+// Normalize category by removing "- X seconds" patterns and consolidating similar categories
 function normalizeCategory(category: string | null): string {
   if (!category) return 'Unknown';
   
-  // Pattern: "Category - X seconds" or "Category- X seconds" or "Category -X seconds"
-  const secondsPattern = /\s*-\s*\d+\s*seconds?$/i;
+  // First, strip any "- X seconds" or similar duration suffixes
+  const secondsPattern = /\s*-\s*\d+\s*(seconds?|secs?|s)?\s*$/i;
+  let normalized = category.replace(secondsPattern, '').trim();
   
-  if (secondsPattern.test(category)) {
-    const baseCategory = category.replace(secondsPattern, '').trim();
-    
-    // Special handling for certain categories that should become voicemail variants
-    const voicemailCategories = ['receptionist', 'gatekeeper', 'assistant'];
-    const lowerBase = baseCategory.toLowerCase();
-    
-    if (voicemailCategories.some(vc => lowerBase.includes(vc))) {
-      return `${baseCategory} Voicemail`;
+  // Lowercase for comparison
+  const lower = normalized.toLowerCase();
+  
+  // Consolidate common patterns into simplified categories
+  if (lower.includes('hung up') || lower === 'hangup' || lower === 'hang up') {
+    return 'Hung Up';
+  }
+  if (lower.includes('no answer') || lower === 'noanswer') {
+    return 'No Answer';
+  }
+  if (lower.includes('voicemail') || lower === 'vm') {
+    return 'Voicemail';
+  }
+  if (lower.includes('busy') || lower === 'busy signal') {
+    return 'Busy';
+  }
+  if (lower.includes('wrong number') || lower === 'wrongnumber') {
+    return 'Wrong Number';
+  }
+  if (lower.includes('disconnected') || lower === 'not in service' || lower.includes('not in service')) {
+    return 'Disconnected';
+  }
+  if (lower.includes('gatekeeper') || lower.includes('receptionist') || lower.includes('assistant')) {
+    // Check if it's a voicemail variant
+    if (lower.includes('voicemail') || lower.includes('vm')) {
+      return 'Gatekeeper Voicemail';
     }
-    
-    // "No Answer - X seconds" becomes just "No Answer"
-    if (lowerBase.includes('no answer')) {
-      return 'No Answer';
-    }
-    
-    // For other categories with seconds, keep base name (likely voicemails)
-    return baseCategory;
+    return 'Gatekeeper';
+  }
+  if (lower.includes('callback') || lower.includes('call back')) {
+    return 'Callback Scheduled';
+  }
+  if (lower.includes('connected') || lower.includes('conversation') || lower.includes('talked')) {
+    return 'Connected';
+  }
+  if (lower.includes('left message') || lower.includes('left vm')) {
+    return 'Left Message';
+  }
+  if (lower.includes('meeting') || lower.includes('appointment') || lower.includes('scheduled')) {
+    return 'Meeting Scheduled';
+  }
+  if (lower.includes('not interested') || lower.includes('dnc') || lower.includes('do not call')) {
+    return 'Not Interested';
   }
   
-  return category;
+  // Return the cleaned-up category if no pattern matched
+  return normalized || 'Unknown';
 }
 
 export function usePhoneBurnerData() {
@@ -102,10 +129,11 @@ export function usePhoneBurnerData() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Get unique filter options
+  // Get unique filter options (using normalized categories for the dropdown)
   const filterOptions = useMemo(() => {
     const analysts = [...new Set(allCalls.map(c => c.analyst).filter(Boolean))].sort();
-    const categories = [...new Set(allCalls.map(c => c.category).filter(Boolean))].sort();
+    // Use normalized categories for the filter dropdown
+    const categories = [...new Set(allCalls.map(c => normalizeCategory(c.category)))].filter(c => c !== 'Unknown').sort();
     const opportunities = [...new Set(allCalls.map(c => c.primary_opportunity).filter(Boolean))].sort();
     
     return { analysts, categories, opportunities };
@@ -132,9 +160,9 @@ export function usePhoneBurnerData() {
       result = result.filter(call => call.analyst === filters.analyst);
     }
 
-    // Category filter
+    // Category filter (compare normalized categories)
     if (filters.category !== 'all') {
-      result = result.filter(call => call.category === filters.category);
+      result = result.filter(call => normalizeCategory(call.category) === filters.category);
     }
 
     // Primary opportunity filter
