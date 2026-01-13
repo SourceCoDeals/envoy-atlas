@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.nocodb-discover]
 verify_jwt = false
+
+[functions.cold-calls-sync]
+verify_jwt = false
