@@ -52,11 +52,24 @@ export function DurationCharts({ durationDistribution, durationTrends }: Duratio
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value: number) => [value.toLocaleString(), 'Calls']}
-                    contentStyle={{ 
-                      backgroundColor: 'hsl(var(--popover))', 
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px'
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        const total = durationDistribution.reduce((sum, d) => sum + d.value, 0);
+                        const percentage = ((data.value / total) * 100).toFixed(1);
+                        return (
+                          <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
+                            <p className="font-medium text-foreground">{data.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {data.value.toLocaleString()} calls ({percentage}%)
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Total calls: {total.toLocaleString()}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
                     }}
                   />
                   <Legend />

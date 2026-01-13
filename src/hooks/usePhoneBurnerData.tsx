@@ -21,10 +21,41 @@ export interface ColdCall {
   primary_opportunity: string | null;
   call_duration_sec: number | null;
   called_date: string | null;
+  nocodb_created_at: string | null;
   to_company: string | null;
   to_name: string | null;
   composite_score: number | null;
   seller_interest_score: number | null;
+}
+
+// Normalize category by removing "- X seconds" patterns
+function normalizeCategory(category: string | null): string {
+  if (!category) return 'Unknown';
+  
+  // Pattern: "Category - X seconds" or "Category- X seconds" or "Category -X seconds"
+  const secondsPattern = /\s*-\s*\d+\s*seconds?$/i;
+  
+  if (secondsPattern.test(category)) {
+    const baseCategory = category.replace(secondsPattern, '').trim();
+    
+    // Special handling for certain categories that should become voicemail variants
+    const voicemailCategories = ['receptionist', 'gatekeeper', 'assistant'];
+    const lowerBase = baseCategory.toLowerCase();
+    
+    if (voicemailCategories.some(vc => lowerBase.includes(vc))) {
+      return `${baseCategory} Voicemail`;
+    }
+    
+    // "No Answer - X seconds" becomes just "No Answer"
+    if (lowerBase.includes('no answer')) {
+      return 'No Answer';
+    }
+    
+    // For other categories with seconds, keep base name (likely voicemails)
+    return baseCategory;
+  }
+  
+  return category;
 }
 
 export function usePhoneBurnerData() {
@@ -51,7 +82,7 @@ export function usePhoneBurnerData() {
       while (true) {
         const { data, error } = await supabase
           .from('cold_calls')
-          .select('id, analyst, category, primary_opportunity, call_duration_sec, called_date, to_company, to_name, composite_score, seller_interest_score')
+          .select('id, analyst, category, primary_opportunity, call_duration_sec, called_date, nocodb_created_at, to_company, to_name, composite_score, seller_interest_score')
           .eq('workspace_id', currentWorkspace.id)
           .range(offset, offset + limit - 1);
 
@@ -136,11 +167,11 @@ export function usePhoneBurnerData() {
     return { totalCalls, avgDuration, totalDuration };
   }, [filteredCalls]);
 
-  // Category breakdown
+  // Category breakdown with normalized categories
   const categoryBreakdown = useMemo(() => {
     const breakdown: Record<string, number> = {};
     filteredCalls.forEach(call => {
-      const cat = call.category || 'Unknown';
+      const cat = normalizeCategory(call.category);
       breakdown[cat] = (breakdown[cat] || 0) + 1;
     });
     return Object.entries(breakdown)
@@ -179,12 +210,12 @@ export function usePhoneBurnerData() {
     return [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
   }, [filteredCalls]);
 
-  // Scatter plot data: time of day vs date
+  // Scatter plot data: time of day vs date (using nocodb_created_at for accurate timestamps)
   const scatterData = useMemo(() => {
     return filteredCalls
-      .filter(call => call.called_date)
+      .filter(call => call.nocodb_created_at)
       .map(call => {
-        const dateObj = parseISO(call.called_date!);
+        const dateObj = parseISO(call.nocodb_created_at!);
         return {
           date: format(dateObj, 'yyyy-MM-dd'),
           hour: getHours(dateObj),
