@@ -20,6 +20,7 @@ export interface CopyPerformance {
   positive_rate: number;
   word_count: number;
   personalization_vars: string[];
+  platform: string;
 }
 
 export function useCopyInsights() {
@@ -36,10 +37,9 @@ export function useCopyInsights() {
       setError(null);
 
       try {
-        // Fetch campaign variants with their metrics
-        const { data: variants, error: variantsError } = await supabase
-          .from('campaign_variants')
-          .select(`
+        // Fetch variants from both platform tables
+        const [smartleadVariants, replyioVariants] = await Promise.all([
+          supabase.from('smartlead_variants').select(`
             id,
             name,
             subject_line,
@@ -47,33 +47,78 @@ export function useCopyInsights() {
             campaign_id,
             word_count,
             personalization_vars,
-            campaigns!inner (
+            smartlead_campaigns!inner (
               id,
               name,
               workspace_id
             )
-          `)
-          .eq('campaigns.workspace_id', currentWorkspace.id);
+          `).eq('smartlead_campaigns.workspace_id', currentWorkspace.id),
+          supabase.from('replyio_variants').select(`
+            id,
+            name,
+            subject_line,
+            body_preview,
+            campaign_id,
+            word_count,
+            personalization_vars,
+            replyio_campaigns!inner (
+              id,
+              name,
+              workspace_id
+            )
+          `).eq('replyio_campaigns.workspace_id', currentWorkspace.id)
+        ]);
 
-        if (variantsError) throw variantsError;
+        const variants = [
+          ...(smartleadVariants.data || []).map(v => ({ ...v, platform: 'smartlead', campaigns: v.smartlead_campaigns })),
+          ...(replyioVariants.data || []).map(v => ({ ...v, platform: 'replyio', campaigns: v.replyio_campaigns }))
+        ];
 
-        // Fetch daily metrics for these variants
-        const { data: metrics, error: metricsError } = await supabase
-          .from('daily_metrics')
-          .select('variant_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
-          .eq('workspace_id', currentWorkspace.id)
-          .not('variant_id', 'is', null);
+        // Get variant IDs by platform
+        const smartleadVariantIds = (smartleadVariants.data || []).map(v => v.id);
+        const replyioVariantIds = (replyioVariants.data || []).map(v => v.id);
 
-        if (metricsError) throw metricsError;
+        // Fetch daily metrics for variants from both tables
+        const [smartleadMetrics, replyioMetrics] = await Promise.all([
+          smartleadVariantIds.length > 0
+            ? supabase.from('smartlead_daily_metrics').select('variant_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
+                .eq('workspace_id', currentWorkspace.id)
+                .not('variant_id', 'is', null)
+            : Promise.resolve({ data: [], error: null }),
+          replyioVariantIds.length > 0
+            ? supabase.from('replyio_daily_metrics').select('variant_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
+                .eq('workspace_id', currentWorkspace.id)
+                .not('variant_id', 'is', null)
+            : Promise.resolve({ data: [], error: null })
+        ]);
 
-        // Also get campaign-level metrics for variants without specific metrics
-        const { data: campaignMetrics, error: campMetricsError } = await supabase
-          .from('daily_metrics')
-          .select('campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
-          .eq('workspace_id', currentWorkspace.id)
-          .is('variant_id', null);
+        const allMetrics = [
+          ...(smartleadMetrics.data || []),
+          ...(replyioMetrics.data || [])
+        ];
 
-        if (campMetricsError) throw campMetricsError;
+        // Get campaign IDs
+        const smartleadCampIds = (smartleadVariants.data || []).map(v => v.campaign_id);
+        const replyioCampIds = (replyioVariants.data || []).map(v => v.campaign_id);
+
+        // Get campaign-level metrics for variants without specific metrics
+        const [smartleadCampMetrics, replyioCampMetrics] = await Promise.all([
+          smartleadCampIds.length > 0
+            ? supabase.from('smartlead_daily_metrics').select('campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
+                .eq('workspace_id', currentWorkspace.id)
+                .is('variant_id', null)
+            : Promise.resolve({ data: [], error: null }),
+          replyioCampIds.length > 0
+            ? supabase.from('replyio_daily_metrics').select('campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
+                .eq('workspace_id', currentWorkspace.id)
+                .is('variant_id', null)
+            : Promise.resolve({ data: [], error: null })
+        ]);
+
+        const allCampaignMetrics = [
+          ...(smartleadCampMetrics.data || []),
+          ...(replyioCampMetrics.data || [])
+        ];
 
         // Aggregate metrics by variant
         const variantMetrics: Record<string, {
@@ -84,7 +129,7 @@ export function useCopyInsights() {
           positive: number;
         }> = {};
 
-        metrics?.forEach(m => {
+        allMetrics.forEach(m => {
           if (!m.variant_id) return;
           if (!variantMetrics[m.variant_id]) {
             variantMetrics[m.variant_id] = { sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 };
@@ -105,7 +150,7 @@ export function useCopyInsights() {
           positive: number;
         }> = {};
 
-        campaignMetrics?.forEach(m => {
+        allCampaignMetrics.forEach(m => {
           if (!m.campaign_id) return;
           if (!campaignAggMetrics[m.campaign_id]) {
             campaignAggMetrics[m.campaign_id] = { sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 };
@@ -117,7 +162,7 @@ export function useCopyInsights() {
           campaignAggMetrics[m.campaign_id].positive += m.positive_reply_count || 0;
         });
 
-        // Build performance data - try variant metrics first, then campaign metrics as fallback
+        // Build performance data
         const performanceData: CopyPerformance[] = (variants || [])
           .filter(v => v.subject_line)
           .map(v => {
@@ -160,6 +205,7 @@ export function useCopyInsights() {
               positive_rate: sent > 0 ? (vMetrics.positive / sent) * 100 : 0,
               word_count: wordCount,
               personalization_vars: persVars as string[],
+              platform: v.platform,
             };
           })
           .sort((a, b) => b.reply_rate - a.reply_rate);

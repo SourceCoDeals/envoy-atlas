@@ -22,6 +22,25 @@ export interface CampaignWithMetrics {
   bounce_rate: number;
 }
 
+interface BaseCampaign {
+  id: string;
+  name: string;
+  status: string | null;
+  platform_id: string;
+  created_at: string;
+  updated_at: string;
+  workspace_id: string;
+}
+
+interface BaseMetric {
+  campaign_id: string;
+  sent_count: number | null;
+  opened_count: number | null;
+  clicked_count: number | null;
+  replied_count: number | null;
+  bounced_count: number | null;
+}
+
 export function useCampaigns() {
   const { currentWorkspace } = useWorkspace();
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([]);
@@ -44,60 +63,72 @@ export function useCampaigns() {
     setError(null);
 
     try {
-      // Fetch campaigns
-      const { data: campaignsData, error: campaignsError } = await supabase
-        .from('campaigns')
+      // Fetch SmartLead campaigns
+      const { data: smartleadCampaigns, error: smartleadError } = await supabase
+        .from('smartlead_campaigns')
         .select('*')
         .eq('workspace_id', currentWorkspace.id);
 
-      if (campaignsError) throw campaignsError;
+      if (smartleadError) throw smartleadError;
 
-      if (!campaignsData || campaignsData.length === 0) {
+      // Fetch Reply.io campaigns
+      const { data: replyioCampaigns, error: replyioError } = await supabase
+        .from('replyio_campaigns')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id);
+
+      if (replyioError) throw replyioError;
+
+      // Combine campaigns from both platforms
+      const allCampaigns: BaseCampaign[] = [
+        ...(smartleadCampaigns || []).map(c => ({ ...c, platform: 'smartlead' })),
+        ...(replyioCampaigns || []).map(c => ({ ...c, platform: 'replyio' }))
+      ];
+
+      if (allCampaigns.length === 0) {
         setCampaigns([]);
         setLoading(false);
         return;
       }
 
-      // Fetch daily metrics for all campaigns
-      const { data: metricsData, error: metricsError } = await supabase
-        .from('daily_metrics')
-        .select('*')
-        .in('campaign_id', campaignsData.map(c => c.id));
+      // Get campaign IDs by platform
+      const smartleadIds = (smartleadCampaigns || []).map(c => c.id);
+      const replyioIds = (replyioCampaigns || []).map(c => c.id);
 
-      if (metricsError) throw metricsError;
+      // Fetch daily metrics from both tables
+      const [smartleadMetricsResult, replyioMetricsResult] = await Promise.all([
+        smartleadIds.length > 0 
+          ? supabase.from('smartlead_daily_metrics').select('*').in('campaign_id', smartleadIds)
+          : Promise.resolve({ data: [], error: null }),
+        replyioIds.length > 0
+          ? supabase.from('replyio_daily_metrics').select('*').in('campaign_id', replyioIds)
+          : Promise.resolve({ data: [], error: null })
+      ]);
 
-      // Fetch leads count per campaign
-      const { data: leadsData, error: leadsError } = await supabase
-        .from('leads')
-        .select('campaign_id')
-        .in('campaign_id', campaignsData.map(c => c.id));
+      if (smartleadMetricsResult.error) throw smartleadMetricsResult.error;
+      if (replyioMetricsResult.error) throw replyioMetricsResult.error;
 
-      if (leadsError) throw leadsError;
-
-      // Count leads per campaign
-      const leadsCountMap: Record<string, number> = {};
-      (leadsData || []).forEach(lead => {
-        if (lead.campaign_id) {
-          leadsCountMap[lead.campaign_id] = (leadsCountMap[lead.campaign_id] || 0) + 1;
-        }
-      });
+      const allMetrics: BaseMetric[] = [
+        ...(smartleadMetricsResult.data || []),
+        ...(replyioMetricsResult.data || [])
+      ];
 
       // Aggregate metrics per campaign
-      const campaignsWithMetrics: CampaignWithMetrics[] = campaignsData.map(campaign => {
-        const campaignMetrics = (metricsData || []).filter(m => m.campaign_id === campaign.id);
+      const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
+        const campaignMetrics = allMetrics.filter(m => m.campaign_id === campaign.id);
         
         const total_sent = campaignMetrics.reduce((sum, m) => sum + (m.sent_count || 0), 0);
         const total_opened = campaignMetrics.reduce((sum, m) => sum + (m.opened_count || 0), 0);
         const total_clicked = campaignMetrics.reduce((sum, m) => sum + (m.clicked_count || 0), 0);
         const total_replied = campaignMetrics.reduce((sum, m) => sum + (m.replied_count || 0), 0);
         const total_bounced = campaignMetrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
-        const total_leads = leadsCountMap[campaign.id] || 0;
+        const total_leads = 0; // Will be populated from leads table if needed
 
         return {
           id: campaign.id,
           name: campaign.name,
           status: campaign.status || 'unknown',
-          platform: campaign.platform,
+          platform: (campaign as any).platform || 'smartlead',
           platform_campaign_id: campaign.platform_id,
           created_at: campaign.created_at,
           updated_at: campaign.updated_at,
