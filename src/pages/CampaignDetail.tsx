@@ -155,8 +155,16 @@ export default function CampaignDetail() {
           .eq('campaign_id', campaignId)
           .not('variant_id', 'is', null);
 
+        type MetricRow = {
+          variant_id: string | null;
+          sent_count: number | null;
+          opened_count: number | null;
+          clicked_count: number | null;
+          replied_count: number | null;
+        };
+
         const variantsWithMetrics: VariantPerformance[] = variantsData.map(v => {
-          const vMetrics = (variantMetrics || []).filter(m => m.variant_id === v.id);
+          const vMetrics = ((variantMetrics || []) as MetricRow[]).filter(m => m.variant_id === v.id);
           const sent = vMetrics.reduce((s, m) => s + (m.sent_count || 0), 0);
           const opened = vMetrics.reduce((s, m) => s + (m.opened_count || 0), 0);
           const clicked = vMetrics.reduce((s, m) => s + (m.clicked_count || 0), 0);

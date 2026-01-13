@@ -3785,6 +3785,7 @@ export type Database = {
           replied_count: number | null
           sent_count: number | null
           updated_at: string
+          variant_id: string | null
           workspace_id: string
         }
         Insert: {
@@ -3800,6 +3801,7 @@ export type Database = {
           replied_count?: number | null
           sent_count?: number | null
           updated_at?: string
+          variant_id?: string | null
           workspace_id: string
         }
         Update: {
@@ -3815,6 +3817,7 @@ export type Database = {
           replied_count?: number | null
           sent_count?: number | null
           updated_at?: string
+          variant_id?: string | null
           workspace_id?: string
         }
         Relationships: [
@@ -3823,6 +3826,13 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "replyio_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "replyio_daily_metrics_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "replyio_variants"
             referencedColumns: ["id"]
           },
           {
@@ -4282,6 +4292,7 @@ export type Database = {
           replied_count: number | null
           sent_count: number | null
           updated_at: string
+          variant_id: string | null
           workspace_id: string
         }
         Insert: {
@@ -4297,6 +4308,7 @@ export type Database = {
           replied_count?: number | null
           sent_count?: number | null
           updated_at?: string
+          variant_id?: string | null
           workspace_id: string
         }
         Update: {
@@ -4312,6 +4324,7 @@ export type Database = {
           replied_count?: number | null
           sent_count?: number | null
           updated_at?: string
+          variant_id?: string | null
           workspace_id?: string
         }
         Relationships: [
@@ -4320,6 +4333,13 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "smartlead_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smartlead_daily_metrics_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_variants"
             referencedColumns: ["id"]
           },
           {
