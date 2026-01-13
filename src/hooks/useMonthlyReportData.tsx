@@ -102,46 +102,64 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
       setLoading(true);
 
       try {
-        // Fetch current month metrics
-        const { data: currentData } = await supabase
-          .from('daily_metrics')
-          .select('sent_count, delivered_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, spam_complaint_count, unsubscribed_count, date')
-          .eq('workspace_id', currentWorkspace.id)
-          .gte('date', format(monthStart, 'yyyy-MM-dd'))
-          .lte('date', format(monthEnd, 'yyyy-MM-dd'));
+        // Fetch current month metrics from both platform tables
+        const [smartleadCurrent, replyioCurrent] = await Promise.all([
+          supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
+            .eq('workspace_id', currentWorkspace.id)
+            .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
+            .lte('metric_date', format(monthEnd, 'yyyy-MM-dd')),
+          supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
+            .eq('workspace_id', currentWorkspace.id)
+            .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
+            .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
+        ]);
 
-        // Fetch previous month metrics
-        const { data: previousData } = await supabase
-          .from('daily_metrics')
-          .select('sent_count, delivered_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, spam_complaint_count, unsubscribed_count')
-          .eq('workspace_id', currentWorkspace.id)
-          .gte('date', format(prevMonthStart, 'yyyy-MM-dd'))
-          .lte('date', format(prevMonthEnd, 'yyyy-MM-dd'));
+        const currentData = [
+          ...(smartleadCurrent.data || []).map(d => ({ ...d, date: d.metric_date })),
+          ...(replyioCurrent.data || []).map(d => ({ ...d, date: d.metric_date }))
+        ];
+
+        // Fetch previous month metrics from both platform tables
+        const [smartleadPrevious, replyioPrevious] = await Promise.all([
+          supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+            .eq('workspace_id', currentWorkspace.id)
+            .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
+            .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd')),
+          supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+            .eq('workspace_id', currentWorkspace.id)
+            .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
+            .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd'))
+        ]);
+
+        const previousData = [
+          ...(smartleadPrevious.data || []),
+          ...(replyioPrevious.data || [])
+        ];
 
         // Aggregate current month
         const current = (currentData || []).reduce((acc, row) => ({
           sent: acc.sent + (row.sent_count || 0),
-          delivered: acc.delivered + (row.delivered_count || 0),
+          delivered: acc.delivered + (row.sent_count || 0) - (row.bounced_count || 0),
           opened: acc.opened + (row.opened_count || 0),
           clicked: acc.clicked + (row.clicked_count || 0),
           replied: acc.replied + (row.replied_count || 0),
           positiveReplies: acc.positiveReplies + (row.positive_reply_count || 0),
           bounced: acc.bounced + (row.bounced_count || 0),
-          spamComplaints: acc.spamComplaints + (row.spam_complaint_count || 0),
-          unsubscribed: acc.unsubscribed + (row.unsubscribed_count || 0),
+          spamComplaints: 0,
+          unsubscribed: 0,
         }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
 
         // Aggregate previous month
         const previous = (previousData || []).reduce((acc, row) => ({
           sent: acc.sent + (row.sent_count || 0),
-          delivered: acc.delivered + (row.delivered_count || 0),
+          delivered: acc.delivered + (row.sent_count || 0) - (row.bounced_count || 0),
           opened: acc.opened + (row.opened_count || 0),
           clicked: acc.clicked + (row.clicked_count || 0),
           replied: acc.replied + (row.replied_count || 0),
           positiveReplies: acc.positiveReplies + (row.positive_reply_count || 0),
           bounced: acc.bounced + (row.bounced_count || 0),
-          spamComplaints: acc.spamComplaints + (row.spam_complaint_count || 0),
-          unsubscribed: acc.unsubscribed + (row.unsubscribed_count || 0),
+          spamComplaints: 0,
+          unsubscribed: 0,
         }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
 
         setCurrentMetrics(current);
@@ -170,7 +188,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
           });
           const agg = weekRows.reduce((acc, row) => ({
             sent: acc.sent + (row.sent_count || 0),
-            delivered: acc.delivered + (row.delivered_count || 0),
+            delivered: acc.delivered + (row.sent_count || 0) - (row.bounced_count || 0),
             replied: acc.replied + (row.replied_count || 0),
             positiveReplies: acc.positiveReplies + (row.positive_reply_count || 0),
             bounced: acc.bounced + (row.bounced_count || 0),
@@ -184,26 +202,50 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         });
         setWeeklyBreakdown(weeklyData);
 
-        // Fetch campaign performance
-        const { data: campaignsData } = await supabase
-          .from('campaigns')
-          .select('id, name, status')
-          .eq('workspace_id', currentWorkspace.id);
+        // Fetch campaigns from both platform tables for performance
+        const [smartleadCampaigns, replyioCampaigns] = await Promise.all([
+          supabase.from('smartlead_campaigns').select('id, name, status').eq('workspace_id', currentWorkspace.id),
+          supabase.from('replyio_campaigns').select('id, name, status').eq('workspace_id', currentWorkspace.id)
+        ]);
 
-        const { data: campaignMetrics } = await supabase
-          .from('daily_metrics')
-          .select('campaign_id, sent_count, delivered_count, replied_count, positive_reply_count, bounced_count')
-          .eq('workspace_id', currentWorkspace.id)
-          .gte('date', format(monthStart, 'yyyy-MM-dd'))
-          .lte('date', format(monthEnd, 'yyyy-MM-dd'))
-          .not('campaign_id', 'is', null);
+        const campaignsData = [
+          ...(smartleadCampaigns.data || []),
+          ...(replyioCampaigns.data || [])
+        ];
+
+        // Get campaign IDs
+        const smartleadIds = (smartleadCampaigns.data || []).map(c => c.id);
+        const replyioIds = (replyioCampaigns.data || []).map(c => c.id);
+
+        // Fetch campaign metrics from both platform tables
+        const [smartleadCampMetrics, replyioCampMetrics] = await Promise.all([
+          smartleadIds.length > 0 
+            ? supabase.from('smartlead_daily_metrics').select('campaign_id, sent_count, replied_count, positive_reply_count, bounced_count')
+                .eq('workspace_id', currentWorkspace.id)
+                .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
+                .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
+                .not('campaign_id', 'is', null)
+            : Promise.resolve({ data: [], error: null }),
+          replyioIds.length > 0
+            ? supabase.from('replyio_daily_metrics').select('campaign_id, sent_count, replied_count, positive_reply_count, bounced_count')
+                .eq('workspace_id', currentWorkspace.id)
+                .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
+                .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
+                .not('campaign_id', 'is', null)
+            : Promise.resolve({ data: [], error: null })
+        ]);
+
+        const campaignMetrics = [
+          ...(smartleadCampMetrics.data || []),
+          ...(replyioCampMetrics.data || [])
+        ];
 
         const campaignAgg = new Map<string, { sent: number; delivered: number; replied: number; positiveReplies: number; bounced: number }>();
         (campaignMetrics || []).forEach(row => {
           if (!row.campaign_id) return;
           const existing = campaignAgg.get(row.campaign_id) || { sent: 0, delivered: 0, replied: 0, positiveReplies: 0, bounced: 0 };
           existing.sent += row.sent_count || 0;
-          existing.delivered += row.delivered_count || 0;
+          existing.delivered += (row.sent_count || 0) - (row.bounced_count || 0);
           existing.replied += row.replied_count || 0;
           existing.positiveReplies += row.positive_reply_count || 0;
           existing.bounced += row.bounced_count || 0;

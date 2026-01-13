@@ -76,27 +76,53 @@ export default function CampaignDetail() {
     setLoading(true);
 
     try {
-      // Fetch campaign
-      const { data: campaignData, error: campaignError } = await supabase
-        .from('campaigns')
+      // Try to fetch campaign from SmartLead first, then Reply.io
+      let campaignData = null;
+      let platform = 'smartlead';
+      
+      const { data: smartleadCampaign } = await supabase
+        .from('smartlead_campaigns')
         .select('*')
         .eq('id', campaignId)
         .eq('workspace_id', currentWorkspace.id)
         .single();
 
-      if (campaignError) throw campaignError;
-      setCampaign(campaignData);
+      if (smartleadCampaign) {
+        campaignData = smartleadCampaign;
+        platform = 'smartlead';
+      } else {
+        const { data: replyioCampaign } = await supabase
+          .from('replyio_campaigns')
+          .select('*')
+          .eq('id', campaignId)
+          .eq('workspace_id', currentWorkspace.id)
+          .single();
+        
+        if (replyioCampaign) {
+          campaignData = replyioCampaign;
+          platform = 'replyio';
+        }
+      }
 
-      // Fetch daily metrics
+      if (!campaignData) {
+        setCampaign(null);
+        setLoading(false);
+        return;
+      }
+
+      setCampaign({ ...campaignData, platform });
+
+      // Fetch daily metrics from the appropriate platform table
+      const metricsTable = platform === 'smartlead' ? 'smartlead_daily_metrics' : 'replyio_daily_metrics';
       const { data: metricsData, error: metricsError } = await supabase
-        .from('daily_metrics')
+        .from(metricsTable)
         .select('*')
         .eq('campaign_id', campaignId)
-        .order('date', { ascending: true });
+        .order('metric_date', { ascending: true });
 
       if (!metricsError && metricsData) {
         const daily: DailyData[] = metricsData.map(m => ({
-          date: format(new Date(m.date), 'MMM d'),
+          date: format(new Date(m.metric_date), 'MMM d'),
           sent: m.sent_count || 0,
           opened: m.opened_count || 0,
           replied: m.replied_count || 0,
@@ -114,16 +140,17 @@ export default function CampaignDetail() {
         setTotals(tots);
       }
 
-      // Fetch variants with their metrics
+      // Fetch variants from the appropriate platform table
+      const variantsTable = platform === 'smartlead' ? 'smartlead_variants' : 'replyio_variants';
       const { data: variantsData, error: variantsError } = await supabase
-        .from('campaign_variants')
+        .from(variantsTable)
         .select('*')
         .eq('campaign_id', campaignId);
 
       if (!variantsError && variantsData) {
         // Get metrics per variant
         const { data: variantMetrics } = await supabase
-          .from('daily_metrics')
+          .from(metricsTable)
           .select('*')
           .eq('campaign_id', campaignId)
           .not('variant_id', 'is', null);
@@ -153,10 +180,11 @@ export default function CampaignDetail() {
         setVariants(variantsWithMetrics.sort((a, b) => b.reply_rate - a.reply_rate));
       }
 
-      // Fetch reply events for time-of-day analysis
+      // Fetch reply events for time-of-day analysis from appropriate platform table
+      const eventsTable = platform === 'smartlead' ? 'smartlead_message_events' : 'replyio_message_events';
       const { data: replyEvents } = await supabase
-        .from('message_events')
-        .select('occurred_at')
+        .from(eventsTable)
+        .select('event_timestamp')
         .eq('campaign_id', campaignId)
         .in('event_type', ['reply', 'positive_reply', 'negative_reply']);
 
@@ -165,7 +193,7 @@ export default function CampaignDetail() {
         for (let i = 0; i < 24; i++) hourCounts[i] = 0;
         
         replyEvents.forEach(e => {
-          const hour = new Date(e.occurred_at).getHours();
+          const hour = new Date(e.event_timestamp).getHours();
           hourCounts[hour]++;
         });
 

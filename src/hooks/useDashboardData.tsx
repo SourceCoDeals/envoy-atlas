@@ -66,14 +66,16 @@ export function useDashboardData() {
     setLoading(true);
 
     try {
-      // Fetch daily metrics
-      const { data: metrics, error: metricsError } = await supabase
-        .from('daily_metrics')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .order('date', { ascending: true });
+      // Fetch daily metrics from both platform tables
+      const [smartleadMetrics, replyioMetrics] = await Promise.all([
+        supabase.from('smartlead_daily_metrics').select('*').eq('workspace_id', currentWorkspace.id).order('metric_date', { ascending: true }),
+        supabase.from('replyio_daily_metrics').select('*').eq('workspace_id', currentWorkspace.id).order('metric_date', { ascending: true })
+      ]);
 
-      if (metricsError) throw metricsError;
+      if (smartleadMetrics.error) throw smartleadMetrics.error;
+      if (replyioMetrics.error) throw replyioMetrics.error;
+
+      const metrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
 
       if (!metrics || metrics.length === 0) {
         setHasData(false);
@@ -83,7 +85,7 @@ export function useDashboardData() {
 
       setHasData(true);
 
-      // Calculate totals
+      // Calculate totals (note: these tables don't have spam_complaint_count or delivered_count)
       const totals = metrics.reduce((acc, m) => ({
         sent: acc.sent + (m.sent_count || 0),
         opened: acc.opened + (m.opened_count || 0),
@@ -91,8 +93,8 @@ export function useDashboardData() {
         replied: acc.replied + (m.replied_count || 0),
         bounced: acc.bounced + (m.bounced_count || 0),
         positive: acc.positive + (m.positive_reply_count || 0),
-        spam: acc.spam + (m.spam_complaint_count || 0),
-        delivered: acc.delivered + (m.delivered_count || 0),
+        spam: 0,
+        delivered: 0,
       }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0, spam: 0, delivered: 0 });
 
       // Calculate delivered if not tracked separately (sent - bounced)
@@ -116,11 +118,12 @@ export function useDashboardData() {
         deliveredRate: totals.sent > 0 ? (delivered / totals.sent) * 100 : 0,
       });
 
-      // Group by date for trend
+      // Group by date for trend (use metric_date from new tables)
       const dateMap = new Map<string, { sent: number; replies: number; positive: number }>();
       metrics.forEach(m => {
-        const existing = dateMap.get(m.date) || { sent: 0, replies: 0, positive: 0 };
-        dateMap.set(m.date, {
+        const dateKey = m.metric_date;
+        const existing = dateMap.get(dateKey) || { sent: 0, replies: 0, positive: 0 };
+        dateMap.set(dateKey, {
           sent: existing.sent + (m.sent_count || 0),
           replies: existing.replies + (m.replied_count || 0),
           positive: existing.positive + (m.positive_reply_count || 0),
@@ -138,11 +141,16 @@ export function useDashboardData() {
 
       setTrendData(trend);
 
-      // Fetch campaigns for top performers
-      const { data: campaigns } = await supabase
-        .from('campaigns')
-        .select('id, name')
-        .eq('workspace_id', currentWorkspace.id);
+      // Fetch campaigns from both platforms for top performers
+      const [smartleadCampaigns, replyioCampaigns] = await Promise.all([
+        supabase.from('smartlead_campaigns').select('id, name').eq('workspace_id', currentWorkspace.id),
+        supabase.from('replyio_campaigns').select('id, name').eq('workspace_id', currentWorkspace.id)
+      ]);
+
+      const campaigns = [
+        ...(smartleadCampaigns.data || []),
+        ...(replyioCampaigns.data || [])
+      ];
 
       if (campaigns) {
         const campaignMetrics = campaigns.map(c => {
@@ -168,17 +176,21 @@ export function useDashboardData() {
         );
       }
 
-      // Fetch reply events for time heatmap
-      const { data: replyEvents } = await supabase
-        .from('message_events')
-        .select('occurred_at')
-        .eq('workspace_id', currentWorkspace.id)
-        .in('event_type', ['reply', 'replied', 'positive_reply', 'negative_reply']);
+      // Fetch reply events from both platform tables for time heatmap (use event_timestamp)
+      const [smartleadEvents, replyioEvents] = await Promise.all([
+        supabase.from('smartlead_message_events').select('event_timestamp').eq('workspace_id', currentWorkspace.id).in('event_type', ['reply', 'replied', 'positive_reply', 'negative_reply']),
+        supabase.from('replyio_message_events').select('event_timestamp').eq('workspace_id', currentWorkspace.id).in('event_type', ['reply', 'replied', 'positive_reply', 'negative_reply'])
+      ]);
+
+      const replyEvents = [
+        ...(smartleadEvents.data || []),
+        ...(replyioEvents.data || [])
+      ];
 
       if (replyEvents) {
         const timeMap = new Map<string, number>();
         replyEvents.forEach(e => {
-          const d = new Date(e.occurred_at);
+          const d = new Date(e.event_timestamp);
           const key = `${d.getDay()}-${d.getHours()}`;
           timeMap.set(key, (timeMap.get(key) || 0) + 1);
         });
