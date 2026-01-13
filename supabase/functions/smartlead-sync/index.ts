@@ -524,9 +524,7 @@ serve(async (req) => {
         }).eq('id', connection.id);
 
         try {
-          const isActiveCampaign = ['active', 'paused'].includes(campaign.status?.toLowerCase() || '');
-          
-          // 1. Upsert campaign to smartlead_campaigns table
+          // 1. Upsert campaign to smartlead_campaigns table (sync ALL campaigns, not just active)
           const { data: upsertedCampaign, error: campError } = await supabase
             .from('smartlead_campaigns')
             .upsert({ 
@@ -550,31 +548,7 @@ serve(async (req) => {
           const campaignDbId = upsertedCampaign.id;
           progress.campaigns_synced++;
           
-          if (!isActiveCampaign) {
-            console.log(`  Skipping detailed sync for non-active campaign: ${campaign.status}`);
-            
-            try {
-              const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
-              const today = new Date().toISOString().split('T')[0];
-              
-              await supabase.from('smartlead_daily_metrics').upsert({
-                workspace_id, 
-                campaign_id: campaignDbId, 
-                metric_date: today,
-                sent_count: analytics.sent_count || 0,
-                opened_count: analytics.unique_open_count || 0,
-                clicked_count: analytics.unique_click_count || 0,
-                replied_count: analytics.reply_count || 0,
-                bounced_count: analytics.bounce_count || 0,
-              }, { onConflict: 'campaign_id,metric_date' });
-              
-              progress.metrics_created++;
-            } catch (e) {
-              console.error(`  Analytics fetch failed for ${campaign.name}:`, e);
-            }
-            
-            continue;
-          }
+          // Full sync for ALL campaigns regardless of status
 
           // 2. Fetch sequences (email copy variants)
           try {

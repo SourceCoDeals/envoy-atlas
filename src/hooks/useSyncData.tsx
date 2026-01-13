@@ -30,25 +30,27 @@ export function useSyncData() {
       
       const syncPromises: Promise<any>[] = [];
       
-      // Trigger SmartLead sync if connected
+      // Trigger SmartLead sync if connected - use reset to force fresh full sync
       if (connectedPlatforms.includes('smartlead')) {
         syncPromises.push(
           supabase.functions.invoke('smartlead-sync', {
             body: { 
               workspace_id: currentWorkspace.id,
-              sync_type: 'full'
+              sync_type: 'full',
+              reset: true  // Force fresh sync of all campaigns
             }
           })
         );
       }
 
-      // Trigger Reply.io sync if connected
+      // Trigger Reply.io sync if connected - use reset to force fresh full sync
       if (connectedPlatforms.includes('replyio')) {
         syncPromises.push(
           supabase.functions.invoke('replyio-sync', {
             body: { 
               workspace_id: currentWorkspace.id,
-              sync_type: 'full'
+              sync_type: 'full',
+              reset: true  // Force fresh sync of all sequences
             }
           })
         );
