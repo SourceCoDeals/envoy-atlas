@@ -22,6 +22,7 @@ export interface ColdCall {
   call_duration_sec: number | null;
   called_date: string | null;
   called_date_time: string | null;
+  nocodb_created_at: string | null;
   to_company: string | null;
   to_name: string | null;
   composite_score: number | null;
@@ -82,7 +83,7 @@ export function usePhoneBurnerData() {
       while (true) {
         const { data, error } = await supabase
           .from('cold_calls')
-          .select('id, analyst, category, primary_opportunity, call_duration_sec, called_date, called_date_time, to_company, to_name, composite_score, seller_interest_score')
+          .select('id, analyst, category, primary_opportunity, call_duration_sec, called_date, called_date_time, nocodb_created_at, to_company, to_name, composite_score, seller_interest_score')
           .eq('workspace_id', currentWorkspace.id)
           .range(offset, offset + limit - 1);
 
@@ -234,16 +235,37 @@ export function usePhoneBurnerData() {
     return [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
   }, [filteredCalls]);
 
-  // Scatter plot data: time of day vs date (using called_date_time for accurate timestamps)
+  // Scatter plot data: time of day vs date (using nocodb_created_at with IST to EST conversion)
   const scatterData = useMemo(() => {
     return filteredCalls
-      .filter(call => call.called_date_time)
+      .filter(call => call.nocodb_created_at)
       .map(call => {
-        const dateObj = parseISO(call.called_date_time!);
-        // Add 5 hours to adjust for timezone offset (UTC to EST)
-        const adjustedHour = (getHours(dateObj) + 5) % 24;
+        const dateObj = parseISO(call.nocodb_created_at!);
+        // Convert IST (UTC+5:30) to EST (UTC-5): subtract 10.5 hours
+        // getHours returns 0-23, we subtract 10.5 and handle wrap-around
+        const istHour = getHours(dateObj);
+        const istMinutes = dateObj.getMinutes();
+        const totalMinutesIST = istHour * 60 + istMinutes;
+        const totalMinutesEST = totalMinutesIST - 630; // 10.5 hours = 630 minutes
+        
+        // Handle day wrap-around
+        let adjustedMinutes = totalMinutesEST;
+        let dayOffset = 0;
+        if (adjustedMinutes < 0) {
+          adjustedMinutes += 1440; // Add 24 hours in minutes
+          dayOffset = -1;
+        }
+        
+        const adjustedHour = Math.floor(adjustedMinutes / 60);
+        
+        // Adjust the date if we crossed midnight
+        let adjustedDate = dateObj;
+        if (dayOffset !== 0) {
+          adjustedDate = new Date(dateObj.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+        }
+        
         return {
-          date: format(dateObj, 'yyyy-MM-dd'),
+          date: format(adjustedDate, 'yyyy-MM-dd'),
           hour: adjustedHour,
           analyst: call.analyst || 'Unknown',
         };
