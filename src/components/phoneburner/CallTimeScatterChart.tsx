@@ -29,6 +29,9 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
     analystColors[analyst] = COLOR_PALETTE[idx % COLOR_PALETTE.length];
   });
 
+  // Get all unique dates sorted chronologically
+  const allDatesSorted = [...new Set(data.map(d => d.date))].sort();
+
   // Aggregate calls by date, hour, and analyst - count calls at each point
   const aggregatedByAnalyst = analysts.map(analyst => {
     const counts: Record<string, number> = {};
@@ -38,17 +41,17 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
       counts[key] = (counts[key] || 0) + 1;
     });
     
+    // Create data points and sort by date
+    const scatterPoints = Object.entries(counts).map(([key, count]) => {
+      const [date, hourStr] = key.split('|');
+      return { x: date, y: parseInt(hourStr), z: count, analyst };
+    }).sort((a, b) => a.x.localeCompare(b.x)); // Sort by date string (yyyy-MM-dd format sorts correctly)
+    
     return {
       analyst,
-      data: Object.entries(counts).map(([key, count]) => {
-        const [date, hourStr] = key.split('|');
-        return { x: date, y: parseInt(hourStr), z: count, analyst };
-      }),
+      data: scatterPoints,
     };
   });
-
-  // Get all unique dates for x-axis
-  const allDates = [...new Set(data.map(d => d.date))].sort();
 
   const formatHour = (hour: number) => {
     if (hour === 0) return '12 AM';
