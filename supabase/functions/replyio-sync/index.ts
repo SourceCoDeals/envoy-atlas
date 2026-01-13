@@ -184,8 +184,9 @@ Deno.serve(async (req) => {
         if (sequences.length < 100 || checkTimeBudget()) break;
       }
       
-      allSequences = allSequences.filter(s => !s.isArchived);
+      // Sync ALL sequences including archived/paused (no filtering)
       progress.total_sequences = allSequences.length;
+      console.log(`Found ${allSequences.length} total sequences (including archived/paused)`);
 
       for (let i = progress.sequence_index; i < allSequences.length; i++) {
         if (checkTimeBudget()) {
