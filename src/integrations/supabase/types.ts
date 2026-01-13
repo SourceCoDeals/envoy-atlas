@@ -1397,6 +1397,125 @@ export type Database = {
         }
         Relationships: []
       }
+      cold_calls: {
+        Row: {
+          analyst: string | null
+          call_duration_sec: number | null
+          call_summary: string | null
+          call_transcript: string | null
+          called_date: string | null
+          category: string | null
+          composite_score: number | null
+          created_at: string
+          direction: string | null
+          engagement_score: number | null
+          from_name: string | null
+          from_number: string | null
+          gatekeeper_handling_score: number | null
+          id: string
+          key_concerns: string[] | null
+          next_step_clarity_score: number | null
+          nocodb_created_at: string | null
+          nocodb_id: number | null
+          nocodb_updated_at: string | null
+          objection_handling_score: number | null
+          opening_type: string | null
+          primary_opportunity: string | null
+          quality_of_conversation_score: number | null
+          rapport_building_score: number | null
+          salesforce_url: string | null
+          seller_interest_score: number | null
+          target_pain_points: string | null
+          to_company: string | null
+          to_email: string | null
+          to_name: string | null
+          to_number: string | null
+          updated_at: string
+          value_proposition_score: number | null
+          workspace_id: string
+        }
+        Insert: {
+          analyst?: string | null
+          call_duration_sec?: number | null
+          call_summary?: string | null
+          call_transcript?: string | null
+          called_date?: string | null
+          category?: string | null
+          composite_score?: number | null
+          created_at?: string
+          direction?: string | null
+          engagement_score?: number | null
+          from_name?: string | null
+          from_number?: string | null
+          gatekeeper_handling_score?: number | null
+          id?: string
+          key_concerns?: string[] | null
+          next_step_clarity_score?: number | null
+          nocodb_created_at?: string | null
+          nocodb_id?: number | null
+          nocodb_updated_at?: string | null
+          objection_handling_score?: number | null
+          opening_type?: string | null
+          primary_opportunity?: string | null
+          quality_of_conversation_score?: number | null
+          rapport_building_score?: number | null
+          salesforce_url?: string | null
+          seller_interest_score?: number | null
+          target_pain_points?: string | null
+          to_company?: string | null
+          to_email?: string | null
+          to_name?: string | null
+          to_number?: string | null
+          updated_at?: string
+          value_proposition_score?: number | null
+          workspace_id: string
+        }
+        Update: {
+          analyst?: string | null
+          call_duration_sec?: number | null
+          call_summary?: string | null
+          call_transcript?: string | null
+          called_date?: string | null
+          category?: string | null
+          composite_score?: number | null
+          created_at?: string
+          direction?: string | null
+          engagement_score?: number | null
+          from_name?: string | null
+          from_number?: string | null
+          gatekeeper_handling_score?: number | null
+          id?: string
+          key_concerns?: string[] | null
+          next_step_clarity_score?: number | null
+          nocodb_created_at?: string | null
+          nocodb_id?: number | null
+          nocodb_updated_at?: string | null
+          objection_handling_score?: number | null
+          opening_type?: string | null
+          primary_opportunity?: string | null
+          quality_of_conversation_score?: number | null
+          rapport_building_score?: number | null
+          salesforce_url?: string | null
+          seller_interest_score?: number | null
+          target_pain_points?: string | null
+          to_company?: string | null
+          to_email?: string | null
+          to_name?: string | null
+          to_number?: string | null
+          updated_at?: string
+          value_proposition_score?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cold_calls_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_notes: {
         Row: {
           created_at: string
