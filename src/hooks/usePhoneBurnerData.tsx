@@ -240,9 +240,11 @@ export function usePhoneBurnerData() {
       .filter(call => call.called_date_time)
       .map(call => {
         const dateObj = parseISO(call.called_date_time!);
+        // Add 5 hours to adjust for timezone offset (UTC to EST)
+        const adjustedHour = (getHours(dateObj) + 5) % 24;
         return {
           date: format(dateObj, 'yyyy-MM-dd'),
-          hour: getHours(dateObj),
+          hour: adjustedHour,
           analyst: call.analyst || 'Unknown',
         };
       });
