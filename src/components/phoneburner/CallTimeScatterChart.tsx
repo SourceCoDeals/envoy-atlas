@@ -33,15 +33,16 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
   const aggregatedByAnalyst = analysts.map(analyst => {
     const counts: Record<string, number> = {};
     data.filter(d => d.analyst === analyst).forEach(d => {
-      const key = `${d.date}-${d.hour}`;
+      // Use pipe separator to avoid conflict with date format dashes
+      const key = `${d.date}|${d.hour}`;
       counts[key] = (counts[key] || 0) + 1;
     });
     
     return {
       analyst,
       data: Object.entries(counts).map(([key, count]) => {
-        const [date, hour] = key.split('-');
-        return { x: date, y: parseInt(hour), z: count, analyst };
+        const [date, hourStr] = key.split('|');
+        return { x: date, y: parseInt(hourStr), z: count, analyst };
       }),
     };
   });
