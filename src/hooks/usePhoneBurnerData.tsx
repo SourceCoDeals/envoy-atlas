@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { subDays, startOfDay, parseISO, format, getHours } from 'date-fns';
+import { subDays, startOfDay, parseISO, format, getHours, eachDayOfInterval, addDays } from 'date-fns';
 
 export type DateRangeOption = '7d' | '14d' | '30d' | 'all';
 
@@ -21,7 +21,7 @@ export interface ColdCall {
   primary_opportunity: string | null;
   call_duration_sec: number | null;
   called_date: string | null;
-  nocodb_created_at: string | null;
+  called_date_time: string | null;
   to_company: string | null;
   to_name: string | null;
   composite_score: number | null;
@@ -82,7 +82,7 @@ export function usePhoneBurnerData() {
       while (true) {
         const { data, error } = await supabase
           .from('cold_calls')
-          .select('id, analyst, category, primary_opportunity, call_duration_sec, called_date, nocodb_created_at, to_company, to_name, composite_score, seller_interest_score')
+          .select('id, analyst, category, primary_opportunity, call_duration_sec, called_date, called_date_time, to_company, to_name, composite_score, seller_interest_score')
           .eq('workspace_id', currentWorkspace.id)
           .range(offset, offset + limit - 1);
 
@@ -179,43 +179,63 @@ export function usePhoneBurnerData() {
       .sort((a, b) => b.value - a.value);
   }, [filteredCalls]);
 
-  // Calls by analyst over time
+  // Get the date range for charts (all days in range, not just days with data)
+  const dateRangeForCharts = useMemo(() => {
+    if (filters.dateRange === 'all') {
+      // For "all time", use actual data range
+      const dates = filteredCalls
+        .filter(c => c.called_date)
+        .map(c => parseISO(c.called_date!));
+      if (dates.length === 0) return [];
+      const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
+      const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+      return eachDayOfInterval({ start: minDate, end: maxDate });
+    }
+    
+    const daysMap = { '7d': 7, '14d': 14, '30d': 30 };
+    const days = daysMap[filters.dateRange];
+    const endDate = new Date();
+    const startDate = subDays(endDate, days - 1);
+    return eachDayOfInterval({ start: startOfDay(startDate), end: startOfDay(endDate) });
+  }, [filters.dateRange, filteredCalls]);
+
+  // Calls by analyst over time (includes all days in range)
   const callsByAnalystOverTime = useMemo(() => {
     const dataMap: Record<string, Record<string, number>> = {};
-    const dates = new Set<string>();
+    
+    // Get all unique analysts first
+    const analysts = [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
 
     filteredCalls.forEach(call => {
       if (!call.called_date || !call.analyst) return;
       const date = format(parseISO(call.called_date), 'yyyy-MM-dd');
-      dates.add(date);
       
       if (!dataMap[call.analyst]) dataMap[call.analyst] = {};
       dataMap[call.analyst][date] = (dataMap[call.analyst][date] || 0) + 1;
     });
 
-    const sortedDates = Array.from(dates).sort();
-    const analysts = Object.keys(dataMap);
-
-    return sortedDates.map(date => {
+    // Use all dates in range, not just dates with data
+    return dateRangeForCharts.map(dateObj => {
+      const date = format(dateObj, 'yyyy-MM-dd');
       const entry: Record<string, any> = { date };
       analysts.forEach(analyst => {
-        entry[analyst] = dataMap[analyst][date] || 0;
+        entry[analyst] = dataMap[analyst]?.[date] || 0;
       });
       return entry;
     });
-  }, [filteredCalls]);
+  }, [filteredCalls, dateRangeForCharts]);
 
   // Get unique analysts for chart legend
   const uniqueAnalysts = useMemo(() => {
     return [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
   }, [filteredCalls]);
 
-  // Scatter plot data: time of day vs date (using nocodb_created_at for accurate timestamps)
+  // Scatter plot data: time of day vs date (using called_date_time for accurate timestamps)
   const scatterData = useMemo(() => {
     return filteredCalls
-      .filter(call => call.nocodb_created_at)
+      .filter(call => call.called_date_time)
       .map(call => {
-        const dateObj = parseISO(call.nocodb_created_at!);
+        const dateObj = parseISO(call.called_date_time!);
         return {
           date: format(dateObj, 'yyyy-MM-dd'),
           hour: getHours(dateObj),
@@ -256,7 +276,7 @@ export function usePhoneBurnerData() {
     })).filter(r => r.value > 0);
   }, [filteredCalls]);
 
-  // Daily duration trends
+  // Daily duration trends (includes all days in range)
   const durationTrends = useMemo(() => {
     const dataMap: Record<string, { total: number; count: number }> = {};
 
@@ -271,15 +291,18 @@ export function usePhoneBurnerData() {
       }
     });
 
-    return Object.entries(dataMap)
-      .map(([date, data]) => ({
+    // Use all dates in range, not just dates with data
+    return dateRangeForCharts.map(dateObj => {
+      const date = format(dateObj, 'yyyy-MM-dd');
+      const data = dataMap[date] || { total: 0, count: 0 };
+      return {
         date,
         totalDuration: Math.round(data.total / 60), // Convert to minutes
         avgDuration: data.count > 0 ? Math.round(data.total / data.count) : 0,
         callCount: data.count,
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredCalls]);
+      };
+    });
+  }, [filteredCalls, dateRangeForCharts]);
 
   return {
     filters,
