@@ -19,28 +19,75 @@ export function useSyncData() {
         throw new Error('Not authenticated');
       }
 
-      const { data, error } = await supabase.functions.invoke('smartlead-sync', {
-        body: { 
-          workspace_id: currentWorkspace.id,
-          sync_type: 'incremental'
+      // Fetch connected platforms for this workspace
+      const { data: connections } = await supabase
+        .from('api_connections')
+        .select('platform')
+        .eq('workspace_id', currentWorkspace.id)
+        .eq('is_active', true);
+
+      const connectedPlatforms = (connections || []).map(c => c.platform);
+      
+      const syncPromises: Promise<any>[] = [];
+      
+      // Trigger SmartLead sync if connected
+      if (connectedPlatforms.includes('smartlead')) {
+        syncPromises.push(
+          supabase.functions.invoke('smartlead-sync', {
+            body: { 
+              workspace_id: currentWorkspace.id,
+              sync_type: 'full'
+            }
+          })
+        );
+      }
+
+      // Trigger Reply.io sync if connected
+      if (connectedPlatforms.includes('replyio')) {
+        syncPromises.push(
+          supabase.functions.invoke('replyio-sync', {
+            body: { 
+              workspace_id: currentWorkspace.id,
+              sync_type: 'full'
+            }
+          })
+        );
+      }
+
+      if (syncPromises.length === 0) {
+        toast.info('No platforms connected', {
+          description: 'Connect SmartLead or Reply.io to sync data'
+        });
+        return;
+      }
+
+      const results = await Promise.allSettled(syncPromises);
+      
+      let totalCampaigns = 0;
+      let hasErrors = false;
+      
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value.data) {
+          totalCampaigns += result.value.data.processed_campaigns || result.value.data.sequences_synced || 0;
+        } else if (result.status === 'rejected' || result.value?.error) {
+          hasErrors = true;
+          console.error('Sync error:', result);
         }
       });
 
-      if (error) throw error;
-
       setLastSyncAt(new Date().toISOString());
       
-      if (data?.partial) {
-        toast.info('Sync in progress', {
-          description: `Synced ${data.processed_campaigns || 0} campaigns. More data loading...`
+      if (hasErrors) {
+        toast.warning('Partial sync completed', {
+          description: `Synced ${totalCampaigns} campaigns. Some errors occurred.`
         });
       } else {
         toast.success('Data refreshed', {
-          description: `Synced ${data?.processed_campaigns || 0} campaigns successfully`
+          description: `Synced ${totalCampaigns} campaigns from ${connectedPlatforms.join(' & ')}`
         });
       }
 
-      return data;
+      return { totalCampaigns, platforms: connectedPlatforms };
     } catch (err) {
       console.error('Sync error:', err);
       toast.error('Sync failed', {
