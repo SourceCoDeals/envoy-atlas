@@ -29,23 +29,32 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
     analystColors[analyst] = COLOR_PALETTE[idx % COLOR_PALETTE.length];
   });
 
-  // Get all unique dates sorted chronologically
+  // Get all unique dates sorted chronologically and create date-to-index mapping
   const allDatesSorted = [...new Set(data.map(d => d.date))].sort();
+  const dateToTimestamp: Record<string, number> = {};
+  allDatesSorted.forEach(date => {
+    dateToTimestamp[date] = parseISO(date).getTime();
+  });
 
   // Aggregate calls by date, hour, and analyst - count calls at each point
   const aggregatedByAnalyst = analysts.map(analyst => {
     const counts: Record<string, number> = {};
     data.filter(d => d.analyst === analyst).forEach(d => {
-      // Use pipe separator to avoid conflict with date format dashes
       const key = `${d.date}|${d.hour}`;
       counts[key] = (counts[key] || 0) + 1;
     });
     
-    // Create data points and sort by date
+    // Create data points with numeric x values (timestamps)
     const scatterPoints = Object.entries(counts).map(([key, count]) => {
       const [date, hourStr] = key.split('|');
-      return { x: date, y: parseInt(hourStr), z: count, analyst };
-    }).sort((a, b) => a.x.localeCompare(b.x)); // Sort by date string (yyyy-MM-dd format sorts correctly)
+      return { 
+        x: dateToTimestamp[date], 
+        date, // Keep original date for tooltip
+        y: parseInt(hourStr), 
+        z: count, 
+        analyst 
+      };
+    }).sort((a, b) => a.x - b.x);
     
     return {
       analyst,
@@ -79,6 +88,17 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
     1
   );
 
+  // Get min/max timestamps for X-axis domain
+  const allTimestamps = Object.values(dateToTimestamp);
+  const minTimestamp = Math.min(...allTimestamps);
+  const maxTimestamp = Math.max(...allTimestamps);
+
+  // Generate tick values for X-axis (evenly spaced dates)
+  const tickCount = Math.min(allDatesSorted.length, 10);
+  const step = Math.max(1, Math.floor(allDatesSorted.length / tickCount));
+  const tickDates = allDatesSorted.filter((_, idx) => idx % step === 0 || idx === allDatesSorted.length - 1);
+  const tickValues = tickDates.map(date => dateToTimestamp[date]);
+
   return (
     <Card>
       <CardHeader>
@@ -92,13 +112,14 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis 
                 dataKey="x" 
-                type="category"
-                allowDuplicatedCategory={false}
+                type="number"
+                domain={[minTimestamp, maxTimestamp]}
+                ticks={tickValues}
                 tickFormatter={(val) => {
                   try {
-                    return format(parseISO(val), 'M/d');
+                    return format(new Date(val), 'M/d');
                   } catch {
-                    return val;
+                    return '';
                   }
                 }}
                 className="text-xs"
@@ -128,7 +149,7 @@ export function CallTimeScatterChart({ data, analysts }: CallTimeScatterChartPro
                       <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
                         <p className="font-medium text-foreground">{point.analyst || 'Unknown'}</p>
                         <p className="text-sm text-muted-foreground">
-                          Date: {format(parseISO(point.x), 'MMM d, yyyy')}
+                          Date: {format(parseISO(point.date), 'MMM d, yyyy')}
                         </p>
                         <p className="text-sm text-muted-foreground">
                           Time: {formatHour(point.y)}
