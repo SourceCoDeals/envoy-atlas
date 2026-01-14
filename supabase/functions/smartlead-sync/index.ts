@@ -7,7 +7,9 @@ const corsHeaders = {
 };
 
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
-const RATE_LIMIT_DELAY = 450;
+// SmartLead Rate Limit: 10 requests per 2 seconds = 5 req/s
+// Using 250ms delay = 4 req/s to stay safely within limits
+const RATE_LIMIT_DELAY = 250;
 const BATCH_SIZE = 20;
 const TIME_BUDGET_MS = 55000;
 
