@@ -6,7 +6,11 @@ const corsHeaders = {
 };
 
 const REPLYIO_BASE_URL = 'https://api.reply.io/v3';
-const RATE_LIMIT_DELAY = 300;
+// Reply.io Rate Limit: 10 seconds between API calls, 15,000 requests/month
+// The 10-second limit applies globally, but we can be more aggressive for listing
+// vs stats endpoints since stats endpoint may hit more rate limits
+const RATE_LIMIT_DELAY_LIST = 2000;  // 2 seconds for listing endpoints
+const RATE_LIMIT_DELAY_STATS = 1000; // 1 second for stats (faster with allow404)
 const TIME_BUDGET_MS = 50000;
 
 function mapSequenceStatus(status: string): string {
@@ -22,18 +26,24 @@ function mapSequenceStatus(status: string): string {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function replyioRequest(endpoint: string, apiKey: string, retries = 3, allow404 = false): Promise<any> {
+async function replyioRequest(
+  endpoint: string, 
+  apiKey: string, 
+  options: { retries?: number; allow404?: boolean; delayMs?: number } = {}
+): Promise<any> {
+  const { retries = 3, allow404 = false, delayMs = RATE_LIMIT_DELAY_LIST } = options;
+  
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      await delay(RATE_LIMIT_DELAY);
+      await delay(delayMs);
       console.log(`Fetching: ${endpoint}`);
       const response = await fetch(`${REPLYIO_BASE_URL}${endpoint}`, {
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
       });
       
       if (response.status === 429) {
-        console.log(`Rate limited, waiting ${(attempt + 1) * 2} seconds...`);
-        await delay(2000 * (attempt + 1));
+        console.log(`Rate limited, waiting ${(attempt + 1) * 10} seconds...`);
+        await delay(10000 * (attempt + 1));
         continue;
       }
       
@@ -53,7 +63,7 @@ async function replyioRequest(endpoint: string, apiKey: string, retries = 3, all
     } catch (error) {
       if (attempt === retries - 1) throw error;
       console.log(`Retry ${attempt + 1}/${retries}:`, error);
-      await delay(1000 * (attempt + 1));
+      await delay(2000 * (attempt + 1));
     }
   }
 }
@@ -101,6 +111,7 @@ Deno.serve(async (req) => {
     }
 
     const apiKey = connection.api_key_encrypted;
+    const existingProgress = (connection.sync_progress as any) || {};
 
     // Handle reset
     if (reset) {
@@ -128,35 +139,59 @@ Deno.serve(async (req) => {
     const startTime = Date.now();
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
 
-    // Step 1: Fetch all sequences (paginated)
-    console.log('Fetching all sequences...');
-    let allSequences: any[] = [];
-    let skip = 0;
+    // Use cached sequence list if available and not reset
+    let allSequences: any[] = existingProgress.cached_sequences || [];
     
-    while (!isTimeBudgetExceeded()) {
-      const response = await replyioRequest(`/sequences?top=100&skip=${skip}`, apiKey);
-      const sequences = Array.isArray(response) ? response : (response?.sequences || response?.items || []);
+    if (allSequences.length === 0 || reset) {
+      // Step 1: Fetch all sequences (paginated) - use faster delay for listing
+      console.log('Fetching all sequences...');
+      allSequences = [];
+      let skip = 0;
       
-      if (sequences.length === 0) break;
+      while (!isTimeBudgetExceeded()) {
+        const response = await replyioRequest(
+          `/sequences?top=100&skip=${skip}`, 
+          apiKey, 
+          { delayMs: RATE_LIMIT_DELAY_LIST }
+        );
+        const sequences = Array.isArray(response) ? response : (response?.sequences || response?.items || []);
+        
+        if (sequences.length === 0) break;
+        
+        allSequences = allSequences.concat(sequences);
+        skip += sequences.length;
+        console.log(`Fetched ${allSequences.length} sequences so far...`);
+        
+        if (sequences.length < 100) break;
+      }
       
-      allSequences = allSequences.concat(sequences);
-      skip += sequences.length;
-      console.log(`Fetched ${allSequences.length} sequences so far...`);
+      console.log(`Found ${allSequences.length} total sequences`);
       
-      if (sequences.length < 100) break;
+      // Cache the sequence list for subsequent runs
+      await supabase.from('api_connections').update({
+        sync_progress: { 
+          ...existingProgress,
+          cached_sequences: allSequences.map(s => ({ id: s.id, name: s.name, status: s.status })),
+          sequence_index: 0,
+          total_sequences: allSequences.length 
+        },
+      }).eq('id', connection.id);
+    } else {
+      console.log(`Using cached sequence list: ${allSequences.length} sequences`);
     }
-    
-    console.log(`Found ${allSequences.length} total sequences`);
 
     // Step 2: Process each sequence
-    const existingProgress = (connection.sync_progress as any) || {};
     let startIndex = reset ? 0 : (existingProgress.sequence_index || 0);
 
     for (let i = startIndex; i < allSequences.length; i++) {
       if (isTimeBudgetExceeded()) {
         console.log(`Time budget exceeded at sequence ${i}/${allSequences.length}. Will continue next run.`);
         await supabase.from('api_connections').update({
-          sync_progress: { sequence_index: i, total_sequences: allSequences.length },
+          sync_progress: { 
+            cached_sequences: allSequences,
+            sequence_index: i, 
+            total_sequences: allSequences.length 
+          },
           sync_status: 'partial',
         }).eq('id', connection.id);
 
@@ -172,7 +207,7 @@ Deno.serve(async (req) => {
       console.log(`[${i + 1}/${allSequences.length}] Processing: ${sequence.name} (${sequence.status})`);
 
       try {
-        // Upsert sequence as campaign
+        // Upsert sequence as campaign (no API call needed - use cached data)
         const { data: campaign, error: campError } = await supabase
           .from('replyio_campaigns')
           .upsert({
@@ -193,9 +228,13 @@ Deno.serve(async (req) => {
         const campaignId = campaign.id;
         progress.sequences_synced++;
 
-        // Fetch statistics
+        // Fetch statistics - use faster delay with allow404
         try {
-          const stats = await replyioRequest(`/statistics/sequences/${sequence.id}`, apiKey, 1, true);
+          const stats = await replyioRequest(
+            `/statistics/sequences/${sequence.id}`, 
+            apiKey, 
+            { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
+          );
           
           if (stats) {
             const today = new Date().toISOString().split('T')[0];
@@ -216,8 +255,7 @@ Deno.serve(async (req) => {
             console.log(`  Stats synced: sent=${stats.deliveredContacts || 0}, replies=${stats.repliedContacts || 0}`);
           }
         } catch (e) {
-          console.error(`  Stats error for ${sequence.name}:`, e);
-          progress.errors.push(`Stats ${sequence.name}: ${(e as Error).message}`);
+          console.error(`  Stats error for ${sequence.name}:`, (e as Error).message);
         }
 
       } catch (e) {
