@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -13,6 +13,7 @@ import { WhatChangedAnalysis, generateChangeAnalysis } from '@/components/dashbo
 import { ActionQueue, generateActionItems } from '@/components/dashboard/ActionQueue';
 import { KPICard, getKPIStatus } from '@/components/dashboard/KPICard';
 import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/components/dashboard/DateRangeFilter';
+import { ExecutiveSummary } from '@/components/copyinsights/ExecutiveSummary';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
@@ -117,6 +118,89 @@ export default function Dashboard() {
     if (link) navigate(link);
   };
 
+  // Generate executive summary insights
+  const executiveInsights = useMemo(() => {
+    const insights = [];
+    
+    // Overall health assessment
+    if (healthData.overallScore >= 80) {
+      insights.push({
+        type: 'positive' as const,
+        title: 'Your outbound program is healthy',
+        description: `With a ${healthData.overallScore}/100 health score, your emails are reaching inboxes and getting responses. Keep monitoring to maintain this performance.`,
+        impact: `${healthData.overallScore}/100 health`,
+      });
+    } else if (healthData.overallScore >= 60) {
+      insights.push({
+        type: 'warning' as const,
+        title: 'Your program needs some attention',
+        description: `A ${healthData.overallScore}/100 health score means there's room for improvement. Focus on the action items below to get back on track.`,
+        impact: `${healthData.overallScore}/100 health`,
+      });
+    } else {
+      insights.push({
+        type: 'negative' as const,
+        title: 'Urgent: Your outbound program needs help',
+        description: `A ${healthData.overallScore}/100 health score indicates serious issues. Address the problems below immediately to avoid damaging your sender reputation.`,
+        impact: `${healthData.overallScore}/100 health`,
+      });
+    }
+
+    // Reply rate insight
+    if (stats.replyRate >= 3) {
+      insights.push({
+        type: 'positive' as const,
+        title: `${stats.replyRate.toFixed(1)}% of recipients are replying`,
+        description: 'This is above the industry average of 3%. Your messaging is resonating with your audience.',
+        impact: 'Above benchmark',
+      });
+    } else if (stats.replyRate >= 2) {
+      insights.push({
+        type: 'neutral' as const,
+        title: `${stats.replyRate.toFixed(1)}% reply rate—room to grow`,
+        description: 'You\'re close to the 3% benchmark. Small copy improvements could push you over. Check Copy Insights for specific recommendations.',
+      });
+    } else {
+      insights.push({
+        type: 'negative' as const,
+        title: `Only ${stats.replyRate.toFixed(1)}% are replying`,
+        description: 'This is below the 3% benchmark. Your messaging may not be resonating, or you could have deliverability issues. Check both.',
+        impact: 'Below benchmark',
+      });
+    }
+
+    // Deliverability insight
+    if (stats.bounceRate > 5 || stats.spamRate > 0.3) {
+      insights.push({
+        type: 'negative' as const,
+        title: 'Deliverability issues detected',
+        description: stats.bounceRate > 5 
+          ? `${stats.bounceRate.toFixed(1)}% bounce rate is too high. Clean your lists or you'll damage your sender reputation.`
+          : `${stats.spamRate.toFixed(2)}% spam rate is concerning. Review your content and warm-up practices.`,
+        impact: 'Fix immediately',
+      });
+    } else if (stats.deliveredRate >= 95) {
+      insights.push({
+        type: 'positive' as const,
+        title: `${stats.deliveredRate.toFixed(0)}% of emails are reaching inboxes`,
+        description: 'Your deliverability is solid. Your infrastructure is healthy and emails are getting through.',
+        impact: 'Healthy',
+      });
+    }
+
+    return insights;
+  }, [healthData.overallScore, stats]);
+
+  const bottomLine = useMemo(() => {
+    if (failureMode.primaryCause !== 'none') {
+      return `Focus on fixing ${failureMode.primaryCause.replace('_', ' ')} first—it's your biggest blocker right now.`;
+    }
+    if (stats.replyRate < 3) {
+      return 'Your infrastructure is fine. Focus on improving your messaging—check Copy Insights for specific recommendations.';
+    }
+    return 'Things are running smoothly. Keep monitoring and continue testing new approaches.';
+  }, [failureMode.primaryCause, stats.replyRate]);
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -173,6 +257,14 @@ export default function Dashboard() {
           </Card>
         ) : (
           <>
+            {/* Executive Summary */}
+            <ExecutiveSummary
+              title="What's Happening With Your Outbound"
+              subtitle="Here's a plain-English summary of your email program's health and performance"
+              insights={executiveInsights}
+              bottomLine={bottomLine}
+            />
+
             {/* Health Score + Failure Mode */}
             <div className="grid gap-4 lg:grid-cols-2">
               <SystemHealthScore data={healthData} />
