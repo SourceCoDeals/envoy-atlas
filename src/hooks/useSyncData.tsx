@@ -34,24 +34,31 @@ export function useSyncData() {
       const newProgress: SyncProgress = {};
       connections.forEach(conn => {
         const syncProgress = conn.sync_progress as any;
+        const status = conn.sync_status || 'idle';
+        
         if (conn.platform === 'smartlead' && syncProgress) {
-          newProgress.smartlead = {
-            current: syncProgress.campaign_index ?? syncProgress.current_index ?? 0,
-            total: syncProgress.total_campaigns ?? 0,
-            status: conn.sync_status || 'idle'
-          };
+          const total = syncProgress.total_campaigns ?? 0;
+          // If sync is complete (success status or completed flag), set current = total
+          const isComplete = status === 'success' || syncProgress.completed === true;
+          const current = isComplete 
+            ? total 
+            : (syncProgress.campaign_index ?? syncProgress.current_index ?? 0);
+          
+          newProgress.smartlead = { current, total, status };
         } else if (conn.platform === 'replyio' && syncProgress) {
-          // Get total from cached_sequences array length
+          // Get total from cached_sequences array length or total_sequences
           const cachedSequences = syncProgress.cached_sequences;
           const total = Array.isArray(cachedSequences) 
             ? cachedSequences.length 
             : (syncProgress.total_sequences ?? 0);
           
-          newProgress.replyio = {
-            current: syncProgress.sequence_index ?? syncProgress.current_index ?? 0,
-            total: total,
-            status: conn.sync_status || 'idle'
-          };
+          // If sync is complete, set current = total
+          const isComplete = status === 'success' || syncProgress.completed === true;
+          const current = isComplete 
+            ? total 
+            : (syncProgress.sequence_index ?? syncProgress.current_index ?? 0);
+          
+          newProgress.replyio = { current, total, status };
         }
       });
       setProgress(newProgress);
