@@ -1,0 +1,180 @@
+import { useMemo } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
+import type { BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
+import { calculateYouIRatio } from '@/lib/patternTaxonomy';
+
+interface BodyCopyTabProps {
+  bodyCopy: BodyCopyAnalysis[];
+  baselineReplyRate: number;
+}
+
+export function BodyCopyTab({ bodyCopy, baselineReplyRate }: BodyCopyTabProps) {
+  // Word count analysis
+  const wordCountBuckets = useMemo(() => {
+    const buckets = [
+      { range: '<50', min: 0, max: 50, sent: 0, replies: 0 },
+      { range: '50-100', min: 50, max: 100, sent: 0, replies: 0 },
+      { range: '100-150', min: 100, max: 150, sent: 0, replies: 0 },
+      { range: '150-200', min: 150, max: 200, sent: 0, replies: 0 },
+      { range: '200+', min: 200, max: Infinity, sent: 0, replies: 0 },
+    ];
+
+    bodyCopy.forEach(b => {
+      const bucket = buckets.find(bkt => b.word_count >= bkt.min && b.word_count < bkt.max);
+      if (bucket) {
+        bucket.sent += b.sent_count;
+        bucket.replies += b.reply_count;
+      }
+    });
+
+    return buckets.map(b => ({
+      ...b,
+      reply_rate: b.sent > 0 ? (b.replies / b.sent) * 100 : 0,
+    }));
+  }, [bodyCopy]);
+
+  const avgWordCount = bodyCopy.length > 0 
+    ? Math.round(bodyCopy.reduce((sum, b) => sum + b.word_count, 0) / bodyCopy.length)
+    : 0;
+
+  // You:We ratio analysis
+  const youWeRatioBuckets = useMemo(() => {
+    const buckets = [
+      { range: '<1:1', min: 0, max: 1, sent: 0, replies: 0, label: 'Self-focused' },
+      { range: '1-2:1', min: 1, max: 2, sent: 0, replies: 0, label: 'Balanced' },
+      { range: '2-3:1', min: 2, max: 3, sent: 0, replies: 0, label: 'Prospect-focused' },
+      { range: '3+:1', min: 3, max: Infinity, sent: 0, replies: 0, label: 'Highly focused' },
+    ];
+
+    bodyCopy.forEach(b => {
+      const ratio = calculateYouIRatio(b.email_body || b.body_preview || '');
+      const bucket = buckets.find(bkt => ratio >= bkt.min && ratio < bkt.max);
+      if (bucket) {
+        bucket.sent += b.sent_count;
+        bucket.replies += b.reply_count;
+      }
+    });
+
+    return buckets.map(b => ({
+      ...b,
+      reply_rate: b.sent > 0 ? (b.replies / b.sent) * 100 : 0,
+    }));
+  }, [bodyCopy]);
+
+  // CTA performance
+  const ctaPerformance = useMemo(() => {
+    const groups: Record<string, { sent: number; replies: number }> = {};
+    
+    bodyCopy.forEach(b => {
+      const cta = b.cta_type || 'unknown';
+      if (!groups[cta]) groups[cta] = { sent: 0, replies: 0 };
+      groups[cta].sent += b.sent_count;
+      groups[cta].replies += b.reply_count;
+    });
+
+    return Object.entries(groups)
+      .map(([cta, data]) => ({
+        type: cta,
+        rate: data.sent > 0 ? (data.replies / data.sent) * 100 : 0,
+        sample: data.sent,
+      }))
+      .sort((a, b) => b.rate - a.rate);
+  }, [bodyCopy]);
+
+  return (
+    <div className="space-y-6">
+      {/* Word Count Impact */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Email Length Impact</CardTitle>
+          <CardDescription>Shorter emails consistently outperform longer ones</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={wordCountBuckets}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                <XAxis dataKey="range" tick={{ fontSize: 12 }} />
+                <YAxis tickFormatter={(v) => `${v}%`} domain={[0, 10]} />
+                <RechartsTooltip />
+                <Bar dataKey="reply_rate" radius={[4, 4, 0, 0]}>
+                  {wordCountBuckets.map((entry, index) => (
+                    <Cell 
+                      key={index} 
+                      fill={index < 2 ? 'hsl(var(--success))' : 
+                            index < 3 ? 'hsl(var(--muted-foreground))' :
+                            'hsl(var(--destructive))'}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-4 p-3 bg-muted/50 rounded-lg text-sm">
+            <strong>📊 INSIGHT:</strong> Emails under 100 words have {wordCountBuckets[1]?.reply_rate.toFixed(1)}% reply rate 
+            vs {wordCountBuckets[3]?.reply_rate.toFixed(1)}% for 150+ words. 
+            Your average: <strong>{avgWordCount} words</strong> {avgWordCount > 100 ? '⚠️ Too Long' : '✓ Good'}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* You:We Ratio */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Prospect Focus: You vs We Ratio</CardTitle>
+          <CardDescription>Emails that focus on "you" outperform self-focused "we" emails</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {youWeRatioBuckets.map((bucket, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-24 text-sm">{bucket.range}</div>
+                <div className="w-28 text-xs text-muted-foreground">{bucket.label}</div>
+                <div className="flex-1 relative h-6 bg-muted rounded">
+                  <div 
+                    className={`absolute h-full rounded ${
+                      i >= 2 ? 'bg-success' : i === 1 ? 'bg-yellow-500' : 'bg-destructive'
+                    }`}
+                    style={{ width: `${Math.min((bucket.reply_rate / 8) * 100, 100)}%` }}
+                  />
+                </div>
+                <div className="w-14 text-sm font-medium">{bucket.reply_rate.toFixed(1)}%</div>
+                <Badge variant="outline" className="text-xs">n={bucket.sent.toLocaleString()}</Badge>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* CTA Performance */}
+      <Card>
+        <CardHeader>
+          <CardTitle>CTA Type Performance</CardTitle>
+          <CardDescription>Lower friction CTAs get more responses</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {ctaPerformance.slice(0, 6).map((cta, i) => (
+              <div key={i} className="flex items-center gap-3 text-sm">
+                <div className="w-32 truncate">{cta.type}</div>
+                <div className="flex-1 relative h-4 bg-muted rounded">
+                  <div 
+                    className={`absolute h-full rounded ${
+                      i < 2 ? 'bg-success' : i < 4 ? 'bg-yellow-500' : 'bg-destructive'
+                    }`}
+                    style={{ width: `${Math.min((cta.rate / 8) * 100, 100)}%` }}
+                  />
+                </div>
+                <div className="w-12 font-medium">{cta.rate.toFixed(1)}%</div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
