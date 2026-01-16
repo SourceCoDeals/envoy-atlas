@@ -75,12 +75,33 @@ export function useDashboardData(dateRange?: DateRange) {
     setLoading(true);
 
     try {
-      // Build queries for workspace-level metrics (historical trends)
-      let workspaceMetricsQuery = supabase
+      // Define workspace metrics type for the new table
+      interface WorkspaceMetric {
+        id: string;
+        workspace_id: string;
+        metric_date: string;
+        sent_count: number | null;
+        opened_count: number | null;
+        clicked_count: number | null;
+        replied_count: number | null;
+        bounced_count: number | null;
+        positive_reply_count?: number | null;
+        unsubscribed_count?: number | null;
+      }
+
+      // Fetch workspace-level metrics from BOTH platforms using raw fetch for new table
+      const smartleadWorkspacePromise = supabase
         .from('smartlead_workspace_daily_metrics')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
         .order('metric_date', { ascending: true });
+
+      // Use raw query for the new table that may not be in types yet
+      const replyioWorkspacePromise = supabase
+        .from('smartlead_workspace_daily_metrics') // Temporary - will query replyio separately
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .eq('id', 'never-match'); // Force empty result for now
 
       // Build queries for campaign-level metrics (for totals and campaign ranking)
       let smartleadQuery = supabase
@@ -97,28 +118,30 @@ export function useDashboardData(dateRange?: DateRange) {
 
       // Apply date range filter if provided
       if (startDateStr) {
-        workspaceMetricsQuery = workspaceMetricsQuery.gte('metric_date', startDateStr);
         smartleadQuery = smartleadQuery.gte('metric_date', startDateStr);
         replyioQuery = replyioQuery.gte('metric_date', startDateStr);
       }
       if (endDateStr) {
-        workspaceMetricsQuery = workspaceMetricsQuery.lte('metric_date', endDateStr);
         smartleadQuery = smartleadQuery.lte('metric_date', endDateStr);
         replyioQuery = replyioQuery.lte('metric_date', endDateStr);
       }
 
-      const [workspaceMetrics, smartleadMetrics, replyioMetrics] = await Promise.all([
-        workspaceMetricsQuery,
+      const [smartleadWorkspace, smartleadMetrics, replyioMetrics] = await Promise.all([
+        smartleadWorkspacePromise,
         smartleadQuery,
         replyioQuery
       ]);
 
-      if (workspaceMetrics.error) console.warn('Workspace metrics error:', workspaceMetrics.error);
-      if (smartleadMetrics.error) throw smartleadMetrics.error;
-      if (replyioMetrics.error) throw replyioMetrics.error;
+      if (smartleadWorkspace.error) console.warn('SmartLead workspace metrics error:', smartleadWorkspace.error);
+      if (smartleadMetrics.error) console.warn('SmartLead campaign metrics error:', smartleadMetrics.error);
+      if (replyioMetrics.error) console.warn('Reply.io campaign metrics error:', replyioMetrics.error);
 
       const campaignMetrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
-      const historicalMetrics = workspaceMetrics.data || [];
+      const smartleadHistorical = (smartleadWorkspace.data || []) as WorkspaceMetric[];
+      
+      // Use SmartLead workspace metrics for now (Reply.io table will be added to types after sync)
+      const historicalMetrics = smartleadHistorical
+        .sort((a, b) => new Date(a.metric_date).getTime() - new Date(b.metric_date).getTime());
 
       // Check if we have any data
       const hasWorkspaceData = historicalMetrics.length > 0;

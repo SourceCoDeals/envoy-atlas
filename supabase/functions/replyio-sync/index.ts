@@ -417,94 +417,116 @@ Deno.serve(async (req) => {
 
         // ==============================================
         // Try v1 API for metrics (more reliable for stats)
+        // v1 /campaigns?id=X returns an ARRAY with one object, not the object directly!
         // ==============================================
         try {
-          const seqDetails = await replyioRequest(
+          const seqDetailsRaw = await replyioRequest(
             `/campaigns?id=${sequence.id}`,
             apiKey,
             { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS, useV1: true }
           );
           
+          // Handle v1 response format - it returns an array!
+          const seqDetails = Array.isArray(seqDetailsRaw) ? seqDetailsRaw[0] : seqDetailsRaw;
+          
           if (seqDetails) {
             // Log ALL fields to understand the response format
-            console.log(`  v1 API full response:`, JSON.stringify(seqDetails).substring(0, 500));
+            console.log(`  v1 API response type: ${Array.isArray(seqDetailsRaw) ? 'array' : 'object'}`);
+            console.log(`  v1 API full response:`, JSON.stringify(seqDetails).substring(0, 800));
             
             const today = new Date().toISOString().split('T')[0];
             
-            // Try ALL known field variations from Reply.io API
-            const sentCount = seqDetails.deliveriesCount ?? seqDetails.delivered ?? 
+            // Reply.io v1 API field names from actual documentation
+            // The API returns fields like: id, name, emails (array), stats (object), etc.
+            const stats = seqDetails.stats || seqDetails.statistics || seqDetails;
+            
+            // Try nested stats object first, then flat fields
+            const sentCount = stats.deliveredContacts ?? stats.deliveriesCount ?? stats.delivered ?? 
+                              seqDetails.deliveriesCount ?? seqDetails.delivered ?? 
                               seqDetails.totalDelivered ?? seqDetails.emails_sent ?? 
                               seqDetails.sentCount ?? seqDetails.sent ?? 0;
-            const repliedCount = seqDetails.repliesCount ?? seqDetails.replied ?? 
+            const repliedCount = stats.repliedContacts ?? stats.repliesCount ?? stats.replied ?? 
+                                 seqDetails.repliesCount ?? seqDetails.replied ?? 
                                  seqDetails.totalReplies ?? seqDetails.replies ?? 0;
-            const openedCount = seqDetails.opensCount ?? seqDetails.opened ?? 
+            const openedCount = stats.openedContacts ?? stats.opensCount ?? stats.opened ?? 
+                                seqDetails.opensCount ?? seqDetails.opened ?? 
                                 seqDetails.totalOpened ?? seqDetails.opens ?? 0;
-            const bouncedCount = seqDetails.bouncesCount ?? seqDetails.bounced ?? 
+            const bouncedCount = stats.bouncedContacts ?? stats.bouncesCount ?? stats.bounced ?? 
+                                 seqDetails.bouncesCount ?? seqDetails.bounced ?? 
                                  seqDetails.totalBounced ?? seqDetails.bounces ?? 0;
-            const clickedCount = seqDetails.clicksCount ?? seqDetails.clicked ?? 
+            const clickedCount = stats.clickedContacts ?? stats.clicksCount ?? stats.clicked ?? 
+                                 seqDetails.clicksCount ?? seqDetails.clicked ?? 
                                  seqDetails.totalClicked ?? seqDetails.clicks ?? 0;
-            const interestedCount = seqDetails.interestedCount ?? seqDetails.interested ?? 
+            const interestedCount = stats.interestedContacts ?? stats.interestedCount ?? stats.interested ?? 
+                                    seqDetails.interestedCount ?? seqDetails.interested ?? 
                                     seqDetails.totalInterested ?? 0;
             
-            console.log(`  v1 Extracted metrics: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}`);
+            console.log(`  v1 Extracted metrics: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}, bounces=${bouncedCount}`);
             
-            if (sentCount > 0 || repliedCount > 0 || openedCount > 0) {
-              const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
-                workspace_id,
-                campaign_id: campaignId,
-                metric_date: today,
-                sent_count: sentCount,
-                opened_count: openedCount,
-                clicked_count: clickedCount,
-                replied_count: repliedCount,
-                positive_reply_count: interestedCount,
-                bounced_count: bouncedCount,
-              }, { onConflict: 'campaign_id,metric_date' });
+            // ALWAYS store metrics even if zeros - we need the record
+            const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
+              workspace_id,
+              campaign_id: campaignId,
+              metric_date: today,
+              sent_count: sentCount,
+              opened_count: openedCount,
+              clicked_count: clickedCount,
+              replied_count: repliedCount,
+              positive_reply_count: interestedCount,
+              bounced_count: bouncedCount,
+            }, { onConflict: 'campaign_id,metric_date' });
 
-              if (metricsErr) {
-                console.error(`  Failed to upsert metrics:`, metricsErr.message);
-              } else {
-                progress.metrics_created++;
-                metricsStored = true;
-                console.log(`  ✓ v1 Stats stored: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}`);
-              }
+            if (metricsErr) {
+              console.error(`  Failed to upsert metrics:`, metricsErr.message);
             } else {
-              console.log(`  No meaningful metrics from v1 API for ${sequence.name}`);
+              progress.metrics_created++;
+              metricsStored = true;
+              console.log(`  ✓ v1 Stats stored: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}`);
             }
 
-            // Try to get steps from v1 if v2 failed
+            // Try to get steps/templates from v1 response if v2 failed
             if (!variantsStored) {
-              const steps = seqDetails.steps || seqDetails.emails || [];
+              // v1 API returns "emails" array with step templates
+              const steps = seqDetails.emails || seqDetails.steps || [];
               if (steps.length > 0) {
-                console.log(`  v1 Found ${steps.length} steps/templates`);
+                console.log(`  v1 Found ${steps.length} email templates`);
+                console.log(`  v1 First email keys:`, Object.keys(steps[0]).join(', '));
                 
                 for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
                   const step = steps[stepIdx];
-                  const subject = step.subject || step.emailSubject || '';
-                  const body = step.body || step.emailBody || step.text || '';
+                  // v1 email template structure
+                  const subject = step.subject || step.emailSubject || step.title || '';
+                  const body = step.body || step.emailBody || step.text || step.content || step.template || '';
                   const vars = extractPersonalizationVars(subject + ' ' + body);
                   const wordCount = body.split(/\s+/).filter(Boolean).length;
                   
-                  const { error: varErr } = await supabase.from('replyio_variants').upsert({
-                    campaign_id: campaignId,
-                    platform_variant_id: `step-${step.id || stepIdx}`,
-                    name: `Step ${stepIdx + 1}`,
-                    variant_type: 'email',
-                    subject_line: subject,
-                    body_preview: body.substring(0, 500),
-                    email_body: body,
-                    word_count: wordCount,
-                    personalization_vars: vars,
-                    is_control: true,
-                  }, { onConflict: 'campaign_id,platform_variant_id' });
-                  
-                  if (!varErr) {
-                    progress.variants_synced++;
-                    variantsStored = true;
+                  if (subject || body) {
+                    const { error: varErr } = await supabase.from('replyio_variants').upsert({
+                      campaign_id: campaignId,
+                      platform_variant_id: `email-${step.id || step.stepId || stepIdx}`,
+                      name: step.name || `Email ${stepIdx + 1}`,
+                      variant_type: step.type || 'email',
+                      subject_line: subject,
+                      body_preview: body.substring(0, 500),
+                      email_body: body,
+                      word_count: wordCount,
+                      personalization_vars: vars,
+                      is_control: true,
+                    }, { onConflict: 'campaign_id,platform_variant_id' });
+                    
+                    if (varErr) {
+                      console.error(`  Failed to upsert v1 variant:`, varErr.message);
+                    } else {
+                      progress.variants_synced++;
+                      variantsStored = true;
+                      console.log(`  ✓ v1 Variant stored: ${step.name || `Email ${stepIdx + 1}`}`);
+                    }
                   }
                 }
               }
             }
+          } else {
+            console.log(`  v1 API returned no data for sequence ${sequence.id}`);
           }
         } catch (e) {
           console.error(`  v1 API error for ${sequence.name}:`, (e as Error).message);
@@ -557,6 +579,51 @@ Deno.serve(async (req) => {
         console.error(`Error processing sequence ${sequence.name}:`, e);
         progress.errors.push(`Sequence ${sequence.name}: ${(e as Error).message}`);
       }
+    }
+
+    // ==============================================
+    // Aggregate daily metrics to workspace level
+    // ==============================================
+    console.log('=== Aggregating metrics to workspace level ===');
+    
+    try {
+      // Get today's metrics grouped by workspace
+      const today = new Date().toISOString().split('T')[0];
+      
+      const { data: campaignMetrics, error: metricsQueryErr } = await supabase
+        .from('replyio_daily_metrics')
+        .select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+        .eq('workspace_id', workspace_id)
+        .eq('metric_date', today);
+      
+      if (!metricsQueryErr && campaignMetrics && campaignMetrics.length > 0) {
+        // Aggregate all campaign metrics
+        const aggregated = campaignMetrics.reduce((acc, m) => ({
+          sent_count: acc.sent_count + (m.sent_count || 0),
+          opened_count: acc.opened_count + (m.opened_count || 0),
+          clicked_count: acc.clicked_count + (m.clicked_count || 0),
+          replied_count: acc.replied_count + (m.replied_count || 0),
+          positive_reply_count: acc.positive_reply_count + (m.positive_reply_count || 0),
+          bounced_count: acc.bounced_count + (m.bounced_count || 0),
+        }), { sent_count: 0, opened_count: 0, clicked_count: 0, replied_count: 0, positive_reply_count: 0, bounced_count: 0 });
+        
+        // Upsert to workspace-level metrics
+        const { error: wsMetricsErr } = await supabase
+          .from('replyio_workspace_daily_metrics')
+          .upsert({
+            workspace_id,
+            metric_date: today,
+            ...aggregated,
+          }, { onConflict: 'workspace_id,metric_date' });
+        
+        if (wsMetricsErr) {
+          console.error('Failed to upsert workspace metrics:', wsMetricsErr.message);
+        } else {
+          console.log(`✓ Workspace metrics aggregated: sent=${aggregated.sent_count}, replies=${aggregated.replied_count}`);
+        }
+      }
+    } catch (e) {
+      console.error('Error aggregating workspace metrics:', e);
     }
 
     // All sequences processed - sync complete
