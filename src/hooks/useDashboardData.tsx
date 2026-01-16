@@ -89,19 +89,19 @@ export function useDashboardData(dateRange?: DateRange) {
         unsubscribed_count?: number | null;
       }
 
-      // Fetch workspace-level metrics from BOTH platforms using raw fetch for new table
-      const smartleadWorkspacePromise = supabase
+      // Fetch workspace-level metrics from BOTH platforms
+      let smartleadWorkspaceQuery = supabase
         .from('smartlead_workspace_daily_metrics')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
         .order('metric_date', { ascending: true });
 
-      // Use raw query for the new table that may not be in types yet
-      const replyioWorkspacePromise = supabase
-        .from('smartlead_workspace_daily_metrics') // Temporary - will query replyio separately
+      // Query the new Reply.io workspace metrics table (now exists after migration)
+      let replyioWorkspaceQuery = supabase
+        .from('replyio_workspace_daily_metrics')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
-        .eq('id', 'never-match'); // Force empty result for now
+        .order('metric_date', { ascending: true });
 
       // Build queries for campaign-level metrics (for totals and campaign ranking)
       let smartleadQuery = supabase
@@ -120,28 +120,60 @@ export function useDashboardData(dateRange?: DateRange) {
       if (startDateStr) {
         smartleadQuery = smartleadQuery.gte('metric_date', startDateStr);
         replyioQuery = replyioQuery.gte('metric_date', startDateStr);
+        smartleadWorkspaceQuery = smartleadWorkspaceQuery.gte('metric_date', startDateStr);
+        replyioWorkspaceQuery = replyioWorkspaceQuery.gte('metric_date', startDateStr);
       }
       if (endDateStr) {
         smartleadQuery = smartleadQuery.lte('metric_date', endDateStr);
         replyioQuery = replyioQuery.lte('metric_date', endDateStr);
+        smartleadWorkspaceQuery = smartleadWorkspaceQuery.lte('metric_date', endDateStr);
+        replyioWorkspaceQuery = replyioWorkspaceQuery.lte('metric_date', endDateStr);
       }
 
-      const [smartleadWorkspace, smartleadMetrics, replyioMetrics] = await Promise.all([
-        smartleadWorkspacePromise,
+      const [smartleadWorkspace, replyioWorkspace, smartleadMetrics, replyioMetrics] = await Promise.all([
+        smartleadWorkspaceQuery,
+        replyioWorkspaceQuery,
         smartleadQuery,
         replyioQuery
       ]);
 
       if (smartleadWorkspace.error) console.warn('SmartLead workspace metrics error:', smartleadWorkspace.error);
+      if (replyioWorkspace.error) console.warn('Reply.io workspace metrics error:', replyioWorkspace.error);
       if (smartleadMetrics.error) console.warn('SmartLead campaign metrics error:', smartleadMetrics.error);
       if (replyioMetrics.error) console.warn('Reply.io campaign metrics error:', replyioMetrics.error);
 
       const campaignMetrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
       const smartleadHistorical = (smartleadWorkspace.data || []) as WorkspaceMetric[];
+      const replyioHistorical = (replyioWorkspace.data || []) as WorkspaceMetric[];
       
-      // Use SmartLead workspace metrics for now (Reply.io table will be added to types after sync)
-      const historicalMetrics = smartleadHistorical
+      // Merge workspace metrics from both platforms by date
+      const metricsByDate = new Map<string, WorkspaceMetric>();
+      
+      // Add SmartLead metrics first
+      for (const m of smartleadHistorical) {
+        metricsByDate.set(m.metric_date, { ...m });
+      }
+      
+      // Merge Reply.io metrics (add to existing dates or create new entries)
+      for (const m of replyioHistorical) {
+        const existing = metricsByDate.get(m.metric_date);
+        if (existing) {
+          existing.sent_count = (existing.sent_count || 0) + (m.sent_count || 0);
+          existing.opened_count = (existing.opened_count || 0) + (m.opened_count || 0);
+          existing.clicked_count = (existing.clicked_count || 0) + (m.clicked_count || 0);
+          existing.replied_count = (existing.replied_count || 0) + (m.replied_count || 0);
+          existing.bounced_count = (existing.bounced_count || 0) + (m.bounced_count || 0);
+          existing.positive_reply_count = (existing.positive_reply_count || 0) + (m.positive_reply_count || 0);
+        } else {
+          metricsByDate.set(m.metric_date, { ...m });
+        }
+      }
+      
+      // Convert back to sorted array
+      const historicalMetrics = Array.from(metricsByDate.values())
         .sort((a, b) => new Date(a.metric_date).getTime() - new Date(b.metric_date).getTime());
+      
+      console.log(`Dashboard: SmartLead workspace=${smartleadHistorical.length}, Reply.io workspace=${replyioHistorical.length}, merged=${historicalMetrics.length}`);
 
       // Check if we have any data
       const hasWorkspaceData = historicalMetrics.length > 0;

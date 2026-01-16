@@ -476,6 +476,10 @@ serve(async (req) => {
             const receivedMessages = reply.email_history?.filter(e => e.type === 'RECEIVED') || [];
             
             for (const msg of receivedMessages) {
+              // Create robust unique message_id that handles edge cases
+              const msgTimestamp = msg.time ? new Date(msg.time).getTime() : Date.now();
+              const messageId = `${reply.email_lead_id}-${reply.email_lead_map_id}-${msgTimestamp}`;
+              
               const { error: upsertError } = await supabase
                 .from('smartlead_message_events')
                 .upsert({
@@ -484,12 +488,14 @@ serve(async (req) => {
                   lead_id: null, // We don't have lead UUIDs, could create leads table
                   event_type: 'reply',
                   event_timestamp: msg.time || reply.last_reply_time,
-                  message_id: `${reply.email_lead_id}-${msg.time}`,
+                  message_id: messageId,
                   reply_text: msg.email_body?.substring(0, 5000), // Limit size
                   reply_sentiment: null, // Could add classification later
                 }, { onConflict: 'workspace_id,campaign_id,message_id' });
               
-              if (!upsertError) {
+              if (upsertError) {
+                console.error(`Failed to store reply message: ${upsertError.message}`);
+              } else {
                 progress.message_events_created++;
               }
             }
@@ -998,6 +1004,12 @@ serve(async (req) => {
             const receivedMessages = reply.email_history?.filter(e => e.type === 'RECEIVED') || [];
             
             for (const msg of receivedMessages) {
+              // Create robust unique message_id that handles edge cases
+              const msgTimestamp = msg.time ? new Date(msg.time).getTime() : Date.now();
+              const messageId = `${reply.email_lead_id}-${reply.email_lead_map_id}-${msgTimestamp}`;
+              
+              console.log(`    Storing reply: lead=${reply.email_lead_id}, campaign=${reply.email_campaign_id}, msgId=${messageId}`);
+              
               const { error: upsertError } = await supabase
                 .from('smartlead_message_events')
                 .upsert({
@@ -1006,12 +1018,17 @@ serve(async (req) => {
                   lead_id: null,
                   event_type: 'reply',
                   event_timestamp: msg.time || reply.last_reply_time,
-                  message_id: `${reply.email_lead_id}-${msg.time}`,
+                  message_id: messageId,
                   reply_text: msg.email_body?.substring(0, 5000),
                   reply_sentiment: null,
                 }, { onConflict: 'workspace_id,campaign_id,message_id' });
               
-              if (!upsertError) progress.message_events_created++;
+              if (upsertError) {
+                console.error(`    Failed to store message: ${upsertError.message}`);
+              } else {
+                progress.message_events_created++;
+                console.log(`    ✓ Stored message event: ${messageId}`);
+              }
             }
             progress.replies_fetched++;
           }
