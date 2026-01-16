@@ -37,13 +37,14 @@ export function useCopyInsights() {
       setError(null);
 
       try {
-        // Fetch variants from both platform tables
+        // Fetch variants from both platform-specific tables
         const [smartleadVariants, replyioVariants] = await Promise.all([
           supabase.from('smartlead_variants').select(`
             id,
             name,
             subject_line,
             body_preview,
+            email_body,
             campaign_id,
             word_count,
             personalization_vars,
@@ -58,6 +59,7 @@ export function useCopyInsights() {
             name,
             subject_line,
             body_preview,
+            email_body,
             campaign_id,
             word_count,
             personalization_vars,
@@ -69,10 +71,90 @@ export function useCopyInsights() {
           `).eq('replyio_campaigns.workspace_id', currentWorkspace.id)
         ]);
 
-        const variants = [
-          ...(smartleadVariants.data || []).map(v => ({ ...v, platform: 'smartlead', campaigns: v.smartlead_campaigns })),
-          ...(replyioVariants.data || []).map(v => ({ ...v, platform: 'replyio', campaigns: v.replyio_campaigns }))
+        // Define a unified variant type for processing
+        interface UnifiedVariant {
+          id: string;
+          name: string;
+          subject_line: string | null;
+          body_preview: string | null;
+          email_body: string | null;
+          campaign_id: string;
+          word_count: number | null;
+          personalization_vars: any;
+          platform: string;
+          campaigns: { id: string; name: string };
+        }
+
+        let variants: UnifiedVariant[] = [
+          ...(smartleadVariants.data || []).map(v => ({ 
+            id: v.id,
+            name: v.name,
+            subject_line: v.subject_line,
+            body_preview: v.body_preview,
+            email_body: v.email_body,
+            campaign_id: v.campaign_id,
+            word_count: v.word_count,
+            personalization_vars: v.personalization_vars,
+            platform: 'smartlead', 
+            campaigns: v.smartlead_campaigns 
+          })),
+          ...(replyioVariants.data || []).map(v => ({ 
+            id: v.id,
+            name: v.name,
+            subject_line: v.subject_line,
+            body_preview: v.body_preview,
+            email_body: v.email_body,
+            campaign_id: v.campaign_id,
+            word_count: v.word_count,
+            personalization_vars: v.personalization_vars,
+            platform: 'replyio', 
+            campaigns: v.replyio_campaigns 
+          }))
         ];
+
+        // If no variants in new platform tables, fall back to legacy campaign_variants
+        if (variants.length === 0) {
+          console.log('No variants in platform tables, falling back to legacy campaign_variants...');
+          
+          const { data: legacyVariants, error: legacyError } = await supabase
+            .from('campaign_variants')
+            .select(`
+              id,
+              name,
+              subject_line,
+              body_preview,
+              email_body,
+              campaign_id,
+              word_count,
+              personalization_vars,
+              campaigns!inner (
+                id,
+                name,
+                platform,
+                workspace_id
+              )
+            `)
+            .eq('campaigns.workspace_id', currentWorkspace.id);
+          
+          if (!legacyError && legacyVariants && legacyVariants.length > 0) {
+            console.log(`Found ${legacyVariants.length} legacy variants`);
+            variants = legacyVariants.map(v => {
+              const camp = v.campaigns as unknown as { id: string; name: string; platform: string };
+              return {
+                id: v.id,
+                name: v.name,
+                subject_line: v.subject_line,
+                body_preview: v.body_preview,
+                email_body: v.email_body,
+                campaign_id: v.campaign_id,
+                word_count: v.word_count,
+                personalization_vars: v.personalization_vars,
+                platform: camp.platform || 'unknown',
+                campaigns: { id: camp.id, name: camp.name },
+              };
+            });
+          }
+        }
 
         // Get variant IDs by platform
         const smartleadVariantIds = (smartleadVariants.data || []).map(v => v.id);
@@ -97,12 +179,13 @@ export function useCopyInsights() {
           ...(replyioMetrics.data || [])
         ];
 
-        // Get campaign IDs
+        // Get campaign IDs from all variants
+        const allCampaignIds = variants.map(v => v.campaign_id);
         const smartleadCampIds = (smartleadVariants.data || []).map(v => v.campaign_id);
         const replyioCampIds = (replyioVariants.data || []).map(v => v.campaign_id);
 
         // Get campaign-level metrics for variants without specific metrics
-        const [smartleadCampMetrics, replyioCampMetrics] = await Promise.all([
+        const [smartleadCampMetrics, replyioCampMetrics, legacyCampMetrics] = await Promise.all([
           smartleadCampIds.length > 0
             ? supabase.from('smartlead_daily_metrics').select('campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
                 .eq('workspace_id', currentWorkspace.id)
@@ -112,6 +195,10 @@ export function useCopyInsights() {
             ? supabase.from('replyio_daily_metrics').select('campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
                 .eq('workspace_id', currentWorkspace.id)
                 .is('variant_id', null)
+            : Promise.resolve({ data: [], error: null }),
+          // Also try to get metrics from unified campaigns table for legacy variants
+          allCampaignIds.length > 0 && smartleadVariantIds.length === 0 && replyioVariantIds.length === 0
+            ? supabase.from('campaigns').select('id, platform').in('id', allCampaignIds)
             : Promise.resolve({ data: [], error: null })
         ]);
 
@@ -179,7 +266,7 @@ export function useCopyInsights() {
             }
 
             const sent = vMetrics.sent;
-            const body = v.body_preview || '';
+            const body = v.body_preview || v.email_body || '';
             const wordCount = v.word_count || body.split(/\s+/).filter(Boolean).length;
             const persVars = Array.isArray(v.personalization_vars) 
               ? v.personalization_vars 
@@ -189,7 +276,7 @@ export function useCopyInsights() {
 
             return {
               subject_line: v.subject_line || '',
-              body_preview: v.body_preview,
+              body_preview: v.body_preview || v.email_body?.substring(0, 500) || null,
               variant_name: v.name,
               campaign_name: campaign.name,
               campaign_id: v.campaign_id,

@@ -46,6 +46,19 @@ interface SmartleadEmailAccount {
   warmup_details?: { status: string };
 }
 
+interface SmartleadSequence {
+  seq_id: number;
+  seq_number: number;
+  subject: string;
+  email_body: string;
+  seq_delay_details?: { delay_in_days: number };
+  sequence_variants?: Array<{
+    variant_id: string;
+    subject: string;
+    email_body: string;
+  }>;
+}
+
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function smartleadRequest(endpoint: string, apiKey: string, retries = 3): Promise<any> {
@@ -77,6 +90,24 @@ async function smartleadRequest(endpoint: string, apiKey: string, retries = 3): 
       await delay(1000 * (i + 1));
     }
   }
+}
+
+// Extract personalization variables from email content
+function extractPersonalizationVars(content: string): string[] {
+  const varPatterns = [
+    /\{\{([^}]+)\}\}/g,  // {{variable}}
+    /\{([^}]+)\}/g,       // {variable}
+    /\[\[([^\]]+)\]\]/g,  // [[variable]]
+  ];
+  
+  const vars = new Set<string>();
+  for (const pattern of varPatterns) {
+    const matches = content.matchAll(pattern);
+    for (const match of matches) {
+      vars.add(match[1].trim());
+    }
+  }
+  return Array.from(vars);
 }
 
 // Self-continuation function using EdgeRuntime.waitUntil
@@ -215,6 +246,7 @@ serve(async (req) => {
       campaigns_synced: 0,
       email_accounts_synced: 0,
       metrics_created: 0,
+      variants_synced: 0,
       errors: [] as string[],
     };
 
@@ -320,6 +352,68 @@ serve(async (req) => {
           progress.errors.push(`Analytics ${campaign.name}: ${(e as Error).message}`);
         }
 
+        // Fetch sequences/variants for this campaign
+        try {
+          const sequences: SmartleadSequence[] = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
+          
+          if (sequences && sequences.length > 0) {
+            console.log(`  Found ${sequences.length} sequences for campaign`);
+            
+            for (const seq of sequences) {
+              // Store the main sequence as a variant
+              const mainSubject = seq.subject || '';
+              const mainBody = seq.email_body || '';
+              const mainVars = extractPersonalizationVars(mainSubject + ' ' + mainBody);
+              const mainWordCount = mainBody.split(/\s+/).filter(Boolean).length;
+              
+              // Upsert main sequence as variant
+              await supabase.from('smartlead_variants').upsert({
+                campaign_id: campaignDbId,
+                platform_variant_id: `seq-${seq.seq_id}`,
+                name: `Step ${seq.seq_number}`,
+                subject_line: mainSubject,
+                body_preview: mainBody.substring(0, 500),
+                email_body: mainBody,
+                word_count: mainWordCount,
+                personalization_vars: mainVars,
+                step_number: seq.seq_number,
+                is_control: true,
+              }, { onConflict: 'campaign_id,platform_variant_id' });
+              
+              progress.variants_synced++;
+
+              // Store A/B variants if they exist
+              if (seq.sequence_variants && seq.sequence_variants.length > 0) {
+                for (const variant of seq.sequence_variants) {
+                  const varSubject = variant.subject || mainSubject;
+                  const varBody = variant.email_body || mainBody;
+                  const varVars = extractPersonalizationVars(varSubject + ' ' + varBody);
+                  const varWordCount = varBody.split(/\s+/).filter(Boolean).length;
+                  
+                  await supabase.from('smartlead_variants').upsert({
+                    campaign_id: campaignDbId,
+                    platform_variant_id: `var-${variant.variant_id}`,
+                    name: `Step ${seq.seq_number} Variant ${variant.variant_id}`,
+                    subject_line: varSubject,
+                    body_preview: varBody.substring(0, 500),
+                    email_body: varBody,
+                    word_count: varWordCount,
+                    personalization_vars: varVars,
+                    step_number: seq.seq_number,
+                    is_control: false,
+                  }, { onConflict: 'campaign_id,platform_variant_id' });
+                  
+                  progress.variants_synced++;
+                }
+              }
+            }
+            console.log(`  Variants synced: ${progress.variants_synced} total`);
+          }
+        } catch (e) {
+          console.error(`  Sequences error for ${campaign.name}:`, e);
+          progress.errors.push(`Sequences ${campaign.name}: ${(e as Error).message}`);
+        }
+
         // Fetch email accounts for this campaign
         try {
           const emailAccounts: SmartleadEmailAccount[] = await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, apiKey);
@@ -377,7 +471,7 @@ serve(async (req) => {
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.metrics_created} metrics, ${progress.email_accounts_synced} email accounts`,
+      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.metrics_created} metrics, ${progress.email_accounts_synced} email accounts`,
       next: replyioConnection ? 'Triggering Reply.io sync...' : null,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
