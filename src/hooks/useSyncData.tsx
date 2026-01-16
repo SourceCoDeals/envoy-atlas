@@ -133,8 +133,20 @@ export function useSyncData() {
     return () => stopPolling();
   }, [stopPolling]);
 
-  const triggerSync = async (autoContinue = true) => {
+  const triggerSync = async () => {
     if (!currentWorkspace?.id || syncing) return;
+
+    // Check if sync is already in progress in DB
+    const currentProgress = await fetchProgress();
+    if (currentProgress && isSyncInProgress(currentProgress)) {
+      // Sync already running - just start polling to show progress
+      toast.info('Sync already in progress', {
+        description: 'Watching for updates...'
+      });
+      setSyncing(true);
+      startPolling();
+      return { platforms: ['smartlead', 'replyio'] };
+    }
 
     setSyncing(true);
     setElapsedTime(0);
@@ -163,42 +175,36 @@ export function useSyncData() {
         return;
       }
 
-      // Check current progress to decide if this is a continuation
-      const currentProgress = await fetchProgress();
-      const isResume = currentProgress && isSyncInProgress(currentProgress);
-
       const syncPromises: Promise<any>[] = [];
       
-      // Trigger SmartLead sync if connected
+      // Only trigger SmartLead - it will chain to Reply.io
       if (connectedPlatforms.includes('smartlead')) {
         syncPromises.push(
           supabase.functions.invoke('smartlead-sync', {
             body: { 
               workspace_id: currentWorkspace.id,
               sync_type: 'full',
-              reset: !isResume,
+              reset: true,
               auto_continue: true
             }
           })
         );
-      }
-
-      // Trigger Reply.io sync if connected (only if SmartLead not connected)
-      if (connectedPlatforms.includes('replyio') && !connectedPlatforms.includes('smartlead')) {
+      } else if (connectedPlatforms.includes('replyio')) {
+        // Only trigger Reply.io if SmartLead not connected
         syncPromises.push(
           supabase.functions.invoke('replyio-sync', {
             body: { 
               workspace_id: currentWorkspace.id,
               sync_type: 'full',
-              reset: !isResume,
+              reset: true,
               auto_continue: true
             }
           })
         );
       }
 
-      toast.info(isResume ? 'Resuming sync...' : 'Starting sync...', {
-        description: `Syncing ${connectedPlatforms.join(' & ')} - will continue automatically`
+      toast.info('Starting sync...', {
+        description: `Syncing ${connectedPlatforms.filter(p => ['smartlead', 'replyio'].includes(p)).join(' → ')} - will continue automatically`
       });
 
       await Promise.allSettled(syncPromises);
