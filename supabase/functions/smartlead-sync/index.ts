@@ -825,8 +825,22 @@ serve(async (req) => {
           const sequencesRaw = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
           
           // COMPREHENSIVE Debug: Log raw response structure
-          console.log(`  Sequences API raw response:`, JSON.stringify(sequencesRaw).substring(0, 600));
+          const rawStr = JSON.stringify(sequencesRaw).substring(0, 800);
+          console.log(`  Sequences API raw response:`, rawStr);
           console.log(`  Sequences API type: ${typeof sequencesRaw}, isArray: ${Array.isArray(sequencesRaw)}`);
+          
+          // Store first campaign's response for debugging
+          if (i === startIndex && progress.variants_synced === 0) {
+            await supabase.from('api_connections').update({
+              sync_progress: {
+                ...((connection.sync_progress as any) || {}),
+                debug_sequences_sample: rawStr,
+                debug_sequences_type: typeof sequencesRaw,
+                debug_sequences_isArray: Array.isArray(sequencesRaw),
+                debug_sequences_keys: sequencesRaw && !Array.isArray(sequencesRaw) ? Object.keys(sequencesRaw).join(', ') : 'N/A',
+              },
+            }).eq('id', connection.id);
+          }
           
           if (sequencesRaw && !Array.isArray(sequencesRaw)) {
             console.log(`  Sequences API response keys:`, Object.keys(sequencesRaw).join(', '));
@@ -845,6 +859,9 @@ serve(async (req) => {
             sequences = sequencesRaw.steps;
           } else if (sequencesRaw?.email_sequences && Array.isArray(sequencesRaw.email_sequences)) {
             sequences = sequencesRaw.email_sequences;
+          } else if (sequencesRaw?.ok === true && sequencesRaw?.data) {
+            // SmartLead often returns { ok: true, data: [...] }
+            sequences = Array.isArray(sequencesRaw.data) ? sequencesRaw.data : [sequencesRaw.data];
           } else if (sequencesRaw && typeof sequencesRaw === 'object' && !Array.isArray(sequencesRaw)) {
             // Maybe it's a single sequence object
             if (sequencesRaw.seq_id || sequencesRaw.id || sequencesRaw.subject || sequencesRaw.email_body) {
