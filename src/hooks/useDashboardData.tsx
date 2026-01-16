@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 
@@ -41,7 +41,12 @@ interface TimeData {
   value: number;
 }
 
-export function useDashboardData() {
+interface DateRange {
+  startDate: Date | null;
+  endDate: Date;
+}
+
+export function useDashboardData(dateRange?: DateRange) {
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
@@ -55,21 +60,47 @@ export function useDashboardData() {
   const [topCampaigns, setTopCampaigns] = useState<TopCampaign[]>([]);
   const [timeData, setTimeData] = useState<TimeData[]>([]);
 
+  // Memoize date range strings to avoid unnecessary refetches
+  const startDateStr = dateRange?.startDate?.toISOString().split('T')[0] ?? null;
+  const endDateStr = dateRange?.endDate?.toISOString().split('T')[0] ?? null;
+
   useEffect(() => {
     if (currentWorkspace?.id) {
       fetchDashboardData();
     }
-  }, [currentWorkspace?.id]);
+  }, [currentWorkspace?.id, startDateStr, endDateStr]);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     if (!currentWorkspace?.id) return;
     setLoading(true);
 
     try {
-      // Fetch daily metrics from both platform tables
+      // Build queries with optional date filtering
+      let smartleadQuery = supabase
+        .from('smartlead_daily_metrics')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .order('metric_date', { ascending: true });
+      
+      let replyioQuery = supabase
+        .from('replyio_daily_metrics')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .order('metric_date', { ascending: true });
+
+      // Apply date range filter if provided
+      if (startDateStr) {
+        smartleadQuery = smartleadQuery.gte('metric_date', startDateStr);
+        replyioQuery = replyioQuery.gte('metric_date', startDateStr);
+      }
+      if (endDateStr) {
+        smartleadQuery = smartleadQuery.lte('metric_date', endDateStr);
+        replyioQuery = replyioQuery.lte('metric_date', endDateStr);
+      }
+
       const [smartleadMetrics, replyioMetrics] = await Promise.all([
-        supabase.from('smartlead_daily_metrics').select('*').eq('workspace_id', currentWorkspace.id).order('metric_date', { ascending: true }),
-        supabase.from('replyio_daily_metrics').select('*').eq('workspace_id', currentWorkspace.id).order('metric_date', { ascending: true })
+        smartleadQuery,
+        replyioQuery
       ]);
 
       if (smartleadMetrics.error) throw smartleadMetrics.error;
@@ -212,7 +243,7 @@ export function useDashboardData() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentWorkspace?.id, startDateStr, endDateStr]);
 
   return { loading, hasData, stats, trendData, topCampaigns, timeData, refetch: fetchDashboardData };
 }
