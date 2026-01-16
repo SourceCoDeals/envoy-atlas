@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -12,6 +12,7 @@ import { FailureModeClassification, classifyFailureMode } from '@/components/das
 import { WhatChangedAnalysis, generateChangeAnalysis } from '@/components/dashboard/WhatChangedAnalysis';
 import { ActionQueue, generateActionItems } from '@/components/dashboard/ActionQueue';
 import { KPICard, getKPIStatus } from '@/components/dashboard/KPICard';
+import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/components/dashboard/DateRangeFilter';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
@@ -42,7 +43,9 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { workspaces, currentWorkspace, loading: workspaceLoading } = useWorkspace();
-  const { loading: dataLoading, hasData, stats, trendData, topCampaigns, timeData, refetch } = useDashboardData();
+  const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('last30');
+  const dateRange = getDateRange(dateRangeOption);
+  const { loading: dataLoading, hasData, stats, trendData, topCampaigns, timeData, refetch } = useDashboardData(dateRange);
   const { syncing, triggerSync } = useSyncData();
 
   const handleRefresh = async () => {
@@ -126,6 +129,7 @@ export default function Dashboard() {
           </div>
           {hasData && (
             <div className="flex gap-2">
+              <DateRangeFilter value={dateRangeOption} onChange={setDateRangeOption} />
               <Button 
                 variant="outline" 
                 size="sm" 
