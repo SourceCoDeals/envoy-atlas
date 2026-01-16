@@ -75,7 +75,14 @@ export function useDashboardData(dateRange?: DateRange) {
     setLoading(true);
 
     try {
-      // Build queries with optional date filtering
+      // Build queries for workspace-level metrics (historical trends)
+      let workspaceMetricsQuery = supabase
+        .from('smartlead_workspace_daily_metrics')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .order('metric_date', { ascending: true });
+
+      // Build queries for campaign-level metrics (for totals and campaign ranking)
       let smartleadQuery = supabase
         .from('smartlead_daily_metrics')
         .select('*')
@@ -90,25 +97,34 @@ export function useDashboardData(dateRange?: DateRange) {
 
       // Apply date range filter if provided
       if (startDateStr) {
+        workspaceMetricsQuery = workspaceMetricsQuery.gte('metric_date', startDateStr);
         smartleadQuery = smartleadQuery.gte('metric_date', startDateStr);
         replyioQuery = replyioQuery.gte('metric_date', startDateStr);
       }
       if (endDateStr) {
+        workspaceMetricsQuery = workspaceMetricsQuery.lte('metric_date', endDateStr);
         smartleadQuery = smartleadQuery.lte('metric_date', endDateStr);
         replyioQuery = replyioQuery.lte('metric_date', endDateStr);
       }
 
-      const [smartleadMetrics, replyioMetrics] = await Promise.all([
+      const [workspaceMetrics, smartleadMetrics, replyioMetrics] = await Promise.all([
+        workspaceMetricsQuery,
         smartleadQuery,
         replyioQuery
       ]);
 
+      if (workspaceMetrics.error) console.warn('Workspace metrics error:', workspaceMetrics.error);
       if (smartleadMetrics.error) throw smartleadMetrics.error;
       if (replyioMetrics.error) throw replyioMetrics.error;
 
-      const metrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
+      const campaignMetrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
+      const historicalMetrics = workspaceMetrics.data || [];
 
-      if (!metrics || metrics.length === 0) {
+      // Check if we have any data
+      const hasWorkspaceData = historicalMetrics.length > 0;
+      const hasCampaignData = campaignMetrics.length > 0;
+      
+      if (!hasWorkspaceData && !hasCampaignData) {
         setHasData(false);
         setLoading(false);
         return;
@@ -116,8 +132,8 @@ export function useDashboardData(dateRange?: DateRange) {
 
       setHasData(true);
 
-      // Calculate totals (note: these tables don't have spam_complaint_count or delivered_count)
-      const totals = metrics.reduce((acc, m) => ({
+      // Calculate totals from campaign-level metrics (more accurate per-campaign data)
+      const totals = campaignMetrics.reduce((acc, m) => ({
         sent: acc.sent + (m.sent_count || 0),
         opened: acc.opened + (m.opened_count || 0),
         clicked: acc.clicked + (m.clicked_count || 0),
@@ -127,6 +143,23 @@ export function useDashboardData(dateRange?: DateRange) {
         spam: 0,
         delivered: 0,
       }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0, spam: 0, delivered: 0 });
+
+      // If campaign metrics are empty but workspace metrics exist, use workspace metrics for totals
+      if (!hasCampaignData && hasWorkspaceData) {
+        const workspaceTotals = historicalMetrics.reduce((acc, m) => ({
+          sent: acc.sent + (m.sent_count || 0),
+          opened: acc.opened + (m.opened_count || 0),
+          clicked: acc.clicked + (m.clicked_count || 0),
+          replied: acc.replied + (m.replied_count || 0),
+          bounced: acc.bounced + (m.bounced_count || 0),
+        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
+        
+        totals.sent = workspaceTotals.sent;
+        totals.opened = workspaceTotals.opened;
+        totals.clicked = workspaceTotals.clicked;
+        totals.replied = workspaceTotals.replied;
+        totals.bounced = workspaceTotals.bounced;
+      }
 
       // Calculate delivered if not tracked separately (sent - bounced)
       const delivered = totals.delivered > 0 ? totals.delivered : (totals.sent - totals.bounced);
@@ -149,28 +182,43 @@ export function useDashboardData(dateRange?: DateRange) {
         deliveredRate: totals.sent > 0 ? (delivered / totals.sent) * 100 : 0,
       });
 
-      // Group by date for trend (use metric_date from new tables)
-      const dateMap = new Map<string, { sent: number; replies: number; positive: number }>();
-      metrics.forEach(m => {
-        const dateKey = m.metric_date;
-        const existing = dateMap.get(dateKey) || { sent: 0, replies: 0, positive: 0 };
-        dateMap.set(dateKey, {
-          sent: existing.sent + (m.sent_count || 0),
-          replies: existing.replies + (m.replied_count || 0),
-          positive: existing.positive + (m.positive_reply_count || 0),
+      // Use workspace-level historical metrics for trend data (properly aggregated by date)
+      if (hasWorkspaceData) {
+        const trend: TrendData[] = historicalMetrics
+          .map(m => ({
+            date: new Date(m.metric_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            sent: m.sent_count || 0,
+            replies: m.replied_count || 0,
+            positiveReplies: 0, // Positive replies need classification logic
+          }))
+          .slice(-30); // Last 30 days for better trend visibility
+
+        setTrendData(trend);
+      } else if (hasCampaignData) {
+        // Fallback to campaign metrics if workspace metrics don't exist
+        const dateMap = new Map<string, { sent: number; replies: number; positive: number }>();
+        campaignMetrics.forEach(m => {
+          const dateKey = m.metric_date;
+          const existing = dateMap.get(dateKey) || { sent: 0, replies: 0, positive: 0 };
+          dateMap.set(dateKey, {
+            sent: existing.sent + (m.sent_count || 0),
+            replies: existing.replies + (m.replied_count || 0),
+            positive: existing.positive + (m.positive_reply_count || 0),
+          });
         });
-      });
 
-      const trend: TrendData[] = Array.from(dateMap.entries())
-        .map(([date, data]) => ({
-          date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          sent: data.sent,
-          replies: data.replies,
-          positiveReplies: data.positive,
-        }))
-        .slice(-14); // Last 14 days
+        const trend: TrendData[] = Array.from(dateMap.entries())
+          .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+          .map(([date, data]) => ({
+            date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            sent: data.sent,
+            replies: data.replies,
+            positiveReplies: data.positive,
+          }))
+          .slice(-30);
 
-      setTrendData(trend);
+        setTrendData(trend);
+      }
 
       // Fetch campaigns from both platforms for top performers
       const [smartleadCampaigns, replyioCampaigns] = await Promise.all([
@@ -183,9 +231,9 @@ export function useDashboardData(dateRange?: DateRange) {
         ...(replyioCampaigns.data || [])
       ];
 
-      if (campaigns) {
-        const campaignMetrics = campaigns.map(c => {
-          const cMetrics = metrics.filter(m => m.campaign_id === c.id);
+      if (campaigns.length > 0 && hasCampaignData) {
+        const campaignStats = campaigns.map(c => {
+          const cMetrics = campaignMetrics.filter(m => m.campaign_id === c.id);
           const sent = cMetrics.reduce((s, m) => s + (m.sent_count || 0), 0);
           const replied = cMetrics.reduce((s, m) => s + (m.replied_count || 0), 0);
           const positive = cMetrics.reduce((s, m) => s + (m.positive_reply_count || 0), 0);
@@ -200,9 +248,9 @@ export function useDashboardData(dateRange?: DateRange) {
         });
 
         setTopCampaigns(
-          campaignMetrics
+          campaignStats
             .filter(c => c.sent > 0)
-            .sort((a, b) => b.positiveRate - a.positiveRate)
+            .sort((a, b) => b.replyRate - a.replyRate) // Sort by reply rate since positive may be 0
             .slice(0, 5)
         );
       }
@@ -218,7 +266,7 @@ export function useDashboardData(dateRange?: DateRange) {
         ...(replyioEvents.data || [])
       ];
 
-      if (replyEvents) {
+      if (replyEvents.length > 0) {
         const timeMap = new Map<string, number>();
         replyEvents.forEach(e => {
           const d = new Date(e.event_timestamp);
