@@ -63,26 +63,25 @@ export function useCampaigns() {
     setError(null);
 
     try {
-      // Fetch SmartLead campaigns
-      const { data: smartleadCampaigns, error: smartleadError } = await supabase
-        .from('smartlead_campaigns')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id);
+      // Fetch campaigns from both platforms in parallel
+      const [smartleadResult, replyioResult] = await Promise.all([
+        supabase
+          .from('smartlead_campaigns')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('replyio_campaigns')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id)
+      ]);
 
-      if (smartleadError) throw smartleadError;
+      if (smartleadResult.error) throw smartleadResult.error;
+      if (replyioResult.error) throw replyioResult.error;
 
-      // Fetch Reply.io campaigns
-      const { data: replyioCampaigns, error: replyioError } = await supabase
-        .from('replyio_campaigns')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id);
-
-      if (replyioError) throw replyioError;
-
-      // Combine campaigns from both platforms
-      const allCampaigns: BaseCampaign[] = [
-        ...(smartleadCampaigns || []).map(c => ({ ...c, platform: 'smartlead' })),
-        ...(replyioCampaigns || []).map(c => ({ ...c, platform: 'replyio' }))
+      // Tag campaigns with their platform
+      const allCampaigns: (BaseCampaign & { platform: string })[] = [
+        ...(smartleadResult.data || []).map(c => ({ ...c, platform: 'smartlead' })),
+        ...(replyioResult.data || []).map(c => ({ ...c, platform: 'replyio' }))
       ];
 
       if (allCampaigns.length === 0) {
@@ -91,27 +90,22 @@ export function useCampaigns() {
         return;
       }
 
-      // Get campaign IDs by platform
-      const smartleadIds = (smartleadCampaigns || []).map(c => c.id);
-      const replyioIds = (replyioCampaigns || []).map(c => c.id);
-
-      // Fetch daily metrics from both tables
+      // Fetch daily metrics using workspace_id (avoids large .in() queries that cause 400 errors)
       const [smartleadMetricsResult, replyioMetricsResult] = await Promise.all([
-        smartleadIds.length > 0 
-          ? supabase.from('smartlead_daily_metrics').select('*').in('campaign_id', smartleadIds)
-          : Promise.resolve({ data: [], error: null }),
-        replyioIds.length > 0
-          ? supabase.from('replyio_daily_metrics').select('*').in('campaign_id', replyioIds)
-          : Promise.resolve({ data: [], error: null })
+        supabase
+          .from('smartlead_daily_metrics')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('replyio_daily_metrics')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id)
       ]);
 
-      if (smartleadMetricsResult.error) throw smartleadMetricsResult.error;
-      if (replyioMetricsResult.error) throw replyioMetricsResult.error;
-
-      const allMetrics: BaseMetric[] = [
-        ...(smartleadMetricsResult.data || []),
-        ...(replyioMetricsResult.data || [])
-      ];
+      // Don't fail if metrics fetch fails - just use empty arrays
+      const smartleadMetrics = smartleadMetricsResult.data || [];
+      const replyioMetrics = replyioMetricsResult.data || [];
+      const allMetrics: BaseMetric[] = [...smartleadMetrics, ...replyioMetrics];
 
       // Aggregate metrics per campaign
       const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
@@ -122,13 +116,13 @@ export function useCampaigns() {
         const total_clicked = campaignMetrics.reduce((sum, m) => sum + (m.clicked_count || 0), 0);
         const total_replied = campaignMetrics.reduce((sum, m) => sum + (m.replied_count || 0), 0);
         const total_bounced = campaignMetrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
-        const total_leads = 0; // Will be populated from leads table if needed
+        const total_leads = 0;
 
         return {
           id: campaign.id,
           name: campaign.name,
           status: campaign.status || 'unknown',
-          platform: (campaign as any).platform || 'smartlead',
+          platform: campaign.platform,
           platform_campaign_id: campaign.platform_id,
           created_at: campaign.created_at,
           updated_at: campaign.updated_at,
@@ -158,9 +152,17 @@ export function useCampaigns() {
       });
 
       setCampaigns(campaignsWithMetrics);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error fetching campaigns:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch campaigns');
+      // Better error extraction for PostgREST errors
+      let errorMessage = 'Failed to fetch campaigns';
+      if (err && typeof err === 'object') {
+        const e = err as { message?: string; details?: string; hint?: string; code?: string };
+        if (e.message) errorMessage = e.message;
+        if (e.details) errorMessage += ` - ${e.details}`;
+        if (e.hint) errorMessage += ` (${e.hint})`;
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
