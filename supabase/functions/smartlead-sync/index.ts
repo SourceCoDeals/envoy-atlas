@@ -1,6 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Declare EdgeRuntime global for Supabase Edge Functions
+declare const EdgeRuntime: {
+  waitUntil: (promise: Promise<any>) => void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -12,6 +17,7 @@ const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 const RATE_LIMIT_DELAY = 250;
 const BATCH_SIZE = 20;
 const TIME_BUDGET_MS = 55000;
+const MAX_BATCHES = 25; // Safety limit to prevent infinite loops
 
 interface SmartleadCampaign {
   id: number;
@@ -73,6 +79,63 @@ async function smartleadRequest(endpoint: string, apiKey: string, retries = 3): 
   }
 }
 
+// Self-continuation function using EdgeRuntime.waitUntil
+async function triggerNextBatch(
+  supabaseUrl: string,
+  anonKey: string,
+  authToken: string,
+  workspaceId: string,
+  batchNumber: number
+) {
+  console.log(`Triggering next batch (${batchNumber}) via self-continuation...`);
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        reset: false,
+        batch_number: batchNumber,
+        auto_continue: true,
+      }),
+    });
+    console.log(`Next batch triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('Failed to trigger next batch:', error);
+  }
+}
+
+// Chain to Reply.io sync when SmartLead completes
+async function triggerReplyioSync(
+  supabaseUrl: string,
+  anonKey: string,
+  authToken: string,
+  workspaceId: string
+) {
+  console.log('SmartLead sync complete - triggering Reply.io sync...');
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/replyio-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        reset: false,
+        triggered_by: 'smartlead-complete',
+        auto_continue: true,
+      }),
+    });
+    console.log(`Reply.io sync triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('Failed to trigger Reply.io sync:', error);
+  }
+}
+
 serve(async (req) => {
   console.log('smartlead-sync: Request received', { method: req.method });
 
@@ -90,17 +153,30 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: { user }, error: authError } = await createClient(
-      supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!,
+      supabaseUrl, anonKey,
       { global: { headers: { Authorization: authHeader } } }
     ).auth.getUser();
 
     if (authError || !user) throw new Error('Unauthorized');
 
-    const { workspace_id, reset = false } = await req.json();
+    const { workspace_id, reset = false, batch_number = 1, auto_continue = false } = await req.json();
     if (!workspace_id) throw new Error('workspace_id is required');
+
+    // Safety check for max batches
+    if (batch_number > MAX_BATCHES) {
+      console.error(`Max batch limit (${MAX_BATCHES}) reached. Stopping sync.`);
+      return new Response(JSON.stringify({ 
+        error: 'Max batch limit reached',
+        batch_number,
+        message: 'Sync stopped after too many batches. Please check for issues.'
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}`);
 
     const { data: membership } = await supabase
       .from('workspace_members').select('role')
@@ -130,7 +206,10 @@ serve(async (req) => {
       console.log('Reset complete');
     }
 
-    await supabase.from('api_connections').update({ sync_status: 'syncing' }).eq('id', connection.id);
+    await supabase.from('api_connections').update({ 
+      sync_status: 'syncing',
+      updated_at: new Date().toISOString(),
+    }).eq('id', connection.id);
 
     const progress = {
       campaigns_synced: 0,
@@ -162,19 +241,34 @@ serve(async (req) => {
     // Step 2: Process campaigns in batches
     for (let i = startIndex; i < campaigns.length; i++) {
       if (isTimeBudgetExceeded()) {
-        console.log(`Time budget exceeded at campaign ${i}/${campaigns.length}. Will continue next run.`);
+        console.log(`Time budget exceeded at campaign ${i}/${campaigns.length}. Triggering continuation...`);
+        
         await supabase.from('api_connections').update({
-          sync_progress: { campaign_index: i, total_campaigns: campaigns.length },
+          sync_progress: { 
+            campaign_index: i, 
+            total_campaigns: campaigns.length,
+            batch_number: batch_number,
+          },
           sync_status: 'partial',
+          updated_at: new Date().toISOString(),
         }).eq('id', connection.id);
 
-        // Note: Sync will auto-resume on next trigger or scheduled run
+        // Use EdgeRuntime.waitUntil to trigger next batch after response
+        const shouldContinue = auto_continue || batch_number === 1;
+        if (shouldContinue) {
+          EdgeRuntime.waitUntil(
+            triggerNextBatch(supabaseUrl, anonKey, authHeader, workspace_id, batch_number + 1)
+          );
+        }
 
         return new Response(JSON.stringify({
           success: true,
           complete: false,
           progress,
-          message: `Processed ${i}/${campaigns.length} campaigns. Continuing...`,
+          current: i,
+          total: campaigns.length,
+          batch_number,
+          message: `Processed ${i}/${campaigns.length} campaigns. ${shouldContinue ? 'Auto-continuing...' : 'Run again to continue.'}`,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -264,11 +358,27 @@ serve(async (req) => {
 
     console.log('SmartLead sync complete:', progress);
 
+    // Check if Reply.io connection exists and trigger its sync
+    const { data: replyioConnection } = await supabase
+      .from('api_connections')
+      .select('id')
+      .eq('workspace_id', workspace_id)
+      .eq('platform', 'replyio')
+      .eq('is_active', true)
+      .single();
+
+    if (replyioConnection && auto_continue) {
+      EdgeRuntime.waitUntil(
+        triggerReplyioSync(supabaseUrl, anonKey, authHeader, workspace_id)
+      );
+    }
+
     return new Response(JSON.stringify({
       success: true,
       complete: true,
       progress,
       message: `Synced ${progress.campaigns_synced} campaigns, ${progress.metrics_created} metrics, ${progress.email_accounts_synced} email accounts`,
+      next: replyioConnection ? 'Triggering Reply.io sync...' : null,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {

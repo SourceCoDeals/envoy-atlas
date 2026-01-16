@@ -1,5 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+// Declare EdgeRuntime global for Supabase Edge Functions
+declare const EdgeRuntime: {
+  waitUntil: (promise: Promise<any>) => void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -12,6 +17,7 @@ const REPLYIO_BASE_URL = 'https://api.reply.io/v3';
 const RATE_LIMIT_DELAY_LIST = 2000;  // 2 seconds for listing endpoints
 const RATE_LIMIT_DELAY_STATS = 1000; // 1 second for stats (faster with allow404)
 const TIME_BUDGET_MS = 50000;
+const MAX_BATCHES = 50; // Safety limit - Reply.io has more sequences
 
 function mapSequenceStatus(status: string): string {
   const statusMap: Record<string, string> = {
@@ -68,6 +74,73 @@ async function replyioRequest(
   }
 }
 
+// Self-continuation function using EdgeRuntime.waitUntil
+async function triggerNextBatch(
+  supabaseUrl: string,
+  authToken: string,
+  workspaceId: string,
+  batchNumber: number
+) {
+  console.log(`Triggering next Reply.io batch (${batchNumber}) via self-continuation...`);
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/replyio-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        reset: false,
+        batch_number: batchNumber,
+        auto_continue: true,
+      }),
+    });
+    console.log(`Next batch triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('Failed to trigger next batch:', error);
+  }
+}
+
+// Trigger analysis functions when sync completes
+async function triggerAnalysis(
+  supabaseUrl: string,
+  authToken: string,
+  workspaceId: string
+) {
+  console.log('Sync complete - triggering analysis functions...');
+  
+  // Trigger backfill-features
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/backfill-features`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    });
+    console.log(`backfill-features triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('Failed to trigger backfill-features:', error);
+  }
+  
+  // Trigger compute-patterns
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/compute-patterns`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    });
+    console.log(`compute-patterns triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('Failed to trigger compute-patterns:', error);
+  }
+}
+
 Deno.serve(async (req) => {
   console.log('replyio-sync: Request received', { method: req.method });
 
@@ -96,11 +169,30 @@ Deno.serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { workspace_id, reset = false } = await req.json();
+    const { 
+      workspace_id, 
+      reset = false, 
+      batch_number = 1, 
+      auto_continue = false,
+      triggered_by = null 
+    } = await req.json();
+    
     if (!workspace_id) {
       return new Response(JSON.stringify({ error: 'Missing workspace_id' }), 
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+
+    // Safety check for max batches
+    if (batch_number > MAX_BATCHES) {
+      console.error(`Max batch limit (${MAX_BATCHES}) reached. Stopping sync.`);
+      return new Response(JSON.stringify({ 
+        error: 'Max batch limit reached',
+        batch_number,
+        message: 'Sync stopped after too many batches. Please check for issues.'
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, triggered_by=${triggered_by}`);
 
     const { data: connection } = await supabase.from('api_connections').select('*')
       .eq('workspace_id', workspace_id).eq('platform', 'replyio').eq('is_active', true).single();
@@ -128,7 +220,10 @@ Deno.serve(async (req) => {
       console.log('Reset complete');
     }
 
-    await supabase.from('api_connections').update({ sync_status: 'syncing' }).eq('id', connection.id);
+    await supabase.from('api_connections').update({ 
+      sync_status: 'syncing',
+      updated_at: new Date().toISOString(),
+    }).eq('id', connection.id);
 
     const progress = {
       sequences_synced: 0,
@@ -173,7 +268,8 @@ Deno.serve(async (req) => {
           ...existingProgress,
           cached_sequences: allSequences.map(s => ({ id: s.id, name: s.name, status: s.status })),
           sequence_index: 0,
-          total_sequences: allSequences.length 
+          total_sequences: allSequences.length,
+          batch_number: batch_number,
         },
       }).eq('id', connection.id);
     } else {
@@ -185,21 +281,35 @@ Deno.serve(async (req) => {
 
     for (let i = startIndex; i < allSequences.length; i++) {
       if (isTimeBudgetExceeded()) {
-        console.log(`Time budget exceeded at sequence ${i}/${allSequences.length}. Will continue next run.`);
+        console.log(`Time budget exceeded at sequence ${i}/${allSequences.length}. Triggering continuation...`);
+        
         await supabase.from('api_connections').update({
           sync_progress: { 
             cached_sequences: allSequences,
             sequence_index: i, 
-            total_sequences: allSequences.length 
+            total_sequences: allSequences.length,
+            batch_number: batch_number,
           },
           sync_status: 'partial',
+          updated_at: new Date().toISOString(),
         }).eq('id', connection.id);
+
+        // Use EdgeRuntime.waitUntil to trigger next batch after response
+        const shouldContinue = auto_continue || batch_number === 1 || triggered_by === 'smartlead-complete';
+        if (shouldContinue) {
+          EdgeRuntime.waitUntil(
+            triggerNextBatch(supabaseUrl, authHeader, workspace_id, batch_number + 1)
+          );
+        }
 
         return new Response(JSON.stringify({
           success: true,
           complete: false,
           progress,
-          message: `Processed ${i}/${allSequences.length} sequences. Run again to continue.`,
+          current: i,
+          total: allSequences.length,
+          batch_number,
+          message: `Processed ${i}/${allSequences.length} sequences. ${shouldContinue ? 'Auto-continuing...' : 'Run again to continue.'}`,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -274,11 +384,19 @@ Deno.serve(async (req) => {
 
     console.log('Reply.io sync complete:', progress);
 
+    // Trigger analysis functions when sync is complete
+    if (auto_continue || triggered_by === 'smartlead-complete') {
+      EdgeRuntime.waitUntil(
+        triggerAnalysis(supabaseUrl, authHeader, workspace_id)
+      );
+    }
+
     return new Response(JSON.stringify({
       success: true,
       complete: true,
       progress,
       message: `Synced ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics`,
+      next: 'Triggering analysis functions...',
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
