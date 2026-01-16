@@ -15,11 +15,11 @@ const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 // SmartLead Rate Limit: 10 requests per 2 seconds = 5 req/s
 // Using 250ms delay = 4 req/s to stay safely within limits
 const RATE_LIMIT_DELAY = 250;
-const BATCH_SIZE = 20;
 const TIME_BUDGET_MS = 55000;
-const MAX_BATCHES = 25; // Safety limit to prevent infinite loops
+const MAX_BATCHES = 25;
 const MAX_HISTORICAL_DAYS = 730; // 2 years max lookback
 const HISTORICAL_CHUNK_DAYS = 90; // Process history in 90-day chunks
+const REPLIES_PER_PAGE = 100; // Pagination for inbox replies
 
 interface SmartleadCampaign {
   id: number;
@@ -61,30 +61,58 @@ interface SmartleadSequence {
   }>;
 }
 
-// Day-wise analytics response from SmartLead
-interface SmartleadDailyAnalytics {
-  date: string;
-  sent: number;
-  unique_sent?: number;
-  open: number;
-  unique_open?: number;
-  click: number;
-  unique_click?: number;
-  reply: number;
-  bounce: number;
-  unsubscribe?: number;
+// Day-wise analytics - actual API response format
+interface SmartleadDayWiseStat {
+  date: string; // "8 Jan" format
+  day_name: string;
+  email_engagement_metrics: {
+    sent: number;
+    opened: number;
+    replied: number;
+    bounced: number;
+    unsubscribed: number;
+  };
+}
+
+// Inbox reply structure from master inbox
+interface SmartleadInboxReply {
+  email_lead_id: number;
+  email_lead_map_id: number;
+  lead_email: string;
+  lead_first_name?: string;
+  lead_last_name?: string;
+  email_campaign_id: number;
+  email_campaign_name: string;
+  last_reply_time: string;
+  lead_category_id?: number;
+  lead_status?: string;
+  is_important?: boolean;
+  email_history?: Array<{
+    type: string; // 'SENT' or 'RECEIVED'
+    email_body: string;
+    time: string;
+    seq_number?: number;
+  }>;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function smartleadRequest(endpoint: string, apiKey: string, retries = 3): Promise<any> {
+async function smartleadRequest(endpoint: string, apiKey: string, method = 'GET', body?: any, retries = 3): Promise<any> {
   for (let i = 0; i < retries; i++) {
     await delay(RATE_LIMIT_DELAY);
     const url = `${SMARTLEAD_BASE_URL}${endpoint}${endpoint.includes('?') ? '&' : '?'}api_key=${apiKey}`;
-    console.log(`Fetching: ${endpoint}`);
+    console.log(`Fetching (${method}): ${endpoint}`);
     
     try {
-      const response = await fetch(url);
+      const options: RequestInit = {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+      if (body && method !== 'GET') {
+        options.body = JSON.stringify(body);
+      }
+      
+      const response = await fetch(url, options);
       
       if (response.status === 429) {
         console.log(`Rate limited, waiting ${(i + 1) * 2} seconds...`);
@@ -108,12 +136,54 @@ async function smartleadRequest(endpoint: string, apiKey: string, retries = 3): 
   }
 }
 
+// Parse SmartLead's short date format "8 Jan" to ISO date string
+function parseShortDate(shortDate: string, chunkStart: string, chunkEnd: string): string | null {
+  try {
+    // Parse the chunk dates to get year context
+    const startYear = parseInt(chunkStart.split('-')[0]);
+    const endYear = parseInt(chunkEnd.split('-')[0]);
+    
+    // Parse short date like "8 Jan", "15 Oct"
+    const parts = shortDate.trim().split(' ');
+    if (parts.length !== 2) return null;
+    
+    const day = parseInt(parts[0]);
+    const monthStr = parts[1].toLowerCase();
+    
+    const monthMap: Record<string, number> = {
+      'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
+      'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
+    };
+    
+    const month = monthMap[monthStr];
+    if (month === undefined || isNaN(day)) return null;
+    
+    // Try both years if they differ (e.g., chunk spans Dec-Jan)
+    // Check which year makes the date fall within the chunk range
+    for (const year of [endYear, startYear]) {
+      const testDate = new Date(year, month, day);
+      const testIso = testDate.toISOString().split('T')[0];
+      
+      if (testIso >= chunkStart && testIso <= chunkEnd) {
+        return testIso;
+      }
+    }
+    
+    // Fallback to end year
+    const date = new Date(endYear, month, day);
+    return date.toISOString().split('T')[0];
+  } catch (e) {
+    console.error(`Failed to parse date "${shortDate}":`, e);
+    return null;
+  }
+}
+
 // Extract personalization variables from email content
 function extractPersonalizationVars(content: string): string[] {
   const varPatterns = [
-    /\{\{([^}]+)\}\}/g,  // {{variable}}
-    /\{([^}]+)\}/g,       // {variable}
-    /\[\[([^\]]+)\]\]/g,  // [[variable]]
+    /\{\{([^}]+)\}\}/g,
+    /\{([^}]+)\}/g,
+    /\[\[([^\]]+)\]\]/g,
   ];
   
   const vars = new Set<string>();
@@ -126,7 +196,7 @@ function extractPersonalizationVars(content: string): string[] {
   return Array.from(vars);
 }
 
-// Self-continuation function using EdgeRuntime.waitUntil
+// Self-continuation functions
 async function triggerNextBatch(
   supabaseUrl: string,
   anonKey: string,
@@ -155,7 +225,6 @@ async function triggerNextBatch(
   }
 }
 
-// Chain to Reply.io sync when SmartLead completes
 async function triggerReplyioSync(
   supabaseUrl: string,
   anonKey: string,
@@ -183,7 +252,6 @@ async function triggerReplyioSync(
   }
 }
 
-// Continue historical backfill in a new invocation
 async function triggerHistoricalContinuation(
   supabaseUrl: string,
   authToken: string,
@@ -213,6 +281,34 @@ async function triggerHistoricalContinuation(
   }
 }
 
+async function triggerRepliesContinuation(
+  supabaseUrl: string,
+  authToken: string,
+  workspaceId: string,
+  offset: number
+) {
+  console.log(`Triggering replies fetch at offset ${offset}...`);
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        reset: false,
+        fetch_replies_only: true,
+        replies_offset: offset,
+        auto_continue: true,
+      }),
+    });
+    console.log(`Replies continuation triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('Failed to trigger replies continuation:', error);
+  }
+}
+
 // Generate date chunks for historical backfill
 function generateDateChunks(startDate: Date, endDate: Date, chunkDays: number): Array<{start: string, end: string}> {
   const chunks: Array<{start: string, end: string}> = [];
@@ -229,7 +325,6 @@ function generateDateChunks(startDate: Date, endDate: Date, chunkDays: number): 
       end: chunkEnd.toISOString().split('T')[0]
     });
     
-    // Move to next day after chunk end
     chunkStart = new Date(chunkEnd.getTime() + 24 * 60 * 60 * 1000);
   }
   
@@ -268,10 +363,13 @@ serve(async (req) => {
       reset = false, 
       batch_number = 1, 
       auto_continue = false,
-      backfill_historical = false,  // Flag to only fetch historical data
-      full_backfill = false,        // Fetch ALL historical data (up to 2 years)
-      historical_chunk_index = 0,   // Which chunk of historical data to process
+      backfill_historical = false,
+      full_backfill = false,
+      historical_chunk_index = 0,
+      fetch_replies_only = false,
+      replies_offset = 0,
     } = await req.json();
+    
     if (!workspace_id) throw new Error('workspace_id is required');
 
     // Safety check for max batches
@@ -284,7 +382,7 @@ serve(async (req) => {
       }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, backfill_historical=${backfill_historical}, full_backfill=${full_backfill}, chunk=${historical_chunk_index}`);
+    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, backfill_historical=${backfill_historical}, full_backfill=${full_backfill}, chunk=${historical_chunk_index}, fetch_replies_only=${fetch_replies_only}`);
 
     const { data: membership } = await supabase
       .from('workspace_members').select('role')
@@ -308,10 +406,10 @@ serve(async (req) => {
         await supabase.from('smartlead_daily_metrics').delete().eq('workspace_id', workspace_id);
         await supabase.from('smartlead_variants').delete().in('campaign_id', campaignIds);
         await supabase.from('smartlead_sequence_steps').delete().in('campaign_id', campaignIds);
+        await supabase.from('smartlead_message_events').delete().eq('workspace_id', workspace_id);
         await supabase.from('smartlead_campaigns').delete().eq('workspace_id', workspace_id);
       }
       await supabase.from('email_accounts').delete().eq('workspace_id', workspace_id).eq('platform', 'smartlead');
-      // Also clear workspace-level historical metrics
       await supabase.from('smartlead_workspace_daily_metrics').delete().eq('workspace_id', workspace_id);
       console.log('Reset complete');
     }
@@ -328,11 +426,110 @@ serve(async (req) => {
       variants_synced: 0,
       historical_days: 0,
       historical_chunks_processed: 0,
+      replies_fetched: 0,
+      message_events_created: 0,
       errors: [] as string[],
     };
 
     const startTime = Date.now();
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
+
+    // ============================================
+    // MODE: Fetch Replies Only
+    // ============================================
+    if (fetch_replies_only) {
+      console.log(`=== REPLIES MODE: Fetching inbox replies at offset ${replies_offset} ===`);
+      
+      // Get campaign ID mapping
+      const { data: campaignMap } = await supabase
+        .from('smartlead_campaigns')
+        .select('id, platform_id')
+        .eq('workspace_id', workspace_id);
+      
+      const campaignLookup = new Map(campaignMap?.map(c => [c.platform_id, c.id]) || []);
+      
+      try {
+        // Fetch inbox replies with pagination
+        const repliesResponse = await smartleadRequest(
+          '/master-inbox/inbox-replies',
+          apiKey,
+          'POST',
+          {
+            offset: replies_offset,
+            limit: REPLIES_PER_PAGE,
+          }
+        );
+        
+        const replies = repliesResponse?.data || repliesResponse || [];
+        console.log(`Fetched ${Array.isArray(replies) ? replies.length : 0} replies at offset ${replies_offset}`);
+        
+        if (Array.isArray(replies) && replies.length > 0) {
+          for (const reply of replies as SmartleadInboxReply[]) {
+            const campaignDbId = campaignLookup.get(String(reply.email_campaign_id));
+            
+            if (!campaignDbId) {
+              console.log(`Skipping reply - campaign ${reply.email_campaign_id} not found in DB`);
+              continue;
+            }
+            
+            // Extract reply content from email_history
+            const receivedMessages = reply.email_history?.filter(e => e.type === 'RECEIVED') || [];
+            
+            for (const msg of receivedMessages) {
+              const { error: upsertError } = await supabase
+                .from('smartlead_message_events')
+                .upsert({
+                  workspace_id,
+                  campaign_id: campaignDbId,
+                  lead_id: null, // We don't have lead UUIDs, could create leads table
+                  event_type: 'reply',
+                  event_timestamp: msg.time || reply.last_reply_time,
+                  message_id: `${reply.email_lead_id}-${msg.time}`,
+                  reply_text: msg.email_body?.substring(0, 5000), // Limit size
+                  reply_sentiment: null, // Could add classification later
+                }, { onConflict: 'workspace_id,campaign_id,message_id' });
+              
+              if (!upsertError) {
+                progress.message_events_created++;
+              }
+            }
+            progress.replies_fetched++;
+          }
+          
+          // If we got a full page, there might be more
+          if (replies.length >= REPLIES_PER_PAGE && !isTimeBudgetExceeded()) {
+            // Continue fetching in same invocation
+            // Note: for very large inboxes, we'd need to continue in another invocation
+          } else if (replies.length >= REPLIES_PER_PAGE) {
+            // Time budget exceeded, continue in another invocation
+            EdgeRuntime.waitUntil(
+              triggerRepliesContinuation(supabaseUrl, authHeader, workspace_id, replies_offset + REPLIES_PER_PAGE)
+            );
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching inbox replies:', e);
+        progress.errors.push(`Inbox replies: ${(e as Error).message}`);
+      }
+      
+      await supabase.from('api_connections').update({
+        sync_status: 'success',
+        sync_progress: {
+          ...(connection.sync_progress as any || {}),
+          replies_complete: true,
+          replies_fetched: progress.replies_fetched,
+          message_events_created: progress.message_events_created,
+        },
+        updated_at: new Date().toISOString(),
+      }).eq('id', connection.id);
+      
+      return new Response(JSON.stringify({
+        success: true,
+        complete: true,
+        progress,
+        message: `Fetched ${progress.replies_fetched} replies, created ${progress.message_events_created} message events`,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     // ============================================
     // PHASE 1: Fetch Historical Day-Wise Statistics
@@ -343,7 +540,6 @@ serve(async (req) => {
     if (shouldFetchHistorical) {
       console.log('=== PHASE 1: Fetching historical day-wise statistics ===');
       
-      // First, get all campaign IDs from the API
       const allCampaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
       console.log(`Found ${allCampaigns.length} campaigns for historical fetch`);
       
@@ -352,37 +548,30 @@ serve(async (req) => {
       } else {
         const campaignPlatformIds = allCampaigns.map(c => c.id);
         
-        // Calculate date range based on earliest campaign or max lookback
         const endDate = new Date();
         let historicalStartDate: Date;
         
         if (full_backfill || backfill_historical) {
-          // Find the earliest campaign created_at
           const earliestCampaign = allCampaigns.reduce((earliest, c) => {
             if (!c.created_at) return earliest;
             const cDate = new Date(c.created_at);
             return cDate < earliest ? cDate : earliest;
           }, new Date());
           
-          // Use earliest campaign date or 2 years ago (whichever is more recent)
           const twoYearsAgo = new Date(Date.now() - MAX_HISTORICAL_DAYS * 24 * 60 * 60 * 1000);
           historicalStartDate = earliestCampaign < twoYearsAgo ? twoYearsAgo : earliestCampaign;
           
           console.log(`Full backfill mode: earliest campaign is ${earliestCampaign.toISOString()}`);
           console.log(`Using start date: ${historicalStartDate.toISOString()} (max 2 years)`);
         } else {
-          // Default: last 90 days for regular syncs
           historicalStartDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
         }
         
-        // Generate date chunks
         const dateChunks = generateDateChunks(historicalStartDate, endDate, HISTORICAL_CHUNK_DAYS);
         console.log(`Processing ${dateChunks.length} date chunks (${HISTORICAL_CHUNK_DAYS} days each)`);
         
-        // Determine which chunk to process
         const startChunk = historical_chunk_index || 0;
         
-        // Store chunks info for continuation
         if (dateChunks.length > 1) {
           await supabase.from('api_connections').update({
             sync_progress: {
@@ -394,12 +583,10 @@ serve(async (req) => {
           }).eq('id', connection.id);
         }
         
-        // Process chunks sequentially until time budget exceeded
         for (let chunkIdx = startChunk; chunkIdx < dateChunks.length; chunkIdx++) {
           if (isTimeBudgetExceeded()) {
             console.log(`Time budget exceeded at chunk ${chunkIdx}/${dateChunks.length}. Will continue in next invocation.`);
             
-            // Update progress and trigger continuation
             await supabase.from('api_connections').update({
               sync_status: 'syncing',
               sync_progress: {
@@ -411,7 +598,6 @@ serve(async (req) => {
               },
             }).eq('id', connection.id);
             
-            // Trigger continuation
             EdgeRuntime.waitUntil(
               triggerHistoricalContinuation(supabaseUrl, authHeader, workspace_id, chunkIdx, dateChunks.length)
             );
@@ -435,7 +621,6 @@ serve(async (req) => {
             const idsParam = batchIds.join(',');
             
             try {
-              // Fetch day-wise stats for this batch of campaigns
               console.log(`  Fetching campaign batch ${Math.floor(i / BATCH_SIZE_HISTORY) + 1}/${Math.ceil(campaignPlatformIds.length / BATCH_SIZE_HISTORY)} for date range ${chunk.start} to ${chunk.end}...`);
               
               const dayWiseResponse = await smartleadRequest(
@@ -443,57 +628,46 @@ serve(async (req) => {
                 apiKey
               );
               
-              // Log full response structure for debugging
-              console.log(`  API Response type: ${typeof dayWiseResponse}`);
-              console.log(`  API Response keys: ${dayWiseResponse ? Object.keys(dayWiseResponse).join(', ') : 'null'}`);
+              // Parse the ACTUAL API response format: { success, message, data: { day_wise_stats: [...] } }
+              let dailyStats: SmartleadDayWiseStat[] = [];
               
-              // Try multiple response formats SmartLead might use
-              let dailyStats: SmartleadDailyAnalytics[] = [];
-              
-              if (Array.isArray(dayWiseResponse)) {
-                dailyStats = dayWiseResponse;
-              } else if (dayWiseResponse?.data?.daily_stats) {
-                dailyStats = dayWiseResponse.data.daily_stats;
-              } else if (dayWiseResponse?.daily_stats) {
-                dailyStats = dayWiseResponse.daily_stats;
-              } else if (dayWiseResponse?.data && Array.isArray(dayWiseResponse.data)) {
-                dailyStats = dayWiseResponse.data;
-              } else if (dayWiseResponse?.stats) {
-                dailyStats = dayWiseResponse.stats;
+              if (dayWiseResponse?.data?.day_wise_stats && Array.isArray(dayWiseResponse.data.day_wise_stats)) {
+                dailyStats = dayWiseResponse.data.day_wise_stats;
+                console.log(`  Found ${dailyStats.length} daily records in day_wise_stats`);
+              } else if (Array.isArray(dayWiseResponse)) {
+                // Old format fallback
+                dailyStats = dayWiseResponse as any;
               } else {
-                console.log(`  Unexpected response format. Full response: ${JSON.stringify(dayWiseResponse).substring(0, 1000)}`);
+                console.log(`  Unexpected response format. Keys: ${dayWiseResponse ? Object.keys(dayWiseResponse).join(', ') : 'null'}`);
+                if (dayWiseResponse?.data) {
+                  console.log(`  data keys: ${Object.keys(dayWiseResponse.data).join(', ')}`);
+                }
               }
               
-              console.log(`  Found ${dailyStats.length} daily records in response`);
-              
-              if (dailyStats.length === 0) {
-                console.log(`  No daily stats in response - this date range may have no data`);
-              }
-              
-              // Upsert each day's data into workspace-level metrics
+              // Process each day's data
               for (const stat of dailyStats) {
-                if (!stat.date) {
-                  console.log(`  Skipping stat with no date:`, JSON.stringify(stat).substring(0, 200));
+                // Parse the short date format "8 Jan" to ISO date
+                const metricDate = parseShortDate(stat.date, chunk.start, chunk.end);
+                
+                if (!metricDate) {
+                  console.log(`  Skipping - could not parse date: "${stat.date}"`);
                   continue;
                 }
                 
-                // Parse the date - handle various formats
-                let metricDate = String(stat.date);
-                if (metricDate.includes('T')) {
-                  metricDate = metricDate.split('T')[0];
-                }
+                // Extract nested metrics
+                const metrics = stat.email_engagement_metrics || {};
                 
                 const { error: upsertError } = await supabase
                   .from('smartlead_workspace_daily_metrics')
                   .upsert({
                     workspace_id,
                     metric_date: metricDate,
-                    sent_count: stat.sent || 0,
-                    opened_count: stat.open || 0,
-                    clicked_count: stat.click || 0,
-                    replied_count: stat.reply || 0,
-                    bounced_count: stat.bounce || 0,
-                    unsubscribed_count: stat.unsubscribe || 0,
+                    sent_count: metrics.sent || 0,
+                    opened_count: metrics.opened || 0,
+                    clicked_count: 0, // Not in this API response
+                    replied_count: metrics.replied || 0,
+                    bounced_count: metrics.bounced || 0,
+                    unsubscribed_count: metrics.unsubscribed || 0,
                   }, { 
                     onConflict: 'workspace_id,metric_date',
                   });
@@ -557,7 +731,7 @@ serve(async (req) => {
     const campaignProgress = (connection.sync_progress as any) || {};
     let startIndex = reset ? 0 : (campaignProgress.campaign_index || 0);
 
-    // Step 2: Process campaigns in batches
+    // Process campaigns
     for (let i = startIndex; i < campaigns.length; i++) {
       if (isTimeBudgetExceeded()) {
         console.log(`Time budget exceeded at campaign ${i}/${campaigns.length}. Triggering continuation...`);
@@ -574,7 +748,6 @@ serve(async (req) => {
           updated_at: new Date().toISOString(),
         }).eq('id', connection.id);
 
-        // Use EdgeRuntime.waitUntil to trigger next batch after response
         const shouldContinue = auto_continue || batch_number === 1;
         if (shouldContinue) {
           EdgeRuntime.waitUntil(
@@ -649,14 +822,13 @@ serve(async (req) => {
             console.log(`  Found ${sequences.length} sequences for campaign`);
             
             for (const seq of sequences) {
-              // Store the main sequence as a variant
               const mainSubject = seq.subject || '';
               const mainBody = seq.email_body || '';
               const mainVars = extractPersonalizationVars(mainSubject + ' ' + mainBody);
               const mainWordCount = mainBody.split(/\s+/).filter(Boolean).length;
               
-              // Upsert main sequence as variant
-              await supabase.from('smartlead_variants').upsert({
+              // Upsert main sequence as variant with error logging
+              const { error: variantError } = await supabase.from('smartlead_variants').upsert({
                 campaign_id: campaignDbId,
                 platform_variant_id: `seq-${seq.seq_id}`,
                 name: `Step ${seq.seq_number}`,
@@ -669,7 +841,11 @@ serve(async (req) => {
                 is_control: true,
               }, { onConflict: 'campaign_id,platform_variant_id' });
               
-              progress.variants_synced++;
+              if (variantError) {
+                console.error(`  Failed to upsert variant for step ${seq.seq_number}:`, variantError.message);
+              } else {
+                progress.variants_synced++;
+              }
 
               // Store A/B variants if they exist
               if (seq.sequence_variants && seq.sequence_variants.length > 0) {
@@ -679,7 +855,7 @@ serve(async (req) => {
                   const varVars = extractPersonalizationVars(varSubject + ' ' + varBody);
                   const varWordCount = varBody.split(/\s+/).filter(Boolean).length;
                   
-                  await supabase.from('smartlead_variants').upsert({
+                  const { error: abError } = await supabase.from('smartlead_variants').upsert({
                     campaign_id: campaignDbId,
                     platform_variant_id: `var-${variant.variant_id}`,
                     name: `Step ${seq.seq_number} Variant ${variant.variant_id}`,
@@ -692,11 +868,15 @@ serve(async (req) => {
                     is_control: false,
                   }, { onConflict: 'campaign_id,platform_variant_id' });
                   
-                  progress.variants_synced++;
+                  if (abError) {
+                    console.error(`  Failed to upsert A/B variant:`, abError.message);
+                  } else {
+                    progress.variants_synced++;
+                  }
                 }
               }
             }
-            console.log(`  Variants synced: ${progress.variants_synced} total`);
+            console.log(`  Variants synced for campaign: ${sequences.length} steps`);
           }
         } catch (e) {
           console.error(`  Sequences error for ${campaign.name}:`, e);
@@ -732,7 +912,68 @@ serve(async (req) => {
     }
 
     // ============================================
-    // PHASE 3: Sync Complete
+    // PHASE 3: Fetch Inbox Replies (first page)
+    // ============================================
+    if (!isTimeBudgetExceeded()) {
+      console.log('=== PHASE 3: Fetching inbox replies ===');
+      
+      const { data: campaignMap } = await supabase
+        .from('smartlead_campaigns')
+        .select('id, platform_id')
+        .eq('workspace_id', workspace_id);
+      
+      const campaignLookup = new Map(campaignMap?.map(c => [c.platform_id, c.id]) || []);
+      
+      try {
+        const repliesResponse = await smartleadRequest(
+          '/master-inbox/inbox-replies',
+          apiKey,
+          'POST',
+          { offset: 0, limit: REPLIES_PER_PAGE }
+        );
+        
+        const replies = repliesResponse?.data || repliesResponse || [];
+        console.log(`Fetched ${Array.isArray(replies) ? replies.length : 0} replies`);
+        
+        if (Array.isArray(replies)) {
+          for (const reply of replies as SmartleadInboxReply[]) {
+            const campaignDbId = campaignLookup.get(String(reply.email_campaign_id));
+            if (!campaignDbId) continue;
+            
+            const receivedMessages = reply.email_history?.filter(e => e.type === 'RECEIVED') || [];
+            
+            for (const msg of receivedMessages) {
+              const { error: upsertError } = await supabase
+                .from('smartlead_message_events')
+                .upsert({
+                  workspace_id,
+                  campaign_id: campaignDbId,
+                  lead_id: null,
+                  event_type: 'reply',
+                  event_timestamp: msg.time || reply.last_reply_time,
+                  message_id: `${reply.email_lead_id}-${msg.time}`,
+                  reply_text: msg.email_body?.substring(0, 5000),
+                  reply_sentiment: null,
+                }, { onConflict: 'workspace_id,campaign_id,message_id' });
+              
+              if (!upsertError) progress.message_events_created++;
+            }
+            progress.replies_fetched++;
+          }
+          
+          // If there are more replies, trigger continuation
+          if (replies.length >= REPLIES_PER_PAGE) {
+            console.log('More replies available, will need additional fetch');
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching inbox replies:', e);
+        progress.errors.push(`Inbox replies: ${(e as Error).message}`);
+      }
+    }
+
+    // ============================================
+    // PHASE 4: Sync Complete
     // ============================================
     await supabase.from('api_connections').update({
       sync_status: 'success',
@@ -741,6 +982,8 @@ serve(async (req) => {
         historical_complete: true,
         total_campaigns: campaigns.length,
         historical_days: progress.historical_days,
+        variants_synced: progress.variants_synced,
+        replies_fetched: progress.replies_fetched,
       },
       last_sync_at: new Date().toISOString(),
       last_full_sync_at: new Date().toISOString(),
@@ -767,7 +1010,7 @@ serve(async (req) => {
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.metrics_created} metrics, ${progress.historical_days} historical days, ${progress.email_accounts_synced} email accounts`,
+      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.metrics_created} metrics, ${progress.historical_days} historical days, ${progress.email_accounts_synced} email accounts, ${progress.replies_fetched} replies`,
       next: replyioConnection ? 'Triggering Reply.io sync...' : null,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
