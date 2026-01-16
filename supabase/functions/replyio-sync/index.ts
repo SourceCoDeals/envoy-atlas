@@ -13,6 +13,7 @@ const corsHeaders = {
 const REPLYIO_BASE_URL = 'https://api.reply.io';
 // Reply.io v1 API for certain endpoints, v3 for others
 const REPLYIO_V1_URL = 'https://api.reply.io/v1';
+const REPLYIO_V2_URL = 'https://api.reply.io/v2';
 const REPLYIO_V3_URL = 'https://api.reply.io/v3';
 
 // Reply.io Rate Limit: 10 seconds between API calls, 15,000 requests/month
@@ -28,8 +29,9 @@ function mapSequenceStatus(status: string): string {
     'Stopped': 'stopped',
     'Draft': 'draft',
     'Archived': 'archived',
+    'New': 'draft',
   };
-  return statusMap[status] || status.toLowerCase();
+  return statusMap[status] || status?.toLowerCase() || 'unknown';
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -55,10 +57,10 @@ function extractPersonalizationVars(content: string): string[] {
 async function replyioRequest(
   endpoint: string, 
   apiKey: string, 
-  options: { retries?: number; allow404?: boolean; delayMs?: number; useV1?: boolean } = {}
+  options: { retries?: number; allow404?: boolean; delayMs?: number; useV1?: boolean; useV2?: boolean } = {}
 ): Promise<any> {
-  const { retries = 3, allow404 = false, delayMs = RATE_LIMIT_DELAY_LIST, useV1 = false } = options;
-  const baseUrl = useV1 ? REPLYIO_V1_URL : REPLYIO_V3_URL;
+  const { retries = 3, allow404 = false, delayMs = RATE_LIMIT_DELAY_LIST, useV1 = false, useV2 = false } = options;
+  const baseUrl = useV1 ? REPLYIO_V1_URL : (useV2 ? REPLYIO_V2_URL : REPLYIO_V3_URL);
   
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
@@ -353,7 +355,69 @@ Deno.serve(async (req) => {
         const campaignId = campaign.id;
         progress.sequences_synced++;
 
-        // Try to get detailed sequence info including steps (v1 API)
+        // ==============================================
+        // Try v2 API for sequence details (includes steps)
+        // ==============================================
+        let metricsStored = false;
+        let variantsStored = false;
+        
+        try {
+          const seqDetails = await replyioRequest(
+            `/sequences/${sequence.id}`,
+            apiKey,
+            { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS, useV2: true }
+          );
+          
+          if (seqDetails) {
+            console.log(`  v2 API response keys:`, Object.keys(seqDetails).join(', '));
+            
+            // v2 API returns steps directly in the sequence object
+            const steps = seqDetails.steps || seqDetails.emails || [];
+            console.log(`  v2 Found ${steps.length} steps/templates`);
+            
+            if (steps.length > 0) {
+              for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+                const step = steps[stepIdx];
+                console.log(`    Step ${stepIdx + 1} keys:`, Object.keys(step).join(', '));
+                
+                // v2 step structure
+                const subject = step.subject || step.emailSubject || step.title || '';
+                const body = step.body || step.emailBody || step.text || step.content || '';
+                const vars = extractPersonalizationVars(subject + ' ' + body);
+                const wordCount = body.split(/\s+/).filter(Boolean).length;
+                
+                const variantData = {
+                  campaign_id: campaignId,
+                  platform_variant_id: `step-${step.id || step.stepId || stepIdx + 1}`,
+                  name: step.name || `Step ${stepIdx + 1}`,
+                  variant_type: step.type || 'email',
+                  subject_line: subject,
+                  body_preview: body.substring(0, 500),
+                  email_body: body,
+                  word_count: wordCount,
+                  personalization_vars: vars,
+                  is_control: true,
+                };
+                
+                const { error: varErr } = await supabase.from('replyio_variants')
+                  .upsert(variantData, { onConflict: 'campaign_id,platform_variant_id' });
+                
+                if (varErr) {
+                  console.error(`    Failed to upsert variant step ${stepIdx + 1}:`, varErr.message);
+                } else {
+                  progress.variants_synced++;
+                  variantsStored = true;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`  v2 API error for ${sequence.name}:`, (e as Error).message);
+        }
+
+        // ==============================================
+        // Try v1 API for metrics (more reliable for stats)
+        // ==============================================
         try {
           const seqDetails = await replyioRequest(
             `/campaigns?id=${sequence.id}`,
@@ -361,19 +425,31 @@ Deno.serve(async (req) => {
             { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS, useV1: true }
           );
           
-          console.log(`  v1 API response for seq ${sequence.id}:`, JSON.stringify(seqDetails).substring(0, 200));
-          
           if (seqDetails) {
-            // Store metrics from v1 API (these fields are typically populated)
+            // Log ALL fields to understand the response format
+            console.log(`  v1 API full response:`, JSON.stringify(seqDetails).substring(0, 500));
+            
             const today = new Date().toISOString().split('T')[0];
-            const sentCount = seqDetails.deliveriesCount || seqDetails.delivered || 0;
-            const repliedCount = seqDetails.repliesCount || seqDetails.replied || 0;
-            const openedCount = seqDetails.opensCount || seqDetails.opened || 0;
-            const bouncedCount = seqDetails.bouncesCount || seqDetails.bounced || 0;
-            const clickedCount = seqDetails.clicksCount || seqDetails.clicked || 0;
+            
+            // Try ALL known field variations from Reply.io API
+            const sentCount = seqDetails.deliveriesCount ?? seqDetails.delivered ?? 
+                              seqDetails.totalDelivered ?? seqDetails.emails_sent ?? 
+                              seqDetails.sentCount ?? seqDetails.sent ?? 0;
+            const repliedCount = seqDetails.repliesCount ?? seqDetails.replied ?? 
+                                 seqDetails.totalReplies ?? seqDetails.replies ?? 0;
+            const openedCount = seqDetails.opensCount ?? seqDetails.opened ?? 
+                                seqDetails.totalOpened ?? seqDetails.opens ?? 0;
+            const bouncedCount = seqDetails.bouncesCount ?? seqDetails.bounced ?? 
+                                 seqDetails.totalBounced ?? seqDetails.bounces ?? 0;
+            const clickedCount = seqDetails.clicksCount ?? seqDetails.clicked ?? 
+                                 seqDetails.totalClicked ?? seqDetails.clicks ?? 0;
+            const interestedCount = seqDetails.interestedCount ?? seqDetails.interested ?? 
+                                    seqDetails.totalInterested ?? 0;
+            
+            console.log(`  v1 Extracted metrics: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}`);
             
             if (sentCount > 0 || repliedCount > 0 || openedCount > 0) {
-              await supabase.from('replyio_daily_metrics').upsert({
+              const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
                 workspace_id,
                 campaign_id: campaignId,
                 metric_date: today,
@@ -381,42 +457,52 @@ Deno.serve(async (req) => {
                 opened_count: openedCount,
                 clicked_count: clickedCount,
                 replied_count: repliedCount,
-                positive_reply_count: seqDetails.interestedCount || 0,
+                positive_reply_count: interestedCount,
                 bounced_count: bouncedCount,
               }, { onConflict: 'campaign_id,metric_date' });
 
-              progress.metrics_created++;
-              console.log(`  v1 Stats synced: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}`);
+              if (metricsErr) {
+                console.error(`  Failed to upsert metrics:`, metricsErr.message);
+              } else {
+                progress.metrics_created++;
+                metricsStored = true;
+                console.log(`  ✓ v1 Stats stored: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}`);
+              }
             } else {
               console.log(`  No meaningful metrics from v1 API for ${sequence.name}`);
             }
 
-            // Try to get email templates/steps from v1 details
-            const steps = seqDetails.steps || seqDetails.emails || [];
-            if (steps.length > 0) {
-              console.log(`  Found ${steps.length} steps/templates`);
-              
-              for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
-                const step = steps[stepIdx];
-                const subject = step.subject || step.emailSubject || '';
-                const body = step.body || step.emailBody || step.text || '';
-                const vars = extractPersonalizationVars(subject + ' ' + body);
-                const wordCount = body.split(/\s+/).filter(Boolean).length;
+            // Try to get steps from v1 if v2 failed
+            if (!variantsStored) {
+              const steps = seqDetails.steps || seqDetails.emails || [];
+              if (steps.length > 0) {
+                console.log(`  v1 Found ${steps.length} steps/templates`);
                 
-                await supabase.from('replyio_variants').upsert({
-                  campaign_id: campaignId,
-                  platform_variant_id: `step-${step.id || stepIdx}`,
-                  name: `Step ${stepIdx + 1}`,
-                  subject_line: subject,
-                  body_preview: body.substring(0, 500),
-                  email_body: body,
-                  word_count: wordCount,
-                  personalization_vars: vars,
-                  step_number: stepIdx + 1,
-                  is_control: true,
-                }, { onConflict: 'campaign_id,platform_variant_id' });
-                
-                progress.variants_synced++;
+                for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+                  const step = steps[stepIdx];
+                  const subject = step.subject || step.emailSubject || '';
+                  const body = step.body || step.emailBody || step.text || '';
+                  const vars = extractPersonalizationVars(subject + ' ' + body);
+                  const wordCount = body.split(/\s+/).filter(Boolean).length;
+                  
+                  const { error: varErr } = await supabase.from('replyio_variants').upsert({
+                    campaign_id: campaignId,
+                    platform_variant_id: `step-${step.id || stepIdx}`,
+                    name: `Step ${stepIdx + 1}`,
+                    variant_type: 'email',
+                    subject_line: subject,
+                    body_preview: body.substring(0, 500),
+                    email_body: body,
+                    word_count: wordCount,
+                    personalization_vars: vars,
+                    is_control: true,
+                  }, { onConflict: 'campaign_id,platform_variant_id' });
+                  
+                  if (!varErr) {
+                    progress.variants_synced++;
+                    variantsStored = true;
+                  }
+                }
               }
             }
           }
@@ -424,8 +510,10 @@ Deno.serve(async (req) => {
           console.error(`  v1 API error for ${sequence.name}:`, (e as Error).message);
         }
 
-        // Fallback: If no metrics from v1, try v3 statistics endpoint
-        if (progress.metrics_created === 0 || !existingProgress.has_v1_metrics) {
+        // ==============================================
+        // Fallback to v3 statistics endpoint for metrics
+        // ==============================================
+        if (!metricsStored) {
           try {
             const stats = await replyioRequest(
               `/statistics/sequences/${sequence.id}`, 
@@ -434,25 +522,30 @@ Deno.serve(async (req) => {
             );
             
             if (stats) {
+              console.log(`  v3 Stats response keys:`, Object.keys(stats).join(', '));
+              
               const today = new Date().toISOString().split('T')[0];
-              const sentCount = stats.deliveredContacts || stats.delivered || 0;
-              const repliedCount = stats.repliedContacts || stats.replied || 0;
+              const sentCount = stats.deliveredContacts ?? stats.delivered ?? stats.sent ?? 0;
+              const repliedCount = stats.repliedContacts ?? stats.replied ?? stats.replies ?? 0;
+              const openedCount = stats.openedContacts ?? stats.opened ?? stats.opens ?? 0;
               
               if (sentCount > 0 || repliedCount > 0) {
-                await supabase.from('replyio_daily_metrics').upsert({
+                const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
                   workspace_id,
                   campaign_id: campaignId,
                   metric_date: today,
                   sent_count: sentCount,
-                  opened_count: stats.openedContacts || stats.opened || 0,
-                  clicked_count: stats.clickedContacts || stats.clicked || 0,
+                  opened_count: openedCount,
+                  clicked_count: stats.clickedContacts ?? stats.clicked ?? 0,
                   replied_count: repliedCount,
-                  positive_reply_count: stats.interestedContacts || stats.interested || 0,
-                  bounced_count: stats.bouncedContacts || stats.bounced || 0,
+                  positive_reply_count: stats.interestedContacts ?? stats.interested ?? 0,
+                  bounced_count: stats.bouncedContacts ?? stats.bounced ?? 0,
                 }, { onConflict: 'campaign_id,metric_date' });
 
-                progress.metrics_created++;
-                console.log(`  v3 Stats synced: sent=${sentCount}, replies=${repliedCount}`);
+                if (!metricsErr) {
+                  progress.metrics_created++;
+                  console.log(`  ✓ v3 Stats stored: sent=${sentCount}, replies=${repliedCount}`);
+                }
               }
             }
           } catch (e) {
@@ -462,37 +555,41 @@ Deno.serve(async (req) => {
 
       } catch (e) {
         console.error(`Error processing sequence ${sequence.name}:`, e);
-        progress.errors.push(`${sequence.name}: ${(e as Error).message}`);
+        progress.errors.push(`Sequence ${sequence.name}: ${(e as Error).message}`);
       }
     }
 
-    // Sync complete
+    // All sequences processed - sync complete
+    console.log('=== Reply.io sync complete ===');
+    console.log(`Final stats: ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants`);
+    
     await supabase.from('api_connections').update({
       sync_status: 'success',
-      sync_progress: { completed: true, total_sequences: allSequences.length },
+      sync_progress: { 
+        complete: true,
+        sequences_synced: progress.sequences_synced,
+        metrics_created: progress.metrics_created,
+        variants_synced: progress.variants_synced,
+      },
       last_sync_at: new Date().toISOString(),
-      last_full_sync_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }).eq('id', connection.id);
 
-    console.log('Reply.io sync complete:', progress);
-
-    if (auto_continue || triggered_by === 'smartlead-complete') {
-      EdgeRuntime.waitUntil(
-        triggerAnalysis(supabaseUrl, authHeader, workspace_id)
-      );
-    }
+    // Trigger analysis functions
+    EdgeRuntime.waitUntil(triggerAnalysis(supabaseUrl, authHeader, workspace_id));
 
     return new Response(JSON.stringify({
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.sequences_synced} sequences, ${progress.variants_synced} variants, ${progress.metrics_created} metrics`,
-      next: 'Triggering analysis functions...',
+      message: `Synced ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants`,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
     console.error('replyio-sync error:', error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), 
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ 
+      error: (error as Error).message,
+      stack: (error as Error).stack,
+    }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });

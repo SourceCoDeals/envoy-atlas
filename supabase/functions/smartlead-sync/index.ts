@@ -816,39 +816,61 @@ serve(async (req) => {
 
         // Fetch sequences/variants for this campaign
         try {
-          const sequences: SmartleadSequence[] = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
+          const sequencesRaw = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
+          
+          // Debug: Log raw response structure
+          console.log(`  Sequences API raw response type: ${typeof sequencesRaw}, isArray: ${Array.isArray(sequencesRaw)}`);
+          if (sequencesRaw && !Array.isArray(sequencesRaw)) {
+            console.log(`  Sequences API response keys:`, Object.keys(sequencesRaw).join(', '));
+          }
+          
+          // Handle different response formats
+          const sequences: SmartleadSequence[] = Array.isArray(sequencesRaw) 
+            ? sequencesRaw 
+            : (sequencesRaw?.data || sequencesRaw?.sequences || sequencesRaw?.steps || []);
           
           if (sequences && sequences.length > 0) {
             console.log(`  Found ${sequences.length} sequences for campaign`);
             
             for (const seq of sequences) {
-              const mainSubject = seq.subject || '';
-              const mainBody = seq.email_body || '';
+              // Log sequence structure to debug field names
+              console.log(`    Sequence keys: ${Object.keys(seq).join(', ')}`);
+              
+              const mainSubject = seq.subject || (seq as any).email_subject || '';
+              const mainBody = seq.email_body || (seq as any).body || (seq as any).content || '';
               const mainVars = extractPersonalizationVars(mainSubject + ' ' + mainBody);
               const mainWordCount = mainBody.split(/\s+/).filter(Boolean).length;
+              const seqId = seq.seq_id || (seq as any).id || (seq as any).sequence_id;
+              const seqNumber = seq.seq_number || (seq as any).step_number || (seq as any).order || 1;
               
-              // Upsert main sequence as variant with error logging
-              const { error: variantError } = await supabase.from('smartlead_variants').upsert({
+              // Upsert main sequence as variant (WITHOUT step_number - column doesn't exist)
+              const variantData = {
                 campaign_id: campaignDbId,
-                platform_variant_id: `seq-${seq.seq_id}`,
-                name: `Step ${seq.seq_number}`,
+                platform_variant_id: `seq-${seqId}`,
+                name: `Step ${seqNumber}`,
+                variant_type: 'sequence',
                 subject_line: mainSubject,
                 body_preview: mainBody.substring(0, 500),
                 email_body: mainBody,
                 word_count: mainWordCount,
                 personalization_vars: mainVars,
-                step_number: seq.seq_number,
                 is_control: true,
-              }, { onConflict: 'campaign_id,platform_variant_id' });
+              };
+              
+              const { error: variantError } = await supabase.from('smartlead_variants')
+                .upsert(variantData, { onConflict: 'campaign_id,platform_variant_id' });
               
               if (variantError) {
-                console.error(`  Failed to upsert variant for step ${seq.seq_number}:`, variantError.message);
+                console.error(`  Failed to upsert variant for step ${seqNumber}:`, variantError.message);
+                console.error(`  Variant data:`, JSON.stringify(variantData));
               } else {
                 progress.variants_synced++;
+                console.log(`  ✓ Variant synced: Step ${seqNumber} (${mainSubject.substring(0, 30)}...)`);
               }
 
               // Store A/B variants if they exist
               if (seq.sequence_variants && seq.sequence_variants.length > 0) {
+                console.log(`    Found ${seq.sequence_variants.length} A/B variants`);
                 for (const variant of seq.sequence_variants) {
                   const varSubject = variant.subject || mainSubject;
                   const varBody = variant.email_body || mainBody;
@@ -858,13 +880,13 @@ serve(async (req) => {
                   const { error: abError } = await supabase.from('smartlead_variants').upsert({
                     campaign_id: campaignDbId,
                     platform_variant_id: `var-${variant.variant_id}`,
-                    name: `Step ${seq.seq_number} Variant ${variant.variant_id}`,
+                    name: `Step ${seqNumber} Variant ${variant.variant_id}`,
+                    variant_type: 'ab_variant',
                     subject_line: varSubject,
                     body_preview: varBody.substring(0, 500),
                     email_body: varBody,
                     word_count: varWordCount,
                     personalization_vars: varVars,
-                    step_number: seq.seq_number,
                     is_control: false,
                   }, { onConflict: 'campaign_id,platform_variant_id' });
                   
@@ -877,6 +899,8 @@ serve(async (req) => {
               }
             }
             console.log(`  Variants synced for campaign: ${sequences.length} steps`);
+          } else {
+            console.log(`  No sequences found for campaign ${campaign.name}`);
           }
         } catch (e) {
           console.error(`  Sequences error for ${campaign.name}:`, e);
