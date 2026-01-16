@@ -6,6 +6,7 @@ import { useSyncData } from '@/hooks/useSyncData';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfolioOverview';
 import { EnhancedCampaignTable } from '@/components/campaigns/EnhancedCampaignTable';
+import { SyncProgressBar } from '@/components/campaigns/SyncProgressBar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download } from 'lucide-react';
@@ -14,7 +15,7 @@ export default function Campaigns() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { campaigns, loading, error, refetch } = useCampaigns();
-  const { syncing, triggerSync } = useSyncData();
+  const { syncing, progress, elapsedTime, triggerSync } = useSyncData();
   const [tierFilter, setTierFilter] = useState('all');
 
   const handleRefresh = async () => {
@@ -60,6 +61,13 @@ export default function Campaigns() {
             </div>
           )}
         </div>
+
+        {/* Sync Progress Bar */}
+        <SyncProgressBar 
+          progress={progress} 
+          isActive={syncing} 
+          elapsedTime={elapsedTime} 
+        />
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
