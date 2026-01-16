@@ -60,22 +60,8 @@ export default function Dashboard() {
     }
   }, [user, authLoading, navigate]);
 
-  if (authLoading || workspaceLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
-
-  if (workspaces.length === 0) {
-    return <CreateWorkspace />;
-  }
-
   // Calculate system health with new 4-component model
-  const healthData = calculateSystemHealth({
+  const healthData = useMemo(() => calculateSystemHealth({
     bounceRate: stats.bounceRate,
     spamRate: stats.spamRate,
     openRate: stats.openRate,
@@ -83,10 +69,10 @@ export default function Dashboard() {
     positiveReplyRate: stats.positiveRate,
     deliveredRate: stats.deliveredRate,
     expectedReplyRate: 3,
-  });
+  }), [stats]);
 
   // Classify failure mode
-  const failureMode = classifyFailureMode({
+  const failureMode = useMemo(() => classifyFailureMode({
     bounceRate: stats.bounceRate,
     bounceRatePrev: stats.bounceRate * 0.9,
     spamRate: stats.spamRate,
@@ -96,27 +82,23 @@ export default function Dashboard() {
     replyRatePrev: stats.replyRate * 1.15,
     unsubscribeRate: 0.1,
     unsubscribeRatePrev: 0.08,
-  });
+  }), [stats]);
 
   // Generate change analysis
-  const changeData = generateChangeAnalysis(
+  const changeData = useMemo(() => generateChangeAnalysis(
     { replyRate: stats.replyRate, positiveRate: stats.positiveRate, bounceRate: stats.bounceRate },
     { replyRate: stats.replyRate * 1.1, positiveRate: stats.positiveRate * 1.05, bounceRate: stats.bounceRate * 0.95 }
-  );
+  ), [stats]);
 
   // Generate action items
-  const actionItems = generateActionItems(
+  const actionItems = useMemo(() => generateActionItems(
     { spamRate: stats.spamRate, bounceRate: stats.bounceRate, replyRate: stats.replyRate },
     failureMode.primaryCause !== 'none' ? {
       primaryCause: failureMode.primaryCause,
       evidence: failureMode.evidence,
       recommendedActions: failureMode.recommendedActions,
     } : undefined
-  );
-
-  const handleActionClick = (action: any, link?: string) => {
-    if (link) navigate(link);
-  };
+  ), [stats, failureMode]);
 
   // Generate executive summary insights
   const executiveInsights = useMemo(() => {
@@ -200,6 +182,26 @@ export default function Dashboard() {
     }
     return 'Things are running smoothly. Keep monitoring and continue testing new approaches.';
   }, [failureMode.primaryCause, stats.replyRate]);
+
+  const handleActionClick = (action: any, link?: string) => {
+    if (link) navigate(link);
+  };
+
+  // Early returns AFTER all hooks
+  if (authLoading || workspaceLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) return null;
+
+  if (workspaces.length === 0) {
+    return <CreateWorkspace />;
+  }
+
 
   return (
     <DashboardLayout>
