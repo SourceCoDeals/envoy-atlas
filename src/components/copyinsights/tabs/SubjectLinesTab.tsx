@@ -24,6 +24,8 @@ interface SubjectLinesTabProps {
   onSaveToLibrary: (item: SubjectLineAnalysis) => void;
 }
 
+import { ExecutiveSummary } from '../ExecutiveSummary';
+
 export function SubjectLinesTab({ subjectLines, baselineReplyRate, onSaveToLibrary }: SubjectLinesTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<'reply_rate' | 'open_rate' | 'sent_count'>('reply_rate');
@@ -154,8 +156,52 @@ export function SubjectLinesTab({ subjectLines, baselineReplyRate, onSaveToLibra
 
   const formatRate = (rate: number) => `${rate.toFixed(1)}%`;
 
+  // Generate executive summary insights
+  const bestFormat = formatPerformance[0];
+  const avgOpenRate = subjectLines.length > 0 
+    ? subjectLines.reduce((sum, s) => sum + s.open_rate, 0) / subjectLines.length 
+    : 0;
+
+  const executiveInsights = [
+    {
+      type: bestFormat && bestFormat.vs_baseline > 10 ? 'positive' as const : 'neutral' as const,
+      title: bestFormat ? `"${bestFormat.format}" subjects work best for you` : 'Testing different formats',
+      description: bestFormat 
+        ? `Subject lines with ${bestFormat.format.toLowerCase()} formatting get ${bestFormat.open_rate.toFixed(0)}% opens—that's ${bestFormat.vs_baseline > 0 ? '+' : ''}${bestFormat.vs_baseline.toFixed(0)}% vs your average.`
+        : 'You need more data to identify winning formats.',
+      impact: bestFormat ? `${bestFormat.open_rate.toFixed(0)}% opens` : undefined,
+    },
+    {
+      type: bestLengthBucket && bestLengthBucket.open_rate > avgOpenRate ? 'positive' as const : 'neutral' as const,
+      title: `Sweet spot: ${bestLengthBucket?.range || '21-35'} characters`,
+      description: `Shorter subject lines fit better on mobile screens. Your best performers are ${bestLengthBucket?.range || '21-35'} characters.`,
+      impact: `${bestLengthBucket?.open_rate.toFixed(0) || '38'}% opens`,
+    },
+    {
+      type: personalizationImpact.length > 1 && personalizationImpact[0].reply_lift > 20 ? 'positive' as const : 'warning' as const,
+      title: personalizationImpact[0]?.level === 'No Personalization' 
+        ? 'Personalization could boost your results'
+        : `${personalizationImpact[0]?.level || 'Personalized'} subjects perform best`,
+      description: personalizationImpact[0]?.level === 'No Personalization'
+        ? 'Most of your emails have no personalization. Adding names or company mentions typically lifts reply rates 20-40%.'
+        : `When you use ${personalizationImpact[0]?.level?.toLowerCase() || 'personalization'}, you see ${personalizationImpact[0]?.reply_rate.toFixed(1)}% reply rates.`,
+    },
+  ];
+
+  const bottomLine = bestFormat 
+    ? `Use ${bestFormat.format.toLowerCase()} subject lines under ${bestLengthBucket?.range.split('-')[1] || '35'} characters with ${personalizationImpact[0]?.level?.toLowerCase() || 'personalization'} for best results.`
+    : 'Keep testing different formats—you need more data to find your winning formula.';
+
   return (
     <div className="space-y-6">
+      {/* Executive Summary */}
+      <ExecutiveSummary
+        title="Subject Line Insights in Plain English"
+        subtitle="What's making people open (or ignore) your emails"
+        insights={executiveInsights}
+        bottomLine={bottomLine}
+      />
+
       {/* Subject Line Performance by Format */}
       <Card>
         <CardHeader>

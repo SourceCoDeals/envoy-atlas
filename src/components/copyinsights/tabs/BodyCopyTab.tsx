@@ -6,6 +6,7 @@ import { TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import type { BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
 import { calculateYouIRatio } from '@/lib/patternTaxonomy';
+import { ExecutiveSummary } from '../ExecutiveSummary';
 
 interface BodyCopyTabProps {
   bodyCopy: BodyCopyAnalysis[];
@@ -85,8 +86,52 @@ export function BodyCopyTab({ bodyCopy, baselineReplyRate }: BodyCopyTabProps) {
       .sort((a, b) => b.rate - a.rate);
   }, [bodyCopy]);
 
+  // Generate executive summary insights
+  const bestLengthBucket = wordCountBuckets.reduce((best, b) => b.reply_rate > best.reply_rate ? b : best, wordCountBuckets[0]);
+  const bestRatioBucket = youWeRatioBuckets.reduce((best, b) => b.reply_rate > best.reply_rate ? b : best, youWeRatioBuckets[0]);
+  const topCTA = ctaPerformance[0];
+
+  const executiveInsights = [
+    {
+      type: avgWordCount > 100 ? 'warning' as const : 'positive' as const,
+      title: avgWordCount > 100 ? 'Your emails are too long' : 'Your email length is good',
+      description: avgWordCount > 100
+        ? `At ${avgWordCount} words on average, you're losing readers. Emails under 100 words get ${(wordCountBuckets[1]?.reply_rate - wordCountBuckets[3]?.reply_rate).toFixed(1)}% higher reply rates.`
+        : `At ${avgWordCount} words, your emails are digestible. Short emails respect busy inboxes.`,
+      impact: avgWordCount > 100 ? 'Cut words' : 'Good length',
+    },
+    {
+      type: bestRatioBucket.range.includes('3+') || bestRatioBucket.range.includes('2-3') ? 'positive' as const : 'warning' as const,
+      title: `Focus on "you" not "we"`,
+      description: bestRatioBucket.range.includes('<1')
+        ? `Your emails talk too much about yourself. Flip the script—talk about the recipient's problems and goals.`
+        : `Emails with a ${bestRatioBucket.range} you:we ratio perform best (${bestRatioBucket.reply_rate.toFixed(1)}% replies). Make it about them.`,
+      impact: `${bestRatioBucket.reply_rate.toFixed(1)}% reply rate`,
+    },
+    {
+      type: topCTA ? 'positive' as const : 'neutral' as const,
+      title: topCTA ? `"${topCTA.type}" CTAs work best` : 'Test different CTAs',
+      description: topCTA
+        ? `When you use ${topCTA.type.toLowerCase()} calls-to-action, you get ${topCTA.rate.toFixed(1)}% reply rates. Low-friction asks outperform hard calendar pushes.`
+        : 'You need more data to identify your best CTA style.',
+      impact: topCTA ? `${topCTA.rate.toFixed(1)}% replies` : undefined,
+    },
+  ];
+
+  const bottomLine = avgWordCount > 100
+    ? `Trim your emails to under 100 words, focus on "you" language, and use soft CTAs like "Does this make sense?" instead of calendar links.`
+    : `Keep your emails short. Focus on the reader. Ask low-friction questions.`;
+
   return (
     <div className="space-y-6">
+      {/* Executive Summary */}
+      <ExecutiveSummary
+        title="Body Copy: What Makes People Reply"
+        subtitle="How your email structure and language affects response rates"
+        insights={executiveInsights}
+        bottomLine={bottomLine}
+      />
+
       {/* Word Count Impact */}
       <Card>
         <CardHeader>

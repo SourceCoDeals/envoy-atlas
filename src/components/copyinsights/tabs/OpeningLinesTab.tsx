@@ -6,6 +6,7 @@ import { AlertCircle, TrendingUp, Target } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
 import type { BodyCopyAnalysis } from '@/hooks/useCopyAnalytics';
 import { detectOpeningType } from '@/lib/patternTaxonomy';
+import { ExecutiveSummary } from '../ExecutiveSummary';
 
 interface OpeningLinesTabProps {
   bodyCopy: BodyCopyAnalysis[];
@@ -110,8 +111,51 @@ export function OpeningLinesTab({ bodyCopy, baselineReplyRate }: OpeningLinesTab
     return `${lift.toFixed(0)}%`;
   };
 
+  // Generate executive summary insights
+  const topHook = hookPerformance[0];
+  const bottomHook = hookPerformance[hookPerformance.length - 1];
+
+  const executiveInsights = [
+    {
+      type: topHook && topHook.lift > 50 ? 'positive' as const : 'neutral' as const,
+      title: topHook ? `"${topHook.type}" openers get the most replies` : 'Testing different openers',
+      description: topHook 
+        ? `When you start with a ${topHook.type.toLowerCase()}, you get ${topHook.rate.toFixed(1)}% reply rate—that's ${topHook.lift > 0 ? '+' : ''}${topHook.lift.toFixed(0)}% better than average.`
+        : 'We need more data to identify your best opening style.',
+      impact: topHook ? `${topHook.rate.toFixed(1)}% replies` : undefined,
+    },
+    {
+      type: problemGenericUsage > 40 ? 'negative' as const : 'positive' as const,
+      title: problemGenericUsage > 40 
+        ? `You're using weak openers ${problemGenericUsage.toFixed(0)}% of the time`
+        : 'You use strong openers most of the time',
+      description: problemGenericUsage > 40
+        ? 'Opening with problems or generic intros turns people off. They feel presumptuous or salesy.'
+        : `Only ${problemGenericUsage.toFixed(0)}% of your emails use weak openers—keep it up!`,
+      impact: problemGenericUsage > 40 ? 'Hurting results' : 'Good habits',
+    },
+    {
+      type: estimatedImpact.liftPercent > 20 ? 'positive' as const : 'neutral' as const,
+      title: `You could gain ~${Math.round((estimatedImpact.lift / 100) * 2000)} more replies/month`,
+      description: `If you shift to our recommended hook mix (more ${topHook?.type || 'Timeline'}, less ${bottomHook?.type || 'Generic'}), you'd see about +${estimatedImpact.liftPercent.toFixed(0)}% improvement.`,
+      impact: `+${estimatedImpact.liftPercent.toFixed(0)}% projected`,
+    },
+  ];
+
+  const bottomLine = problemGenericUsage > 40
+    ? `Stop using "I wanted to reach out" openers. Start with something specific to the recipient—their company news, a recent post, or a relevant number.`
+    : `Keep using ${topHook?.type || 'Timeline'} openers. They're working well for you.`;
+
   return (
     <div className="space-y-6">
+      {/* Executive Summary */}
+      <ExecutiveSummary
+        title="Opening Lines: What Works & What Doesn't"
+        subtitle="The first sentence of your email has the biggest impact on whether people reply"
+        insights={executiveInsights}
+        bottomLine={bottomLine}
+      />
+
       {/* Hook Type Performance */}
       <Card>
         <CardHeader>
