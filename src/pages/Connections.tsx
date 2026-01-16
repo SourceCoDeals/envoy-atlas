@@ -285,6 +285,54 @@ export default function Connections() {
     return res.data as any;
   };
 
+  const handleSyncSmartlead = async (options: { reset?: boolean; fullBackfill?: boolean } = {}) => {
+    if (!currentWorkspace) return;
+    const { reset = false, fullBackfill = false } = options;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncing((s) => ({ ...s, smartlead: true }));
+
+    try {
+      const token = await getAccessToken();
+      const res = await supabase.functions.invoke("smartlead-sync", {
+        body: {
+          workspace_id: currentWorkspace.id,
+          reset,
+          full_backfill: fullBackfill,
+          auto_continue: true,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || "Sync failed");
+
+      const data = res.data;
+      if (data.success) {
+        if (data.complete) {
+          setSuccess(
+            fullBackfill
+              ? `Full historical backfill complete! Fetched ${data.progress?.historical_days || 0} days of data.`
+              : `SmartLead sync complete! Synced ${data.progress?.campaigns_synced || 0} campaigns.`
+          );
+        } else {
+          setSuccess(
+            fullBackfill
+              ? `Historical backfill in progress... (${data.progress?.historical_days || 0} days so far)`
+              : "SmartLead sync started, processing in background..."
+          );
+        }
+      }
+
+      await fetchConnections();
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to sync SmartLead");
+    } finally {
+      setIsSyncing((s) => ({ ...s, smartlead: false }));
+    }
+  };
+
   const handleSyncPhoneburner = async (reset = false) => {
     if (!currentWorkspace) return;
     setError(null);
@@ -723,30 +771,96 @@ export default function Connections() {
                           </Button>
                         </div>
                       </>
-                    ) : (
-                      <div className="space-y-2 text-sm">
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Status</span>
-                          <span className="capitalize">{smartleadConnection.sync_status || "active"}</span>
+                    ) : smartleadConnection.sync_status === "syncing" ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          <span className="text-sm font-medium">Syncing...</span>
                         </div>
-                        {smartleadConnection.last_sync_at && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Last Sync</span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {new Date(smartleadConnection.last_sync_at).toLocaleString()}
-                            </span>
+                        {(smartleadConnection.sync_progress as any)?.historical_days && (
+                          <div className="text-xs text-muted-foreground">
+                            Historical days: {(smartleadConnection.sync_progress as any).historical_days}
                           </div>
                         )}
-                        {smartleadConnection.last_full_sync_at && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Last Full Sync</span>
-                            <span className="flex items-center gap-1">
-                              <Download className="h-3 w-3" />
-                              {new Date(smartleadConnection.last_full_sync_at).toLocaleString()}
-                            </span>
+                        {(smartleadConnection.sync_progress as any)?.campaign_index !== undefined && (
+                          <div className="space-y-1">
+                            <Progress
+                              value={
+                                ((smartleadConnection.sync_progress as any).campaign_index /
+                                  ((smartleadConnection.sync_progress as any).total_campaigns || 1)) *
+                                100
+                              }
+                            />
+                            <div className="text-xs text-muted-foreground">
+                              {(smartleadConnection.sync_progress as any).campaign_index} /{" "}
+                              {(smartleadConnection.sync_progress as any).total_campaigns} campaigns
+                            </div>
                           </div>
                         )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Status</span>
+                            <span className="capitalize">{smartleadConnection.sync_status || "active"}</span>
+                          </div>
+                          {smartleadConnection.last_sync_at && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Last Sync</span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {new Date(smartleadConnection.last_sync_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                          {smartleadConnection.last_full_sync_at && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Last Full Sync</span>
+                              <span className="flex items-center gap-1">
+                                <Download className="h-3 w-3" />
+                                {new Date(smartleadConnection.last_full_sync_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-2 border-t">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSyncSmartlead()}
+                            disabled={!!isSyncing.smartlead}
+                          >
+                            {isSyncing.smartlead ? (
+                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                            ) : (
+                              <RefreshCw className="mr-2 h-3 w-3" />
+                            )}
+                            Sync
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSyncSmartlead({ fullBackfill: true })}
+                            disabled={!!isSyncing.smartlead}
+                            title="Fetch ALL historical data (up to 2 years)"
+                          >
+                            {isSyncing.smartlead ? (
+                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                            ) : (
+                              <Database className="mr-2 h-3 w-3" />
+                            )}
+                            Full Backfill
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleSyncSmartlead({ reset: true })}
+                            disabled={!!isSyncing.smartlead}
+                          >
+                            Reset & Sync
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </CardContent>
