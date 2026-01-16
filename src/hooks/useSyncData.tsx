@@ -36,14 +36,20 @@ export function useSyncData() {
         const syncProgress = conn.sync_progress as any;
         if (conn.platform === 'smartlead' && syncProgress) {
           newProgress.smartlead = {
-            current: syncProgress.current_index || syncProgress.campaign_index || 0,
-            total: syncProgress.total_campaigns || 0,
+            current: syncProgress.campaign_index ?? syncProgress.current_index ?? 0,
+            total: syncProgress.total_campaigns ?? 0,
             status: conn.sync_status || 'idle'
           };
         } else if (conn.platform === 'replyio' && syncProgress) {
+          // Get total from cached_sequences array length
+          const cachedSequences = syncProgress.cached_sequences;
+          const total = Array.isArray(cachedSequences) 
+            ? cachedSequences.length 
+            : (syncProgress.total_sequences ?? 0);
+          
           newProgress.replyio = {
-            current: syncProgress.current_index || syncProgress.sequence_index || 0,
-            total: syncProgress.cached_sequences?.length || syncProgress.total_sequences || 0,
+            current: syncProgress.sequence_index ?? syncProgress.current_index ?? 0,
+            total: total,
             status: conn.sync_status || 'idle'
           };
         }
