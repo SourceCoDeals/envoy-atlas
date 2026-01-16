@@ -10,14 +10,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const REPLYIO_BASE_URL = 'https://api.reply.io/v3';
+const REPLYIO_BASE_URL = 'https://api.reply.io';
+// Reply.io v1 API for certain endpoints, v3 for others
+const REPLYIO_V1_URL = 'https://api.reply.io/v1';
+const REPLYIO_V3_URL = 'https://api.reply.io/v3';
+
 // Reply.io Rate Limit: 10 seconds between API calls, 15,000 requests/month
-// The 10-second limit applies globally, but we can be more aggressive for listing
-// vs stats endpoints since stats endpoint may hit more rate limits
 const RATE_LIMIT_DELAY_LIST = 2000;  // 2 seconds for listing endpoints
-const RATE_LIMIT_DELAY_STATS = 1000; // 1 second for stats (faster with allow404)
+const RATE_LIMIT_DELAY_STATS = 1000; // 1 second for stats
 const TIME_BUDGET_MS = 50000;
-const MAX_BATCHES = 50; // Safety limit - Reply.io has more sequences
+const MAX_BATCHES = 50;
 
 function mapSequenceStatus(status: string): string {
   const statusMap: Record<string, string> = {
@@ -32,18 +34,38 @@ function mapSequenceStatus(status: string): string {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Extract personalization variables from email content
+function extractPersonalizationVars(content: string): string[] {
+  const varPatterns = [
+    /\{\{([^}]+)\}\}/g,  // {{variable}}
+    /\{([^}]+)\}/g,       // {variable}
+    /\[\[([^\]]+)\]\]/g,  // [[variable]]
+  ];
+  
+  const vars = new Set<string>();
+  for (const pattern of varPatterns) {
+    const matches = content.matchAll(pattern);
+    for (const match of matches) {
+      vars.add(match[1].trim());
+    }
+  }
+  return Array.from(vars);
+}
+
 async function replyioRequest(
   endpoint: string, 
   apiKey: string, 
-  options: { retries?: number; allow404?: boolean; delayMs?: number } = {}
+  options: { retries?: number; allow404?: boolean; delayMs?: number; useV1?: boolean } = {}
 ): Promise<any> {
-  const { retries = 3, allow404 = false, delayMs = RATE_LIMIT_DELAY_LIST } = options;
+  const { retries = 3, allow404 = false, delayMs = RATE_LIMIT_DELAY_LIST, useV1 = false } = options;
+  const baseUrl = useV1 ? REPLYIO_V1_URL : REPLYIO_V3_URL;
   
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       await delay(delayMs);
-      console.log(`Fetching: ${endpoint}`);
-      const response = await fetch(`${REPLYIO_BASE_URL}${endpoint}`, {
+      const url = `${baseUrl}${endpoint}`;
+      console.log(`Fetching: ${url}`);
+      const response = await fetch(url, {
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
       });
       
@@ -53,7 +75,6 @@ async function replyioRequest(
         continue;
       }
       
-      // Allow 404 for stats endpoints (archived sequences may not have stats)
       if (response.status === 404 && allow404) {
         console.log(`  404 - no data available for ${endpoint}`);
         return null;
@@ -74,7 +95,7 @@ async function replyioRequest(
   }
 }
 
-// Self-continuation function using EdgeRuntime.waitUntil
+// Self-continuation function
 async function triggerNextBatch(
   supabaseUrl: string,
   authToken: string,
@@ -110,7 +131,6 @@ async function triggerAnalysis(
 ) {
   console.log('Sync complete - triggering analysis functions...');
   
-  // Trigger backfill-features
   try {
     const response = await fetch(`${supabaseUrl}/functions/v1/backfill-features`, {
       method: 'POST',
@@ -125,7 +145,6 @@ async function triggerAnalysis(
     console.error('Failed to trigger backfill-features:', error);
   }
   
-  // Trigger compute-patterns
   try {
     const response = await fetch(`${supabaseUrl}/functions/v1/compute-patterns`, {
       method: 'POST',
@@ -182,7 +201,6 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Safety check for max batches
     if (batch_number > MAX_BATCHES) {
       console.error(`Max batch limit (${MAX_BATCHES}) reached. Stopping sync.`);
       return new Response(JSON.stringify({ 
@@ -228,6 +246,7 @@ Deno.serve(async (req) => {
     const progress = {
       sequences_synced: 0,
       metrics_created: 0,
+      variants_synced: 0,
       errors: [] as string[],
     };
 
@@ -238,7 +257,6 @@ Deno.serve(async (req) => {
     let allSequences: any[] = existingProgress.cached_sequences || [];
     
     if (allSequences.length === 0 || reset) {
-      // Step 1: Fetch all sequences (paginated) - use faster delay for listing
       console.log('Fetching all sequences...');
       allSequences = [];
       let skip = 0;
@@ -262,7 +280,6 @@ Deno.serve(async (req) => {
       
       console.log(`Found ${allSequences.length} total sequences`);
       
-      // Cache the sequence list for subsequent runs
       await supabase.from('api_connections').update({
         sync_progress: { 
           ...existingProgress,
@@ -276,7 +293,6 @@ Deno.serve(async (req) => {
       console.log(`Using cached sequence list: ${allSequences.length} sequences`);
     }
 
-    // Step 2: Process each sequence
     let startIndex = reset ? 0 : (existingProgress.sequence_index || 0);
 
     for (let i = startIndex; i < allSequences.length; i++) {
@@ -294,7 +310,6 @@ Deno.serve(async (req) => {
           updated_at: new Date().toISOString(),
         }).eq('id', connection.id);
 
-        // Use EdgeRuntime.waitUntil to trigger next batch after response
         const shouldContinue = auto_continue || batch_number === 1 || triggered_by === 'smartlead-complete';
         if (shouldContinue) {
           EdgeRuntime.waitUntil(
@@ -317,7 +332,7 @@ Deno.serve(async (req) => {
       console.log(`[${i + 1}/${allSequences.length}] Processing: ${sequence.name} (${sequence.status})`);
 
       try {
-        // Upsert sequence as campaign (no API call needed - use cached data)
+        // Upsert sequence as campaign
         const { data: campaign, error: campError } = await supabase
           .from('replyio_campaigns')
           .upsert({
@@ -338,66 +353,111 @@ Deno.serve(async (req) => {
         const campaignId = campaign.id;
         progress.sequences_synced++;
 
-        // Fetch statistics - try primary endpoint first, fall back to sequence details
+        // Try to get detailed sequence info including steps (v1 API)
         try {
-          let stats = await replyioRequest(
-            `/statistics/sequences/${sequence.id}`, 
-            apiKey, 
-            { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
+          const seqDetails = await replyioRequest(
+            `/campaigns?id=${sequence.id}`,
+            apiKey,
+            { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS, useV1: true }
           );
           
-          // If stats endpoint returned null/404, try fetching sequence details for counts
-          if (!stats) {
-            console.log(`  No stats from /statistics endpoint, trying sequence details...`);
-            const seqDetails = await replyioRequest(
-              `/sequences/${sequence.id}`,
-              apiKey,
-              { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
-            );
-            
-            if (seqDetails) {
-              // Reply.io sequence objects may contain summary counts
-              stats = {
-                deliveredContacts: seqDetails.peopleCount || seqDetails.totalPeople || 0,
-                repliedContacts: seqDetails.repliedCount || seqDetails.replied || 0,
-                openedContacts: seqDetails.openedCount || seqDetails.opened || 0,
-                bouncedContacts: seqDetails.bouncedCount || seqDetails.bounced || 0,
-                clickedContacts: seqDetails.clickedCount || seqDetails.clicked || 0,
-                interestedContacts: seqDetails.interestedCount || seqDetails.interested || 0,
-              };
-              console.log(`  Using sequence detail counts: people=${stats.deliveredContacts}, replied=${stats.repliedContacts}`);
-            }
-          }
+          console.log(`  v1 API response for seq ${sequence.id}:`, JSON.stringify(seqDetails).substring(0, 200));
           
-          if (stats) {
+          if (seqDetails) {
+            // Store metrics from v1 API (these fields are typically populated)
             const today = new Date().toISOString().split('T')[0];
-            const sentCount = stats.deliveredContacts || stats.delivered || 0;
-            const repliedCount = stats.repliedContacts || stats.replied || 0;
+            const sentCount = seqDetails.deliveriesCount || seqDetails.delivered || 0;
+            const repliedCount = seqDetails.repliesCount || seqDetails.replied || 0;
+            const openedCount = seqDetails.opensCount || seqDetails.opened || 0;
+            const bouncedCount = seqDetails.bouncesCount || seqDetails.bounced || 0;
+            const clickedCount = seqDetails.clicksCount || seqDetails.clicked || 0;
             
-            // Only insert if we have meaningful data
-            if (sentCount > 0 || repliedCount > 0) {
+            if (sentCount > 0 || repliedCount > 0 || openedCount > 0) {
               await supabase.from('replyio_daily_metrics').upsert({
                 workspace_id,
                 campaign_id: campaignId,
                 metric_date: today,
                 sent_count: sentCount,
-                opened_count: stats.openedContacts || stats.opened || 0,
-                clicked_count: stats.clickedContacts || stats.clicked || 0,
+                opened_count: openedCount,
+                clicked_count: clickedCount,
                 replied_count: repliedCount,
-                positive_reply_count: stats.interestedContacts || stats.interested || 0,
-                bounced_count: stats.bouncedContacts || stats.bounced || 0,
+                positive_reply_count: seqDetails.interestedCount || 0,
+                bounced_count: bouncedCount,
               }, { onConflict: 'campaign_id,metric_date' });
 
               progress.metrics_created++;
-              console.log(`  Stats synced: sent=${sentCount}, replies=${repliedCount}`);
+              console.log(`  v1 Stats synced: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}`);
             } else {
-              console.log(`  Skipping empty metrics for ${sequence.name}`);
+              console.log(`  No meaningful metrics from v1 API for ${sequence.name}`);
             }
-          } else {
-            console.log(`  No metrics available for ${sequence.name} (status: ${sequence.status})`);
+
+            // Try to get email templates/steps from v1 details
+            const steps = seqDetails.steps || seqDetails.emails || [];
+            if (steps.length > 0) {
+              console.log(`  Found ${steps.length} steps/templates`);
+              
+              for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+                const step = steps[stepIdx];
+                const subject = step.subject || step.emailSubject || '';
+                const body = step.body || step.emailBody || step.text || '';
+                const vars = extractPersonalizationVars(subject + ' ' + body);
+                const wordCount = body.split(/\s+/).filter(Boolean).length;
+                
+                await supabase.from('replyio_variants').upsert({
+                  campaign_id: campaignId,
+                  platform_variant_id: `step-${step.id || stepIdx}`,
+                  name: `Step ${stepIdx + 1}`,
+                  subject_line: subject,
+                  body_preview: body.substring(0, 500),
+                  email_body: body,
+                  word_count: wordCount,
+                  personalization_vars: vars,
+                  step_number: stepIdx + 1,
+                  is_control: true,
+                }, { onConflict: 'campaign_id,platform_variant_id' });
+                
+                progress.variants_synced++;
+              }
+            }
           }
         } catch (e) {
-          console.error(`  Stats error for ${sequence.name}:`, (e as Error).message);
+          console.error(`  v1 API error for ${sequence.name}:`, (e as Error).message);
+        }
+
+        // Fallback: If no metrics from v1, try v3 statistics endpoint
+        if (progress.metrics_created === 0 || !existingProgress.has_v1_metrics) {
+          try {
+            const stats = await replyioRequest(
+              `/statistics/sequences/${sequence.id}`, 
+              apiKey, 
+              { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
+            );
+            
+            if (stats) {
+              const today = new Date().toISOString().split('T')[0];
+              const sentCount = stats.deliveredContacts || stats.delivered || 0;
+              const repliedCount = stats.repliedContacts || stats.replied || 0;
+              
+              if (sentCount > 0 || repliedCount > 0) {
+                await supabase.from('replyio_daily_metrics').upsert({
+                  workspace_id,
+                  campaign_id: campaignId,
+                  metric_date: today,
+                  sent_count: sentCount,
+                  opened_count: stats.openedContacts || stats.opened || 0,
+                  clicked_count: stats.clickedContacts || stats.clicked || 0,
+                  replied_count: repliedCount,
+                  positive_reply_count: stats.interestedContacts || stats.interested || 0,
+                  bounced_count: stats.bouncedContacts || stats.bounced || 0,
+                }, { onConflict: 'campaign_id,metric_date' });
+
+                progress.metrics_created++;
+                console.log(`  v3 Stats synced: sent=${sentCount}, replies=${repliedCount}`);
+              }
+            }
+          } catch (e) {
+            console.error(`  v3 Stats error for ${sequence.name}:`, (e as Error).message);
+          }
         }
 
       } catch (e) {
@@ -416,7 +476,6 @@ Deno.serve(async (req) => {
 
     console.log('Reply.io sync complete:', progress);
 
-    // Trigger analysis functions when sync is complete
     if (auto_continue || triggered_by === 'smartlead-complete') {
       EdgeRuntime.waitUntil(
         triggerAnalysis(supabaseUrl, authHeader, workspace_id)
@@ -427,7 +486,7 @@ Deno.serve(async (req) => {
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics`,
+      message: `Synced ${progress.sequences_synced} sequences, ${progress.variants_synced} variants, ${progress.metrics_created} metrics`,
       next: 'Triggering analysis functions...',
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
