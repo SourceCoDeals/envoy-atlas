@@ -128,6 +128,25 @@ export function useSyncData() {
     };
   }, [syncing]);
 
+  // Auto-detect an in-progress sync (e.g. after refresh/navigation) and start polling
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const current = await fetchProgress();
+      if (cancelled || !current) return;
+
+      if (isSyncInProgress(current)) {
+        setSyncing(true);
+        startPolling();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchProgress, isSyncInProgress, startPolling]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => stopPolling();
