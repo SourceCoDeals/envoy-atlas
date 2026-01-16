@@ -338,31 +338,63 @@ Deno.serve(async (req) => {
         const campaignId = campaign.id;
         progress.sequences_synced++;
 
-        // Fetch statistics - use faster delay with allow404
+        // Fetch statistics - try primary endpoint first, fall back to sequence details
         try {
-          const stats = await replyioRequest(
+          let stats = await replyioRequest(
             `/statistics/sequences/${sequence.id}`, 
             apiKey, 
-            { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
+            { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
           );
+          
+          // If stats endpoint returned null/404, try fetching sequence details for counts
+          if (!stats) {
+            console.log(`  No stats from /statistics endpoint, trying sequence details...`);
+            const seqDetails = await replyioRequest(
+              `/sequences/${sequence.id}`,
+              apiKey,
+              { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
+            );
+            
+            if (seqDetails) {
+              // Reply.io sequence objects may contain summary counts
+              stats = {
+                deliveredContacts: seqDetails.peopleCount || seqDetails.totalPeople || 0,
+                repliedContacts: seqDetails.repliedCount || seqDetails.replied || 0,
+                openedContacts: seqDetails.openedCount || seqDetails.opened || 0,
+                bouncedContacts: seqDetails.bouncedCount || seqDetails.bounced || 0,
+                clickedContacts: seqDetails.clickedCount || seqDetails.clicked || 0,
+                interestedContacts: seqDetails.interestedCount || seqDetails.interested || 0,
+              };
+              console.log(`  Using sequence detail counts: people=${stats.deliveredContacts}, replied=${stats.repliedContacts}`);
+            }
+          }
           
           if (stats) {
             const today = new Date().toISOString().split('T')[0];
+            const sentCount = stats.deliveredContacts || stats.delivered || 0;
+            const repliedCount = stats.repliedContacts || stats.replied || 0;
             
-            await supabase.from('replyio_daily_metrics').upsert({
-              workspace_id,
-              campaign_id: campaignId,
-              metric_date: today,
-              sent_count: stats.deliveredContacts || stats.delivered || 0,
-              opened_count: stats.openedContacts || stats.opened || 0,
-              clicked_count: stats.clickedContacts || stats.clicked || 0,
-              replied_count: stats.repliedContacts || stats.replied || 0,
-              positive_reply_count: stats.interestedContacts || stats.interested || 0,
-              bounced_count: stats.bouncedContacts || stats.bounced || 0,
-            }, { onConflict: 'campaign_id,metric_date' });
+            // Only insert if we have meaningful data
+            if (sentCount > 0 || repliedCount > 0) {
+              await supabase.from('replyio_daily_metrics').upsert({
+                workspace_id,
+                campaign_id: campaignId,
+                metric_date: today,
+                sent_count: sentCount,
+                opened_count: stats.openedContacts || stats.opened || 0,
+                clicked_count: stats.clickedContacts || stats.clicked || 0,
+                replied_count: repliedCount,
+                positive_reply_count: stats.interestedContacts || stats.interested || 0,
+                bounced_count: stats.bouncedContacts || stats.bounced || 0,
+              }, { onConflict: 'campaign_id,metric_date' });
 
-            progress.metrics_created++;
-            console.log(`  Stats synced: sent=${stats.deliveredContacts || 0}, replies=${stats.repliedContacts || 0}`);
+              progress.metrics_created++;
+              console.log(`  Stats synced: sent=${sentCount}, replies=${repliedCount}`);
+            } else {
+              console.log(`  Skipping empty metrics for ${sequence.name}`);
+            }
+          } else {
+            console.log(`  No metrics available for ${sequence.name} (status: ${sequence.status})`);
           }
         } catch (e) {
           console.error(`  Stats error for ${sequence.name}:`, (e as Error).message);

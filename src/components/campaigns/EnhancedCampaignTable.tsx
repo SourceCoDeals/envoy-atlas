@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
 import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle } from 'lucide-react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Database } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface EnhancedCampaignTableProps {
@@ -24,6 +24,7 @@ interface CampaignWithScore extends CampaignWithMetrics {
   tier: CampaignTier;
   estimatedPositiveRate: number;
   estimatedMeetings: number;
+  hasMetrics: boolean;
 }
 
 const getConfidenceIcon = (confidence: ConfidenceLevel) => {
@@ -93,7 +94,9 @@ export function EnhancedCampaignTable({
       const tier = calculateCampaignScore(campaign);
       const estimatedPositiveRate = campaign.reply_rate * 0.45;
       const estimatedMeetings = Math.round(campaign.total_replied * 0.45 * 0.16);
-      return { ...campaign, tier, estimatedPositiveRate, estimatedMeetings };
+      // Check if campaign has any actual metrics data
+      const hasMetrics = campaign.total_sent > 0 || campaign.total_opened > 0 || campaign.total_replied > 0;
+      return { ...campaign, tier, estimatedPositiveRate, estimatedMeetings, hasMetrics };
     });
   }, [campaigns]);
 
@@ -376,7 +379,29 @@ export function EnhancedCampaignTable({
                   <TableCell className="font-medium">
                     <Link to={`/campaigns/${campaign.id}`} className="block">
                       <div className="flex flex-col">
-                        <span className="truncate max-w-[280px] hover:text-primary">{campaign.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="truncate max-w-[260px] hover:text-primary">{campaign.name}</span>
+                          {!campaign.hasMetrics && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Badge variant="outline" className="text-[10px] px-1 py-0 text-muted-foreground border-muted-foreground/30 gap-0.5">
+                                    <Database className="h-2.5 w-2.5" />
+                                    No Data
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-xs">
+                                  <p className="font-medium">No metrics available</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {campaign.platform === 'replyio' 
+                                      ? 'Paused Reply.io sequences may not report statistics. Try re-syncing or activating the sequence.'
+                                      : 'Metrics will appear after emails are sent.'}
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </div>
                         <span className="text-xs text-muted-foreground">{campaign.platform}</span>
                       </div>
                     </Link>
