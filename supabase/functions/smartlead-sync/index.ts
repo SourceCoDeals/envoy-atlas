@@ -208,7 +208,13 @@ serve(async (req) => {
 
     if (authError || !user) throw new Error('Unauthorized');
 
-    const { workspace_id, reset = false, batch_number = 1, auto_continue = false } = await req.json();
+    const { 
+      workspace_id, 
+      reset = false, 
+      batch_number = 1, 
+      auto_continue = false,
+      backfill_historical = false  // New flag to only fetch historical data
+    } = await req.json();
     if (!workspace_id) throw new Error('workspace_id is required');
 
     // Safety check for max batches
@@ -221,7 +227,7 @@ serve(async (req) => {
       }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}`);
+    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, backfill_historical=${backfill_historical}`);
 
     const { data: membership } = await supabase
       .from('workspace_members').select('role')
@@ -248,6 +254,8 @@ serve(async (req) => {
         await supabase.from('smartlead_campaigns').delete().eq('workspace_id', workspace_id);
       }
       await supabase.from('email_accounts').delete().eq('workspace_id', workspace_id).eq('platform', 'smartlead');
+      // Also clear workspace-level historical metrics
+      await supabase.from('smartlead_workspace_daily_metrics').delete().eq('workspace_id', workspace_id);
       console.log('Reset complete');
     }
 
@@ -261,14 +269,124 @@ serve(async (req) => {
       email_accounts_synced: 0,
       metrics_created: 0,
       variants_synced: 0,
+      historical_days: 0,
       errors: [] as string[],
     };
 
     const startTime = Date.now();
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
 
-    // Step 1: Fetch all campaigns
-    console.log('Fetching all campaigns...');
+    // ============================================
+    // PHASE 1: Fetch Historical Day-Wise Statistics (Run FIRST)
+    // ============================================
+    // Only run on first batch OR if backfill_historical is explicitly requested
+    const existingProgress = (connection.sync_progress as any) || {};
+    const shouldFetchHistorical = batch_number === 1 || backfill_historical || !existingProgress.historical_complete;
+    
+    if (shouldFetchHistorical) {
+      console.log('PHASE 1: Fetching historical day-wise statistics...');
+      
+      // First, get all campaign IDs from the API
+      const allCampaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
+      const campaignPlatformIds = allCampaigns.map(c => c.id);
+      
+      // Calculate date range: last 90 days
+      const endDate = new Date();
+      const historicalStartDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      const startDateStr = historicalStartDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      
+      console.log(`Fetching historical stats from ${startDateStr} to ${endDateStr} for ${campaignPlatformIds.length} campaigns`);
+      
+      // Batch campaign IDs in groups of 100 (API limit)
+      const BATCH_SIZE_HISTORY = 100;
+      
+      for (let i = 0; i < campaignPlatformIds.length; i += BATCH_SIZE_HISTORY) {
+        const batchIds = campaignPlatformIds.slice(i, i + BATCH_SIZE_HISTORY);
+        const idsParam = batchIds.join(',');
+        
+        try {
+          // Fetch day-wise stats for this batch of campaigns
+          console.log(`  Fetching batch ${Math.floor(i / BATCH_SIZE_HISTORY) + 1}/${Math.ceil(campaignPlatformIds.length / BATCH_SIZE_HISTORY)}...`);
+          const dayWiseResponse = await smartleadRequest(
+            `/analytics/day-wise-overall-stats?start_date=${startDateStr}&end_date=${endDateStr}&campaign_ids=${idsParam}`,
+            apiKey
+          );
+          
+          console.log('  API Response structure:', JSON.stringify(dayWiseResponse).substring(0, 500));
+          
+          const dailyStats: SmartleadDailyAnalytics[] = dayWiseResponse?.data?.daily_stats || 
+                                                         dayWiseResponse?.daily_stats || 
+                                                         (Array.isArray(dayWiseResponse) ? dayWiseResponse : []);
+          
+          console.log(`  Batch ${Math.floor(i / BATCH_SIZE_HISTORY) + 1}: Found ${dailyStats.length} daily records`);
+          
+          // Upsert each day's data into workspace-level metrics
+          for (const stat of dailyStats) {
+            if (!stat.date) continue;
+            
+            // Parse the date - handle various formats
+            let metricDate = String(stat.date);
+            if (metricDate.includes('T')) {
+              metricDate = metricDate.split('T')[0];
+            }
+            
+            const { error: upsertError } = await supabase
+              .from('smartlead_workspace_daily_metrics')
+              .upsert({
+                workspace_id,
+                metric_date: metricDate,
+                sent_count: stat.sent || 0,
+                opened_count: stat.open || 0,
+                clicked_count: stat.click || 0,
+                replied_count: stat.reply || 0,
+                bounced_count: stat.bounce || 0,
+                unsubscribed_count: stat.unsubscribe || 0,
+              }, { 
+                onConflict: 'workspace_id,metric_date',
+              });
+            
+            if (upsertError) {
+              console.error(`  Error upserting metrics for ${metricDate}:`, upsertError.message);
+            } else {
+              progress.historical_days++;
+            }
+          }
+          
+          console.log(`  Successfully processed ${dailyStats.length} daily records for batch`);
+          
+        } catch (e) {
+          console.error(`  Historical stats error for batch starting at ${i}:`, e);
+          progress.errors.push(`Historical stats batch ${i}: ${(e as Error).message}`);
+        }
+      }
+      
+      console.log(`Historical fetch complete: ${progress.historical_days} days processed`);
+      
+      // If backfill_historical mode, we're done
+      if (backfill_historical) {
+        await supabase.from('api_connections').update({
+          sync_status: 'success',
+          sync_progress: { 
+            historical_complete: true,
+            historical_days: progress.historical_days,
+          },
+          updated_at: new Date().toISOString(),
+        }).eq('id', connection.id);
+        
+        return new Response(JSON.stringify({
+          success: true,
+          complete: true,
+          progress,
+          message: `Backfilled ${progress.historical_days} days of historical data`,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // ============================================
+    // PHASE 2: Fetch All Campaigns
+    // ============================================
+    console.log('PHASE 2: Fetching all campaigns...');
     const campaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
     console.log(`Found ${campaigns.length} total campaigns`);
 
@@ -281,8 +399,8 @@ serve(async (req) => {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
-    const existingProgress = (connection.sync_progress as any) || {};
-    let startIndex = reset ? 0 : (existingProgress.campaign_index || 0);
+    const campaignProgress = (connection.sync_progress as any) || {};
+    let startIndex = reset ? 0 : (campaignProgress.campaign_index || 0);
 
     // Step 2: Process campaigns in batches
     for (let i = startIndex; i < campaigns.length; i++) {
@@ -457,146 +575,15 @@ serve(async (req) => {
     }
 
     // ============================================
-    // PHASE 2: Fetch Historical Day-Wise Statistics
+    // PHASE 3: Sync Complete
     // ============================================
-    console.log('Fetching historical day-wise statistics...');
-    
-    // Get all campaign platform IDs for historical fetch
-    const campaignPlatformIds = campaigns.map(c => c.id);
-    
-    // Calculate date range: last 90 days
-    const endDate = new Date();
-    const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-    const startDateStr = startDate.toISOString().split('T')[0];
-    const endDateStr = endDate.toISOString().split('T')[0];
-    
-    console.log(`Fetching historical stats from ${startDateStr} to ${endDateStr} for ${campaignPlatformIds.length} campaigns`);
-    
-    // Batch campaign IDs in groups of 100 (API limit)
-    const BATCH_SIZE_HISTORY = 100;
-    let historicalDaysProcessed = 0;
-    
-    for (let i = 0; i < campaignPlatformIds.length; i += BATCH_SIZE_HISTORY) {
-      if (isTimeBudgetExceeded()) {
-        console.log('Time budget exceeded during historical fetch. Will continue in next batch.');
-        break;
-      }
-      
-      const batchIds = campaignPlatformIds.slice(i, i + BATCH_SIZE_HISTORY);
-      const idsParam = batchIds.join(',');
-      
-      try {
-        // Fetch day-wise stats for this batch of campaigns
-        const dayWiseResponse = await smartleadRequest(
-          `/analytics/day-wise-overall-stats?start_date=${startDateStr}&end_date=${endDateStr}&campaign_ids=${idsParam}`,
-          apiKey
-        );
-        
-        const dailyStats: SmartleadDailyAnalytics[] = dayWiseResponse?.data?.daily_stats || 
-                                                       dayWiseResponse?.daily_stats || 
-                                                       (Array.isArray(dayWiseResponse) ? dayWiseResponse : []);
-        
-        console.log(`  Batch ${Math.floor(i / BATCH_SIZE_HISTORY) + 1}: Found ${dailyStats.length} daily records`);
-        
-        // Upsert each day's data into workspace-level metrics
-        for (const stat of dailyStats) {
-          if (!stat.date) continue;
-          
-          // Parse the date - handle various formats
-          let metricDate = stat.date;
-          if (metricDate.includes('T')) {
-            metricDate = metricDate.split('T')[0];
-          }
-          
-          const { error: upsertError } = await supabase
-            .from('smartlead_workspace_daily_metrics')
-            .upsert({
-              workspace_id,
-              metric_date: metricDate,
-              sent_count: stat.sent || stat.unique_sent || 0,
-              opened_count: stat.open || stat.unique_open || 0,
-              clicked_count: stat.click || stat.unique_click || 0,
-              replied_count: stat.reply || 0,
-              bounced_count: stat.bounce || 0,
-              unsubscribed_count: stat.unsubscribe || 0,
-            }, { 
-              onConflict: 'workspace_id,metric_date',
-              ignoreDuplicates: false 
-            });
-          
-          if (upsertError) {
-            console.error(`  Error upserting metrics for ${metricDate}:`, upsertError.message);
-          } else {
-            historicalDaysProcessed++;
-          }
-        }
-        
-        console.log(`  Successfully processed ${dailyStats.length} daily records for batch`);
-        
-      } catch (e) {
-        console.error(`  Historical stats error for batch starting at ${i}:`, e);
-        progress.errors.push(`Historical stats batch ${i}: ${(e as Error).message}`);
-        
-        // If the day-wise endpoint isn't available, fall back to aggregating from per-campaign metrics
-        console.log('  Falling back to aggregating from per-campaign daily metrics...');
-        
-        // Aggregate existing smartlead_daily_metrics into workspace-level metrics
-        const { data: existingMetrics, error: fetchError } = await supabase
-          .from('smartlead_daily_metrics')
-          .select('metric_date, sent_count, opened_count, clicked_count, replied_count, bounced_count')
-          .eq('workspace_id', workspace_id);
-        
-        if (!fetchError && existingMetrics && existingMetrics.length > 0) {
-          // Group by date
-          const dateAggregates = new Map<string, {
-            sent: number;
-            opened: number;
-            clicked: number;
-            replied: number;
-            bounced: number;
-          }>();
-          
-          for (const m of existingMetrics) {
-            const existing = dateAggregates.get(m.metric_date) || {
-              sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0
-            };
-            dateAggregates.set(m.metric_date, {
-              sent: existing.sent + (m.sent_count || 0),
-              opened: existing.opened + (m.opened_count || 0),
-              clicked: existing.clicked + (m.clicked_count || 0),
-              replied: existing.replied + (m.replied_count || 0),
-              bounced: existing.bounced + (m.bounced_count || 0),
-            });
-          }
-          
-          // Upsert aggregated data
-          for (const [metricDate, agg] of dateAggregates) {
-            await supabase.from('smartlead_workspace_daily_metrics').upsert({
-              workspace_id,
-              metric_date: metricDate,
-              sent_count: agg.sent,
-              opened_count: agg.opened,
-              clicked_count: agg.clicked,
-              replied_count: agg.replied,
-              bounced_count: agg.bounced,
-            }, { onConflict: 'workspace_id,metric_date' });
-            historicalDaysProcessed++;
-          }
-          console.log(`  Fallback: Aggregated ${dateAggregates.size} days from per-campaign metrics`);
-        }
-      }
-    }
-    
-    console.log(`Historical stats complete: ${historicalDaysProcessed} days processed`);
-    progress.metrics_created += historicalDaysProcessed;
-
-    // Sync complete
     await supabase.from('api_connections').update({
       sync_status: 'success',
       sync_progress: { 
         completed: true, 
+        historical_complete: true,
         total_campaigns: campaigns.length,
-        historical_days: historicalDaysProcessed,
+        historical_days: progress.historical_days,
       },
       last_sync_at: new Date().toISOString(),
       last_full_sync_at: new Date().toISOString(),
@@ -623,8 +610,7 @@ serve(async (req) => {
       success: true,
       complete: true,
       progress,
-      historical_days: historicalDaysProcessed,
-      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.metrics_created} metrics (including ${historicalDaysProcessed} historical days), ${progress.email_accounts_synced} email accounts`,
+      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.metrics_created} metrics, ${progress.historical_days} historical days, ${progress.email_accounts_synced} email accounts`,
       next: replyioConnection ? 'Triggering Reply.io sync...' : null,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
