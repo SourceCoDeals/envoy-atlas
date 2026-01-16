@@ -16,11 +16,12 @@ const REPLYIO_V1_URL = 'https://api.reply.io/v1';
 const REPLYIO_V2_URL = 'https://api.reply.io/v2';
 const REPLYIO_V3_URL = 'https://api.reply.io/v3';
 
-// Reply.io Rate Limit: 10 seconds between API calls, 15,000 requests/month
-const RATE_LIMIT_DELAY_LIST = 2000;  // 2 seconds for listing endpoints
-const RATE_LIMIT_DELAY_STATS = 1000; // 1 second for stats
+// Reply.io Rate Limit: 10 seconds between API calls (strict!), 15,000 requests/month
+// CRITICAL: API returns 400 "Too much requests" if called within 10 seconds
+const RATE_LIMIT_DELAY_LIST = 3000;  // 3 seconds for listing endpoints
+const RATE_LIMIT_DELAY_STATS = 10500; // 10.5 seconds for stats - API enforces 10s minimum!
 const TIME_BUDGET_MS = 50000;
-const MAX_BATCHES = 50;
+const MAX_BATCHES = 100; // Increased due to slower rate limiting
 
 function mapSequenceStatus(status: string): string {
   const statusMap: Record<string, string> = {
@@ -300,6 +301,36 @@ Deno.serve(async (req) => {
     for (let i = startIndex; i < allSequences.length; i++) {
       if (isTimeBudgetExceeded()) {
         console.log(`Time budget exceeded at sequence ${i}/${allSequences.length}. Triggering continuation...`);
+        
+        // Aggregate metrics to workspace level before exiting batch
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const { data: batchMetrics } = await supabase
+            .from('replyio_daily_metrics')
+            .select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+            .eq('workspace_id', workspace_id)
+            .eq('metric_date', today);
+          
+          if (batchMetrics && batchMetrics.length > 0) {
+            const aggregated = batchMetrics.reduce((acc, m) => ({
+              sent_count: acc.sent_count + (m.sent_count || 0),
+              opened_count: acc.opened_count + (m.opened_count || 0),
+              clicked_count: acc.clicked_count + (m.clicked_count || 0),
+              replied_count: acc.replied_count + (m.replied_count || 0),
+              positive_reply_count: acc.positive_reply_count + (m.positive_reply_count || 0),
+              bounced_count: acc.bounced_count + (m.bounced_count || 0),
+            }), { sent_count: 0, opened_count: 0, clicked_count: 0, replied_count: 0, positive_reply_count: 0, bounced_count: 0 });
+            
+            await supabase.from('replyio_workspace_daily_metrics').upsert({
+              workspace_id,
+              metric_date: today,
+              ...aggregated,
+            }, { onConflict: 'workspace_id,metric_date' });
+            console.log(`✓ Batch workspace metrics: sent=${aggregated.sent_count}, replies=${aggregated.replied_count}`);
+          }
+        } catch (e) {
+          console.error('Error aggregating batch metrics:', e);
+        }
         
         await supabase.from('api_connections').update({
           sync_progress: { 
