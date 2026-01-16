@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
@@ -8,15 +8,21 @@ interface SyncProgress {
   replyio?: { current: number; total: number; status: string };
 }
 
+const POLL_INTERVAL = 3000; // 3 seconds
+
 export function useSyncData() {
   const { currentWorkspace } = useWorkspace();
   const [syncing, setSyncing] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [progress, setProgress] = useState<SyncProgress>({});
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const syncStartTime = useRef<number | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const elapsedRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Poll sync progress while syncing
+  // Fetch sync progress from database
   const fetchProgress = useCallback(async () => {
-    if (!currentWorkspace?.id) return;
+    if (!currentWorkspace?.id) return null;
 
     const { data: connections } = await supabase
       .from('api_connections')
@@ -30,14 +36,14 @@ export function useSyncData() {
         const syncProgress = conn.sync_progress as any;
         if (conn.platform === 'smartlead' && syncProgress) {
           newProgress.smartlead = {
-            current: syncProgress.current_index || 0,
+            current: syncProgress.current_index || syncProgress.campaign_index || 0,
             total: syncProgress.total_campaigns || 0,
             status: conn.sync_status || 'idle'
           };
         } else if (conn.platform === 'replyio' && syncProgress) {
           newProgress.replyio = {
-            current: syncProgress.current_index || 0,
-            total: syncProgress.cached_sequences?.length || 0,
+            current: syncProgress.current_index || syncProgress.sequence_index || 0,
+            total: syncProgress.cached_sequences?.length || syncProgress.total_sequences || 0,
             status: conn.sync_status || 'idle'
           };
         }
@@ -49,20 +55,84 @@ export function useSyncData() {
   }, [currentWorkspace?.id]);
 
   // Check if sync is still in progress
-  const isSyncInProgress = (progress: SyncProgress) => {
-    const slProgress = progress.smartlead;
-    const rioProgress = progress.replyio;
+  const isSyncInProgress = useCallback((prog: SyncProgress) => {
+    const slProgress = prog.smartlead;
+    const rioProgress = prog.replyio;
     
-    const slIncomplete = slProgress && slProgress.current < slProgress.total && slProgress.status !== 'error';
-    const rioIncomplete = rioProgress && rioProgress.current < rioProgress.total && rioProgress.status !== 'error';
+    const slIncomplete = slProgress && slProgress.total > 0 && 
+      slProgress.current < slProgress.total && slProgress.status !== 'error';
+    const rioIncomplete = rioProgress && rioProgress.total > 0 && 
+      rioProgress.current < rioProgress.total && rioProgress.status !== 'error';
     
-    return slIncomplete || rioIncomplete;
-  };
+    // Also check if status is 'syncing' or 'in_progress'
+    const slSyncing = slProgress?.status === 'syncing' || slProgress?.status === 'in_progress';
+    const rioSyncing = rioProgress?.status === 'syncing' || rioProgress?.status === 'in_progress';
+    
+    return slIncomplete || rioIncomplete || slSyncing || rioSyncing;
+  }, []);
+
+  // Start polling when sync begins
+  const startPolling = useCallback(() => {
+    if (pollingRef.current) return;
+    
+    pollingRef.current = setInterval(async () => {
+      const currentProgress = await fetchProgress();
+      if (currentProgress && !isSyncInProgress(currentProgress)) {
+        stopPolling();
+        setSyncing(false);
+        setLastSyncAt(new Date().toISOString());
+        toast.success('Sync complete!', {
+          description: 'All campaigns synced successfully'
+        });
+      }
+    }, POLL_INTERVAL);
+  }, [fetchProgress, isSyncInProgress]);
+
+  // Stop polling
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (elapsedRef.current) {
+      clearInterval(elapsedRef.current);
+      elapsedRef.current = null;
+    }
+  }, []);
+
+  // Track elapsed time
+  useEffect(() => {
+    if (syncing && !elapsedRef.current) {
+      syncStartTime.current = Date.now();
+      setElapsedTime(0);
+      elapsedRef.current = setInterval(() => {
+        if (syncStartTime.current) {
+          setElapsedTime(Math.floor((Date.now() - syncStartTime.current) / 1000));
+        }
+      }, 1000);
+    } else if (!syncing && elapsedRef.current) {
+      clearInterval(elapsedRef.current);
+      elapsedRef.current = null;
+    }
+    
+    return () => {
+      if (elapsedRef.current) {
+        clearInterval(elapsedRef.current);
+      }
+    };
+  }, [syncing]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
 
   const triggerSync = async (autoContinue = true) => {
     if (!currentWorkspace?.id || syncing) return;
 
     setSyncing(true);
+    setElapsedTime(0);
+    syncStartTime.current = Date.now();
     
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -83,6 +153,7 @@ export function useSyncData() {
         toast.info('No platforms connected', {
           description: 'Connect SmartLead or Reply.io to sync data'
         });
+        setSyncing(false);
         return;
       }
 
@@ -99,83 +170,47 @@ export function useSyncData() {
             body: { 
               workspace_id: currentWorkspace.id,
               sync_type: 'full',
-              reset: !isResume  // Only reset if not resuming
+              reset: !isResume,
+              auto_continue: true
             }
           })
         );
       }
 
-      // Trigger Reply.io sync if connected
-      if (connectedPlatforms.includes('replyio')) {
+      // Trigger Reply.io sync if connected (only if SmartLead not connected)
+      if (connectedPlatforms.includes('replyio') && !connectedPlatforms.includes('smartlead')) {
         syncPromises.push(
           supabase.functions.invoke('replyio-sync', {
             body: { 
               workspace_id: currentWorkspace.id,
               sync_type: 'full',
-              reset: !isResume  // Only reset if not resuming
+              reset: !isResume,
+              auto_continue: true
             }
           })
         );
       }
 
       toast.info(isResume ? 'Resuming sync...' : 'Starting sync...', {
-        description: `Syncing ${connectedPlatforms.join(' & ')}`
+        description: `Syncing ${connectedPlatforms.join(' & ')} - will continue automatically`
       });
 
-      const results = await Promise.allSettled(syncPromises);
+      await Promise.allSettled(syncPromises);
       
-      let hasErrors = false;
+      // Start polling for progress updates
+      startPolling();
       
-      results.forEach((result) => {
-        if (result.status === 'rejected' || result.value?.error) {
-          hasErrors = true;
-          console.error('Sync error:', result);
-        }
-      });
+      // Initial progress fetch
+      await fetchProgress();
 
-      // Check progress after sync batch completes
-      const newProgress = await fetchProgress();
-      setLastSyncAt(new Date().toISOString());
-
-      if (hasErrors) {
-        toast.warning('Sync encountered errors', {
-          description: 'Check logs for details'
-        });
-      } else if (newProgress && isSyncInProgress(newProgress)) {
-        const slProg = newProgress.smartlead;
-        const rioProg = newProgress.replyio;
-        
-        const progressText = [
-          slProg && slProg.total > 0 ? `SmartLead: ${slProg.current}/${slProg.total}` : null,
-          rioProg && rioProg.total > 0 ? `Reply.io: ${rioProg.current}/${rioProg.total}` : null
-        ].filter(Boolean).join(', ');
-
-        toast.info('Sync in progress', {
-          description: `${progressText}. Auto-continuing...`,
-          duration: 3000
-        });
-
-        // Auto-continue after a short delay
-        if (autoContinue) {
-          setTimeout(() => {
-            triggerSync(true);
-          }, 2000);
-        }
-      } else {
-        toast.success('Sync complete!', {
-          description: `All campaigns synced from ${connectedPlatforms.join(' & ')}`
-        });
-      }
-
-      return { progress: newProgress, platforms: connectedPlatforms };
+      return { platforms: connectedPlatforms };
     } catch (err) {
       console.error('Sync error:', err);
       toast.error('Sync failed', {
         description: err instanceof Error ? err.message : 'Failed to refresh data'
       });
-      throw err;
-    } finally {
       setSyncing(false);
+      throw err;
     }
   };
 
@@ -183,6 +218,7 @@ export function useSyncData() {
     syncing,
     lastSyncAt,
     progress,
+    elapsedTime,
     triggerSync,
     fetchProgress,
   };
