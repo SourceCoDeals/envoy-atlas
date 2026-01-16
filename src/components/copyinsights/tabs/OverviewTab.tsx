@@ -74,6 +74,8 @@ const MetricCard = ({ title, value, change, benchmark, status, icon }: MetricCar
   );
 };
 
+import { ExecutiveSummary } from '../ExecutiveSummary';
+
 export function OverviewTab({
   subjectLines,
   patterns,
@@ -94,6 +96,37 @@ export function OverviewTab({
   const avgReplyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
   const avgOpenRate = totalSent > 0 ? (totalOpens / totalSent) * 100 : 0;
   const positiveRate = totalReplies > 0 ? (totalPositive / totalReplies) * 100 : 0;
+
+  // Generate executive summary insights
+  const executiveInsights = [
+    {
+      type: avgReplyRate >= 3.43 ? 'positive' as const : 'warning' as const,
+      title: avgReplyRate >= 3.43 ? 'Your emails are performing above average' : 'Your reply rate needs attention',
+      description: avgReplyRate >= 3.43 
+        ? `At ${avgReplyRate.toFixed(1)}%, you're outperforming the industry benchmark of 3.43%. Keep doing what works!`
+        : `At ${avgReplyRate.toFixed(1)}%, you're below the 3.43% benchmark. The good news: small changes can make a big difference.`,
+      impact: avgReplyRate >= 3.43 ? '+' + (avgReplyRate - 3.43).toFixed(1) + '% vs benchmark' : (avgReplyRate - 3.43).toFixed(1) + '% vs benchmark',
+    },
+    {
+      type: positiveRate >= 50 ? 'positive' as const : 'negative' as const,
+      title: positiveRate >= 50 ? 'Most replies are positive' : 'Too many negative replies',
+      description: positiveRate >= 50
+        ? `${positiveRate.toFixed(0)}% of people who reply are interested—you're reaching the right audience.`
+        : `Only ${positiveRate.toFixed(0)}% of replies are positive. You may be targeting the wrong audience or your message isn't resonating.`,
+      impact: positiveRate >= 50 ? 'Good fit' : 'Needs work',
+    },
+    {
+      type: 'neutral' as const,
+      title: `Analyzed ${totalSent.toLocaleString()} emails`,
+      description: totalSent > 5000 
+        ? 'You have plenty of data for reliable insights. The patterns we show are statistically significant.'
+        : 'You have limited data so far. Insights will become more reliable as you send more emails.',
+    },
+  ];
+
+  const bottomLine = avgReplyRate >= 3.43 
+    ? 'Focus on scaling what works—your Timeline hooks and short emails are driving results.'
+    : 'Start with quick wins: switch to Timeline hooks in your opening lines and keep emails under 100 words.';
 
   // Top and bottom performers from patterns
   const topPatterns = patterns.filter(p => p.comparison_to_baseline > 0).slice(0, 5);
@@ -120,6 +153,14 @@ export function OverviewTab({
 
   return (
     <div className="space-y-6">
+      {/* Executive Summary */}
+      <ExecutiveSummary
+        title="What's Happening With Your Email Copy"
+        subtitle="Here's the plain-English breakdown of your email performance"
+        insights={executiveInsights}
+        bottomLine={bottomLine}
+      />
+
       {/* Performance Summary Cards */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <MetricCard 

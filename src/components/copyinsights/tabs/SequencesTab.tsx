@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { ExecutiveSummary } from '../ExecutiveSummary';
 
 interface SequencesTabProps {
   // Add proper types when connecting to real data
@@ -23,8 +24,38 @@ export function SequencesTab({}: SequencesTabProps) {
     { type: 'Bump/Reminder', example: '"Just checking if you saw my email..."', rate: 3.2, lift: '-20%', status: 'bad' },
   ];
 
+  const executiveInsights = [
+    {
+      type: 'positive' as const,
+      title: '80% of replies come from the first 2 emails',
+      description: 'Most people who will reply do so quickly. After that, you get diminishing returns. Focus your best copy on Steps 1 and 2.',
+      impact: 'Focus here',
+    },
+    {
+      type: 'warning' as const,
+      title: 'Your follow-up style matters',
+      description: '"Reply-style" follow-ups (that look like natural replies) get +30% more responses than generic "checking in" messages.',
+      impact: '+30% lift',
+    },
+    {
+      type: 'neutral' as const,
+      title: 'Sweet spot: 4-5 emails over 2-3 weeks',
+      description: 'Longer sequences rarely help. After 4-5 touches, most prospects have made up their mind. More emails just annoy them.',
+    },
+  ];
+
+  const bottomLine = 'Put your best hooks and CTAs in Steps 1-2. Use reply-style follow-ups. Keep sequences to 4-5 emails max.';
+
   return (
     <div className="space-y-6">
+      {/* Executive Summary */}
+      <ExecutiveSummary
+        title="Sequence Performance: The Big Picture"
+        subtitle="How your multi-step email sequences are performing"
+        insights={executiveInsights}
+        bottomLine={bottomLine}
+      />
+
       {/* Sequence Overview */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Active Sequences</div><div className="text-2xl font-bold">698</div></CardContent></Card>
