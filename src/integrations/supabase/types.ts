@@ -4135,6 +4135,59 @@ export type Database = {
           },
         ]
       }
+      replyio_workspace_daily_metrics: {
+        Row: {
+          bounced_count: number | null
+          clicked_count: number | null
+          created_at: string | null
+          id: string
+          metric_date: string
+          opened_count: number | null
+          positive_reply_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          unsubscribed_count: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          bounced_count?: number | null
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date: string
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          unsubscribed_count?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          bounced_count?: number | null
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date?: string
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          unsubscribed_count?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "replyio_workspace_daily_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sending_domains: {
         Row: {
           created_at: string

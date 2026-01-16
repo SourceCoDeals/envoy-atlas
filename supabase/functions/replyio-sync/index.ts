@@ -431,35 +431,63 @@ Deno.serve(async (req) => {
           
           if (seqDetails) {
             // Log ALL fields to understand the response format
-            console.log(`  v1 API response type: ${Array.isArray(seqDetailsRaw) ? 'array' : 'object'}`);
-            console.log(`  v1 API full response:`, JSON.stringify(seqDetails).substring(0, 800));
+            const respType = Array.isArray(seqDetailsRaw) ? 'array' : 'object';
+            const fullResp = JSON.stringify(seqDetails).substring(0, 1200);
+            console.log(`  v1 API response type: ${respType}`);
+            console.log(`  v1 API full response:`, fullResp);
+            
+            // Store first response sample for debugging (accessible via sync_progress)
+            if (i === startIndex && progress.sequences_synced === 1) {
+              await supabase.from('api_connections').update({
+                sync_progress: {
+                  ...existingProgress,
+                  debug_v1_sample: fullResp,
+                  debug_v1_keys: Object.keys(seqDetails).join(', '),
+                },
+              }).eq('id', connection.id);
+            }
             
             const today = new Date().toISOString().split('T')[0];
             
-            // Reply.io v1 API field names from actual documentation
-            // The API returns fields like: id, name, emails (array), stats (object), etc.
-            const stats = seqDetails.stats || seqDetails.statistics || seqDetails;
+            // Reply.io v1 API field names - trying ALL possible variations
+            // The v1 API commonly returns: id, name, emails[], and possibly nested stats
+            const stats = seqDetails.stats || seqDetails.statistics || seqDetails.counters || {};
             
-            // Try nested stats object first, then flat fields
-            const sentCount = stats.deliveredContacts ?? stats.deliveriesCount ?? stats.delivered ?? 
-                              seqDetails.deliveriesCount ?? seqDetails.delivered ?? 
-                              seqDetails.totalDelivered ?? seqDetails.emails_sent ?? 
-                              seqDetails.sentCount ?? seqDetails.sent ?? 0;
-            const repliedCount = stats.repliedContacts ?? stats.repliesCount ?? stats.replied ?? 
-                                 seqDetails.repliesCount ?? seqDetails.replied ?? 
-                                 seqDetails.totalReplies ?? seqDetails.replies ?? 0;
-            const openedCount = stats.openedContacts ?? stats.opensCount ?? stats.opened ?? 
-                                seqDetails.opensCount ?? seqDetails.opened ?? 
-                                seqDetails.totalOpened ?? seqDetails.opens ?? 0;
-            const bouncedCount = stats.bouncedContacts ?? stats.bouncesCount ?? stats.bounced ?? 
-                                 seqDetails.bouncesCount ?? seqDetails.bounced ?? 
-                                 seqDetails.totalBounced ?? seqDetails.bounces ?? 0;
-            const clickedCount = stats.clickedContacts ?? stats.clicksCount ?? stats.clicked ?? 
-                                 seqDetails.clicksCount ?? seqDetails.clicked ?? 
-                                 seqDetails.totalClicked ?? seqDetails.clicks ?? 0;
-            const interestedCount = stats.interestedContacts ?? stats.interestedCount ?? stats.interested ?? 
-                                    seqDetails.interestedCount ?? seqDetails.interested ?? 
-                                    seqDetails.totalInterested ?? 0;
+            // Comprehensive extraction with explicit null-coalescing chain
+            // Priority: nested stats object > flat seqDetails fields > 0
+            const sentCount = Number(
+              stats.deliveredContacts ?? stats.deliveriesCount ?? stats.delivered ?? stats.sentContacts ?? stats.sent ??
+              seqDetails.deliveriesCount ?? seqDetails.delivered ?? seqDetails.deliveredContacts ??
+              seqDetails.totalDelivered ?? seqDetails.emails_sent ?? seqDetails.sentCount ?? seqDetails.sent ??
+              seqDetails.contactsDelivered ?? seqDetails.peopleDelivered ?? 0
+            );
+            const repliedCount = Number(
+              stats.repliedContacts ?? stats.repliesCount ?? stats.replied ??
+              seqDetails.repliesCount ?? seqDetails.replied ?? seqDetails.repliedContacts ??
+              seqDetails.totalReplies ?? seqDetails.replies ?? 
+              seqDetails.contactsReplied ?? seqDetails.peopleReplied ?? 0
+            );
+            const openedCount = Number(
+              stats.openedContacts ?? stats.opensCount ?? stats.opened ??
+              seqDetails.opensCount ?? seqDetails.opened ?? seqDetails.openedContacts ??
+              seqDetails.totalOpened ?? seqDetails.opens ?? 
+              seqDetails.contactsOpened ?? seqDetails.peopleOpened ?? 0
+            );
+            const bouncedCount = Number(
+              stats.bouncedContacts ?? stats.bouncesCount ?? stats.bounced ??
+              seqDetails.bouncesCount ?? seqDetails.bounced ?? seqDetails.bouncedContacts ??
+              seqDetails.totalBounced ?? seqDetails.bounces ?? 0
+            );
+            const clickedCount = Number(
+              stats.clickedContacts ?? stats.clicksCount ?? stats.clicked ??
+              seqDetails.clicksCount ?? seqDetails.clicked ?? seqDetails.clickedContacts ??
+              seqDetails.totalClicked ?? seqDetails.clicks ?? 0
+            );
+            const interestedCount = Number(
+              stats.interestedContacts ?? stats.interestedCount ?? stats.interested ??
+              seqDetails.interestedCount ?? seqDetails.interested ?? seqDetails.interestedContacts ??
+              seqDetails.totalInterested ?? 0
+            );
             
             console.log(`  v1 Extracted metrics: sent=${sentCount}, opens=${openedCount}, replies=${repliedCount}, bounces=${bouncedCount}`);
             
