@@ -818,32 +818,61 @@ serve(async (req) => {
         try {
           const sequencesRaw = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
           
-          // Debug: Log raw response structure
-          console.log(`  Sequences API raw response type: ${typeof sequencesRaw}, isArray: ${Array.isArray(sequencesRaw)}`);
+          // COMPREHENSIVE Debug: Log raw response structure
+          console.log(`  Sequences API raw response:`, JSON.stringify(sequencesRaw).substring(0, 600));
+          console.log(`  Sequences API type: ${typeof sequencesRaw}, isArray: ${Array.isArray(sequencesRaw)}`);
+          
           if (sequencesRaw && !Array.isArray(sequencesRaw)) {
             console.log(`  Sequences API response keys:`, Object.keys(sequencesRaw).join(', '));
           }
           
-          // Handle different response formats
-          const sequences: SmartleadSequence[] = Array.isArray(sequencesRaw) 
-            ? sequencesRaw 
-            : (sequencesRaw?.data || sequencesRaw?.sequences || sequencesRaw?.steps || []);
+          // Handle ALL possible response formats from SmartLead API
+          let sequences: SmartleadSequence[] = [];
+          
+          if (Array.isArray(sequencesRaw)) {
+            sequences = sequencesRaw;
+          } else if (sequencesRaw?.data && Array.isArray(sequencesRaw.data)) {
+            sequences = sequencesRaw.data;
+          } else if (sequencesRaw?.sequences && Array.isArray(sequencesRaw.sequences)) {
+            sequences = sequencesRaw.sequences;
+          } else if (sequencesRaw?.steps && Array.isArray(sequencesRaw.steps)) {
+            sequences = sequencesRaw.steps;
+          } else if (sequencesRaw?.email_sequences && Array.isArray(sequencesRaw.email_sequences)) {
+            sequences = sequencesRaw.email_sequences;
+          } else if (sequencesRaw && typeof sequencesRaw === 'object' && !Array.isArray(sequencesRaw)) {
+            // Maybe it's a single sequence object
+            if (sequencesRaw.seq_id || sequencesRaw.id || sequencesRaw.subject || sequencesRaw.email_body) {
+              sequences = [sequencesRaw];
+            }
+          }
           
           if (sequences && sequences.length > 0) {
             console.log(`  Found ${sequences.length} sequences for campaign`);
             
-            for (const seq of sequences) {
-              // Log sequence structure to debug field names
-              console.log(`    Sequence keys: ${Object.keys(seq).join(', ')}`);
+            for (let seqIdx = 0; seqIdx < sequences.length; seqIdx++) {
+              const seq = sequences[seqIdx];
               
-              const mainSubject = seq.subject || (seq as any).email_subject || '';
-              const mainBody = seq.email_body || (seq as any).body || (seq as any).content || '';
+              // Log sequence structure to debug field names
+              console.log(`    Sequence ${seqIdx + 1} keys: ${Object.keys(seq).join(', ')}`);
+              console.log(`    Sequence ${seqIdx + 1} sample:`, JSON.stringify(seq).substring(0, 300));
+              
+              // SmartLead sequence field variations
+              const mainSubject = seq.subject || (seq as any).email_subject || (seq as any).emailSubject || 
+                                  (seq as any).title || (seq as any).name || '';
+              const mainBody = seq.email_body || (seq as any).body || (seq as any).emailBody || 
+                               (seq as any).content || (seq as any).text || (seq as any).template || '';
+              
+              if (!mainSubject && !mainBody) {
+                console.log(`    Skipping sequence ${seqIdx + 1} - no subject or body found`);
+                continue;
+              }
+              
               const mainVars = extractPersonalizationVars(mainSubject + ' ' + mainBody);
               const mainWordCount = mainBody.split(/\s+/).filter(Boolean).length;
-              const seqId = seq.seq_id || (seq as any).id || (seq as any).sequence_id;
-              const seqNumber = seq.seq_number || (seq as any).step_number || (seq as any).order || 1;
+              const seqId = seq.seq_id || (seq as any).id || (seq as any).sequence_id || seqIdx;
+              const seqNumber = seq.seq_number || (seq as any).step_number || (seq as any).order || (seqIdx + 1);
               
-              // Upsert main sequence as variant (WITHOUT step_number - column doesn't exist)
+              // Upsert main sequence as variant
               const variantData = {
                 campaign_id: campaignDbId,
                 platform_variant_id: `seq-${seqId}`,
@@ -857,15 +886,17 @@ serve(async (req) => {
                 is_control: true,
               };
               
+              console.log(`    Upserting variant: seq-${seqId} with subject "${mainSubject.substring(0, 40)}..."`);
+              
               const { error: variantError } = await supabase.from('smartlead_variants')
                 .upsert(variantData, { onConflict: 'campaign_id,platform_variant_id' });
               
               if (variantError) {
-                console.error(`  Failed to upsert variant for step ${seqNumber}:`, variantError.message);
-                console.error(`  Variant data:`, JSON.stringify(variantData));
+                console.error(`    Failed to upsert variant for step ${seqNumber}:`, variantError.message);
+                console.error(`    Variant data:`, JSON.stringify(variantData).substring(0, 300));
               } else {
                 progress.variants_synced++;
-                console.log(`  ✓ Variant synced: Step ${seqNumber} (${mainSubject.substring(0, 30)}...)`);
+                console.log(`    ✓ Variant synced: Step ${seqNumber} (${mainSubject.substring(0, 30)}...)`);
               }
 
               // Store A/B variants if they exist
@@ -891,7 +922,7 @@ serve(async (req) => {
                   }, { onConflict: 'campaign_id,platform_variant_id' });
                   
                   if (abError) {
-                    console.error(`  Failed to upsert A/B variant:`, abError.message);
+                    console.error(`    Failed to upsert A/B variant:`, abError.message);
                   } else {
                     progress.variants_synced++;
                   }
@@ -900,7 +931,7 @@ serve(async (req) => {
             }
             console.log(`  Variants synced for campaign: ${sequences.length} steps`);
           } else {
-            console.log(`  No sequences found for campaign ${campaign.name}`);
+            console.log(`  No sequences found for campaign ${campaign.name} (empty or unrecognized format)`);
           }
         } catch (e) {
           console.error(`  Sequences error for ${campaign.name}:`, e);
