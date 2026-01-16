@@ -387,63 +387,128 @@ Deno.serve(async (req) => {
         progress.sequences_synced++;
 
         // ==============================================
-        // Try v2 API for sequence details (includes steps)
+        // Templates/variants: Reply.io sequence templates are NOT present in v1 campaign stats.
+        // We'll try multiple endpoints (v3 first) and store debug samples when we still can't find steps.
         // ==============================================
         let metricsStored = false;
         let variantsStored = false;
-        
+
+        const extractSteps = (resp: any): any[] => {
+          if (!resp) return [];
+          if (Array.isArray(resp)) return resp;
+          // common container keys
+          if (Array.isArray(resp.steps)) return resp.steps;
+          if (Array.isArray(resp.emails)) return resp.emails;
+          if (Array.isArray(resp.items)) return resp.items;
+          if (Array.isArray(resp.data)) return resp.data;
+          if (resp.data && Array.isArray(resp.data.steps)) return resp.data.steps;
+          if (resp.data && Array.isArray(resp.data.emails)) return resp.data.emails;
+          return [];
+        };
+
+        const upsertStepsAsVariants = async (steps: any[], source: string) => {
+          if (!steps.length) return false;
+          console.log(`  ${source} Found ${steps.length} templates`);
+          console.log(`  ${source} First template keys:`, Object.keys(steps[0] || {}).join(', '));
+
+          let storedAny = false;
+          for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+            const step = steps[stepIdx];
+
+            const subject = step.subject || step.emailSubject || step.title || step.subjectLine || '';
+            const body = step.body || step.emailBody || step.text || step.content || step.template || step.html || '';
+            const vars = extractPersonalizationVars(`${subject} ${body}`);
+            const wordCount = String(body).split(/\s+/).filter(Boolean).length;
+
+            if (!subject && !body) continue;
+
+            const platformVariantId = `step-${step.id ?? step.stepId ?? step.templateId ?? stepIdx + 1}`;
+
+            const { error: varErr } = await supabase
+              .from('replyio_variants')
+              .upsert({
+                campaign_id: campaignId,
+                platform_variant_id: platformVariantId,
+                name: step.name || step.title || `Step ${stepIdx + 1}`,
+                variant_type: step.type || step.stepType || 'email',
+                subject_line: subject,
+                body_preview: String(body).substring(0, 500),
+                email_body: String(body),
+                word_count: wordCount,
+                personalization_vars: vars,
+                is_control: true,
+              }, { onConflict: 'campaign_id,platform_variant_id' });
+
+            if (varErr) {
+              console.error(`    Failed to upsert ${source} variant ${platformVariantId}:`, varErr.message);
+            } else {
+              progress.variants_synced++;
+              storedAny = true;
+            }
+          }
+
+          if (storedAny) {
+            variantsStored = true;
+            console.log(`  ✓ ${source} Variants stored`);
+          }
+
+          return storedAny;
+        };
+
+        // Try v3 templates endpoints (best effort – some accounts/tiers may not expose these)
+        try {
+          const tryEndpoints = [
+            { endpoint: `/sequences/${sequence.id}/steps`, label: 'v3 /sequences/{id}/steps' },
+            { endpoint: `/sequences/${sequence.id}/templates`, label: 'v3 /sequences/{id}/templates' },
+            { endpoint: `/sequences/${sequence.id}`, label: 'v3 /sequences/{id}' },
+          ];
+
+          for (const t of tryEndpoints) {
+            const resp = await replyioRequest(t.endpoint, apiKey, { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_LIST });
+            const steps = extractSteps(resp);
+            if (steps.length) {
+              await upsertStepsAsVariants(steps, t.label);
+              break;
+            }
+          }
+        } catch (e) {
+          console.error('  v3 templates fetch error:', (e as Error).message);
+        }
+
+        // ==============================================
+        // Try v2 API for sequence details (sometimes includes steps)
+        // ==============================================
         try {
           const seqDetails = await replyioRequest(
             `/sequences/${sequence.id}`,
             apiKey,
             { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS, useV2: true }
           );
-          
+
           if (seqDetails) {
             console.log(`  v2 API response keys:`, Object.keys(seqDetails).join(', '));
-            
-            // v2 API returns steps directly in the sequence object
-            const steps = seqDetails.steps || seqDetails.emails || [];
+
+            const steps = extractSteps(seqDetails);
             console.log(`  v2 Found ${steps.length} steps/templates`);
-            
-            if (steps.length > 0) {
-              for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
-                const step = steps[stepIdx];
-                console.log(`    Step ${stepIdx + 1} keys:`, Object.keys(step).join(', '));
-                
-                // v2 step structure
-                const subject = step.subject || step.emailSubject || step.title || '';
-                const body = step.body || step.emailBody || step.text || step.content || '';
-                const vars = extractPersonalizationVars(subject + ' ' + body);
-                const wordCount = body.split(/\s+/).filter(Boolean).length;
-                
-                const variantData = {
-                  campaign_id: campaignId,
-                  platform_variant_id: `step-${step.id || step.stepId || stepIdx + 1}`,
-                  name: step.name || `Step ${stepIdx + 1}`,
-                  variant_type: step.type || 'email',
-                  subject_line: subject,
-                  body_preview: body.substring(0, 500),
-                  email_body: body,
-                  word_count: wordCount,
-                  personalization_vars: vars,
-                  is_control: true,
-                };
-                
-                const { error: varErr } = await supabase.from('replyio_variants')
-                  .upsert(variantData, { onConflict: 'campaign_id,platform_variant_id' });
-                
-                if (varErr) {
-                  console.error(`    Failed to upsert variant step ${stepIdx + 1}:`, varErr.message);
-                } else {
-                  progress.variants_synced++;
-                  variantsStored = true;
-                }
-              }
+
+            if (!variantsStored && steps.length > 0) {
+              await upsertStepsAsVariants(steps, 'v2 /sequences/{id}');
             }
           }
         } catch (e) {
           console.error(`  v2 API error for ${sequence.name}:`, (e as Error).message);
+        }
+
+        // If we still couldn't find templates, store a tiny debug marker once per run
+        if (!variantsStored && i === startIndex && progress.sequences_synced === 1) {
+          try {
+            await supabase.from('api_connections').update({
+              sync_progress: {
+                ...existingProgress,
+                debug_templates_note: 'No templates found via v3/v2 endpoints; v1 stats has no emails.',
+              },
+            }).eq('id', connection.id);
+          } catch {}
         }
 
         // ==============================================

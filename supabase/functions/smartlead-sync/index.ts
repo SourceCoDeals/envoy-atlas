@@ -473,7 +473,11 @@ serve(async (req) => {
             }
             
             // Extract reply content from email_history
-            const receivedMessages = reply.email_history?.filter(e => e.type === 'RECEIVED') || [];
+            const receivedMessages = reply.email_history?.filter(e => {
+              const t = String((e as any).type || '').toUpperCase();
+              // SmartLead docs use REPLY; some payloads use RECEIVED
+              return t === 'REPLY' || t === 'RECEIVED';
+            }) || [];
             
             for (const msg of receivedMessages) {
               // Create robust unique message_id that handles edge cases
@@ -1018,7 +1022,11 @@ serve(async (req) => {
             const campaignDbId = campaignLookup.get(String(reply.email_campaign_id));
             if (!campaignDbId) continue;
             
-            const receivedMessages = reply.email_history?.filter(e => e.type === 'RECEIVED') || [];
+            const receivedMessages = reply.email_history?.filter(e => {
+              const t = String((e as any).type || '').toUpperCase();
+              // SmartLead docs use REPLY; some payloads use RECEIVED
+              return t === 'REPLY' || t === 'RECEIVED';
+            }) || [];
             
             for (const msg of receivedMessages) {
               // Create robust unique message_id that handles edge cases
