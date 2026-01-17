@@ -82,7 +82,7 @@ export function LinkedCampaignsList({ campaigns, onUnlink, unlinking }: LinkedCa
                 className="h-7 w-7"
                 asChild
               >
-                <Link to={`/email/campaigns/${campaign.platform}/${campaign.id}`}>
+                <Link to={`/campaigns/${campaign.platform}/${campaign.id}/summary`}>
                   <ExternalLink className="h-3.5 w-3.5" />
                 </Link>
               </Button>
