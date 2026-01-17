@@ -8,6 +8,7 @@ const corsHeaders = {
 interface FeatureWithMetrics {
   variant_id: string;
   workspace_id: string;
+  platform: 'smartlead' | 'replyio';
   // Subject features
   subject_is_question: boolean | null;
   subject_has_number: boolean | null;
@@ -32,14 +33,6 @@ interface FeatureWithMetrics {
   replied_count: number;
   positive_count: number;
   opened_count: number;
-}
-
-interface PatternGroup {
-  pattern_name: string;
-  pattern_type: string;
-  pattern_description: string;
-  pattern_criteria: Record<string, any>;
-  variants: FeatureWithMetrics[];
 }
 
 interface ComputedPattern {
@@ -438,18 +431,25 @@ Deno.serve(async (req) => {
 
     console.log(`Computing patterns for workspace: ${workspace_id}`);
 
-    // Fetch all features with metrics for this workspace
-    const { data: features, error: featuresError } = await supabase
-      .from('campaign_variant_features')
-      .select('*')
-      .eq('workspace_id', workspace_id);
+    // ============================================================
+    // FIXED: Query platform-specific feature tables instead of legacy
+    // ============================================================
+    const [{ data: slFeatures, error: slFeatErr }, { data: rioFeatures, error: rioFeatErr }] = await Promise.all([
+      supabase.from('smartlead_variant_features').select('*').eq('workspace_id', workspace_id),
+      supabase.from('replyio_variant_features').select('*').eq('workspace_id', workspace_id),
+    ]);
 
-    if (featuresError) {
-      console.error('Error fetching features:', featuresError);
-      throw featuresError;
-    }
+    if (slFeatErr) console.error('Error fetching Smartlead features:', slFeatErr);
+    if (rioFeatErr) console.error('Error fetching Reply.io features:', rioFeatErr);
 
-    if (!features || features.length === 0) {
+    const allFeatures = [
+      ...(slFeatures || []).map(f => ({ ...f, platform: 'smartlead' as const })),
+      ...(rioFeatures || []).map(f => ({ ...f, platform: 'replyio' as const })),
+    ];
+
+    console.log(`Found ${slFeatures?.length || 0} Smartlead features, ${rioFeatures?.length || 0} Reply.io features`);
+
+    if (allFeatures.length === 0) {
       console.log('No features found for workspace');
       return new Response(
         JSON.stringify({ 
@@ -461,25 +461,52 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch metrics for all variants
-    const variantIds = features.map(f => f.variant_id);
-    const { data: metrics, error: metricsError } = await supabase
-      .from('daily_metrics')
-      .select('variant_id, sent_count, opened_count, replied_count, positive_reply_count')
-      .eq('workspace_id', workspace_id)
-      .in('variant_id', variantIds);
+    // Get variant IDs by platform
+    const slVariantIds = (slFeatures || []).map(f => f.variant_id);
+    const rioVariantIds = (rioFeatures || []).map(f => f.variant_id);
 
-    if (metricsError) {
-      console.error('Error fetching metrics:', metricsError);
-      throw metricsError;
-    }
+    // ============================================================
+    // FIXED: Query platform-specific metrics tables instead of legacy
+    // ============================================================
+    
+    // Get campaign IDs for Smartlead variants
+    const { data: slVariants } = await supabase
+      .from('smartlead_variants')
+      .select('id, campaign_id')
+      .in('id', slVariantIds.length > 0 ? slVariantIds : ['__none__']);
+    
+    const slCampaignIds = [...new Set((slVariants || []).map(v => v.campaign_id))];
+    const slVariantToCampaign = new Map((slVariants || []).map(v => [v.id, v.campaign_id]));
 
-    // Aggregate metrics by variant
-    const metricsMap = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
-    (metrics || []).forEach(m => {
-      if (!m.variant_id) return;
-      const existing = metricsMap.get(m.variant_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
-      metricsMap.set(m.variant_id, {
+    // Get campaign IDs for Reply.io variants  
+    const { data: rioVariantsList } = await supabase
+      .from('replyio_variants')
+      .select('id, campaign_id')
+      .in('id', rioVariantIds.length > 0 ? rioVariantIds : ['__none__']);
+    
+    const rioCampaignIds = [...new Set((rioVariantsList || []).map(v => v.campaign_id))];
+    const rioVariantToCampaign = new Map((rioVariantsList || []).map(v => [v.id, v.campaign_id]));
+
+    // Fetch metrics from platform-specific tables (campaign-level since variant_id is NULL)
+    const [{ data: slMetrics }, { data: rioMetrics }] = await Promise.all([
+      supabase.from('smartlead_daily_metrics')
+        .select('campaign_id, sent_count, opened_count, replied_count, positive_reply_count')
+        .eq('workspace_id', workspace_id)
+        .in('campaign_id', slCampaignIds.length > 0 ? slCampaignIds : ['__none__']),
+      supabase.from('replyio_daily_metrics')
+        .select('campaign_id, sent_count, opened_count, replied_count, positive_reply_count')
+        .eq('workspace_id', workspace_id)
+        .in('campaign_id', rioCampaignIds.length > 0 ? rioCampaignIds : ['__none__']),
+    ]);
+
+    console.log(`Fetched ${slMetrics?.length || 0} Smartlead metric rows, ${rioMetrics?.length || 0} Reply.io metric rows`);
+
+    // Aggregate metrics by campaign_id (since variant_id is NULL, we use campaign metrics)
+    const slCampaignMetrics = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
+    (slMetrics || []).forEach(m => {
+      if (!m.campaign_id) return;
+      const existing = slCampaignMetrics.get(m.campaign_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+      slCampaignMetrics.set(m.campaign_id, {
         sent: existing.sent + (m.sent_count || 0),
         opened: existing.opened + (m.opened_count || 0),
         replied: existing.replied + (m.replied_count || 0),
@@ -487,13 +514,69 @@ Deno.serve(async (req) => {
       });
     });
 
-    // Combine features with metrics
-    const featuresWithMetrics: FeatureWithMetrics[] = features
+    const rioCampaignMetrics = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
+    (rioMetrics || []).forEach(m => {
+      if (!m.campaign_id) return;
+      const existing = rioCampaignMetrics.get(m.campaign_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+      rioCampaignMetrics.set(m.campaign_id, {
+        sent: existing.sent + (m.sent_count || 0),
+        opened: existing.opened + (m.opened_count || 0),
+        replied: existing.replied + (m.replied_count || 0),
+        positive: existing.positive + (m.positive_reply_count || 0),
+      });
+    });
+
+    // Count variants per campaign to distribute metrics
+    const slVariantsPerCampaign = new Map<string, number>();
+    (slVariants || []).forEach(v => {
+      slVariantsPerCampaign.set(v.campaign_id, (slVariantsPerCampaign.get(v.campaign_id) || 0) + 1);
+    });
+
+    const rioVariantsPerCampaign = new Map<string, number>();
+    (rioVariantsList || []).forEach(v => {
+      rioVariantsPerCampaign.set(v.campaign_id, (rioVariantsPerCampaign.get(v.campaign_id) || 0) + 1);
+    });
+
+    // Combine features with metrics (distribute campaign metrics evenly across variants)
+    const featuresWithMetrics: FeatureWithMetrics[] = allFeatures
       .map(f => {
-        const m = metricsMap.get(f.variant_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+        let m = { sent: 0, opened: 0, replied: 0, positive: 0 };
+        
+        if (f.platform === 'smartlead') {
+          const campaignId = slVariantToCampaign.get(f.variant_id);
+          if (campaignId) {
+            const campaignMetrics = slCampaignMetrics.get(campaignId);
+            const variantCount = slVariantsPerCampaign.get(campaignId) || 1;
+            if (campaignMetrics) {
+              // Distribute campaign metrics evenly across variants
+              m = {
+                sent: Math.round(campaignMetrics.sent / variantCount),
+                opened: Math.round(campaignMetrics.opened / variantCount),
+                replied: Math.round(campaignMetrics.replied / variantCount),
+                positive: Math.round(campaignMetrics.positive / variantCount),
+              };
+            }
+          }
+        } else if (f.platform === 'replyio') {
+          const campaignId = rioVariantToCampaign.get(f.variant_id);
+          if (campaignId) {
+            const campaignMetrics = rioCampaignMetrics.get(campaignId);
+            const variantCount = rioVariantsPerCampaign.get(campaignId) || 1;
+            if (campaignMetrics) {
+              m = {
+                sent: Math.round(campaignMetrics.sent / variantCount),
+                opened: Math.round(campaignMetrics.opened / variantCount),
+                replied: Math.round(campaignMetrics.replied / variantCount),
+                positive: Math.round(campaignMetrics.positive / variantCount),
+              };
+            }
+          }
+        }
+
         return {
           variant_id: f.variant_id,
           workspace_id: f.workspace_id,
+          platform: f.platform,
           subject_is_question: f.subject_is_question,
           subject_has_number: f.subject_has_number,
           subject_has_emoji: f.subject_has_emoji,
@@ -525,7 +608,8 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           success: true, 
           message: 'No variants with send data to analyze',
-          patterns_computed: 0 
+          patterns_computed: 0,
+          total_features: allFeatures.length,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -611,6 +695,8 @@ Deno.serve(async (req) => {
         baseline_positive_rate: baselinePositiveRate,
         total_variants_analyzed: featuresWithMetrics.length,
         total_sends_analyzed: totalSent,
+        smartlead_features: slFeatures?.length || 0,
+        replyio_features: rioFeatures?.length || 0,
         top_patterns: computedPatterns.slice(0, 5).map(p => ({
           name: p.pattern_name,
           reply_rate: p.reply_rate,

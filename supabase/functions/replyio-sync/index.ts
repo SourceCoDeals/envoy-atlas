@@ -433,18 +433,22 @@ Deno.serve(async (req) => {
           console.error('Error aggregating batch metrics:', e);
         }
         
-        await supabase.from('api_connections').update({
-          sync_progress: { 
-            cached_sequences: allSequences,
-            sequence_index: i, 
-            total_sequences: allSequences.length,
-            batch_number: batch_number,
-            heartbeat: new Date().toISOString(),
-            debug_info: debugInfo, // Store debug info for troubleshooting
-          },
-          sync_status: 'partial',
-          updated_at: new Date().toISOString(),
-        }).eq('id', connection.id);
+      // ============================================================
+      // FIX: Update last_sync_at on each batch to prevent "stuck" detection
+      // ============================================================
+      await supabase.from('api_connections').update({
+        sync_progress: { 
+          cached_sequences: allSequences,
+          sequence_index: i, 
+          total_sequences: allSequences.length,
+          batch_number: batch_number,
+          heartbeat: new Date().toISOString(),
+          debug_info: debugInfo,
+        },
+        sync_status: 'partial',
+        last_sync_at: new Date().toISOString(), // Update per batch!
+        updated_at: new Date().toISOString(),
+      }).eq('id', connection.id);
 
         const shouldContinue = auto_continue || batch_number === 1 || triggered_by === 'smartlead-complete';
         if (shouldContinue) {

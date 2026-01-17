@@ -12,6 +12,7 @@ interface VariantToBackfill {
   email_body: string | null;
   body_preview: string | null;
   workspace_id: string;
+  platform: 'smartlead' | 'replyio';
 }
 
 // Feature extraction functions (same as sync functions)
@@ -184,103 +185,178 @@ Deno.serve(async (req) => {
 
     console.log(`Backfilling features for workspace: ${workspace_id}, batch_size: ${batch_size}`);
 
-    // Find variants without features
-    const { data: existingFeatures, error: featError } = await supabase
-      .from('campaign_variant_features')
-      .select('variant_id')
-      .eq('workspace_id', workspace_id);
+    // ============================================================
+    // FIXED: Query platform-specific variant tables instead of legacy
+    // ============================================================
+    
+    // Get existing features from both platform-specific feature tables
+    const [{ data: slFeatures }, { data: rioFeatures }] = await Promise.all([
+      supabase.from('smartlead_variant_features').select('variant_id').eq('workspace_id', workspace_id),
+      supabase.from('replyio_variant_features').select('variant_id').eq('workspace_id', workspace_id),
+    ]);
+    
+    const existingSlIds = new Set((slFeatures || []).map(f => f.variant_id));
+    const existingRioIds = new Set((rioFeatures || []).map(f => f.variant_id));
+    
+    console.log(`Existing features: ${existingSlIds.size} Smartlead, ${existingRioIds.size} Reply.io`);
 
-    if (featError) throw featError;
+    // Fetch variants from platform-specific tables
+    const [{ data: slVariants, error: slError }, { data: rioVariants, error: rioError }] = await Promise.all([
+      supabase.from('smartlead_variants').select(`
+        id, campaign_id, subject_line, email_body, body_preview,
+        smartlead_campaigns!inner (workspace_id)
+      `).eq('smartlead_campaigns.workspace_id', workspace_id),
+      
+      supabase.from('replyio_variants').select(`
+        id, campaign_id, subject_line, email_body, body_preview,
+        replyio_campaigns!inner (workspace_id)
+      `).eq('replyio_campaigns.workspace_id', workspace_id),
+    ]);
 
-    const existingVariantIds = new Set((existingFeatures || []).map(f => f.variant_id));
+    if (slError) {
+      console.error('Error fetching Smartlead variants:', slError);
+    }
+    if (rioError) {
+      console.error('Error fetching Reply.io variants:', rioError);
+    }
 
-    // Get variants that need features extracted
-    const { data: variants, error: variantsError } = await supabase
-      .from('campaign_variants')
-      .select(`
-        id,
-        campaign_id,
-        subject_line,
-        email_body,
-        body_preview,
-        campaigns!inner (
-          workspace_id
-        )
-      `)
-      .eq('campaigns.workspace_id', workspace_id);
+    console.log(`Found ${slVariants?.length || 0} Smartlead variants, ${rioVariants?.length || 0} Reply.io variants`);
 
-    if (variantsError) throw variantsError;
+    // Combine and filter variants needing features
+    const variantsToBackfill: VariantToBackfill[] = [];
 
-    // Filter to variants without features
-    const variantsToBackfill: VariantToBackfill[] = (variants || [])
-      .filter(v => !existingVariantIds.has(v.id))
+    // Smartlead variants without features
+    (slVariants || [])
+      .filter(v => !existingSlIds.has(v.id))
       .filter(v => v.subject_line || v.email_body || v.body_preview)
-      .map(v => ({
-        id: v.id,
-        campaign_id: v.campaign_id,
-        subject_line: v.subject_line,
-        email_body: v.email_body,
-        body_preview: v.body_preview,
-        workspace_id: workspace_id,
-      }))
-      .slice(0, batch_size);
+      .forEach(v => {
+        variantsToBackfill.push({
+          id: v.id,
+          campaign_id: v.campaign_id,
+          subject_line: v.subject_line,
+          email_body: v.email_body,
+          body_preview: v.body_preview,
+          workspace_id: workspace_id,
+          platform: 'smartlead',
+        });
+      });
 
-    console.log(`Found ${variantsToBackfill.length} variants to backfill (of ${variants?.length || 0} total)`);
+    // Reply.io variants without features
+    (rioVariants || [])
+      .filter(v => !existingRioIds.has(v.id))
+      .filter(v => v.subject_line || v.email_body || v.body_preview)
+      .forEach(v => {
+        variantsToBackfill.push({
+          id: v.id,
+          campaign_id: v.campaign_id,
+          subject_line: v.subject_line,
+          email_body: v.email_body,
+          body_preview: v.body_preview,
+          workspace_id: workspace_id,
+          platform: 'replyio',
+        });
+      });
 
-    if (variantsToBackfill.length === 0) {
+    // Limit to batch size
+    const batch = variantsToBackfill.slice(0, batch_size);
+    
+    console.log(`Processing batch of ${batch.length} variants (${variantsToBackfill.length} total needing features)`);
+
+    if (batch.length === 0) {
       return new Response(
         JSON.stringify({
           success: true,
           message: 'All variants already have features extracted',
           backfilled: 0,
           remaining: 0,
+          smartlead_total: slVariants?.length || 0,
+          replyio_total: rioVariants?.length || 0,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Extract features for each variant
-    const featuresToInsert = variantsToBackfill.map(variant => {
-      const subjectFeatures = variant.subject_line 
-        ? extractSubjectFeatures(variant.subject_line)
-        : {};
-      
-      const body = variant.email_body || variant.body_preview || '';
-      const bodyFeatures = body ? extractBodyFeatures(body) : {};
-      
-      return {
-        variant_id: variant.id,
-        workspace_id: variant.workspace_id,
-        ...subjectFeatures,
-        ...bodyFeatures,
-        extracted_at: new Date().toISOString(),
-      };
-    });
+    // Separate by platform for insertion into correct tables
+    const slBatch = batch.filter(v => v.platform === 'smartlead');
+    const rioBatch = batch.filter(v => v.platform === 'replyio');
 
-    // Insert features
-    const { error: insertError } = await supabase
-      .from('campaign_variant_features')
-      .insert(featuresToInsert);
+    // Extract features and insert into platform-specific tables
+    let totalInserted = 0;
 
-    if (insertError) {
-      console.error('Error inserting features:', insertError);
-      throw insertError;
+    if (slBatch.length > 0) {
+      const slFeaturesToInsert = slBatch.map(variant => {
+        const subjectFeatures = variant.subject_line 
+          ? extractSubjectFeatures(variant.subject_line)
+          : {};
+        
+        const body = variant.email_body || variant.body_preview || '';
+        const bodyFeatures = body ? extractBodyFeatures(body) : {};
+        
+        return {
+          variant_id: variant.id,
+          workspace_id: variant.workspace_id,
+          ...subjectFeatures,
+          ...bodyFeatures,
+          extracted_at: new Date().toISOString(),
+        };
+      });
+
+      const { error: slInsertError } = await supabase
+        .from('smartlead_variant_features')
+        .upsert(slFeaturesToInsert, { onConflict: 'variant_id' });
+
+      if (slInsertError) {
+        console.error('Error inserting Smartlead features:', slInsertError);
+      } else {
+        totalInserted += slBatch.length;
+        console.log(`Inserted ${slBatch.length} Smartlead variant features`);
+      }
     }
 
-    // Check remaining
-    const totalVariants = (variants || []).filter(v => v.subject_line || v.email_body || v.body_preview).length;
-    const remaining = totalVariants - existingVariantIds.size - variantsToBackfill.length;
+    if (rioBatch.length > 0) {
+      const rioFeaturesToInsert = rioBatch.map(variant => {
+        const subjectFeatures = variant.subject_line 
+          ? extractSubjectFeatures(variant.subject_line)
+          : {};
+        
+        const body = variant.email_body || variant.body_preview || '';
+        const bodyFeatures = body ? extractBodyFeatures(body) : {};
+        
+        return {
+          variant_id: variant.id,
+          workspace_id: variant.workspace_id,
+          ...subjectFeatures,
+          ...bodyFeatures,
+          extracted_at: new Date().toISOString(),
+        };
+      });
 
-    console.log(`Backfilled ${variantsToBackfill.length} variants, ${remaining} remaining`);
+      const { error: rioInsertError } = await supabase
+        .from('replyio_variant_features')
+        .upsert(rioFeaturesToInsert, { onConflict: 'variant_id' });
+
+      if (rioInsertError) {
+        console.error('Error inserting Reply.io features:', rioInsertError);
+      } else {
+        totalInserted += rioBatch.length;
+        console.log(`Inserted ${rioBatch.length} Reply.io variant features`);
+      }
+    }
+
+    const remaining = variantsToBackfill.length - batch.length;
+
+    console.log(`Backfilled ${totalInserted} variants, ${remaining} remaining`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        backfilled: variantsToBackfill.length,
+        backfilled: totalInserted,
         remaining: Math.max(0, remaining),
+        smartlead_processed: slBatch.length,
+        replyio_processed: rioBatch.length,
         message: remaining > 0 
-          ? `Backfilled ${variantsToBackfill.length} variants. ${remaining} remaining - call again to continue.`
-          : `Backfill complete! Processed ${variantsToBackfill.length} variants.`,
+          ? `Backfilled ${totalInserted} variants. ${remaining} remaining - call again to continue.`
+          : `Backfill complete! Processed ${totalInserted} variants.`,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
