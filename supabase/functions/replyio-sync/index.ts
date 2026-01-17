@@ -775,24 +775,35 @@ Deno.serve(async (req) => {
               last_synced_at: new Date().toISOString(),
             }, { onConflict: 'campaign_id' });
             
-            // Store daily delta (or full amount on first sync)
+            // Store daily delta (NOT full cumulative on first sync!)
+            // On first sync, we skip daily_metrics since we don't know actual send dates
+            // The workspace aggregation from historical data handles accurate trends
             const isFirstSync = !prevCumulative;
-            const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
-              workspace_id,
-              campaign_id: campaignId,
-              metric_date: today,
-              sent_count: isFirstSync ? totalSent : deltaSent,
-              opened_count: isFirstSync ? totalOpened : deltaOpened,
-              clicked_count: isFirstSync ? totalClicked : deltaClicked,
-              replied_count: isFirstSync ? totalReplied : deltaReplied,
-              positive_reply_count: isFirstSync ? totalInterested : deltaInterested,
-              bounced_count: isFirstSync ? totalBounced : deltaBounced,
-            }, { onConflict: 'campaign_id,metric_date' });
+            
+            if (!isFirstSync && (deltaSent > 0 || deltaOpened > 0 || deltaReplied > 0 || deltaBounced > 0)) {
+              const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
+                workspace_id,
+                campaign_id: campaignId,
+                metric_date: today,
+                sent_count: deltaSent,
+                opened_count: deltaOpened,
+                clicked_count: deltaClicked,
+                replied_count: deltaReplied,
+                positive_reply_count: deltaInterested,
+                bounced_count: deltaBounced,
+              }, { onConflict: 'campaign_id,metric_date' });
 
-            if (!metricsErr) {
-              progress.metrics_created++;
+              if (!metricsErr) {
+                progress.metrics_created++;
+                metricsStored = true;
+                console.log(`  ✓ Daily delta stored: sent=${deltaSent}, opens=${deltaOpened}, replies=${deltaReplied}`);
+              }
+            } else if (isFirstSync) {
+              console.log(`  First sync - skipping daily_metrics (let historical aggregation handle trends)`);
+              metricsStored = true; // Mark as handled
+            } else {
+              console.log(`  No new activity today - skipping daily_metrics upsert`);
               metricsStored = true;
-              console.log(`  ✓ Metrics stored (${isFirstSync ? 'first sync - full totals' : 'delta'})`);
             }
 
             // Also try v1 email templates if we still don't have variants

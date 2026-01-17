@@ -170,14 +170,40 @@ export function useDashboardData(dateRange?: DateRange) {
       }
       
       // Convert back to sorted array
-      const historicalMetrics = Array.from(metricsByDate.values())
+      let historicalMetrics = Array.from(metricsByDate.values())
         .sort((a, b) => new Date(a.metric_date).getTime() - new Date(b.metric_date).getTime());
       
       console.log(`Dashboard: SmartLead workspace=${smartleadHistorical.length}, Reply.io workspace=${replyioHistorical.length}, merged=${historicalMetrics.length}`);
+      
+      // ==========================================================
+      // FIX: Detect and filter anomalous cumulative data
+      // If one date has >10x the average, it's likely cumulative data
+      // masquerading as daily data (from first sync bug)
+      // ==========================================================
+      if (historicalMetrics.length > 5) {
+        const avgSent = historicalMetrics.reduce((s, m) => s + (m.sent_count || 0), 0) / historicalMetrics.length;
+        const maxSent = Math.max(...historicalMetrics.map(m => m.sent_count || 0));
+        
+        if (maxSent > avgSent * 10 && avgSent > 0) {
+          console.warn(`Dashboard: Detected anomalous spike (max=${maxSent}, avg=${avgSent.toFixed(0)}). Filtering outliers...`);
+          // Filter out the anomalous entries (likely cumulative dumps)
+          const threshold = avgSent * 5;
+          const filtered = historicalMetrics.filter(m => (m.sent_count || 0) <= threshold);
+          
+          if (filtered.length >= 5) {
+            historicalMetrics = filtered;
+            console.log(`Dashboard: Filtered to ${historicalMetrics.length} valid daily metrics`);
+          }
+        }
+      }
 
       // Check if we have any data
       const hasWorkspaceData = historicalMetrics.length > 0;
       const hasCampaignData = campaignMetrics.length > 0;
+      
+      // Also check if campaign data looks valid (not all zeros or corrupted)
+      const campaignDataValid = hasCampaignData && 
+        campaignMetrics.reduce((s, m) => s + (m.sent_count || 0), 0) > 0;
       
       if (!hasWorkspaceData && !hasCampaignData) {
         setHasData(false);
@@ -187,33 +213,42 @@ export function useDashboardData(dateRange?: DateRange) {
 
       setHasData(true);
 
-      // Calculate totals from campaign-level metrics (more accurate per-campaign data)
-      const totals = campaignMetrics.reduce((acc, m) => ({
-        sent: acc.sent + (m.sent_count || 0),
-        opened: acc.opened + (m.opened_count || 0),
-        clicked: acc.clicked + (m.clicked_count || 0),
-        replied: acc.replied + (m.replied_count || 0),
-        bounced: acc.bounced + (m.bounced_count || 0),
-        positive: acc.positive + (m.positive_reply_count || 0),
-        spam: 0,
-        delivered: 0,
-      }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0, spam: 0, delivered: 0 });
-
-      // If campaign metrics are empty but workspace metrics exist, use workspace metrics for totals
-      if (!hasCampaignData && hasWorkspaceData) {
+      // PRIORITY: Use workspace-level historical metrics for totals (more accurate)
+      // These come from day-wise API calls and represent true daily activity
+      // Campaign metrics may be corrupted by first-sync cumulative dumps
+      let totals = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0, spam: 0, delivered: 0 };
+      
+      if (hasWorkspaceData) {
         const workspaceTotals = historicalMetrics.reduce((acc, m) => ({
           sent: acc.sent + (m.sent_count || 0),
           opened: acc.opened + (m.opened_count || 0),
           clicked: acc.clicked + (m.clicked_count || 0),
           replied: acc.replied + (m.replied_count || 0),
           bounced: acc.bounced + (m.bounced_count || 0),
-        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
+          positive: acc.positive + (m.positive_reply_count || 0),
+        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
         
         totals.sent = workspaceTotals.sent;
         totals.opened = workspaceTotals.opened;
         totals.clicked = workspaceTotals.clicked;
         totals.replied = workspaceTotals.replied;
         totals.bounced = workspaceTotals.bounced;
+        totals.positive = workspaceTotals.positive;
+        
+        console.log(`Dashboard: Using workspace totals - sent=${totals.sent}, replied=${totals.replied}`);
+      } else if (campaignDataValid) {
+        // Fallback to campaign-level metrics only if workspace metrics don't exist
+        const campaignTotals = campaignMetrics.reduce((acc, m) => ({
+          sent: acc.sent + (m.sent_count || 0),
+          opened: acc.opened + (m.opened_count || 0),
+          clicked: acc.clicked + (m.clicked_count || 0),
+          replied: acc.replied + (m.replied_count || 0),
+          bounced: acc.bounced + (m.bounced_count || 0),
+          positive: acc.positive + (m.positive_reply_count || 0),
+        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
+        
+        totals = { ...campaignTotals, spam: 0, delivered: 0 };
+        console.log(`Dashboard: Using campaign totals (fallback) - sent=${totals.sent}, replied=${totals.replied}`);
       }
 
       // Calculate delivered if not tracked separately (sent - bounced)

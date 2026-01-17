@@ -819,19 +819,65 @@ serve(async (req) => {
           const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
           const today = new Date().toISOString().split('T')[0];
 
-          await supabase.from('smartlead_daily_metrics').upsert({
-            workspace_id,
+          // Extract lifetime totals (current cumulative values)
+          const totalSent = analytics.sent_count || 0;
+          const totalOpened = analytics.unique_open_count || 0;
+          const totalClicked = analytics.unique_click_count || 0;
+          const totalReplied = analytics.reply_count || 0;
+          const totalBounced = analytics.bounce_count || 0;
+          
+          // Get previous cumulative values to calculate delta
+          const { data: prevCumulative } = await supabase
+            .from('smartlead_campaign_cumulative')
+            .select('*')
+            .eq('campaign_id', campaignDbId)
+            .single();
+          
+          // Calculate daily delta (new activity since last sync)
+          const deltaSent = Math.max(0, totalSent - (prevCumulative?.total_sent || 0));
+          const deltaOpened = Math.max(0, totalOpened - (prevCumulative?.total_opened || 0));
+          const deltaClicked = Math.max(0, totalClicked - (prevCumulative?.total_clicked || 0));
+          const deltaReplied = Math.max(0, totalReplied - (prevCumulative?.total_replied || 0));
+          const deltaBounced = Math.max(0, totalBounced - (prevCumulative?.total_bounced || 0));
+          
+          const isFirstSync = !prevCumulative;
+          console.log(`  Analytics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied} (${isFirstSync ? 'first sync' : 'delta'})`);
+          
+          // Store cumulative values for next comparison
+          await supabase.from('smartlead_campaign_cumulative').upsert({
             campaign_id: campaignDbId,
-            metric_date: today,
-            sent_count: analytics.sent_count || 0,
-            opened_count: analytics.unique_open_count || 0,
-            clicked_count: analytics.unique_click_count || 0,
-            replied_count: analytics.reply_count || 0,
-            bounced_count: analytics.bounce_count || 0,
-          }, { onConflict: 'campaign_id,metric_date' });
-
-          progress.metrics_created++;
-          console.log(`  Analytics synced: sent=${analytics.sent_count}, opens=${analytics.unique_open_count}, replies=${analytics.reply_count}`);
+            workspace_id,
+            total_sent: totalSent,
+            total_opened: totalOpened,
+            total_clicked: totalClicked,
+            total_replied: totalReplied,
+            total_bounced: totalBounced,
+            total_interested: 0, // SmartLead doesn't track this in basic analytics
+            last_synced_at: new Date().toISOString(),
+          }, { onConflict: 'campaign_id' });
+          
+          // Store daily delta (NOT full amount on first sync - let historical fill that)
+          // On first sync, we skip storing to daily_metrics since we don't know
+          // when the actual emails were sent - historical fetch handles that
+          if (!isFirstSync && (deltaSent > 0 || deltaOpened > 0 || deltaReplied > 0 || deltaBounced > 0)) {
+            await supabase.from('smartlead_daily_metrics').upsert({
+              workspace_id,
+              campaign_id: campaignDbId,
+              metric_date: today,
+              sent_count: deltaSent,
+              opened_count: deltaOpened,
+              clicked_count: deltaClicked,
+              replied_count: deltaReplied,
+              bounced_count: deltaBounced,
+              positive_reply_count: 0, // To be classified later
+            }, { onConflict: 'campaign_id,metric_date' });
+            progress.metrics_created++;
+            console.log(`  ✓ Daily delta stored: sent=${deltaSent}, opens=${deltaOpened}, replies=${deltaReplied}`);
+          } else if (isFirstSync) {
+            console.log(`  First sync - skipping daily_metrics (historical fetch provides day-wise data)`);
+          } else {
+            console.log(`  No new activity today - skipping daily_metrics upsert`);
+          }
         } catch (e) {
           console.error(`  Analytics error for ${campaign.name}:`, e);
           progress.errors.push(`Analytics ${campaign.name}: ${(e as Error).message}`);
