@@ -22,6 +22,7 @@ import {
   Database,
   Download,
   ExternalLink,
+  Inbox,
   KeyRound,
   Loader2,
   Phone,
@@ -30,6 +31,8 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
+
+import { DataCoverageIndicator } from "@/components/connections/DataCoverageIndicator";
 
 type SyncProgress = Record<string, any> | null;
 
@@ -370,6 +373,40 @@ export default function Connections() {
       setError(e?.message || "Failed to sync Reply.io");
     } finally {
       setIsSyncing((s) => ({ ...s, replyio: false }));
+    }
+  };
+
+  const handleSyncSmartleadReplies = async () => {
+    if (!currentWorkspace) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncing((s) => ({ ...s, smartlead_replies: true }));
+
+    try {
+      const token = await getAccessToken();
+      const res = await supabase.functions.invoke("smartlead-sync", {
+        body: {
+          workspace_id: currentWorkspace.id,
+          fetch_replies_only: true,
+          auto_continue: true,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || "Sync failed");
+
+      const data = res.data;
+      if (data.success) {
+        setSuccess(`Inbox replies sync complete! Fetched ${data.progress?.replies_fetched || 0} replies.`);
+      }
+
+      await fetchConnections();
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to sync inbox replies");
+    } finally {
+      setIsSyncing((s) => ({ ...s, smartlead_replies: false }));
     }
   };
 
@@ -894,6 +931,20 @@ export default function Connections() {
                           </Button>
                           <Button
                             size="sm"
+                            variant="outline"
+                            onClick={() => handleSyncSmartleadReplies()}
+                            disabled={!!isSyncing.smartlead_replies}
+                            title="Fetch inbox replies and message events"
+                          >
+                            {isSyncing.smartlead_replies ? (
+                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                            ) : (
+                              <Inbox className="mr-2 h-3 w-3" />
+                            )}
+                            Sync Inbox
+                          </Button>
+                          <Button
+                            size="sm"
                             variant="ghost"
                             onClick={() => handleSyncSmartlead({ reset: true })}
                             disabled={!!isSyncing.smartlead}
@@ -1046,6 +1097,11 @@ export default function Connections() {
                     )}
                   </CardContent>
                 </Card>
+
+                {/* Data Coverage Indicator */}
+                {currentWorkspace && (smartleadConnection || replyioConnection) && (
+                  <DataCoverageIndicator workspaceId={currentWorkspace.id} />
+                )}
               </>
             )}
 
