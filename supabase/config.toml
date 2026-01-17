@@ -71,3 +71,6 @@ verify_jwt = false
 
 [functions.sync-recovery]
 verify_jwt = false
+
+[functions.link-data-entities]
+verify_jwt = false
