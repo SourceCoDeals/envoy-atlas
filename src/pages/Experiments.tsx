@@ -5,7 +5,7 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, Plus, Lightbulb, BookOpen, Calculator } from 'lucide-react';
+import { Loader2, Plus, Lightbulb, Calculator } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { ExperimentStatusOverview } from '@/components/experiments/ExperimentStatusOverview';
 import { ActiveExperimentCard, ActiveExperiment, ExperimentVariant } from '@/components/experiments/ActiveExperimentCard';
@@ -45,6 +45,21 @@ function zScoreToPValue(z: number): number {
 // Corrected sample size requirements - much higher than 100!
 const MIN_SAMPLE_SIZE = 500; // Realistic minimum for detecting 50% relative lift
 const CONFIDENCE_THRESHOLD = 95;
+
+// Unified campaign interface
+interface UnifiedCampaign {
+  id: string;
+  name: string;
+  status: string | null;
+  created_at: string;
+  platform: string;
+  variants: Array<{
+    id: string;
+    name: string;
+    subject_line: string | null;
+    is_control: boolean | null;
+  }>;
+}
 
 export default function Experiments() {
   const navigate = useNavigate();
@@ -111,58 +126,121 @@ export default function Experiments() {
     setLoading(true);
 
     try {
-      const { data: campaigns, error: campaignsError } = await supabase
-        .from('campaigns')
-        .select(`
+      // Fetch campaigns from PLATFORM-SPECIFIC tables
+      const [smartleadRes, replyioRes] = await Promise.all([
+        supabase.from('smartlead_campaigns').select(`
           id,
           name,
           status,
           created_at,
-          campaign_variants (
+          smartlead_variants (
             id,
             name,
             subject_line,
             is_control
           )
-        `)
-        .eq('workspace_id', currentWorkspace.id);
+        `).eq('workspace_id', currentWorkspace.id),
+        
+        supabase.from('replyio_campaigns').select(`
+          id,
+          name,
+          status,
+          created_at,
+          replyio_variants (
+            id,
+            name,
+            subject_line,
+            is_control
+          )
+        `).eq('workspace_id', currentWorkspace.id)
+      ]);
 
-      if (campaignsError) throw campaignsError;
+      // Unify campaigns from both platforms
+      const campaigns: UnifiedCampaign[] = [
+        ...(smartleadRes.data || []).map(c => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          created_at: c.created_at,
+          platform: 'smartlead',
+          variants: (c.smartlead_variants || []).map((v: any) => ({
+            id: v.id,
+            name: v.name,
+            subject_line: v.subject_line,
+            is_control: v.is_control,
+          })),
+        })),
+        ...(replyioRes.data || []).map(c => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          created_at: c.created_at,
+          platform: 'replyio',
+          variants: (c.replyio_variants || []).map((v: any) => ({
+            id: v.id,
+            name: v.name,
+            subject_line: v.subject_line,
+            is_control: v.is_control,
+          })),
+        })),
+      ];
 
-      const { data: metrics, error: metricsError } = await supabase
-        .from('daily_metrics')
-        .select('variant_id, sent_count, replied_count, positive_reply_count')
-        .eq('workspace_id', currentWorkspace.id)
-        .not('variant_id', 'is', null);
+      console.log(`[Experiments] Loaded ${smartleadRes.data?.length || 0} Smartlead + ${replyioRes.data?.length || 0} Reply.io campaigns`);
 
-      if (metricsError) throw metricsError;
+      // Get all campaign IDs
+      const smartleadCampaignIds = (smartleadRes.data || []).map(c => c.id);
+      const replyioCampaignIds = (replyioRes.data || []).map(c => c.id);
 
-      const variantMetrics = new Map<string, { sent: number; replied: number; positive: number }>();
-      metrics?.forEach(m => {
-        if (!m.variant_id) return;
-        if (!variantMetrics.has(m.variant_id)) {
-          variantMetrics.set(m.variant_id, { sent: 0, replied: 0, positive: 0 });
+      // Fetch metrics from platform-specific tables
+      const [smartleadMetrics, replyioMetrics] = await Promise.all([
+        smartleadCampaignIds.length > 0
+          ? supabase.from('smartlead_daily_metrics')
+              .select('campaign_id, sent_count, replied_count, positive_reply_count')
+              .eq('workspace_id', currentWorkspace.id)
+          : Promise.resolve({ data: [], error: null }),
+        replyioCampaignIds.length > 0
+          ? supabase.from('replyio_daily_metrics')
+              .select('campaign_id, sent_count, replied_count, positive_reply_count')
+              .eq('workspace_id', currentWorkspace.id)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      // Aggregate campaign-level metrics
+      const campaignMetrics = new Map<string, { sent: number; replied: number; positive: number }>();
+      
+      [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])].forEach(m => {
+        if (!m.campaign_id) return;
+        if (!campaignMetrics.has(m.campaign_id)) {
+          campaignMetrics.set(m.campaign_id, { sent: 0, replied: 0, positive: 0 });
         }
-        const stats = variantMetrics.get(m.variant_id)!;
+        const stats = campaignMetrics.get(m.campaign_id)!;
         stats.sent += m.sent_count || 0;
         stats.replied += m.replied_count || 0;
         stats.positive += m.positive_reply_count || 0;
       });
 
-      const experimentsData: ActiveExperiment[] = (campaigns || [])
-        .filter(c => c.campaign_variants && c.campaign_variants.length >= 2)
+      const experimentsData: ActiveExperiment[] = campaigns
+        .filter(c => c.variants && c.variants.length >= 2)
         .map(campaign => {
-          const variants: ExperimentVariant[] = (campaign.campaign_variants || []).map((v: any) => {
-            const stats = variantMetrics.get(v.id) || { sent: 0, replied: 0, positive: 0 };
+          // Get campaign-level metrics and distribute to variants
+          const stats = campaignMetrics.get(campaign.id) || { sent: 0, replied: 0, positive: 0 };
+          const variantCount = campaign.variants.length;
+          
+          const variants: ExperimentVariant[] = campaign.variants.map((v) => {
+            // Distribute campaign metrics evenly across variants (approximation)
+            const variantSent = Math.round(stats.sent / variantCount);
+            const variantReplied = Math.round(stats.replied / variantCount);
+            const variantPositive = Math.round(stats.positive / variantCount);
+            
             return {
               id: v.id,
               name: v.name,
               subjectLine: v.subject_line,
               isControl: v.is_control || false,
-              sentCount: stats.sent,
-              replyCount: stats.replied,
-              replyRate: stats.sent > 0 ? (stats.replied / stats.sent) * 100 : 0,
-              positiveRate: stats.replied > 0 ? (stats.positive / stats.replied) * 100 : 0,
+              sentCount: variantSent,
+              replyCount: variantReplied,
+              replyRate: variantSent > 0 ? (variantReplied / variantSent) * 100 : 0,
+              positiveRate: variantReplied > 0 ? (variantPositive / variantReplied) * 100 : 0,
             };
           });
 
