@@ -197,6 +197,7 @@ Deno.serve(async (req) => {
       reset = false, 
       batch_number = 1, 
       auto_continue = false,
+      full_backfill = false,
       triggered_by = null 
     } = await req.json();
     
@@ -214,7 +215,7 @@ Deno.serve(async (req) => {
       }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, triggered_by=${triggered_by}`);
+    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, full_backfill=${full_backfill}, triggered_by=${triggered_by}`);
 
     const { data: connection } = await supabase.from('api_connections').select('*')
       .eq('workspace_id', workspace_id).eq('platform', 'replyio').eq('is_active', true).single();
@@ -466,11 +467,20 @@ Deno.serve(async (req) => {
           ];
 
           for (const t of tryEndpoints) {
-            const resp = await replyioRequest(t.endpoint, apiKey, { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_LIST });
-            const steps = extractSteps(resp);
-            if (steps.length) {
-              await upsertStepsAsVariants(steps, t.label);
-              break;
+            try {
+              const resp = await replyioRequest(t.endpoint, apiKey, { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_LIST });
+              // Log first successful response for debugging
+              if (resp && i === startIndex && !variantsStored) {
+                const respStr = JSON.stringify(resp).substring(0, 500);
+                console.log(`  ${t.label} response sample:`, respStr);
+              }
+              const steps = extractSteps(resp);
+              if (steps.length) {
+                await upsertStepsAsVariants(steps, t.label);
+                break;
+              }
+            } catch (e) {
+              console.log(`  ${t.label} failed:`, (e as Error).message);
             }
           }
         } catch (e) {
@@ -480,25 +490,41 @@ Deno.serve(async (req) => {
         // ==============================================
         // Try v2 API for sequence details (sometimes includes steps)
         // ==============================================
-        try {
-          const seqDetails = await replyioRequest(
-            `/sequences/${sequence.id}`,
-            apiKey,
-            { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS, useV2: true }
-          );
+        if (!variantsStored) {
+          try {
+            const seqDetails = await replyioRequest(
+              `/sequences/${sequence.id}`,
+              apiKey,
+              { retries: 2, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS, useV2: true }
+            );
 
-          if (seqDetails) {
-            console.log(`  v2 API response keys:`, Object.keys(seqDetails).join(', '));
+            if (seqDetails) {
+              // Log detailed response for first sequence to debug
+              if (i === startIndex) {
+                const fullResp = JSON.stringify(seqDetails).substring(0, 800);
+                console.log(`  v2 API full response:`, fullResp);
+                console.log(`  v2 API response keys:`, Object.keys(seqDetails).join(', '));
+                
+                // Store debug sample
+                await supabase.from('api_connections').update({
+                  sync_progress: {
+                    ...existingProgress,
+                    debug_v2_sample: fullResp,
+                    debug_v2_keys: Object.keys(seqDetails).join(', '),
+                  },
+                }).eq('id', connection.id);
+              }
 
-            const steps = extractSteps(seqDetails);
-            console.log(`  v2 Found ${steps.length} steps/templates`);
+              const steps = extractSteps(seqDetails);
+              console.log(`  v2 Found ${steps.length} steps/templates`);
 
-            if (!variantsStored && steps.length > 0) {
-              await upsertStepsAsVariants(steps, 'v2 /sequences/{id}');
+              if (steps.length > 0) {
+                await upsertStepsAsVariants(steps, 'v2 /sequences/{id}');
+              }
             }
+          } catch (e) {
+            console.error(`  v2 API error for ${sequence.name}:`, (e as Error).message);
           }
-        } catch (e) {
-          console.error(`  v2 API error for ${sequence.name}:`, (e as Error).message);
         }
 
         // If we still couldn't find templates, store a tiny debug marker once per run
@@ -508,6 +534,7 @@ Deno.serve(async (req) => {
               sync_progress: {
                 ...existingProgress,
                 debug_templates_note: 'No templates found via v3/v2 endpoints; v1 stats has no emails.',
+                debug_checked_at: new Date().toISOString(),
               },
             }).eq('id', connection.id);
           } catch {}
