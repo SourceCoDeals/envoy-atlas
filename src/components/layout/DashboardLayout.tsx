@@ -86,7 +86,6 @@ const emailExperimentNavItems: NavItem[] = [
 const callingMainNavItems: NavItem[] = [
   { title: 'Caller Dashboard', href: '/calling', icon: LayoutDashboard },
   { title: 'Phone Burner', href: '/calling/phoneburner', icon: Phone },
-  { title: 'Engagements', href: '/calling/engagements', icon: Briefcase },
   { title: 'Team', href: '/calling/team', icon: Users },
   { title: 'Top Deals', href: '/calling/deals', icon: BarChart3 },
   { title: 'Top Calls', href: '/calling/top-calls', icon: PhoneCall },
@@ -100,6 +99,15 @@ const callingMainNavItems: NavItem[] = [
 const contactsMainNavItems: NavItem[] = [
   { title: 'All Contacts', href: '/contacts', icon: Users },
   { title: 'Contacts Search', href: '/contacts/search', icon: Mail },
+];
+
+// Engagements channel navigation
+const engagementsMainNavItems: NavItem[] = [
+  { title: 'All Engagements', href: '/engagements', icon: LayoutDashboard },
+];
+
+const engagementsReportsNavItems: NavItem[] = [
+  { title: 'Performance', href: '/engagements/performance', icon: BarChart3 },
 ];
 
 const callingCoachingNavItems: NavItem[] = [
@@ -143,19 +151,28 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       navigate('/calling');
     } else if (newChannel === 'contacts') {
       navigate('/contacts');
+    } else if (newChannel === 'engagements') {
+      navigate('/engagements');
     } else {
       navigate('/');
     }
   };
 
   // Get nav items based on current channel
-  const mainNavItems = channel === 'calling' 
-    ? callingMainNavItems 
-    : channel === 'contacts' 
-      ? contactsMainNavItems 
-      : emailMainNavItems;
-  const reportsNavItems = channel === 'calling' ? callingReportsNavItems : channel === 'contacts' ? [] : emailReportsNavItems;
-  const experimentNavItems = channel === 'email' ? emailExperimentNavItems : channel === 'calling' ? callingCoachingNavItems : [];
+  const getNavItems = () => {
+    switch (channel) {
+      case 'calling':
+        return { main: callingMainNavItems, reports: callingReportsNavItems, experiments: callingCoachingNavItems };
+      case 'contacts':
+        return { main: contactsMainNavItems, reports: [], experiments: [] };
+      case 'engagements':
+        return { main: engagementsMainNavItems, reports: engagementsReportsNavItems, experiments: [] };
+      default:
+        return { main: emailMainNavItems, reports: emailReportsNavItems, experiments: emailExperimentNavItems };
+    }
+  };
+
+  const { main: mainNavItems, reports: reportsNavItems, experiments: experimentNavItems } = getNavItems();
 
   const NavLink = ({ item }: { item: NavItem }) => {
     const isActive = location.pathname === item.href;
@@ -222,6 +239,23 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            onClick={() => handleChannelChange('engagements')}
+            className={cn(
+              'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+              channel === 'engagements'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+            )}
+          >
+            <Briefcase className="h-5 w-5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">Engagements</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
             onClick={() => handleChannelChange('contacts')}
             className={cn(
               'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
@@ -242,7 +276,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     <>
       {/* Logo */}
       <div className="flex h-14 items-center border-b border-border px-4">
-        <Link to={channel === 'calling' ? '/calling' : channel === 'contacts' ? '/contacts' : '/'} className="flex items-center gap-3">
+        <Link to={channel === 'calling' ? '/calling' : channel === 'contacts' ? '/contacts' : channel === 'engagements' ? '/engagements' : '/'} className="flex items-center gap-3">
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
             <BarChart3 className="h-5 w-5 text-primary-foreground" />
           </div>
