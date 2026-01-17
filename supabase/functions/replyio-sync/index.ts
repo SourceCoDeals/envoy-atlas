@@ -418,34 +418,13 @@ Deno.serve(async (req) => {
       if (isTimeBudgetExceeded()) {
         console.log(`Time budget exceeded at sequence ${i}/${allSequences.length}. Triggering continuation...`);
         
-        // Aggregate metrics before exiting batch (just today for speed)
-        const today = new Date().toISOString().split('T')[0];
-        try {
-          const { data: batchMetrics } = await supabase
-            .from('replyio_daily_metrics')
-            .select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
-            .eq('workspace_id', workspace_id)
-            .eq('metric_date', today);
-          
-          if (batchMetrics && batchMetrics.length > 0) {
-            const aggregated = batchMetrics.reduce((acc: any, m: any) => ({
-              sent_count: acc.sent_count + (m.sent_count || 0),
-              opened_count: acc.opened_count + (m.opened_count || 0),
-              clicked_count: acc.clicked_count + (m.clicked_count || 0),
-              replied_count: acc.replied_count + (m.replied_count || 0),
-              positive_reply_count: acc.positive_reply_count + (m.positive_reply_count || 0),
-              bounced_count: acc.bounced_count + (m.bounced_count || 0),
-            }), { sent_count: 0, opened_count: 0, clicked_count: 0, replied_count: 0, positive_reply_count: 0, bounced_count: 0 });
-            
-            await supabase.from('replyio_workspace_daily_metrics').upsert({
-              workspace_id,
-              metric_date: today,
-              ...aggregated,
-            }, { onConflict: 'workspace_id,metric_date' });
-          }
-        } catch (e) {
-          console.error('Error aggregating batch metrics:', e);
-        }
+        // ==========================================================
+        // FIX: Aggregate ALL historical dates before exiting batch
+        // This ensures workspace metrics are available during long syncs
+        // ==========================================================
+        console.log('Running per-batch workspace aggregation...');
+        await aggregateWorkspaceMetrics(supabase, workspace_id);
+        console.log('Per-batch aggregation complete');
         
       // ============================================================
       // FIX: Update last_sync_at on each batch to prevent "stuck" detection
@@ -458,9 +437,10 @@ Deno.serve(async (req) => {
           batch_number: batch_number,
           heartbeat: new Date().toISOString(),
           debug_info: debugInfo,
+          last_aggregated_at: new Date().toISOString(),
         },
         sync_status: 'partial',
-        last_sync_at: new Date().toISOString(), // Update per batch!
+        last_sync_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }).eq('id', connection.id);
 

@@ -156,6 +156,14 @@ export interface InfrastructureMetrics {
   domainBreakdown: DomainBreakdown[];
 }
 
+interface DataAvailability {
+  emailDailyMetrics: boolean;
+  emailCampaignFallback: boolean;
+  callingData: boolean;
+  infrastructureData: boolean;
+  syncInProgress: boolean;
+}
+
 interface EngagementReportData {
   engagement: EngagementDetails | null;
   keyMetrics: KeyMetrics;
@@ -170,6 +178,7 @@ interface EngagementReportData {
   callOutcomes: CallOutcome[];
   recentActivity: ActivityItem[];
   linkedCampaigns: { id: string; name: string; platform: 'smartlead' | 'replyio' }[];
+  dataAvailability: DataAvailability;
 }
 
 export function useEngagementReport(engagementId: string, dateRange?: DateRange) {
@@ -259,6 +268,13 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           callOutcomes: [],
           recentActivity: [],
           linkedCampaigns,
+          dataAvailability: {
+            emailDailyMetrics: false,
+            emailCampaignFallback: false,
+            callingData: false,
+            infrastructureData: emailAccounts.length > 0,
+            syncInProgress: false,
+          },
         });
         setLoading(false);
         return;
@@ -341,16 +357,77 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         fetchAllMatchingCalls(),
       ]);
 
-      // Aggregate email metrics
+      // Aggregate email metrics with fallback logic
       const allEmailMetrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
-      const emailTotals = allEmailMetrics.reduce((acc, m) => ({
-        sent: acc.sent + (m.sent_count || 0),
-        opened: acc.opened + (m.opened_count || 0),
-        clicked: acc.clicked + (m.clicked_count || 0),
-        replied: acc.replied + (m.replied_count || 0),
-        bounced: acc.bounced + (m.bounced_count || 0),
-        positive: acc.positive + (m.positive_reply_count || 0),
-      }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
+      const dailyMetricsTotal = allEmailMetrics.reduce((s, m) => s + (m.sent_count || 0), 0);
+      
+      let emailTotals;
+      let usingFallbackData = false;
+      
+      // If daily metrics are empty or have no data, try campaign-level fallback
+      if (allEmailMetrics.length === 0 || dailyMetricsTotal === 0) {
+        console.log('No daily metrics found, checking for campaign cumulative fallback...');
+        
+        // Fetch cumulative data from campaign tables
+        const smartleadCampaignIds = linkedCampaigns.filter(c => c.platform === 'smartlead').map(c => c.id);
+        const replyioCampaignIds = linkedCampaigns.filter(c => c.platform === 'replyio').map(c => c.id);
+        
+        const [slCampaigns, rioCampaigns] = await Promise.all([
+          smartleadCampaignIds.length > 0 
+            ? supabase.from('smartlead_campaigns')
+                .select('sent_count, opened_count, replied_count, bounced_count, positive_reply_count, clicked_count')
+                .in('id', smartleadCampaignIds)
+            : Promise.resolve({ data: [] }),
+          replyioCampaignIds.length > 0
+            ? supabase.from('replyio_campaigns')
+                .select('sent, opened, replied, bounced, finished')
+                .in('id', replyioCampaignIds)
+            : Promise.resolve({ data: [] }),
+        ]);
+        
+        // Aggregate cumulative data from campaigns
+        const slData = (slCampaigns.data || []) as any[];
+        const rioData = (rioCampaigns.data || []) as any[];
+        
+        const slTotals = slData.reduce((acc, c) => ({
+          sent: acc.sent + (c.sent_count || 0),
+          opened: acc.opened + (c.opened_count || 0),
+          clicked: acc.clicked + (c.clicked_count || 0),
+          replied: acc.replied + (c.replied_count || 0),
+          bounced: acc.bounced + (c.bounced_count || 0),
+          positive: acc.positive + (c.positive_reply_count || 0),
+        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
+        
+        const rioTotals = rioData.reduce((acc, c) => ({
+          sent: acc.sent + (c.sent || 0),
+          opened: acc.opened + (c.opened || 0),
+          clicked: acc.clicked + 0, // Reply.io doesn't track clicks
+          replied: acc.replied + (c.replied || 0),
+          bounced: acc.bounced + (c.bounced || 0),
+          positive: acc.positive + (c.finished || 0), // 'finished' often means positive outcome
+        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
+        
+        emailTotals = {
+          sent: slTotals.sent + rioTotals.sent,
+          opened: slTotals.opened + rioTotals.opened,
+          clicked: slTotals.clicked + rioTotals.clicked,
+          replied: slTotals.replied + rioTotals.replied,
+          bounced: slTotals.bounced + rioTotals.bounced,
+          positive: slTotals.positive + rioTotals.positive,
+        };
+        
+        usingFallbackData = emailTotals.sent > 0;
+        console.log(`Fallback data: ${emailTotals.sent} sent, using fallback: ${usingFallbackData}`);
+      } else {
+        emailTotals = allEmailMetrics.reduce((acc, m) => ({
+          sent: acc.sent + (m.sent_count || 0),
+          opened: acc.opened + (m.opened_count || 0),
+          clicked: acc.clicked + (m.clicked_count || 0),
+          replied: acc.replied + (m.replied_count || 0),
+          bounced: acc.bounced + (m.bounced_count || 0),
+          positive: acc.positive + (m.positive_reply_count || 0),
+        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
+      }
 
       const delivered = emailTotals.sent - emailTotals.bounced;
 
@@ -587,6 +664,13 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         callOutcomes,
         recentActivity,
         linkedCampaigns,
+        dataAvailability: {
+          emailDailyMetrics: allEmailMetrics.length > 0 && !usingFallbackData,
+          emailCampaignFallback: usingFallbackData,
+          callingData: matchingCalls.length > 0,
+          infrastructureData: emailAccounts.length > 0,
+          syncInProgress: false, // Could check api_connections sync_status
+        },
       });
 
     } catch (err) {
