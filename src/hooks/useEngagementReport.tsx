@@ -260,18 +260,17 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       const matchingCalls = (callingData.data || []).filter(call => {
         const engName = (call.engagement_name || '').toLowerCase();
         const callTitle = (call.call_title || '').toLowerCase();
-        const companyName = (call.company_name || '').toLowerCase();
         
         return (
           engName.includes(clientNameLower) ||
           engName.includes(engagementNameLower) ||
-          callTitle.includes(clientNameLower) ||
-          companyName.includes(clientNameLower)
+          callTitle.includes(clientNameLower)
         );
       }).filter(call => {
-        // Apply date filter if provided
-        if (!call.created_at) return true;
-        const callDate = call.created_at.split('T')[0];
+        // Apply date filter using call_date (actual call date) instead of created_at (sync date)
+        const callDateField = call.call_date || call.created_at;
+        if (!callDateField) return true;
+        const callDate = callDateField.split('T')[0];
         if (startDateStr && callDate < startDateStr) return false;
         if (endDateStr && callDate > endDateStr) return false;
         return true;
@@ -293,23 +292,27 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       // Calculate calling metrics
       const totalCalls = matchingCalls.length;
       const connections = matchingCalls.filter(c => 
-        c.call_category && ['connection', 'conversation', 'interested', 'meeting', 'dm reached'].some(cat =>
+        c.call_category && ['connection', 'conversation', 'interested', 'meeting', 'dm reached', 'positive', 'callback'].some(cat =>
           c.call_category?.toLowerCase().includes(cat)
         )
       ).length;
       const conversations = matchingCalls.filter(c =>
-        c.call_category && ['conversation', 'interested', 'meeting'].some(cat =>
+        c.call_category && ['conversation', 'interested', 'meeting', 'positive', 'callback'].some(cat =>
           c.call_category?.toLowerCase().includes(cat)
         )
       ).length;
+      // Count positive responses from both seller_interest_score AND positive categories
       const dmConversations = matchingCalls.filter(c =>
-        (c.seller_interest_score || 0) >= 5
+        (c.seller_interest_score || 0) >= 5 || 
+        (c.call_category && ['interested', 'positive', 'meeting', 'opportunity'].some(cat =>
+          c.call_category?.toLowerCase().includes(cat)
+        ))
       ).length;
       const voicemails = matchingCalls.filter(c =>
         c.call_category && c.call_category.toLowerCase().includes('voicemail')
       ).length;
       const callMeetings = matchingCalls.filter(c =>
-        c.call_category && c.call_category.toLowerCase().includes('meeting')
+        c.call_category && (c.call_category.toLowerCase().includes('meeting') || c.call_category.toLowerCase().includes('appointment'))
       ).length;
       const avgDuration = totalCalls > 0 
         ? matchingCalls.reduce((sum, c) => sum + (c.duration || 0), 0) / totalCalls 
@@ -319,17 +322,21 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           matchingCalls.filter(c => c.composite_score).length || 0
         : 0;
 
-      // Build key metrics
+      // Build key metrics - use actual unique companies from calls
+      const uniqueCompaniesFromCalls = new Set(matchingCalls.map(c => c.company_name).filter(Boolean)).size;
+      // For email, we don't have company data so we use a reasonable estimate based on leads/contacts
+      const estimatedEmailCompanies = emailTotals.sent > 0 ? Math.min(Math.ceil(emailTotals.sent / 2), emailTotals.sent) : 0;
+      // Combine unique companies - calls are actual, email is estimated
+      const totalUniqueCompanies = uniqueCompaniesFromCalls + estimatedEmailCompanies;
+      
       const keyMetrics: KeyMetrics = {
-        companiesContacted: new Set([
-          ...matchingCalls.map(c => c.company_name).filter(Boolean),
-        ]).size + Math.floor(emailTotals.sent / 3), // Estimate unique companies
-        contactsReached: emailTotals.sent + totalCalls,
+        companiesContacted: totalUniqueCompanies,
+        contactsReached: new Set(matchingCalls.map(c => c.contact_name).filter(Boolean)).size + emailTotals.sent,
         totalTouchpoints: emailTotals.sent + totalCalls,
         emailTouchpoints: emailTotals.sent,
         callTouchpoints: totalCalls,
         positiveResponses: emailTotals.positive + dmConversations,
-        meetingsScheduled: callMeetings + Math.floor(emailTotals.positive * 0.3), // Estimate email meetings
+        meetingsScheduled: callMeetings + Math.floor(emailTotals.positive * 0.3),
         opportunities: Math.floor((callMeetings + emailTotals.positive * 0.3) * 0.35),
         responseRate: emailTotals.sent > 0 ? (emailTotals.replied / emailTotals.sent) * 100 : 0,
         meetingRate: (emailTotals.sent + totalCalls) > 0 
@@ -372,13 +379,18 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         avgScore,
       };
 
-      // Build funnel
+      // Build funnel - calculate engaged from actual data (opens + connections)
+      const engagedCount = emailTotals.opened + connections;
+      const engagedPercentage = keyMetrics.companiesContacted > 0 
+        ? Math.round((engagedCount / keyMetrics.contactsReached) * 100) 
+        : 0;
+      
       const funnel: FunnelStage[] = [
         { name: 'Contacted', count: keyMetrics.companiesContacted, percentage: 100 },
-        { name: 'Engaged', count: Math.floor(keyMetrics.companiesContacted * 0.37), percentage: 37 },
+        { name: 'Engaged', count: engagedCount, percentage: engagedPercentage },
         { name: 'Positive Response', count: keyMetrics.positiveResponses, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.positiveResponses / keyMetrics.companiesContacted) * 100) : 0 },
-        { name: 'Meeting', count: keyMetrics.meetingsScheduled, percentage: keyMetrics.positiveResponses > 0 ? Math.round((keyMetrics.meetingsScheduled / keyMetrics.positiveResponses) * 100) : 0 },
-        { name: 'Opportunity', count: keyMetrics.opportunities, percentage: keyMetrics.meetingsScheduled > 0 ? Math.round((keyMetrics.opportunities / keyMetrics.meetingsScheduled) * 100) : 0 },
+        { name: 'Meeting', count: keyMetrics.meetingsScheduled, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.meetingsScheduled / keyMetrics.companiesContacted) * 100) : 0 },
+        { name: 'Opportunity', count: keyMetrics.opportunities, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.opportunities / keyMetrics.companiesContacted) * 100) : 0 },
       ];
 
       // Build channel comparison
