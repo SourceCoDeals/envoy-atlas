@@ -161,16 +161,15 @@ export function useCopyInsights() {
         const replyioVariantIds = (replyioVariants.data || []).map(v => v.id);
 
         // Fetch daily metrics for variants from both tables
+        // NOTE: variant_id may be null in most records - also fetch campaign-level for fallback
         const [smartleadMetrics, replyioMetrics] = await Promise.all([
           smartleadVariantIds.length > 0
-            ? supabase.from('smartlead_daily_metrics').select('variant_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
+            ? supabase.from('smartlead_daily_metrics').select('variant_id, campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
                 .eq('workspace_id', currentWorkspace.id)
-                .not('variant_id', 'is', null)
             : Promise.resolve({ data: [], error: null }),
           replyioVariantIds.length > 0
-            ? supabase.from('replyio_daily_metrics').select('variant_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
+            ? supabase.from('replyio_daily_metrics').select('variant_id, campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
                 .eq('workspace_id', currentWorkspace.id)
-                .not('variant_id', 'is', null)
             : Promise.resolve({ data: [], error: null })
         ]);
 
@@ -180,31 +179,26 @@ export function useCopyInsights() {
         ];
 
         // Get campaign IDs from all variants
-        const allCampaignIds = variants.map(v => v.campaign_id);
-        const smartleadCampIds = (smartleadVariants.data || []).map(v => v.campaign_id);
-        const replyioCampIds = (replyioVariants.data || []).map(v => v.campaign_id);
+        const allCampaignIds = [...new Set(variants.map(v => v.campaign_id))];
+        const smartleadCampIds = [...new Set((smartleadVariants.data || []).map(v => v.campaign_id))];
+        const replyioCampIds = [...new Set((replyioVariants.data || []).map(v => v.campaign_id))];
 
-        // Get campaign-level metrics for variants without specific metrics
-        const [smartleadCampMetrics, replyioCampMetrics, legacyCampMetrics] = await Promise.all([
-          smartleadCampIds.length > 0
-            ? supabase.from('smartlead_daily_metrics').select('campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
-                .eq('workspace_id', currentWorkspace.id)
-                .is('variant_id', null)
-            : Promise.resolve({ data: [], error: null }),
-          replyioCampIds.length > 0
-            ? supabase.from('replyio_daily_metrics').select('campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
-                .eq('workspace_id', currentWorkspace.id)
-                .is('variant_id', null)
-            : Promise.resolve({ data: [], error: null }),
-          // Also try to get metrics from unified campaigns table for legacy variants
-          allCampaignIds.length > 0 && smartleadVariantIds.length === 0 && replyioVariantIds.length === 0
-            ? supabase.from('campaigns').select('id, platform').in('id', allCampaignIds)
-            : Promise.resolve({ data: [], error: null })
-        ]);
+        // Campaign-level metrics are already fetched above - filter for those without variant_id
+        const smartleadCampMetrics = { data: (smartleadMetrics.data || []).filter(m => !m.variant_id), error: null };
+        const replyioCampMetrics = { data: (replyioMetrics.data || []).filter(m => !m.variant_id), error: null };
+        
+        // Filter variant-level metrics
+        const smartleadVariantMetrics = (smartleadMetrics.data || []).filter(m => m.variant_id);
+        const replyioVariantMetrics = (replyioMetrics.data || []).filter(m => m.variant_id);
 
         const allCampaignMetrics = [
           ...(smartleadCampMetrics.data || []),
           ...(replyioCampMetrics.data || [])
+        ];
+
+        const allVariantMetrics = [
+          ...smartleadVariantMetrics,
+          ...replyioVariantMetrics
         ];
 
         // Aggregate metrics by variant
@@ -216,7 +210,7 @@ export function useCopyInsights() {
           positive: number;
         }> = {};
 
-        allMetrics.forEach(m => {
+        allVariantMetrics.forEach(m => {
           if (!m.variant_id) return;
           if (!variantMetrics[m.variant_id]) {
             variantMetrics[m.variant_id] = { sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 };
