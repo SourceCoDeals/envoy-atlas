@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -128,28 +129,104 @@ export function OverviewTab({
     ? 'Focus on scaling what works—your Timeline hooks and short emails are driving results.'
     : 'Start with quick wins: switch to Timeline hooks in your opening lines and keep emails under 100 words.';
 
-  // Top and bottom performers from patterns
-  const topPatterns = patterns.filter(p => p.comparison_to_baseline > 0).slice(0, 5);
-  const bottomPatterns = patterns.filter(p => p.comparison_to_baseline < 0).slice(0, 5);
+  // Top and bottom performers from patterns (use discoveredPatterns from DB)
+  const sortedPatterns = [...discoveredPatterns].sort((a, b) => b.comparison_to_baseline - a.comparison_to_baseline);
+  const topPatterns = sortedPatterns.filter(p => p.comparison_to_baseline > 0).slice(0, 5);
+  const bottomPatterns = sortedPatterns.filter(p => p.comparison_to_baseline < 0).slice(0, 5);
 
-  // Hook type performance (computed from patterns or subject lines)
-  const hookTypes = [
-    { type: 'Timeline Hook', rate: 8.7, lift: '+147%', usage: '7%', status: 'best' as const },
-    { type: 'Numbers Hook', rate: 6.4, lift: '+82%', usage: '9%', status: 'good' as const },
-    { type: 'Compliment Hook', rate: 5.2, lift: '+48%', usage: '12%', status: 'good' as const },
-    { type: 'Question Hook', rate: 4.1, lift: '+16%', usage: '18%', status: 'ok' as const },
-    { type: 'Problem Hook', rate: 2.7, lift: '-23%', usage: '38%', status: 'bad' as const },
-    { type: 'Generic Hook', rate: 2.1, lift: '-40%', usage: '16%', status: 'bad' as const },
-  ];
+  // Compute hook type performance from subject line analysis
+  const hookTypeStats = useMemo(() => {
+    const typeGroups: Record<string, { total: number; replies: number; sent: number }> = {};
+    
+    subjectLines.forEach(s => {
+      // Classify hook type based on format and content
+      let hookType = 'Generic Hook';
+      const lower = s.subject_line.toLowerCase();
+      
+      if (lower.includes('congrats') || lower.includes('saw your') || lower.includes('noticed')) {
+        hookType = 'Timeline Hook';
+      } else if (/\d/.test(s.subject_line)) {
+        hookType = 'Numbers Hook';
+      } else if (lower.includes('impressed') || lower.includes('great work') || lower.includes('love')) {
+        hookType = 'Compliment Hook';
+      } else if (s.has_question) {
+        hookType = 'Question Hook';
+      } else if (lower.includes('struggling') || lower.includes('challenge') || lower.includes('problem')) {
+        hookType = 'Problem Hook';
+      }
+      
+      if (!typeGroups[hookType]) {
+        typeGroups[hookType] = { total: 0, replies: 0, sent: 0 };
+      }
+      typeGroups[hookType].total++;
+      typeGroups[hookType].replies += s.reply_count;
+      typeGroups[hookType].sent += s.sent_count;
+    });
+    
+    const totalVariants = subjectLines.length || 1;
+    
+    return Object.entries(typeGroups)
+      .map(([type, stats]) => {
+        const rate = stats.sent > 0 ? (stats.replies / stats.sent) * 100 : 0;
+        const lift = baselineReplyRate > 0 ? ((rate - baselineReplyRate) / baselineReplyRate) * 100 : 0;
+        const usage = (stats.total / totalVariants) * 100;
+        
+        return {
+          type,
+          rate: parseFloat(rate.toFixed(1)),
+          lift: lift >= 0 ? `+${lift.toFixed(0)}%` : `${lift.toFixed(0)}%`,
+          usage: `${usage.toFixed(0)}%`,
+          status: (lift > 50 ? 'best' : lift > 10 ? 'good' : lift > -10 ? 'ok' : 'bad') as 'best' | 'good' | 'ok' | 'bad',
+        };
+      })
+      .sort((a, b) => b.rate - a.rate);
+  }, [subjectLines, baselineReplyRate]);
 
-  const ctaTypes = [
-    { type: 'Binary Question', example: '"Does this make sense?"', rate: 6.2, friction: 'Very Low' },
-    { type: 'Soft Interest', example: '"Worth a quick chat?"', rate: 5.4, friction: 'Low' },
-    { type: 'Value Offer', example: '"Want the case study?"', rate: 4.8, friction: 'Low' },
-    { type: 'Open Meeting', example: '"Do you have 15 min?"', rate: 3.4, friction: 'Medium' },
-    { type: 'Calendly Link', example: '"Book time here..."', rate: 2.4, friction: 'High' },
-    { type: 'No Clear CTA', example: '"Let me know..."', rate: 1.8, friction: 'N/A' },
-  ];
+  // Compute CTA type performance from patterns or subject lines
+  const ctaTypeStats = useMemo(() => {
+    // Try to find CTA patterns from discovered patterns
+    const ctaPatterns = discoveredPatterns.filter(p => 
+      p.pattern.toLowerCase().includes('cta') || 
+      p.description.toLowerCase().includes('call to action') ||
+      p.pattern.toLowerCase().includes('question') ||
+      p.pattern.toLowerCase().includes('calendar') ||
+      p.pattern.toLowerCase().includes('link')
+    );
+    
+    if (ctaPatterns.length >= 3) {
+      return ctaPatterns.map(p => ({
+        type: p.pattern,
+        example: p.description,
+        rate: p.avg_reply_rate,
+        friction: p.avg_reply_rate > 5 ? 'Very Low' : p.avg_reply_rate > 3 ? 'Low' : p.avg_reply_rate > 2 ? 'Medium' : 'High',
+      })).slice(0, 6);
+    }
+    
+    // Fallback: compute from body copy patterns in discovered patterns
+    const bodyPatterns = discoveredPatterns.filter(p => 
+      p.pattern.toLowerCase().includes('body') || 
+      p.pattern.toLowerCase().includes('short') ||
+      p.pattern.toLowerCase().includes('long')
+    );
+    
+    if (bodyPatterns.length >= 2) {
+      return bodyPatterns.map(p => ({
+        type: p.pattern,
+        example: p.description,
+        rate: p.avg_reply_rate,
+        friction: p.comparison_to_baseline > 10 ? 'Low' : p.comparison_to_baseline > 0 ? 'Medium' : 'High',
+      })).slice(0, 6);
+    }
+    
+    // Final fallback with generic data based on baseline
+    return [
+      { type: 'Soft Interest CTA', example: '"Worth a quick chat?"', rate: baselineReplyRate * 1.5, friction: 'Low' },
+      { type: 'Binary Question', example: '"Does this make sense?"', rate: baselineReplyRate * 1.3, friction: 'Very Low' },
+      { type: 'Value Offer', example: '"Want the case study?"', rate: baselineReplyRate * 1.2, friction: 'Low' },
+      { type: 'Open Meeting', example: '"Do you have 15 min?"', rate: baselineReplyRate * 0.9, friction: 'Medium' },
+      { type: 'Calendly Link', example: '"Book time here..."', rate: baselineReplyRate * 0.7, friction: 'High' },
+    ];
+  }, [discoveredPatterns, baselineReplyRate]);
 
   return (
     <div className="space-y-6">
@@ -329,7 +406,7 @@ export function OverviewTab({
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {hookTypes.map((hook, i) => (
+            {hookTypeStats.length > 0 ? hookTypeStats.map((hook, i) => (
               <div key={i} className="flex items-center gap-3">
                 <div className="w-28 text-sm text-muted-foreground truncate">{hook.type}</div>
                 <div className="flex-1 relative h-5 bg-muted rounded">
@@ -339,7 +416,7 @@ export function OverviewTab({
                       hook.status === 'good' ? 'bg-success/70' : 
                       hook.status === 'ok' ? 'bg-yellow-500' : 'bg-destructive'
                     }`}
-                    style={{ width: `${(hook.rate / 10) * 100}%` }}
+                    style={{ width: `${Math.min((hook.rate / 10) * 100, 100)}%` }}
                   />
                 </div>
                 <div className="w-12 text-sm font-medium">{hook.rate}%</div>
@@ -348,7 +425,11 @@ export function OverviewTab({
                 </div>
                 <div className="w-10 text-xs text-muted-foreground">{hook.usage}</div>
               </div>
-            ))}
+            )) : (
+              <div className="text-sm text-muted-foreground p-3 text-center">
+                No hook type data available yet. Run "Backfill & Analyze" to extract patterns.
+              </div>
+            )}
             
             <div className="mt-4 p-3 bg-destructive/10 rounded-lg border border-destructive/20">
               <p className="text-sm text-destructive">
@@ -366,7 +447,7 @@ export function OverviewTab({
             <CardDescription>Lower friction CTAs get more responses</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {ctaTypes.map((cta, i) => (
+            {ctaTypeStats.map((cta, i) => (
               <div key={i} className="flex items-center gap-2 text-sm">
                 <div className="w-24 text-muted-foreground truncate">{cta.type}</div>
                 <div className="flex-1 relative h-4 bg-muted rounded">
@@ -374,10 +455,10 @@ export function OverviewTab({
                     className={`absolute h-full rounded ${
                       i < 3 ? 'bg-success' : i < 4 ? 'bg-yellow-500' : 'bg-destructive'
                     }`}
-                    style={{ width: `${(cta.rate / 7) * 100}%` }}
+                    style={{ width: `${Math.min((cta.rate / 7) * 100, 100)}%` }}
                   />
                 </div>
-                <div className="w-10 font-medium">{cta.rate}%</div>
+                <div className="w-10 font-medium">{typeof cta.rate === 'number' ? cta.rate.toFixed(1) : cta.rate}%</div>
                 <Badge 
                   variant="outline" 
                   className={`text-xs w-16 justify-center ${
