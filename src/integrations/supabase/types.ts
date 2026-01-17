@@ -4491,6 +4491,63 @@ export type Database = {
           },
         ]
       }
+      smartlead_campaign_cumulative: {
+        Row: {
+          campaign_id: string
+          created_at: string | null
+          id: string
+          last_synced_at: string | null
+          total_bounced: number | null
+          total_clicked: number | null
+          total_interested: number | null
+          total_opened: number | null
+          total_replied: number | null
+          total_sent: number | null
+          workspace_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string | null
+          id?: string
+          last_synced_at?: string | null
+          total_bounced?: number | null
+          total_clicked?: number | null
+          total_interested?: number | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          workspace_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string | null
+          id?: string
+          last_synced_at?: string | null
+          total_bounced?: number | null
+          total_clicked?: number | null
+          total_interested?: number | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smartlead_campaign_cumulative_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "smartlead_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smartlead_campaign_cumulative_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       smartlead_campaigns: {
         Row: {
           created_at: string
