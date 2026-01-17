@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.auto-link-campaigns]
 verify_jwt = false
+
+[functions.sync-recovery]
+verify_jwt = false

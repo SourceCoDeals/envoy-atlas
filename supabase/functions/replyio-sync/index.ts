@@ -379,8 +379,28 @@ Deno.serve(async (req) => {
     }
 
     let startIndex = reset ? 0 : (existingProgress.sequence_index || 0);
+    
+    // Track debug info for troubleshooting
+    let debugInfo: any = {};
 
     for (let i = startIndex; i < allSequences.length; i++) {
+      // ==========================================================
+      // FIX: Add heartbeat every 5 sequences to prevent stuck detection
+      // ==========================================================
+      if (i > 0 && i % 5 === 0) {
+        await supabase.from('api_connections').update({
+          sync_progress: { 
+            cached_sequences: allSequences,
+            sequence_index: i, 
+            total_sequences: allSequences.length,
+            batch_number: batch_number,
+            heartbeat: new Date().toISOString(),
+            debug_info: debugInfo,
+          },
+          updated_at: new Date().toISOString(),
+        }).eq('id', connection.id);
+      }
+      
       if (isTimeBudgetExceeded()) {
         console.log(`Time budget exceeded at sequence ${i}/${allSequences.length}. Triggering continuation...`);
         
@@ -419,6 +439,8 @@ Deno.serve(async (req) => {
             sequence_index: i, 
             total_sequences: allSequences.length,
             batch_number: batch_number,
+            heartbeat: new Date().toISOString(),
+            debug_info: debugInfo, // Store debug info for troubleshooting
           },
           sync_status: 'partial',
           updated_at: new Date().toISOString(),
@@ -480,8 +502,13 @@ Deno.serve(async (req) => {
           if (Array.isArray(resp.data)) return resp.data;
           if (resp.data && Array.isArray(resp.data.steps)) return resp.data.steps;
           if (resp.data && Array.isArray(resp.data.emails)) return resp.data.emails;
+          // Check for sequence object that has emails
+          if (resp.sequence && Array.isArray(resp.sequence.emails)) return resp.sequence.emails;
           return [];
         };
+        
+        // Store debug info for first sequence only
+        const shouldDebug = i === startIndex;
 
         // ==========================================================
         // FIX #1: Completely rewritten variant extraction
@@ -633,18 +660,35 @@ Deno.serve(async (req) => {
             try {
               const resp = await replyioRequest(t.endpoint, apiKey, { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_LIST });
               
-              if (resp && i === startIndex && !variantsStored) {
+              // Store debug info for first sequence
+              if (shouldDebug && resp && !variantsStored) {
+                debugInfo[t.label] = {
+                  response_keys: Object.keys(resp || {}),
+                  response_sample: JSON.stringify(resp).substring(0, 800),
+                  is_array: Array.isArray(resp),
+                };
                 const respStr = JSON.stringify(resp).substring(0, 600);
                 console.log(`  ${t.label} response sample:`, respStr);
               }
               
               const steps = extractSteps(resp);
               if (steps.length) {
+                if (shouldDebug) {
+                  debugInfo[`${t.label}_steps`] = {
+                    count: steps.length,
+                    first_step_keys: steps[0] ? Object.keys(steps[0]) : [],
+                    first_step_has_templates: !!(steps[0]?.templates),
+                    first_step_templates_count: steps[0]?.templates?.length || 0,
+                  };
+                }
                 const stored = await upsertStepsAsVariants(steps, t.label);
                 if (stored) break;
               }
             } catch (e) {
               console.log(`  ${t.label} failed:`, (e as Error).message);
+              if (shouldDebug) {
+                debugInfo[`${t.label}_error`] = (e as Error).message;
+              }
             }
           }
         } catch (e) {
@@ -755,15 +799,40 @@ Deno.serve(async (req) => {
 
             // Also try v1 email templates if we still don't have variants
             if (!variantsStored) {
-              const steps = seqDetails.emails || seqDetails.steps || [];
+              // Check multiple possible locations for email templates
+              const emailsFromEmails = seqDetails.emails || [];
+              const emailsFromSteps = seqDetails.steps || [];
+              const emailsFromSequence = seqDetails.sequence?.emails || [];
+              
+              const steps = emailsFromEmails.length > 0 
+                ? emailsFromEmails 
+                : emailsFromSteps.length > 0 
+                  ? emailsFromSteps 
+                  : emailsFromSequence;
+                  
+              if (shouldDebug) {
+                debugInfo['v1_emails'] = {
+                  has_emails: emailsFromEmails.length > 0,
+                  has_steps: emailsFromSteps.length > 0,
+                  has_sequence_emails: emailsFromSequence.length > 0,
+                  selected_count: steps.length,
+                  first_email_keys: steps[0] ? Object.keys(steps[0]) : [],
+                };
+              }
+              
               if (steps.length > 0) {
                 console.log(`  v1 Found ${steps.length} email templates`);
                 await upsertStepsAsVariants(steps, 'v1 /campaigns');
+              } else {
+                console.log(`  v1 No email templates found. Response keys: ${Object.keys(seqDetails).join(', ')}`);
               }
             }
           }
         } catch (e) {
           console.error(`  v1 API error:`, (e as Error).message);
+          if (shouldDebug) {
+            debugInfo['v1_error'] = (e as Error).message;
+          }
         }
 
         // Fallback to v3 statistics endpoint
@@ -891,6 +960,8 @@ Deno.serve(async (req) => {
         metrics_created: progress.metrics_created,
         variants_synced: progress.variants_synced,
         replies_synced: progress.replies_synced,
+        debug_info: debugInfo, // Store debug info for troubleshooting
+        completed_at: new Date().toISOString(),
       },
       last_sync_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
