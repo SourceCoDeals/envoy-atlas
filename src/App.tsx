@@ -103,6 +103,7 @@ const App = () => (
                   <Route path="/calling/information" element={<CallingInformation />} />
                   <Route path="/calling/ai-summary" element={<AISummary />} />
                   <Route path="/calling/chatbot" element={<Navigate to="/calling" replace />} />
+                  <Route path="/calling/engagements" element={<Navigate to="/engagements" replace />} />
                   {/* Legacy calling routes */}
                   <Route path="/calling/search" element={<CallSearch />} />
                   <Route path="/calling/best-worst" element={<BestWorstCalls />} />
