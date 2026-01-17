@@ -3,20 +3,51 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { useSyncData } from '@/hooks/useSyncData';
+import { useWorkspace } from '@/hooks/useWorkspace';
+import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfolioOverview';
 import { EnhancedCampaignTable } from '@/components/campaigns/EnhancedCampaignTable';
 import { SyncProgressBar } from '@/components/campaigns/SyncProgressBar';
+import { AutoLinkPreviewModal } from '@/components/campaigns/AutoLinkPreviewModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download } from 'lucide-react';
+import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download, Link2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+interface Engagement {
+  id: string;
+  engagement_name: string;
+}
 
 export default function Campaigns() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
+  const { currentWorkspace } = useWorkspace();
   const { campaigns, loading, error, refetch } = useCampaigns();
   const { syncing, progress, elapsedTime, triggerSync } = useSyncData();
   const [tierFilter, setTierFilter] = useState('all');
+  const [engagementFilter, setEngagementFilter] = useState('all');
+  const [engagements, setEngagements] = useState<Engagement[]>([]);
+  const [autoLinkOpen, setAutoLinkOpen] = useState(false);
+  const [autoLinking, setAutoLinking] = useState(false);
+
+  // Fetch engagements
+  useEffect(() => {
+    if (!currentWorkspace?.id) return;
+    
+    const fetchEngagements = async () => {
+      const { data } = await supabase
+        .from('engagements')
+        .select('id, engagement_name')
+        .eq('workspace_id', currentWorkspace.id)
+        .order('engagement_name');
+      
+      if (data) setEngagements(data);
+    };
+    
+    fetchEngagements();
+  }, [currentWorkspace?.id]);
 
   const handleRefresh = async () => {
     await triggerSync();
@@ -110,7 +141,16 @@ export default function Campaigns() {
             />
 
             {/* Action Bar */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setAutoLinkOpen(true)}
+                disabled={loading || autoLinking || engagements.length === 0}
+              >
+                <Link2 className="h-4 w-4 mr-2" />
+                Auto-Link Campaigns
+              </Button>
               <Button variant="outline" size="sm" disabled>
                 <Plus className="h-4 w-4 mr-2" />
                 New Campaign
@@ -125,11 +165,45 @@ export default function Campaigns() {
               </Button>
             </div>
 
-            {/* Enhanced Campaign Table with tier filter sync */}
+            {/* Enhanced Campaign Table with tier + engagement filter sync */}
             <EnhancedCampaignTable 
               campaigns={campaigns} 
               tierFilter={tierFilter}
               onTierFilterChange={setTierFilter}
+              engagementFilter={engagementFilter}
+              onEngagementFilterChange={setEngagementFilter}
+              engagements={engagements.map(e => ({ id: e.id, name: e.engagement_name }))}
+            />
+
+            {/* Auto-Link Modal */}
+            <AutoLinkPreviewModal
+              open={autoLinkOpen}
+              onOpenChange={setAutoLinkOpen}
+              campaigns={campaigns}
+              engagements={engagements.map(e => ({ 
+                id: e.id, 
+                engagement_name: e.engagement_name 
+              }))}
+              onConfirm={async (matches) => {
+                if (!currentWorkspace?.id) return;
+                
+                setAutoLinking(true);
+                try {
+                  const { data, error } = await supabase.functions.invoke('auto-link-campaigns', {
+                    body: { matches, workspace_id: currentWorkspace.id }
+                  });
+                  
+                  if (error) throw error;
+                  
+                  toast.success(`Successfully linked ${data.linked} campaigns`);
+                  refetch();
+                } catch (err: unknown) {
+                  const message = err instanceof Error ? err.message : 'Failed to link campaigns';
+                  toast.error(message);
+                } finally {
+                  setAutoLinking(false);
+                }
+              }}
             />
           </div>
         )}
