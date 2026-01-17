@@ -241,39 +241,59 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         replyioMetricsQuery = replyioMetricsQuery.lte('metric_date', endDateStr);
       }
 
-      // Fetch calling data for this engagement (server-side filtered to avoid 1000-row limit issues)
+      // Fetch calling data for this engagement
+      // Note: We fetch all calls and filter client-side to avoid PostgREST ILIKE escaping issues
       const clientNameLower = engagement.client_name.toLowerCase();
       const engagementNameLower = engagement.engagement_name.toLowerCase();
 
-      let callingQuery = supabase
-        .from('external_calls')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        // Match calls to this engagement by engagement_name (primary) and call_title (fallback)
-        .or(
-          `engagement_name.ilike.%${clientNameLower}%,engagement_name.ilike.%${engagementNameLower}%,call_title.ilike.%${clientNameLower}%`
-        );
+      // Build query - fetch in batches to avoid 1000 row limit
+      const fetchAllMatchingCalls = async () => {
+        const allCalls: any[] = [];
+        let offset = 0;
+        const batchSize = 1000;
+        let hasMore = true;
+        
+        while (hasMore) {
+          let query = supabase
+            .from('external_calls')
+            .select('*')
+            .eq('workspace_id', currentWorkspace.id)
+            .range(offset, offset + batchSize - 1);
+          
+          // Apply date filter if provided
+          if (startDateStr) query = query.gte('call_date', startDateStr);
+          if (endDateStr) query = query.lte('call_date', endDateStr);
+          
+          const { data: batch, error: batchError } = await query;
+          
+          if (batchError) throw batchError;
+          if (!batch || batch.length === 0) {
+            hasMore = false;
+          } else {
+            // Filter matches on the client side
+            const matches = batch.filter(call => {
+              const engName = (call.engagement_name || '').toLowerCase();
+              const callTitle = (call.call_title || '').toLowerCase();
+              return (
+                engName.includes(clientNameLower) ||
+                engName.includes(engagementNameLower) ||
+                callTitle.includes(clientNameLower)
+              );
+            });
+            allCalls.push(...matches);
+            offset += batchSize;
+            if (batch.length < batchSize) hasMore = false;
+          }
+        }
+        
+        return allCalls;
+      };
 
-      // Apply date filter using call_date where possible (it's the business date)
-      if (startDateStr) callingQuery = callingQuery.gte('call_date', startDateStr);
-      if (endDateStr) callingQuery = callingQuery.lte('call_date', endDateStr);
-
-      const [smartleadMetrics, replyioMetrics, callingData] = await Promise.all([
+      const [smartleadMetrics, replyioMetrics, matchingCalls] = await Promise.all([
         smartleadMetricsQuery,
         replyioMetricsQuery,
-        callingQuery,
+        fetchAllMatchingCalls(),
       ]);
-
-      // Final safety filter (handles null engagement_name/call_title edge cases)
-      const matchingCalls = (callingData.data || []).filter(call => {
-        const engName = (call.engagement_name || '').toLowerCase();
-        const callTitle = (call.call_title || '').toLowerCase();
-        return (
-          engName.includes(clientNameLower) ||
-          engName.includes(engagementNameLower) ||
-          callTitle.includes(clientNameLower)
-        );
-      });
 
       // Aggregate email metrics
       const allEmailMetrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
@@ -436,8 +456,10 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       });
 
       matchingCalls.forEach(c => {
-        if (!c.created_at) return;
-        const date = new Date(c.created_at);
+        // Use call_date (actual date of call) not created_at (sync date)
+        const dateStr = c.call_date || c.created_at;
+        if (!dateStr) return;
+        const date = new Date(dateStr);
         const weekStart = new Date(date);
         weekStart.setDate(date.getDate() - date.getDay());
         const weekKey = weekStart.toISOString().split('T')[0];
@@ -484,15 +506,19 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         { outcome: 'Call Back', count: Math.floor(connections * 0.2), percentage: totalCalls > 0 ? (Math.floor(connections * 0.2) / totalCalls) * 100 : 0 },
       ];
 
-      // Build recent activity (last 20 items)
+      // Build recent activity (last 20 items) - use call_date for proper sorting
       const recentActivity: ActivityItem[] = matchingCalls
-        .filter(c => c.created_at)
-        .sort((a, b) => new Date(b.created_at!).getTime() - new Date(a.created_at!).getTime())
+        .filter(c => c.call_date || c.created_at)
+        .sort((a, b) => {
+          const dateA = new Date(a.call_date || a.created_at!).getTime();
+          const dateB = new Date(b.call_date || b.created_at!).getTime();
+          return dateB - dateA;
+        })
         .slice(0, 20)
         .map(c => ({
           id: c.id,
           type: c.call_category?.toLowerCase().includes('connection') ? 'call_connected' as const : 'call_attempted' as const,
-          timestamp: c.created_at!,
+          timestamp: c.call_date || c.created_at!,
           company: c.company_name || 'Unknown',
           contact: c.contact_name || 'Unknown',
           details: c.call_category || 'Call',
@@ -529,15 +555,22 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
 
 function normalizeCallCategory(category: string): string {
   const lower = category.toLowerCase();
-  if (lower.includes('voicemail') || lower.includes('vm')) return 'Voicemail';
-  if (lower.includes('gatekeeper')) return 'Gatekeeper';
-  if (lower.includes('no answer') || lower.includes('ring')) return 'No Answer';
-  if (lower.includes('meeting')) return 'Meeting Set';
-  if (lower.includes('connection') || lower.includes('dm reached')) return 'DM Reached';
-  if (lower.includes('conversation')) return 'Conversation';
-  if (lower.includes('wrong') || lower.includes('invalid')) return 'Wrong Number';
-  if (lower.includes('hung up') || lower.includes('hangup')) return 'Hung Up';
-  return category || 'Other';
+  // Remove duration suffixes like "- 12 seconds"
+  const normalized = lower.replace(/\s*-\s*\d+\s*seconds?/i, '').trim();
+  
+  if (normalized.includes('voicemail') || normalized.includes('vm')) return 'Voicemail';
+  if (normalized.includes('gatekeeper')) return 'Gatekeeper';
+  if (normalized.includes('no answer') || normalized.includes('ring')) return 'No Answer';
+  if (normalized.includes('meeting')) return 'Meeting Set';
+  if (normalized.includes('connection') || normalized.includes('dm reached')) return 'DM Reached';
+  if (normalized.includes('conversation')) return 'Conversation';
+  if (normalized.includes('wrong') || normalized.includes('invalid')) return 'Wrong Number';
+  if (normalized.includes('hung up') || normalized.includes('hangup')) return 'Hung Up';
+  if (normalized.includes('positive') || normalized.includes('interested')) return 'Positive/Interested';
+  if (normalized.includes('callback') || normalized.includes('call back')) return 'Callback Requested';
+  if (normalized.includes('not interested') || normalized.includes('dnc')) return 'Not Interested';
+  if (normalized.includes('busy')) return 'Busy';
+  return category ? category.split(' - ')[0].trim() : 'Other';
 }
 
 function getEmptyKeyMetrics(): KeyMetrics {
