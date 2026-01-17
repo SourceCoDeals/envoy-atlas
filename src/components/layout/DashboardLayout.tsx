@@ -119,11 +119,9 @@ const callingReportsNavItems: NavItem[] = [
   { title: 'Call Analytics', href: '/calling/analytics', icon: BarChart3 },
 ];
 
-// Shared navigation
+// Shared navigation - only Alerts now, Settings is in Channel Rail
 const settingsNavItems: NavItem[] = [
   { title: 'Alerts', href: '/alerts', icon: Bell },
-  { title: 'Connections', href: '/connections', icon: Plug },
-  { title: 'Settings', href: '/settings', icon: Settings },
 ];
 
 interface DashboardLayoutProps {
@@ -269,6 +267,26 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         </TooltipTrigger>
         <TooltipContent side="right">Contacts</TooltipContent>
       </Tooltip>
+
+      {/* Settings at the bottom */}
+      <div className="mt-auto mb-4">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => navigate('/settings')}
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+                location.pathname.startsWith('/settings')
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              )}
+            >
+              <Settings className="h-5 w-5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   );
 
