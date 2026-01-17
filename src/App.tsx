@@ -15,6 +15,7 @@ import Auth from "./pages/Auth";
 import Connections from "./pages/Connections";
 import Campaigns from "./pages/Campaigns";
 import CampaignDetail from "./pages/CampaignDetail";
+import CampaignSummary from "./pages/CampaignSummary";
 import Inbox from "./pages/Inbox";
 import Deliverability from "./pages/Deliverability";
 import Audience from "./pages/Audience";
@@ -77,6 +78,7 @@ const App = () => (
                   <Route path="/oauth/phoneburner/callback" element={<PhoneBurnerCallback />} />
                   <Route path="/campaigns" element={<Campaigns />} />
                   <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
+                  <Route path="/campaigns/:platform/:campaignId/summary" element={<CampaignSummary />} />
                   <Route path="/inbox" element={<Inbox />} />
                   <Route path="/deliverability" element={<Deliverability />} />
                   <Route path="/audience" element={<Audience />} />

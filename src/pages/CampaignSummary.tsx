@@ -17,10 +17,11 @@ import { CampaignLeadBreakdown } from '@/components/campaigns/CampaignLeadBreakd
 import { CampaignPositiveReplies } from '@/components/campaigns/CampaignPositiveReplies';
 
 export default function CampaignSummary() {
-  const { campaignId } = useParams<{ campaignId: string }>();
+  const { campaignId, platform } = useParams<{ campaignId: string; platform?: string }>();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { data, loading, error, refetch } = useCampaignSummary(campaignId);
+  const validPlatform = platform === 'smartlead' || platform === 'replyio' ? platform : undefined;
+  const { data, loading, error, refetch } = useCampaignSummary(campaignId, validPlatform);
 
   useEffect(() => {
     if (!authLoading && !user) {

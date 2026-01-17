@@ -118,7 +118,7 @@ const initialMetrics = {
   positive_rate: 0,
 };
 
-export function useCampaignSummary(campaignId: string | undefined) {
+export function useCampaignSummary(campaignId: string | undefined, platform?: 'smartlead' | 'replyio') {
   const { currentWorkspace } = useWorkspace();
   const [data, setData] = useState<CampaignSummaryData>({
     campaign: null,
@@ -144,21 +144,25 @@ export function useCampaignSummary(campaignId: string | undefined) {
     setError(null);
 
     try {
-      // 1. Find campaign (try SmartLead first, then Reply.io)
+      // 1. Find campaign based on platform hint or fallback to searching both
       let campaignData = null;
-      let platform: 'smartlead' | 'replyio' = 'smartlead';
+      let detectedPlatform: 'smartlead' | 'replyio' = platform || 'smartlead';
 
-      const { data: slCampaign } = await supabase
-        .from('smartlead_campaigns')
-        .select('*')
-        .eq('id', campaignId)
-        .eq('workspace_id', currentWorkspace.id)
-        .single();
+      if (platform === 'smartlead' || !platform) {
+        const { data: slCampaign } = await supabase
+          .from('smartlead_campaigns')
+          .select('*')
+          .eq('id', campaignId)
+          .eq('workspace_id', currentWorkspace.id)
+          .single();
 
-      if (slCampaign) {
-        campaignData = slCampaign;
-        platform = 'smartlead';
-      } else {
+        if (slCampaign) {
+          campaignData = slCampaign;
+          detectedPlatform = 'smartlead';
+        }
+      }
+
+      if (!campaignData && (platform === 'replyio' || !platform)) {
         const { data: rioCampaign } = await supabase
           .from('replyio_campaigns')
           .select('*')
@@ -168,7 +172,7 @@ export function useCampaignSummary(campaignId: string | undefined) {
 
         if (rioCampaign) {
           campaignData = rioCampaign;
-          platform = 'replyio';
+          detectedPlatform = 'replyio';
         }
       }
 
@@ -182,16 +186,16 @@ export function useCampaignSummary(campaignId: string | undefined) {
         id: campaignData.id,
         name: campaignData.name,
         status: campaignData.status || 'unknown',
-        platform,
+        platform: detectedPlatform,
         created_at: campaignData.created_at,
         engagement_id: campaignData.engagement_id || null,
       };
 
       // 2. Fetch all data in parallel
-      const metricsTable = platform === 'smartlead' ? 'smartlead_daily_metrics' : 'replyio_daily_metrics';
-      const variantsTable = platform === 'smartlead' ? 'smartlead_variants' : 'replyio_variants';
-      const eventsTable = platform === 'smartlead' ? 'smartlead_message_events' : 'replyio_message_events';
-      const stepsTable = platform === 'smartlead' ? 'smartlead_sequence_steps' : 'replyio_sequence_steps';
+      const metricsTable = detectedPlatform === 'smartlead' ? 'smartlead_daily_metrics' : 'replyio_daily_metrics';
+      const variantsTable = detectedPlatform === 'smartlead' ? 'smartlead_variants' : 'replyio_variants';
+      const eventsTable = detectedPlatform === 'smartlead' ? 'smartlead_message_events' : 'replyio_message_events';
+      const stepsTable = detectedPlatform === 'smartlead' ? 'smartlead_sequence_steps' : 'replyio_sequence_steps';
 
       const [
         metricsResult,
@@ -435,7 +439,7 @@ export function useCampaignSummary(campaignId: string | undefined) {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspace?.id, campaignId]);
+  }, [currentWorkspace?.id, campaignId, platform]);
 
   useEffect(() => {
     fetchCampaignSummary();
