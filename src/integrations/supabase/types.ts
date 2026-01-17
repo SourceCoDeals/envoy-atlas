@@ -2017,8 +2017,78 @@ export type Database = {
           },
         ]
       }
+      deliverability_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string | null
+          entity_id: string | null
+          entity_name: string | null
+          entity_type: string | null
+          id: string
+          is_read: boolean | null
+          is_resolved: boolean | null
+          message: string
+          metric_value: number | null
+          resolved_at: string | null
+          resolved_by: string | null
+          severity: string
+          threshold_value: number | null
+          title: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string | null
+          entity_id?: string | null
+          entity_name?: string | null
+          entity_type?: string | null
+          id?: string
+          is_read?: boolean | null
+          is_resolved?: boolean | null
+          message: string
+          metric_value?: number | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity?: string
+          threshold_value?: number | null
+          title: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string | null
+          entity_id?: string | null
+          entity_name?: string | null
+          entity_type?: string | null
+          id?: string
+          is_read?: boolean | null
+          is_resolved?: boolean | null
+          message?: string
+          metric_value?: number | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity?: string
+          threshold_value?: number | null
+          title?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliverability_alerts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_accounts: {
         Row: {
+          account_status: string | null
+          bounce_rate: number | null
           created_at: string
           daily_limit: number | null
           email_address: string
@@ -2027,12 +2097,20 @@ export type Database = {
           is_active: boolean
           platform: string
           platform_id: string
+          reply_rate: number | null
           sender_name: string | null
+          sent_30d: number | null
+          spam_complaint_rate: number | null
           updated_at: string
           warmup_enabled: boolean | null
+          warmup_percentage: number | null
+          warmup_start_date: string | null
+          warmup_status: string | null
           workspace_id: string
         }
         Insert: {
+          account_status?: string | null
+          bounce_rate?: number | null
           created_at?: string
           daily_limit?: number | null
           email_address: string
@@ -2041,12 +2119,20 @@ export type Database = {
           is_active?: boolean
           platform: string
           platform_id: string
+          reply_rate?: number | null
           sender_name?: string | null
+          sent_30d?: number | null
+          spam_complaint_rate?: number | null
           updated_at?: string
           warmup_enabled?: boolean | null
+          warmup_percentage?: number | null
+          warmup_start_date?: string | null
+          warmup_status?: string | null
           workspace_id: string
         }
         Update: {
+          account_status?: string | null
+          bounce_rate?: number | null
           created_at?: string
           daily_limit?: number | null
           email_address?: string
@@ -2055,9 +2141,15 @@ export type Database = {
           is_active?: boolean
           platform?: string
           platform_id?: string
+          reply_rate?: number | null
           sender_name?: string | null
+          sent_30d?: number | null
+          spam_complaint_rate?: number | null
           updated_at?: string
           warmup_enabled?: boolean | null
+          warmup_percentage?: number | null
+          warmup_start_date?: string | null
+          warmup_status?: string | null
           workspace_id?: string
         }
         Relationships: [
@@ -4200,42 +4292,81 @@ export type Database = {
       }
       sending_domains: {
         Row: {
+          blacklist_status: string | null
+          blacklisted_on: string[] | null
+          bounce_rate: number | null
           created_at: string
+          daily_volume_limit: number | null
+          daily_volume_used: number | null
           dkim_valid: boolean | null
           dmarc_valid: boolean | null
           domain: string
+          domain_age_days: number | null
+          domain_status: string | null
+          google_postmaster_reputation: string | null
           health_score: number | null
           id: string
           is_bulk_sender: boolean | null
+          last_blacklist_check: string | null
           last_checked_at: string | null
+          microsoft_snds_status: string | null
+          reply_rate: number | null
+          spam_complaint_rate: number | null
           spf_valid: boolean | null
           updated_at: string
+          warmup_percentage: number | null
           workspace_id: string
         }
         Insert: {
+          blacklist_status?: string | null
+          blacklisted_on?: string[] | null
+          bounce_rate?: number | null
           created_at?: string
+          daily_volume_limit?: number | null
+          daily_volume_used?: number | null
           dkim_valid?: boolean | null
           dmarc_valid?: boolean | null
           domain: string
+          domain_age_days?: number | null
+          domain_status?: string | null
+          google_postmaster_reputation?: string | null
           health_score?: number | null
           id?: string
           is_bulk_sender?: boolean | null
+          last_blacklist_check?: string | null
           last_checked_at?: string | null
+          microsoft_snds_status?: string | null
+          reply_rate?: number | null
+          spam_complaint_rate?: number | null
           spf_valid?: boolean | null
           updated_at?: string
+          warmup_percentage?: number | null
           workspace_id: string
         }
         Update: {
+          blacklist_status?: string | null
+          blacklisted_on?: string[] | null
+          bounce_rate?: number | null
           created_at?: string
+          daily_volume_limit?: number | null
+          daily_volume_used?: number | null
           dkim_valid?: boolean | null
           dmarc_valid?: boolean | null
           domain?: string
+          domain_age_days?: number | null
+          domain_status?: string | null
+          google_postmaster_reputation?: string | null
           health_score?: number | null
           id?: string
           is_bulk_sender?: boolean | null
+          last_blacklist_check?: string | null
           last_checked_at?: string | null
+          microsoft_snds_status?: string | null
+          reply_rate?: number | null
+          spam_complaint_rate?: number | null
           spf_valid?: boolean | null
           updated_at?: string
+          warmup_percentage?: number | null
           workspace_id?: string
         }
         Relationships: [
@@ -5103,6 +5234,36 @@ export type Database = {
           },
           {
             foreignKeyName: "campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      domain_health_summary: {
+        Row: {
+          active_mailboxes: number | null
+          avg_bounce_rate: number | null
+          avg_health_score: number | null
+          avg_reply_rate: number | null
+          avg_warmup_percentage: number | null
+          blacklist_status: string | null
+          dkim_valid: boolean | null
+          dmarc_valid: boolean | null
+          domain: string | null
+          domain_status: string | null
+          google_postmaster_reputation: string | null
+          is_bulk_sender: boolean | null
+          mailbox_count: number | null
+          spf_valid: boolean | null
+          total_daily_capacity: number | null
+          warming_up_count: number | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_accounts_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
