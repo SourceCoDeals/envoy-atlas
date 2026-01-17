@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
 
     console.log(`Starting lead enrichment for workspace ${workspace_id}, batch_size: ${batch_size}, force: ${force}`);
 
-    // Get leads that need enrichment
+    // Get leads that need enrichment - check for email_type being null OR enriched_at being null
     let query = supabase
       .from('leads')
       .select('id, title, email, company_size, email_type, email_domain')
@@ -162,8 +162,9 @@ Deno.serve(async (req) => {
       .limit(batch_size);
 
     // Only get unenriched leads unless force is true
+    // Check for null email_type OR null enriched_at (some leads may have partial enrichment)
     if (!force) {
-      query = query.is('enriched_at', null);
+      query = query.or('enriched_at.is.null,email_type.is.null');
     }
 
     const { data: leads, error: fetchError } = await query;
@@ -190,14 +191,14 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${leads.length} leads to enrich`);
 
-    // Process leads
+    // Process leads - always classify email type/domain even if title is null
     const enrichedLeads = leads.map(lead => ({
       id: lead.id,
-      seniority_level: classifySeniority(lead.title),
-      department: classifyDepartment(lead.title),
-      company_size_category: classifyCompanySize(lead.company_size),
-      email_type: lead.email_type || classifyEmailType(lead.email),
-      email_domain: lead.email_domain || extractEmailDomain(lead.email),
+      seniority_level: lead.title ? classifySeniority(lead.title) : 'unknown',
+      department: lead.title ? classifyDepartment(lead.title) : 'other',
+      company_size_category: lead.company_size ? classifyCompanySize(lead.company_size) : 'unknown',
+      email_type: classifyEmailType(lead.email), // Always classify from email
+      email_domain: extractEmailDomain(lead.email), // Always extract domain
       enriched_at: new Date().toISOString(),
     }));
 
