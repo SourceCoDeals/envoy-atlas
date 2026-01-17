@@ -75,7 +75,7 @@ const App = () => (
                   <Route path="/deal-hub" element={<DealHub />} />
                   <Route path="/monthly-report" element={<MonthlyReport />} />
                   <Route path="/auth" element={<Auth />} />
-                  <Route path="/connections" element={<Connections />} />
+                  <Route path="/connections" element={<Navigate to="/settings?tab=connections" replace />} />
                   <Route path="/oauth/phoneburner/callback" element={<PhoneBurnerCallback />} />
                   <Route path="/campaigns" element={<Campaigns />} />
                   <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
