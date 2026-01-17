@@ -130,11 +130,38 @@ export interface DateRange {
   endDate: Date;
 }
 
+export interface DomainBreakdown {
+  domain: string;
+  mailboxCount: number;
+  dailyCapacity: number;
+  spfValid: boolean | null;
+  dkimValid: boolean | null;
+  dmarcValid: boolean | null;
+  bounceRate: number;
+  healthScore: number;
+  warmupCount: number;
+}
+
+export interface InfrastructureMetrics {
+  totalDomains: number;
+  totalMailboxes: number;
+  activeMailboxes: number;
+  totalDailyCapacity: number;
+  currentDailySending: number;
+  utilizationRate: number;
+  warmupCount: number;
+  domainsWithFullAuth: number;
+  avgHealthScore: number;
+  avgBounceRate: number;
+  domainBreakdown: DomainBreakdown[];
+}
+
 interface EngagementReportData {
   engagement: EngagementDetails | null;
   keyMetrics: KeyMetrics;
   emailMetrics: EmailMetrics;
   callingMetrics: CallingMetrics;
+  infrastructureMetrics: InfrastructureMetrics;
   funnel: FunnelStage[];
   channelComparison: ChannelComparison[];
   trendData: TrendDataPoint[];
@@ -198,13 +225,32 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
 
       const campaignIds = linkedCampaigns.map(c => c.id);
 
-      // If no campaigns linked, return empty data
+      // Fetch infrastructure data (always fetch, not dependent on campaigns)
+      const [emailAccountsResult, sendingDomainsResult] = await Promise.all([
+        supabase
+          .from('email_accounts')
+          .select('email_address, daily_limit, health_score, is_active, warmup_enabled, sent_30d, bounce_rate')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('sending_domains')
+          .select('domain, spf_valid, dkim_valid, dmarc_valid, bounce_rate, daily_volume_limit, daily_volume_used')
+          .eq('workspace_id', currentWorkspace.id),
+      ]);
+
+      const emailAccounts = emailAccountsResult.data || [];
+      const sendingDomains = sendingDomainsResult.data || [];
+
+      // Calculate infrastructure metrics
+      const infrastructureMetrics = calculateInfrastructureMetrics(emailAccounts, sendingDomains);
+
+      // If no campaigns linked, return empty data but with infrastructure
       if (campaignIds.length === 0) {
         setData({
           engagement: engagement as EngagementDetails,
           keyMetrics: getEmptyKeyMetrics(),
           emailMetrics: getEmptyEmailMetrics(),
           callingMetrics: getEmptyCallingMetrics(),
+          infrastructureMetrics,
           funnel: [],
           channelComparison: [],
           trendData: [],
@@ -532,6 +578,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         keyMetrics,
         emailMetrics,
         callingMetrics,
+        infrastructureMetrics,
         funnel,
         channelComparison,
         trendData,
@@ -551,6 +598,87 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
   };
 
   return { data, loading, error, refetch: fetchReportData };
+}
+
+function calculateInfrastructureMetrics(
+  emailAccounts: any[],
+  sendingDomains: any[]
+): InfrastructureMetrics {
+  // Build domain map from email accounts
+  const domainMap = new Map<string, DomainBreakdown>();
+  
+  emailAccounts.forEach(acc => {
+    const domain = acc.email_address?.split('@')[1];
+    if (!domain) return;
+    
+    if (!domainMap.has(domain)) {
+      const domainData = sendingDomains.find(d => d.domain === domain);
+      domainMap.set(domain, {
+        domain,
+        mailboxCount: 0,
+        dailyCapacity: 0,
+        spfValid: domainData?.spf_valid ?? null,
+        dkimValid: domainData?.dkim_valid ?? null,
+        dmarcValid: domainData?.dmarc_valid ?? null,
+        bounceRate: domainData?.bounce_rate || 0,
+        healthScore: 0,
+        warmupCount: 0,
+      });
+    }
+    
+    const d = domainMap.get(domain)!;
+    d.mailboxCount++;
+    d.dailyCapacity += acc.daily_limit || 0;
+    d.healthScore += (acc.health_score || 0) * 100;
+    if (acc.warmup_enabled) d.warmupCount++;
+  });
+
+  // Calculate averages for each domain
+  domainMap.forEach((d) => {
+    if (d.mailboxCount > 0) {
+      d.healthScore = Math.round(d.healthScore / d.mailboxCount);
+    }
+  });
+
+  const domainBreakdown = Array.from(domainMap.values())
+    .sort((a, b) => b.mailboxCount - a.mailboxCount);
+
+  // Calculate totals
+  const totalMailboxes = emailAccounts.length;
+  const activeMailboxes = emailAccounts.filter(a => a.is_active).length;
+  const totalDailyCapacity = emailAccounts.reduce((sum, a) => sum + (a.daily_limit || 0), 0);
+  const totalSent30d = emailAccounts.reduce((sum, a) => sum + (a.sent_30d || 0), 0);
+  const currentDailySending = Math.round(totalSent30d / 30);
+  const utilizationRate = totalDailyCapacity > 0 ? (currentDailySending / totalDailyCapacity) * 100 : 0;
+  const warmupCount = emailAccounts.filter(a => a.warmup_enabled).length;
+  
+  const domainsWithFullAuth = domainBreakdown.filter(
+    d => d.spfValid === true && d.dkimValid === true && d.dmarcValid === true
+  ).length;
+
+  const healthScores = emailAccounts.map(a => (a.health_score || 0) * 100).filter(h => h > 0);
+  const avgHealthScore = healthScores.length > 0 
+    ? Math.round(healthScores.reduce((a, b) => a + b, 0) / healthScores.length)
+    : 0;
+
+  const bounceRates = emailAccounts.map(a => a.bounce_rate || 0).filter(b => b > 0);
+  const avgBounceRate = bounceRates.length > 0
+    ? bounceRates.reduce((a, b) => a + b, 0) / bounceRates.length
+    : 0;
+
+  return {
+    totalDomains: domainBreakdown.length,
+    totalMailboxes,
+    activeMailboxes,
+    totalDailyCapacity,
+    currentDailySending,
+    utilizationRate,
+    warmupCount,
+    domainsWithFullAuth,
+    avgHealthScore,
+    avgBounceRate,
+    domainBreakdown,
+  };
 }
 
 function normalizeCallCategory(category: string): string {
