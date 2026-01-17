@@ -40,6 +40,21 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
   const { emailMetrics, linkedCampaigns, infrastructureMetrics } = data;
   const [domainsExpanded, setDomainsExpanded] = useState(false);
 
+  // Default infrastructure metrics if not available
+  const infra = infrastructureMetrics ?? {
+    totalDomains: 0,
+    totalMailboxes: 0,
+    activeMailboxes: 0,
+    totalDailyCapacity: 0,
+    currentDailySending: 0,
+    utilizationRate: 0,
+    warmupCount: 0,
+    domainsWithFullAuth: 0,
+    avgHealthScore: 0,
+    avgBounceRate: 0,
+    domainBreakdown: [],
+  };
+
   // Reply sentiment breakdown (estimated from data)
   const replyBreakdown = [
     { name: 'Positive', value: emailMetrics.positiveReplies, color: 'hsl(var(--chart-2))' },
@@ -142,9 +157,9 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                 <Globe className="h-4 w-4 text-muted-foreground" />
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Domains</span>
               </div>
-              <p className="text-2xl font-bold">{infrastructureMetrics.totalDomains}</p>
+              <p className="text-2xl font-bold">{infra.totalDomains}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {infrastructureMetrics.domainsWithFullAuth} fully authenticated
+                {infra.domainsWithFullAuth} fully authenticated
               </p>
             </div>
 
@@ -153,9 +168,9 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                 <Inbox className="h-4 w-4 text-muted-foreground" />
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Mailboxes</span>
               </div>
-              <p className="text-2xl font-bold">{infrastructureMetrics.totalMailboxes}</p>
+              <p className="text-2xl font-bold">{infra.totalMailboxes}</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {infrastructureMetrics.activeMailboxes} active
+                {infra.activeMailboxes} active
               </p>
             </div>
 
@@ -164,7 +179,7 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                 <Send className="h-4 w-4 text-muted-foreground" />
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Daily Capacity</span>
               </div>
-              <p className="text-2xl font-bold">{infrastructureMetrics.totalDailyCapacity.toLocaleString()}</p>
+              <p className="text-2xl font-bold">{infra.totalDailyCapacity.toLocaleString()}</p>
               <p className="text-xs text-muted-foreground mt-1">emails/day</p>
             </div>
 
@@ -174,13 +189,13 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Utilization</span>
               </div>
               <p className={`text-2xl font-bold ${
-                infrastructureMetrics.utilizationRate > 80 ? 'text-red-500' : 
-                infrastructureMetrics.utilizationRate > 60 ? 'text-yellow-500' : 'text-green-500'
+                infra.utilizationRate > 80 ? 'text-red-500' : 
+                infra.utilizationRate > 60 ? 'text-yellow-500' : 'text-green-500'
               }`}>
-                {infrastructureMetrics.utilizationRate.toFixed(0)}%
+                {infra.utilizationRate.toFixed(0)}%
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {infrastructureMetrics.currentDailySending.toLocaleString()} sent/day
+                {infra.currentDailySending.toLocaleString()} sent/day
               </p>
             </div>
 
@@ -189,7 +204,7 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                 <Flame className="h-4 w-4 text-orange-500" />
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Warmup</span>
               </div>
-              <p className="text-2xl font-bold">{infrastructureMetrics.warmupCount}</p>
+              <p className="text-2xl font-bold">{infra.warmupCount}</p>
               <p className="text-xs text-muted-foreground mt-1">inboxes warming</p>
             </div>
 
@@ -199,13 +214,13 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Health Score</span>
               </div>
               <p className={`text-2xl font-bold ${
-                infrastructureMetrics.avgHealthScore >= 80 ? 'text-green-500' : 
-                infrastructureMetrics.avgHealthScore >= 60 ? 'text-yellow-500' : 'text-red-500'
+                infra.avgHealthScore >= 80 ? 'text-green-500' : 
+                infra.avgHealthScore >= 60 ? 'text-yellow-500' : 'text-red-500'
               }`}>
-                {infrastructureMetrics.avgHealthScore}%
+                {infra.avgHealthScore}%
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                avg bounce: {infrastructureMetrics.avgBounceRate.toFixed(1)}%
+                avg bounce: {infra.avgBounceRate.toFixed(1)}%
               </p>
             </div>
           </div>
@@ -215,20 +230,20 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">Capacity Utilization</span>
               <span className="text-sm text-muted-foreground">
-                {infrastructureMetrics.currentDailySending.toLocaleString()} / {infrastructureMetrics.totalDailyCapacity.toLocaleString()} emails/day
+                {infra.currentDailySending.toLocaleString()} / {infra.totalDailyCapacity.toLocaleString()} emails/day
               </span>
             </div>
             <Progress 
-              value={Math.min(infrastructureMetrics.utilizationRate, 100)} 
+              value={Math.min(infra.utilizationRate, 100)} 
               className="h-3"
             />
             <div className="flex justify-between mt-2 text-xs text-muted-foreground">
               <span>0%</span>
               <span className={
-                infrastructureMetrics.utilizationRate > 80 ? 'text-red-500 font-medium' : 
-                infrastructureMetrics.utilizationRate > 60 ? 'text-yellow-500 font-medium' : ''
+                infra.utilizationRate > 80 ? 'text-red-500 font-medium' : 
+                infra.utilizationRate > 60 ? 'text-yellow-500 font-medium' : ''
               }>
-                {infrastructureMetrics.utilizationRate.toFixed(1)}% used
+                {infra.utilizationRate.toFixed(1)}% used
               </span>
               <span>100%</span>
             </div>
@@ -241,7 +256,7 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                 <ShieldCheck className="h-4 w-4 text-primary" />
                 <span className="font-medium">Domain Authentication</span>
                 <Badge variant="outline" className="ml-2">
-                  {infrastructureMetrics.domainsWithFullAuth}/{infrastructureMetrics.totalDomains} verified
+                  {infra.domainsWithFullAuth}/{infra.totalDomains} verified
                 </Badge>
               </div>
               {domainsExpanded ? (
@@ -265,7 +280,7 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {infrastructureMetrics.domainBreakdown.slice(0, 10).map((domain) => (
+                    {infra.domainBreakdown.slice(0, 10).map((domain) => (
                       <tr key={domain.domain} className="hover:bg-muted/30">
                         <td className="p-3 font-medium">{domain.domain}</td>
                         <td className="p-3 text-center">{domain.mailboxCount}</td>
@@ -285,9 +300,9 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                     ))}
                   </tbody>
                 </table>
-                {infrastructureMetrics.domainBreakdown.length > 10 && (
+                {infra.domainBreakdown.length > 10 && (
                   <div className="p-3 text-center text-sm text-muted-foreground bg-muted/30">
-                    +{infrastructureMetrics.domainBreakdown.length - 10} more domains
+                    +{infra.domainBreakdown.length - 10} more domains
                   </div>
                 )}
               </div>
