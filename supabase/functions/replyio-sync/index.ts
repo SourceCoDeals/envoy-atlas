@@ -20,7 +20,7 @@ const RATE_LIMIT_DELAY_LIST = 3000;
 const RATE_LIMIT_DELAY_STATS = 10500;
 const RATE_LIMIT_DELAY_CONTACTS = 3500;
 const TIME_BUDGET_MS = 50000;
-const MAX_BATCHES = 100;
+const MAX_BATCHES = 250; // Increased to handle large accounts (649+ sequences)
 
 function mapSequenceStatus(status: string): string {
   const statusMap: Record<string, string> = {
