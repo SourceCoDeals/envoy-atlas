@@ -35,7 +35,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2, ChevronDown, ChevronRight,
-  Phone, Target, TrendingUp, Users, Link as LinkIcon
+  Phone, Target, TrendingUp, Users, Link as LinkIcon, BarChart3
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LinkedCampaignsList, LinkedCampaign } from '@/components/engagements/LinkedCampaignsList';
@@ -945,17 +945,30 @@ export default function EngagementDashboard() {
                                       {(linkedCampaigns[engagement.id] || []).length} campaign{(linkedCampaigns[engagement.id] || []).length !== 1 ? 's' : ''} linked
                                     </p>
                                   </div>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openLinkDialog(engagement.id);
-                                    }}
-                                  >
-                                    <LinkIcon className="h-3.5 w-3.5 mr-1.5" />
-                                    Link Campaigns
-                                  </Button>
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="default"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/engagements/${engagement.id}/report`);
+                                      }}
+                                    >
+                                      <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
+                                      View Report
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openLinkDialog(engagement.id);
+                                      }}
+                                    >
+                                      <LinkIcon className="h-3.5 w-3.5 mr-1.5" />
+                                      Link Campaigns
+                                    </Button>
+                                  </div>
                                 </div>
                                 <LinkedCampaignsList
                                   campaigns={linkedCampaigns[engagement.id] || []}
