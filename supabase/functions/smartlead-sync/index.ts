@@ -375,10 +375,23 @@ serve(async (req) => {
     // Safety check for max batches
     if (batch_number > MAX_BATCHES) {
       console.error(`Max batch limit (${MAX_BATCHES}) reached. Stopping sync.`);
+      
+      // Update connection status to indicate batch limit hit
+      await supabase.from('api_connections').update({
+        sync_status: 'error',
+        sync_progress: {
+          batch_limit_reached: true,
+          error_message: `Sync stopped after ${MAX_BATCHES} batches. Some data may be missing.`,
+          stopped_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      }).eq('workspace_id', workspace_id).eq('platform', 'smartlead');
+      
       return new Response(JSON.stringify({ 
         error: 'Max batch limit reached',
         batch_number,
-        message: 'Sync stopped after too many batches. Please check for issues.'
+        batch_limit_reached: true,
+        message: 'Sync stopped after too many batches. Some data may be missing.'
       }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
