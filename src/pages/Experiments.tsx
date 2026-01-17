@@ -69,45 +69,74 @@ export default function Experiments() {
   const [experiments, setExperiments] = useState<ActiveExperiment[]>([]);
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Mock suggestions for now
-  const suggestions: ExperimentSuggestion[] = useMemo(() => [
-    {
-      id: '1',
-      type: 'Subject Line',
-      priority: 'high',
-      hypothesis: 'Question-based subjects will increase reply rate by at least 25% because our data shows questions get 23% higher engagement but are underused',
-      rationale: 'Question patterns show 23% lift in similar accounts but are only used in 9% of your emails',
-      expectedLift: 0.25,
-      requiredSample: 2000,
-      estimatedDurationDays: 14,
-      controlSuggestion: 'Current best performing subject line',
-      treatmentSuggestion: 'New subject using question pattern'
-    },
-    {
-      id: '2',
-      type: 'CTA',
-      priority: 'high',
-      hypothesis: 'Choice-based CTAs ("Tuesday or Thursday?") will increase meeting conversion by 40% by reducing friction',
-      rationale: 'Choice CTAs show 34% higher meeting conversion in industry benchmarks but are only used in 12% of your emails',
-      expectedLift: 0.40,
-      requiredSample: 1200,
-      estimatedDurationDays: 10,
-      controlSuggestion: 'Soft CTA ("Would you be open to...")',
-      treatmentSuggestion: 'Choice CTA ("Tuesday or Thursday?")'
-    },
-    {
-      id: '3',
-      type: 'Send Time',
-      priority: 'medium',
-      hypothesis: 'Sending Tuesday 9-10 AM will increase reply rates by 15%',
-      rationale: 'Analysis suggests Tuesday morning may be optimal but currently receives only 8% of volume',
-      expectedLift: 0.15,
-      requiredSample: 3500,
-      estimatedDurationDays: 21,
-      controlSuggestion: 'Current send time distribution',
-      treatmentSuggestion: 'Shift volume to Tuesday 9-10 AM'
+  // Generate suggestions based on actual experiment data
+  const suggestions: ExperimentSuggestion[] = useMemo(() => {
+    const generatedSuggestions: ExperimentSuggestion[] = [];
+    
+    // Only generate suggestions if we have some data to analyze
+    if (experiments.length === 0) {
+      return []; // No data = no suggestions
     }
-  ], []);
+    
+    // Analyze current experiments to find patterns
+    const avgReplyRate = experiments.reduce((sum, e) => {
+      const variantAvg = e.variants.reduce((s, v) => s + v.replyRate, 0) / e.variants.length;
+      return sum + variantAvg;
+    }, 0) / experiments.length;
+    
+    const lowConfidenceExperiments = experiments.filter(e => e.confidence < 80 && e.status !== 'completed');
+    const needsMoreDataExperiments = experiments.filter(e => e.status === 'needs_data');
+    
+    // Suggestion 1: If we have low-performing campaigns, suggest subject line testing
+    if (avgReplyRate < 3) {
+      generatedSuggestions.push({
+        id: 'suggestion-subject',
+        type: 'Subject Line',
+        priority: 'high',
+        hypothesis: 'Testing question-based subject lines may increase reply rates by 20-30%',
+        rationale: `Current average reply rate is ${avgReplyRate.toFixed(1)}%. Question patterns typically outperform statements in cold outreach.`,
+        expectedLift: 0.25,
+        requiredSample: 2000,
+        estimatedDurationDays: 14,
+        controlSuggestion: 'Current best performing subject line',
+        treatmentSuggestion: 'New subject using question pattern'
+      });
+    }
+    
+    // Suggestion 2: If many experiments lack statistical significance
+    if (lowConfidenceExperiments.length > 0) {
+      generatedSuggestions.push({
+        id: 'suggestion-sample',
+        type: 'Sample Size',
+        priority: 'high',
+        hypothesis: 'Increasing sample sizes will yield more statistically significant results',
+        rationale: `${lowConfidenceExperiments.length} experiments have confidence below 80%. Consider consolidating variants.`,
+        expectedLift: 0.15,
+        requiredSample: MIN_SAMPLE_SIZE * 2,
+        estimatedDurationDays: 21,
+        controlSuggestion: 'Current multi-variant approach',
+        treatmentSuggestion: 'Focused A/B test with higher volume per variant'
+      });
+    }
+    
+    // Suggestion 3: CTA optimization if we have data
+    if (experiments.length >= 2) {
+      generatedSuggestions.push({
+        id: 'suggestion-cta',
+        type: 'CTA',
+        priority: 'medium',
+        hypothesis: 'Choice-based CTAs may increase meeting conversion by reducing friction',
+        rationale: 'Based on industry benchmarks, offering specific time options typically improves conversion.',
+        expectedLift: 0.30,
+        requiredSample: 1500,
+        estimatedDurationDays: 12,
+        controlSuggestion: 'Soft CTA ("Would you be open to...")',
+        treatmentSuggestion: 'Choice CTA ("Tuesday or Thursday?")'
+      });
+    }
+    
+    return generatedSuggestions;
+  }, [experiments]);
 
   useEffect(() => {
     if (!authLoading && !user) {
