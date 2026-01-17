@@ -1,13 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Progress } from '@/components/ui/progress';
 import {
   Building2, Users, Zap, ThumbsUp, CalendarCheck, TrendingUp, Mail, Phone
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell, Legend
+  Legend
 } from 'recharts';
+import { ReportMetricCard } from './components/ReportMetricCard';
+import { ReportProgressBar } from './components/ReportProgressBar';
+import { calculateHealthScore, calculateMeetingProgress } from './utils/calculations';
+import { getHealthColor } from './constants/statusConfig';
 
 interface ExecutiveSummaryTabProps {
   data: {
@@ -51,22 +54,18 @@ interface ExecutiveSummaryTabProps {
 export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
   const { keyMetrics, funnel, channelComparison, trendData, engagement } = data;
 
-  // Calculate health score based on meeting rate, response rate, and activity
-  const meetingProgress = engagement?.meetings_target 
-    ? (keyMetrics.meetingsScheduled / engagement.meetings_target) * 100 
-    : 50;
-  const healthScore = Math.min(100, Math.round(
-    (keyMetrics.responseRate * 5) + // Response rate weight
-    (keyMetrics.meetingRate * 10) + // Meeting rate weight
-    (meetingProgress * 0.3) + // Progress to target weight
-    (keyMetrics.totalTouchpoints > 0 ? 20 : 0) // Activity bonus
-  ));
+  const meetingProgress = calculateMeetingProgress(
+    keyMetrics.meetingsScheduled,
+    engagement?.meetings_target ?? null
+  );
 
-  const getHealthColor = (score: number) => {
-    if (score >= 70) return 'text-green-500';
-    if (score >= 40) return 'text-yellow-500';
-    return 'text-red-500';
-  };
+  const healthScore = calculateHealthScore({
+    responseRate: keyMetrics.responseRate,
+    meetingRate: keyMetrics.meetingRate,
+    meetingsScheduled: keyMetrics.meetingsScheduled,
+    meetingsTarget: engagement?.meetings_target ?? null,
+    totalTouchpoints: keyMetrics.totalTouchpoints,
+  });
 
   return (
     <div className="space-y-6">
@@ -87,29 +86,24 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
               <p className="text-sm text-muted-foreground mt-1">out of 100</p>
             </div>
             <div className="flex-1 space-y-3">
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Response Rate</span>
-                  <span className="font-medium">{keyMetrics.responseRate.toFixed(1)}%</span>
-                </div>
-                <Progress value={Math.min(100, keyMetrics.responseRate * 10)} className="h-2" />
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Meeting Conversion</span>
-                  <span className="font-medium">{keyMetrics.meetingRate.toFixed(1)}%</span>
-                </div>
-                <Progress value={Math.min(100, keyMetrics.meetingRate * 20)} className="h-2" />
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Meetings Progress</span>
-                  <span className="font-medium">
-                    {keyMetrics.meetingsScheduled} / {engagement?.meetings_target || '—'}
-                  </span>
-                </div>
-                <Progress value={Math.min(100, meetingProgress)} className="h-2" />
-              </div>
+              <ReportProgressBar
+                value={keyMetrics.responseRate * 10}
+                label="Response Rate"
+                valueLabel={`${keyMetrics.responseRate.toFixed(1)}%`}
+                size="md"
+              />
+              <ReportProgressBar
+                value={keyMetrics.meetingRate * 20}
+                label="Meeting Conversion"
+                valueLabel={`${keyMetrics.meetingRate.toFixed(1)}%`}
+                size="md"
+              />
+              <ReportProgressBar
+                value={meetingProgress}
+                label="Meetings Progress"
+                valueLabel={`${keyMetrics.meetingsScheduled} / ${engagement?.meetings_target || '—'}`}
+                size="md"
+              />
             </div>
           </div>
         </CardContent>
@@ -117,28 +111,18 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
 
       {/* Key Metrics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Card className="p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Companies</p>
-              <p className="text-2xl font-bold mt-1">{keyMetrics.companiesContacted.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">contacted</p>
-            </div>
-            <Building2 className="h-5 w-5 text-muted-foreground" />
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Contacts</p>
-              <p className="text-2xl font-bold mt-1">{keyMetrics.contactsReached.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">reached</p>
-            </div>
-            <Users className="h-5 w-5 text-muted-foreground" />
-          </div>
-        </Card>
-
+        <ReportMetricCard
+          label="Companies"
+          value={keyMetrics.companiesContacted}
+          subtitle="contacted"
+          icon={Building2}
+        />
+        <ReportMetricCard
+          label="Contacts"
+          value={keyMetrics.contactsReached}
+          subtitle="reached"
+          icon={Users}
+        />
         <Card className="p-4">
           <div className="flex items-start justify-between">
             <div>
@@ -156,41 +140,27 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
             <Zap className="h-5 w-5 text-muted-foreground" />
           </div>
         </Card>
-
-        <Card className="p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Positive</p>
-              <p className="text-2xl font-bold mt-1 text-green-600">{keyMetrics.positiveResponses.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">responses</p>
-            </div>
-            <ThumbsUp className="h-5 w-5 text-green-500" />
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Meetings</p>
-              <p className="text-2xl font-bold mt-1 text-primary">{keyMetrics.meetingsScheduled}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {keyMetrics.meetingRate.toFixed(1)}% rate
-              </p>
-            </div>
-            <CalendarCheck className="h-5 w-5 text-primary" />
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Opportunities</p>
-              <p className="text-2xl font-bold mt-1">{keyMetrics.opportunities}</p>
-              <p className="text-xs text-muted-foreground mt-1">identified</p>
-            </div>
-            <TrendingUp className="h-5 w-5 text-muted-foreground" />
-          </div>
-        </Card>
+        <ReportMetricCard
+          label="Positive"
+          value={keyMetrics.positiveResponses}
+          subtitle="responses"
+          icon={ThumbsUp}
+          highlight
+          valueClassName="text-green-600"
+        />
+        <ReportMetricCard
+          label="Meetings"
+          value={keyMetrics.meetingsScheduled}
+          subtitle={`${keyMetrics.meetingRate.toFixed(1)}% rate`}
+          icon={CalendarCheck}
+          highlight
+        />
+        <ReportMetricCard
+          label="Opportunities"
+          value={keyMetrics.opportunities}
+          subtitle="identified"
+          icon={TrendingUp}
+        />
       </div>
 
       {/* Funnel Visualization */}

@@ -1,10 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
 import { 
   Target, Users, Building2, CheckCircle, 
-  AlertCircle, Clock, MessageSquare
+  AlertCircle
 } from 'lucide-react';
+import { ReportMetricCard } from './components/ReportMetricCard';
+import { ReportProgressBar } from './components/ReportProgressBar';
+import { StatRow } from './components/StatRow';
+import { LIST_QUALITY_THRESHOLDS } from './constants/thresholds';
+import { calculateRate } from './utils/formatters';
 
 interface TargetsListsTabProps {
   data: {
@@ -34,19 +37,19 @@ export function TargetsListsTab({ data }: TargetsListsTabProps) {
   const badData = Math.floor(contacted * 0.02);
 
   const statusBreakdown = [
-    { label: 'Not Yet Contacted', count: notContacted, color: 'bg-muted', percentage: (notContacted / targetUniverse) * 100 },
-    { label: 'In Sequence (Active)', count: inSequence, color: 'bg-blue-500', percentage: (inSequence / targetUniverse) * 100 },
-    { label: 'Engaged (Responded)', count: engaged, color: 'bg-green-500', percentage: (engaged / targetUniverse) * 100 },
-    { label: 'Meeting Held', count: keyMetrics.meetingsScheduled, color: 'bg-primary', percentage: (keyMetrics.meetingsScheduled / targetUniverse) * 100 },
-    { label: 'Opportunity', count: keyMetrics.opportunities, color: 'bg-yellow-500', percentage: (keyMetrics.opportunities / targetUniverse) * 100 },
-    { label: 'Closed - Not Interested', count: notInterested, color: 'bg-red-500/50', percentage: (notInterested / targetUniverse) * 100 },
-    { label: 'Bad Data / Invalid', count: badData, color: 'bg-muted-foreground/50', percentage: (badData / targetUniverse) * 100 },
+    { label: 'Not Yet Contacted', count: notContacted, color: 'bg-muted', percentage: calculateRate(notContacted, targetUniverse) },
+    { label: 'In Sequence (Active)', count: inSequence, color: 'bg-blue-500', percentage: calculateRate(inSequence, targetUniverse) },
+    { label: 'Engaged (Responded)', count: engaged, color: 'bg-green-500', percentage: calculateRate(engaged, targetUniverse) },
+    { label: 'Meeting Held', count: keyMetrics.meetingsScheduled, color: 'bg-primary', percentage: calculateRate(keyMetrics.meetingsScheduled, targetUniverse) },
+    { label: 'Opportunity', count: keyMetrics.opportunities, color: 'bg-yellow-500', percentage: calculateRate(keyMetrics.opportunities, targetUniverse) },
+    { label: 'Closed - Not Interested', count: notInterested, color: 'bg-red-500/50', percentage: calculateRate(notInterested, targetUniverse) },
+    { label: 'Bad Data / Invalid', count: badData, color: 'bg-muted-foreground/50', percentage: calculateRate(badData, targetUniverse) },
   ];
 
   // List quality metrics
   const emailValidRate = 94.2;
   const phoneValidRate = 87.3;
-  const badDataRate = (badData / contacted) * 100;
+  const badDataRate = calculateRate(badData, contacted);
   const decisionMakerRate = 93;
 
   return (
@@ -63,34 +66,29 @@ export function TargetsListsTab({ data }: TargetsListsTabProps) {
           <div className="space-y-6">
             {/* Coverage Status */}
             <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium">Coverage Status</span>
-                <span className="text-sm text-muted-foreground">
-                  {contacted.toLocaleString()} / {targetUniverse.toLocaleString()} companies
-                </span>
-              </div>
-              <div className="h-8 rounded-lg bg-muted overflow-hidden flex">
-                <div 
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${(contacted / targetUniverse) * 100}%` }}
-                />
-              </div>
+              <ReportProgressBar
+                value={contacted}
+                max={targetUniverse}
+                label="Coverage Status"
+                valueLabel={`${contacted.toLocaleString()} / ${targetUniverse.toLocaleString()} companies`}
+                size="lg"
+              />
               <div className="flex justify-between mt-2 text-sm">
                 <span className="text-primary font-medium">
-                  Contacted: {contacted.toLocaleString()} ({((contacted / targetUniverse) * 100).toFixed(0)}%)
+                  Contacted: {contacted.toLocaleString()} ({calculateRate(contacted, targetUniverse).toFixed(0)}%)
                 </span>
                 <span className="text-muted-foreground">
-                  Not Yet Contacted: {notContacted.toLocaleString()} ({((notContacted / targetUniverse) * 100).toFixed(0)}%)
+                  Not Yet Contacted: {notContacted.toLocaleString()} ({calculateRate(notContacted, targetUniverse).toFixed(0)}%)
                 </span>
               </div>
             </div>
 
             {/* Target Criteria */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="p-3 rounded-lg border">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Targets</p>
-                <p className="text-xl font-bold">{targetUniverse.toLocaleString()}</p>
-              </div>
+              <ReportMetricCard
+                label="Total Targets"
+                value={targetUniverse}
+              />
               <div className="p-3 rounded-lg border">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Industry</p>
                 <p className="text-lg font-medium truncate">{engagement?.industry_focus || 'All'}</p>
@@ -99,10 +97,11 @@ export function TargetsListsTab({ data }: TargetsListsTabProps) {
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Geography</p>
                 <p className="text-lg font-medium truncate">{engagement?.geography || 'All'}</p>
               </div>
-              <div className="p-3 rounded-lg border">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Contacted</p>
-                <p className="text-xl font-bold text-primary">{((contacted / targetUniverse) * 100).toFixed(0)}%</p>
-              </div>
+              <ReportMetricCard
+                label="Contacted"
+                value={`${calculateRate(contacted, targetUniverse).toFixed(0)}%`}
+                highlight
+              />
             </div>
           </div>
         </CardContent>
@@ -116,20 +115,14 @@ export function TargetsListsTab({ data }: TargetsListsTabProps) {
         <CardContent>
           <div className="space-y-3">
             {statusBreakdown.map((status) => (
-              <div key={status.label} className="space-y-1">
-                <div className="flex justify-between text-sm">
-                  <span>{status.label}</span>
-                  <span className="text-muted-foreground">
-                    {status.count.toLocaleString()} ({status.percentage.toFixed(1)}%)
-                  </span>
-                </div>
-                <div className="h-6 rounded bg-muted/50 overflow-hidden">
-                  <div 
-                    className={`h-full ${status.color} transition-all`}
-                    style={{ width: `${Math.max(1, status.percentage)}%` }}
-                  />
-                </div>
-              </div>
+              <ReportProgressBar
+                key={status.label}
+                value={status.percentage}
+                label={status.label}
+                valueLabel={`${status.count.toLocaleString()} (${status.percentage.toFixed(1)}%)`}
+                colorClass={status.color}
+                size="lg"
+              />
             ))}
           </div>
         </CardContent>
@@ -142,51 +135,73 @@ export function TargetsListsTab({ data }: TargetsListsTabProps) {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 rounded-lg border">
+            <ReportMetricCard
+              label="Total Contacts"
+              value={Math.floor(targetUniverse * 1.5)}
+              icon={Users}
+            />
+            <div className={`p-4 rounded-lg border ${
+              emailValidRate >= LIST_QUALITY_THRESHOLDS.emailValidRate 
+                ? 'bg-green-500/10 border-green-500/20' 
+                : 'bg-yellow-500/10 border-yellow-500/20'
+            }`}>
               <div className="flex items-center gap-2 mb-2">
-                <Users className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Total Contacts
-                </span>
-              </div>
-              <p className="text-2xl font-bold">{Math.floor(targetUniverse * 1.5).toLocaleString()}</p>
-            </div>
-            <div className={`p-4 rounded-lg border ${emailValidRate >= 90 ? 'bg-green-500/10 border-green-500/20' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className={`h-4 w-4 ${emailValidRate >= 90 ? 'text-green-500' : 'text-yellow-500'}`} />
+                <CheckCircle className={`h-4 w-4 ${
+                  emailValidRate >= LIST_QUALITY_THRESHOLDS.emailValidRate ? 'text-green-500' : 'text-yellow-500'
+                }`} />
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Email Valid %
                 </span>
               </div>
-              <p className={`text-2xl font-bold ${emailValidRate >= 90 ? 'text-green-600' : 'text-yellow-600'}`}>
+              <p className={`text-2xl font-bold ${
+                emailValidRate >= LIST_QUALITY_THRESHOLDS.emailValidRate ? 'text-green-600' : 'text-yellow-600'
+              }`}>
                 {emailValidRate}%
               </p>
               <p className="text-xs text-green-600 mt-1">✓ Good</p>
             </div>
-            <div className={`p-4 rounded-lg border ${phoneValidRate >= 85 ? 'bg-green-500/10 border-green-500/20' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
+            <div className={`p-4 rounded-lg border ${
+              phoneValidRate >= LIST_QUALITY_THRESHOLDS.phoneValidRate 
+                ? 'bg-green-500/10 border-green-500/20' 
+                : 'bg-yellow-500/10 border-yellow-500/20'
+            }`}>
               <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className={`h-4 w-4 ${phoneValidRate >= 85 ? 'text-green-500' : 'text-yellow-500'}`} />
+                <CheckCircle className={`h-4 w-4 ${
+                  phoneValidRate >= LIST_QUALITY_THRESHOLDS.phoneValidRate ? 'text-green-500' : 'text-yellow-500'
+                }`} />
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Phone Valid %
                 </span>
               </div>
-              <p className={`text-2xl font-bold ${phoneValidRate >= 85 ? 'text-green-600' : 'text-yellow-600'}`}>
+              <p className={`text-2xl font-bold ${
+                phoneValidRate >= LIST_QUALITY_THRESHOLDS.phoneValidRate ? 'text-green-600' : 'text-yellow-600'
+              }`}>
                 {phoneValidRate}%
               </p>
               <p className="text-xs text-green-600 mt-1">✓ Good</p>
             </div>
-            <div className={`p-4 rounded-lg border ${badDataRate < 5 ? 'bg-green-500/10 border-green-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+            <div className={`p-4 rounded-lg border ${
+              badDataRate < LIST_QUALITY_THRESHOLDS.badDataRate 
+                ? 'bg-green-500/10 border-green-500/20' 
+                : 'bg-red-500/10 border-red-500/20'
+            }`}>
               <div className="flex items-center gap-2 mb-2">
-                <AlertCircle className={`h-4 w-4 ${badDataRate < 5 ? 'text-green-500' : 'text-red-500'}`} />
+                <AlertCircle className={`h-4 w-4 ${
+                  badDataRate < LIST_QUALITY_THRESHOLDS.badDataRate ? 'text-green-500' : 'text-red-500'
+                }`} />
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Bad Data %
                 </span>
               </div>
-              <p className={`text-2xl font-bold ${badDataRate < 5 ? 'text-green-600' : 'text-red-600'}`}>
+              <p className={`text-2xl font-bold ${
+                badDataRate < LIST_QUALITY_THRESHOLDS.badDataRate ? 'text-green-600' : 'text-red-600'
+              }`}>
                 {badDataRate.toFixed(1)}%
               </p>
-              <p className={`text-xs mt-1 ${badDataRate < 5 ? 'text-green-600' : 'text-red-600'}`}>
-                {badDataRate < 5 ? '✓ Acceptable' : '! High'}
+              <p className={`text-xs mt-1 ${
+                badDataRate < LIST_QUALITY_THRESHOLDS.badDataRate ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {badDataRate < LIST_QUALITY_THRESHOLDS.badDataRate ? '✓ Acceptable' : '! High'}
               </p>
             </div>
           </div>
@@ -194,25 +209,28 @@ export function TargetsListsTab({ data }: TargetsListsTabProps) {
           {/* Contact Coverage */}
           <div className="mt-6 space-y-3">
             <h4 className="font-medium">Contact Coverage</h4>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Companies with 1+ contact</span>
-                <span className="font-medium">{targetUniverse.toLocaleString()} / {targetUniverse.toLocaleString()} (100%)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Companies with 2+ contacts</span>
-                <span className="font-medium">{Math.floor(targetUniverse * 0.81).toLocaleString()} / {targetUniverse.toLocaleString()} (81%)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Companies with decision maker</span>
-                <span className="font-medium">{Math.floor(targetUniverse * (decisionMakerRate / 100)).toLocaleString()} / {targetUniverse.toLocaleString()} ({decisionMakerRate}%)</span>
-              </div>
+            <div className="space-y-2">
+              <StatRow
+                label="Companies with 1+ contact"
+                value={targetUniverse}
+                suffix={`/ ${targetUniverse.toLocaleString()} (100%)`}
+              />
+              <StatRow
+                label="Companies with 2+ contacts"
+                value={Math.floor(targetUniverse * 0.81)}
+                suffix={`/ ${targetUniverse.toLocaleString()} (81%)`}
+              />
+              <StatRow
+                label="Companies with decision maker"
+                value={Math.floor(targetUniverse * (decisionMakerRate / 100))}
+                suffix={`/ ${targetUniverse.toLocaleString()} (${decisionMakerRate}%)`}
+              />
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Industry & Geography Breakdown Placeholder */}
+      {/* Industry & Geography Breakdown */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Target Breakdown</CardTitle>
@@ -222,67 +240,27 @@ export function TargetsListsTab({ data }: TargetsListsTabProps) {
             <div>
               <h4 className="font-medium mb-4">By Industry</h4>
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">{engagement?.industry_focus || 'Manufacturing'}</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.38).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(38%)</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Industrial Services</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.29).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(29%)</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Fabrication</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.18).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(18%)</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Distribution</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.15).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(15%)</span>
-                  </div>
-                </div>
+                <StatRow 
+                  label={engagement?.industry_focus || 'Manufacturing'} 
+                  value={Math.floor(targetUniverse * 0.38)}
+                  percentage={38}
+                />
+                <StatRow label="Industrial Services" value={Math.floor(targetUniverse * 0.29)} percentage={29} />
+                <StatRow label="Fabrication" value={Math.floor(targetUniverse * 0.18)} percentage={18} />
+                <StatRow label="Distribution" value={Math.floor(targetUniverse * 0.15)} percentage={15} />
               </div>
             </div>
             <div>
               <h4 className="font-medium mb-4">By Geography</h4>
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">{engagement?.geography?.split(',')[0] || 'Illinois'}</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.18).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(18%)</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Ohio</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.17).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(17%)</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Michigan</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.15).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(15%)</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Indiana</span>
-                  <div className="text-right">
-                    <span className="font-medium">{Math.floor(targetUniverse * 0.13).toLocaleString()}</span>
-                    <span className="text-muted-foreground text-sm ml-1">(13%)</span>
-                  </div>
-                </div>
+                <StatRow 
+                  label={engagement?.geography?.split(',')[0] || 'Illinois'} 
+                  value={Math.floor(targetUniverse * 0.18)}
+                  percentage={18}
+                />
+                <StatRow label="Ohio" value={Math.floor(targetUniverse * 0.17)} percentage={17} />
+                <StatRow label="Michigan" value={Math.floor(targetUniverse * 0.15)} percentage={15} />
+                <StatRow label="Indiana" value={Math.floor(targetUniverse * 0.13)} percentage={13} />
               </div>
             </div>
           </div>
