@@ -11,10 +11,18 @@ import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './Campaig
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Database, Briefcase } from 'lucide-react';
 import { format } from 'date-fns';
 
+interface Engagement {
+  id: string;
+  name: string;
+}
+
 interface EnhancedCampaignTableProps {
   campaigns: CampaignWithMetrics[];
   tierFilter?: string;
   onTierFilterChange?: (tier: string) => void;
+  engagementFilter?: string;
+  onEngagementFilterChange?: (id: string) => void;
+  engagements?: Engagement[];
 }
 
 type SortField = 'name' | 'score' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
@@ -70,11 +78,15 @@ const getTierRowClass = (tier: CampaignTier['tier']) => {
 export function EnhancedCampaignTable({ 
   campaigns, 
   tierFilter = 'all',
-  onTierFilterChange 
+  onTierFilterChange,
+  engagementFilter = 'all',
+  onEngagementFilterChange,
+  engagements = [],
 }: EnhancedCampaignTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [localTierFilter, setLocalTierFilter] = useState<string>(tierFilter);
+  const [localEngagementFilter, setLocalEngagementFilter] = useState<string>(engagementFilter);
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
@@ -84,10 +96,38 @@ export function EnhancedCampaignTable({
     setLocalTierFilter(tierFilter);
   }, [tierFilter]);
 
+  // Sync external engagement filter with local state
+  useEffect(() => {
+    setLocalEngagementFilter(engagementFilter);
+  }, [engagementFilter]);
+
   const handleTierChange = (value: string) => {
     setLocalTierFilter(value);
     onTierFilterChange?.(value);
   };
+
+  const handleEngagementChange = (value: string) => {
+    setLocalEngagementFilter(value);
+    onEngagementFilterChange?.(value);
+  };
+
+  // Derive unique engagements from campaigns for counts
+  const uniqueEngagements = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    campaigns.forEach(c => {
+      if (c.engagement_id && c.engagement_name) {
+        const existing = map.get(c.engagement_id);
+        if (existing) {
+          existing.count++;
+        } else {
+          map.set(c.engagement_id, { id: c.engagement_id, name: c.engagement_name, count: 1 });
+        }
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [campaigns]);
+
+  const unlinkedCount = campaigns.filter(c => !c.engagement_id).length;
 
   const campaignsWithScores: CampaignWithScore[] = useMemo(() => {
     return campaigns.map(campaign => {
@@ -119,6 +159,13 @@ export function EnhancedCampaignTable({
 
     if (localTierFilter !== 'all') {
       result = result.filter(c => c.tier.tier === localTierFilter);
+    }
+
+    // Filter by engagement
+    if (localEngagementFilter === 'unlinked') {
+      result = result.filter(c => !c.engagement_id);
+    } else if (localEngagementFilter !== 'all') {
+      result = result.filter(c => c.engagement_id === localEngagementFilter);
     }
 
     // Sort: active statuses first, then by selected field
@@ -319,6 +366,29 @@ export function EnhancedCampaignTable({
             <SelectItem value="optimize">⚠️ Optimize</SelectItem>
             <SelectItem value="problem">🔴 Problems</SelectItem>
             <SelectItem value="insufficient">❓ Needs Data</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={localEngagementFilter} onValueChange={handleEngagementChange}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Engagement" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Engagements ({campaigns.length})</SelectItem>
+            <SelectItem value="unlinked">
+              <span className="flex items-center gap-1.5">
+                <span className="text-warning">⚠️</span>
+                Unlinked Only ({unlinkedCount})
+              </span>
+            </SelectItem>
+            {uniqueEngagements.map(e => (
+              <SelectItem key={e.id} value={e.id}>
+                <span className="flex items-center gap-1.5">
+                  <Briefcase className="h-3 w-3 text-muted-foreground" />
+                  <span className="truncate max-w-[140px]">{e.name}</span>
+                  <Badge variant="secondary" className="ml-auto text-[10px] px-1">{e.count}</Badge>
+                </span>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>

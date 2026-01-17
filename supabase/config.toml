@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.cold-calls-sync]
 verify_jwt = false
+
+[functions.auto-link-campaigns]
+verify_jwt = false
