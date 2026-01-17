@@ -1,11 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { 
   Send, CheckCircle, Eye, MousePointer, MessageSquare, 
-  ThumbsUp, AlertTriangle, Mail
+  ThumbsUp, AlertTriangle, Mail, Globe, Inbox, Activity,
+  ChevronDown, ChevronUp, Shield, ShieldCheck, ShieldX,
+  Flame, Gauge
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { useState } from 'react';
+import type { InfrastructureMetrics, DomainBreakdown } from '@/hooks/useEngagementReport';
 
 interface EmailReportTabProps {
   data: {
@@ -27,11 +32,13 @@ interface EmailReportTabProps {
       meetings: number;
     };
     linkedCampaigns: Array<{ id: string; name: string; platform: 'smartlead' | 'replyio' }>;
+    infrastructureMetrics: InfrastructureMetrics;
   };
 }
 
 export function EmailReportTab({ data }: EmailReportTabProps) {
-  const { emailMetrics, linkedCampaigns } = data;
+  const { emailMetrics, linkedCampaigns, infrastructureMetrics } = data;
+  const [domainsExpanded, setDomainsExpanded] = useState(false);
 
   // Reply sentiment breakdown (estimated from data)
   const replyBreakdown = [
@@ -45,6 +52,12 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
     if (diff >= 0) return { status: 'good', icon: '✓' };
     if (diff > -benchmark * 0.2) return { status: 'warning', icon: '!' };
     return { status: 'bad', icon: '✗' };
+  };
+
+  const getAuthIcon = (valid: boolean | null) => {
+    if (valid === true) return <ShieldCheck className="h-4 w-4 text-green-500" />;
+    if (valid === false) return <ShieldX className="h-4 w-4 text-red-500" />;
+    return <Shield className="h-4 w-4 text-muted-foreground" />;
   };
 
   const metrics = [
@@ -113,6 +126,176 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Sending Infrastructure */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Globe className="h-5 w-5 text-primary" />
+            Sending Infrastructure
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="p-4 rounded-lg border bg-card">
+              <div className="flex items-center gap-2 mb-2">
+                <Globe className="h-4 w-4 text-muted-foreground" />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Domains</span>
+              </div>
+              <p className="text-2xl font-bold">{infrastructureMetrics.totalDomains}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {infrastructureMetrics.domainsWithFullAuth} fully authenticated
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-card">
+              <div className="flex items-center gap-2 mb-2">
+                <Inbox className="h-4 w-4 text-muted-foreground" />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Mailboxes</span>
+              </div>
+              <p className="text-2xl font-bold">{infrastructureMetrics.totalMailboxes}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {infrastructureMetrics.activeMailboxes} active
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-card">
+              <div className="flex items-center gap-2 mb-2">
+                <Send className="h-4 w-4 text-muted-foreground" />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Daily Capacity</span>
+              </div>
+              <p className="text-2xl font-bold">{infrastructureMetrics.totalDailyCapacity.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">emails/day</p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-card">
+              <div className="flex items-center gap-2 mb-2">
+                <Gauge className="h-4 w-4 text-muted-foreground" />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Utilization</span>
+              </div>
+              <p className={`text-2xl font-bold ${
+                infrastructureMetrics.utilizationRate > 80 ? 'text-red-500' : 
+                infrastructureMetrics.utilizationRate > 60 ? 'text-yellow-500' : 'text-green-500'
+              }`}>
+                {infrastructureMetrics.utilizationRate.toFixed(0)}%
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {infrastructureMetrics.currentDailySending.toLocaleString()} sent/day
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-card">
+              <div className="flex items-center gap-2 mb-2">
+                <Flame className="h-4 w-4 text-orange-500" />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Warmup</span>
+              </div>
+              <p className="text-2xl font-bold">{infrastructureMetrics.warmupCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">inboxes warming</p>
+            </div>
+
+            <div className="p-4 rounded-lg border bg-card">
+              <div className="flex items-center gap-2 mb-2">
+                <Activity className="h-4 w-4 text-muted-foreground" />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Health Score</span>
+              </div>
+              <p className={`text-2xl font-bold ${
+                infrastructureMetrics.avgHealthScore >= 80 ? 'text-green-500' : 
+                infrastructureMetrics.avgHealthScore >= 60 ? 'text-yellow-500' : 'text-red-500'
+              }`}>
+                {infrastructureMetrics.avgHealthScore}%
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                avg bounce: {infrastructureMetrics.avgBounceRate.toFixed(1)}%
+              </p>
+            </div>
+          </div>
+
+          {/* Capacity Utilization Bar */}
+          <div className="p-4 rounded-lg border bg-muted/30">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium">Capacity Utilization</span>
+              <span className="text-sm text-muted-foreground">
+                {infrastructureMetrics.currentDailySending.toLocaleString()} / {infrastructureMetrics.totalDailyCapacity.toLocaleString()} emails/day
+              </span>
+            </div>
+            <Progress 
+              value={Math.min(infrastructureMetrics.utilizationRate, 100)} 
+              className="h-3"
+            />
+            <div className="flex justify-between mt-2 text-xs text-muted-foreground">
+              <span>0%</span>
+              <span className={
+                infrastructureMetrics.utilizationRate > 80 ? 'text-red-500 font-medium' : 
+                infrastructureMetrics.utilizationRate > 60 ? 'text-yellow-500 font-medium' : ''
+              }>
+                {infrastructureMetrics.utilizationRate.toFixed(1)}% used
+              </span>
+              <span>100%</span>
+            </div>
+          </div>
+
+          {/* Domain Authentication Table */}
+          <Collapsible open={domainsExpanded} onOpenChange={setDomainsExpanded}>
+            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                <span className="font-medium">Domain Authentication</span>
+                <Badge variant="outline" className="ml-2">
+                  {infrastructureMetrics.domainsWithFullAuth}/{infrastructureMetrics.totalDomains} verified
+                </Badge>
+              </div>
+              {domainsExpanded ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+              <div className="rounded-lg border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-medium">Domain</th>
+                      <th className="text-center p-3 font-medium">Inboxes</th>
+                      <th className="text-center p-3 font-medium">Capacity</th>
+                      <th className="text-center p-3 font-medium">SPF</th>
+                      <th className="text-center p-3 font-medium">DKIM</th>
+                      <th className="text-center p-3 font-medium">DMARC</th>
+                      <th className="text-center p-3 font-medium">Health</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {infrastructureMetrics.domainBreakdown.slice(0, 10).map((domain) => (
+                      <tr key={domain.domain} className="hover:bg-muted/30">
+                        <td className="p-3 font-medium">{domain.domain}</td>
+                        <td className="p-3 text-center">{domain.mailboxCount}</td>
+                        <td className="p-3 text-center">{domain.dailyCapacity.toLocaleString()}</td>
+                        <td className="p-3 text-center">{getAuthIcon(domain.spfValid)}</td>
+                        <td className="p-3 text-center">{getAuthIcon(domain.dkimValid)}</td>
+                        <td className="p-3 text-center">{getAuthIcon(domain.dmarcValid)}</td>
+                        <td className="p-3 text-center">
+                          <Badge variant={
+                            domain.healthScore >= 80 ? 'default' :
+                            domain.healthScore >= 60 ? 'secondary' : 'destructive'
+                          }>
+                            {domain.healthScore}%
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {infrastructureMetrics.domainBreakdown.length > 10 && (
+                  <div className="p-3 text-center text-sm text-muted-foreground bg-muted/30">
+                    +{infrastructureMetrics.domainBreakdown.length - 10} more domains
+                  </div>
+                )}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        </CardContent>
+      </Card>
+
       {/* Email Performance Summary */}
       <Card>
         <CardHeader>
