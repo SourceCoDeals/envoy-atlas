@@ -124,18 +124,26 @@ export function useDeliverabilityData() {
       
       if (alertsError) throw alertsError;
       
-      // Fetch campaign bounce data from SmartLead
+      // Fetch campaign bounce data from SmartLead with aggregated metrics
       const { data: smartleadCampaigns, error: slError } = await supabase
         .from('smartlead_campaigns')
-        .select('id, name, sent_count, bounce_count')
+        .select(`
+          id, 
+          name,
+          smartlead_daily_metrics(sent_count, bounced_count)
+        `)
         .eq('workspace_id', currentWorkspace.id);
       
       if (slError) throw slError;
       
-      // Fetch campaign bounce data from Reply.io
+      // Fetch campaign bounce data from Reply.io with aggregated metrics
       const { data: replyioCampaigns, error: rError } = await supabase
         .from('replyio_campaigns')
-        .select('id, name, contacted, bounced')
+        .select(`
+          id, 
+          name,
+          replyio_daily_metrics(sent_count, bounced_count)
+        `)
         .eq('workspace_id', currentWorkspace.id);
       
       if (rError) throw rError;
@@ -229,28 +237,38 @@ export function useDeliverabilityData() {
       const bounceData: CampaignBounceData[] = [];
       
       (smartleadCampaigns || []).forEach(c => {
-        if (c.sent_count && c.sent_count > 0) {
-          const bounceRate = ((c.bounce_count || 0) / c.sent_count) * 100;
+        // Aggregate metrics from daily_metrics
+        const metrics = c.smartlead_daily_metrics || [];
+        const totalSent = metrics.reduce((sum, m) => sum + (m.sent_count || 0), 0);
+        const totalBounced = metrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
+        
+        if (totalSent > 0) {
+          const bounceRate = (totalBounced / totalSent) * 100;
           bounceData.push({
             id: c.id,
             name: c.name,
             bounceRate,
-            bounces: c.bounce_count || 0,
-            sent: c.sent_count,
+            bounces: totalBounced,
+            sent: totalSent,
             platform: 'smartlead',
           });
         }
       });
       
       (replyioCampaigns || []).forEach(c => {
-        if (c.contacted && c.contacted > 0) {
-          const bounceRate = ((c.bounced || 0) / c.contacted) * 100;
+        // Aggregate metrics from daily_metrics
+        const metrics = c.replyio_daily_metrics || [];
+        const totalSent = metrics.reduce((sum, m) => sum + (m.sent_count || 0), 0);
+        const totalBounced = metrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
+        
+        if (totalSent > 0) {
+          const bounceRate = (totalBounced / totalSent) * 100;
           bounceData.push({
             id: c.id,
             name: c.name,
             bounceRate,
-            bounces: c.bounced || 0,
-            sent: c.contacted,
+            bounces: totalBounced,
+            sent: totalSent,
             platform: 'replyio',
           });
         }
