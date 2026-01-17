@@ -102,39 +102,77 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
       setLoading(true);
 
       try {
-        // Fetch current month metrics from both platform tables
-        const [smartleadCurrent, replyioCurrent] = await Promise.all([
-          supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
+        // Fetch current month metrics from WORKSPACE-LEVEL tables (aggregated, more reliable)
+        const [smartleadWorkspaceCurrent, replyioWorkspaceCurrent] = await Promise.all([
+          supabase.from('smartlead_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
             .eq('workspace_id', currentWorkspace.id)
             .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
             .lte('metric_date', format(monthEnd, 'yyyy-MM-dd')),
-          supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
+          supabase.from('replyio_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
             .eq('workspace_id', currentWorkspace.id)
             .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
             .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
         ]);
 
-        const currentData = [
-          ...(smartleadCurrent.data || []).map(d => ({ ...d, date: d.metric_date })),
-          ...(replyioCurrent.data || []).map(d => ({ ...d, date: d.metric_date }))
+        let currentData = [
+          ...(smartleadWorkspaceCurrent.data || []).map(d => ({ ...d, date: d.metric_date })),
+          ...(replyioWorkspaceCurrent.data || []).map(d => ({ ...d, date: d.metric_date }))
         ];
 
-        // Fetch previous month metrics from both platform tables
-        const [smartleadPrevious, replyioPrevious] = await Promise.all([
-          supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+        // Fallback to campaign-level metrics if workspace metrics are empty
+        if (currentData.length === 0) {
+          const [smartleadCampaignCurrent, replyioCampaignCurrent] = await Promise.all([
+            supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
+              .eq('workspace_id', currentWorkspace.id)
+              .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
+              .lte('metric_date', format(monthEnd, 'yyyy-MM-dd')),
+            supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
+              .eq('workspace_id', currentWorkspace.id)
+              .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
+              .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
+          ]);
+
+          currentData = [
+            ...(smartleadCampaignCurrent.data || []).map(d => ({ ...d, date: d.metric_date })),
+            ...(replyioCampaignCurrent.data || []).map(d => ({ ...d, date: d.metric_date }))
+          ];
+        }
+
+        // Fetch previous month metrics from WORKSPACE-LEVEL tables
+        const [smartleadWorkspacePrevious, replyioWorkspacePrevious] = await Promise.all([
+          supabase.from('smartlead_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
             .eq('workspace_id', currentWorkspace.id)
             .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
             .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd')),
-          supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+          supabase.from('replyio_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
             .eq('workspace_id', currentWorkspace.id)
             .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
             .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd'))
         ]);
 
-        const previousData = [
-          ...(smartleadPrevious.data || []),
-          ...(replyioPrevious.data || [])
+        let previousData = [
+          ...(smartleadWorkspacePrevious.data || []),
+          ...(replyioWorkspacePrevious.data || [])
         ];
+
+        // Fallback to campaign-level metrics if workspace metrics are empty
+        if (previousData.length === 0) {
+          const [smartleadCampaignPrevious, replyioCampaignPrevious] = await Promise.all([
+            supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+              .eq('workspace_id', currentWorkspace.id)
+              .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
+              .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd')),
+            supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
+              .eq('workspace_id', currentWorkspace.id)
+              .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
+              .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd'))
+          ]);
+
+          previousData = [
+            ...(smartleadCampaignPrevious.data || []),
+            ...(replyioCampaignPrevious.data || [])
+          ];
+        }
 
         // Aggregate current month
         const current = (currentData || []).reduce((acc, row) => ({

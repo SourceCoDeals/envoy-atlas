@@ -37,6 +37,15 @@ export function DataCoverageIndicator({ workspaceId }: Props) {
       if (!workspaceId) return;
       
       try {
+        // Get campaign IDs for this workspace first to filter variants
+        const [slCampList, rioCampList] = await Promise.all([
+          supabase.from("smartlead_campaigns").select("id").eq("workspace_id", workspaceId),
+          supabase.from("replyio_campaigns").select("id").eq("workspace_id", workspaceId),
+        ]);
+        
+        const slCampaignIds = (slCampList.data || []).map(c => c.id);
+        const rioCampaignIds = (rioCampList.data || []).map(c => c.id);
+
         // Fetch counts in parallel
         const [
           slCampaigns,
@@ -51,12 +60,16 @@ export function DataCoverageIndicator({ workspaceId }: Props) {
           rioMetricRange,
         ] = await Promise.all([
           supabase.from("smartlead_campaigns").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
-          supabase.from("smartlead_variants").select("id", { count: "exact", head: true }),
+          slCampaignIds.length > 0 
+            ? supabase.from("smartlead_variants").select("id", { count: "exact", head: true }).in("campaign_id", slCampaignIds)
+            : Promise.resolve({ count: 0 }),
           supabase.from("smartlead_daily_metrics").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
           supabase.from("smartlead_message_events").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
           supabase.from("smartlead_workspace_daily_metrics").select("metric_date").eq("workspace_id", workspaceId).order("metric_date", { ascending: true }).limit(1),
           supabase.from("replyio_campaigns").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
-          supabase.from("replyio_variants").select("id", { count: "exact", head: true }),
+          rioCampaignIds.length > 0
+            ? supabase.from("replyio_variants").select("id", { count: "exact", head: true }).in("campaign_id", rioCampaignIds)
+            : Promise.resolve({ count: 0 }),
           supabase.from("replyio_daily_metrics").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
           supabase.from("replyio_message_events").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
           supabase.from("replyio_workspace_daily_metrics").select("metric_date").eq("workspace_id", workspaceId).order("metric_date", { ascending: true }).limit(1),

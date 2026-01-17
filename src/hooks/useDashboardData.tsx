@@ -244,7 +244,7 @@ export function useDashboardData(dateRange?: DateRange) {
             date: new Date(m.metric_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
             sent: m.sent_count || 0,
             replies: m.replied_count || 0,
-            positiveReplies: 0, // Positive replies need classification logic
+            positiveReplies: m.positive_reply_count || 0,
           }))
           .slice(-30); // Last 30 days for better trend visibility
 
