@@ -4854,6 +4854,7 @@ export type Database = {
           id: string
           metric_date: string
           opened_count: number | null
+          positive_reply_count: number | null
           replied_count: number | null
           sent_count: number | null
           unsubscribed_count: number | null
@@ -4867,6 +4868,7 @@ export type Database = {
           id?: string
           metric_date: string
           opened_count?: number | null
+          positive_reply_count?: number | null
           replied_count?: number | null
           sent_count?: number | null
           unsubscribed_count?: number | null
@@ -4880,6 +4882,7 @@ export type Database = {
           id?: string
           metric_date?: string
           opened_count?: number | null
+          positive_reply_count?: number | null
           replied_count?: number | null
           sent_count?: number | null
           unsubscribed_count?: number | null

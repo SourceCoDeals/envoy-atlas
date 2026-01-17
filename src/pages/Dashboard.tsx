@@ -352,7 +352,7 @@ export default function Dashboard() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Performance Trend</CardTitle>
-                  <CardDescription>Daily sends and positive replies (last 14 days)</CardDescription>
+                  <CardDescription>Daily sends and replies (last 30 days)</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="h-[280px]">
@@ -380,7 +380,7 @@ export default function Dashboard() {
                             }}
                           />
                           <Area type="monotone" dataKey="sent" stroke="hsl(var(--chart-1))" fill="url(#colorSent)" strokeWidth={2} name="Sent" />
-                          <Area type="monotone" dataKey="positiveReplies" stroke="hsl(var(--success))" fill="url(#colorReplies)" strokeWidth={2} name="Positive" />
+                          <Area type="monotone" dataKey="replies" stroke="hsl(var(--success))" fill="url(#colorReplies)" strokeWidth={2} name="Replies" />
                         </AreaChart>
                       </ResponsiveContainer>
                     ) : (
