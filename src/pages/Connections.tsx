@@ -333,6 +333,46 @@ export default function Connections() {
     }
   };
 
+  const handleSyncReplyio = async (options: { reset?: boolean; fullBackfill?: boolean } = {}) => {
+    if (!currentWorkspace) return;
+    const { reset = false, fullBackfill = false } = options;
+
+    setError(null);
+    setSuccess(null);
+    setIsSyncing((s) => ({ ...s, replyio: true }));
+
+    try {
+      const token = await getAccessToken();
+      const res = await supabase.functions.invoke("replyio-sync", {
+        body: {
+          workspace_id: currentWorkspace.id,
+          reset,
+          full_backfill: fullBackfill,
+          auto_continue: true,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.error) throw new Error(res.error.message || "Sync failed");
+
+      const data = res.data;
+      if (data.success) {
+        if (data.complete) {
+          setSuccess(`Reply.io sync complete! Synced ${data.progress?.sequences_synced || 0} sequences.`);
+        } else {
+          setSuccess("Reply.io sync started, processing in background...");
+        }
+      }
+
+      await fetchConnections();
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to sync Reply.io");
+    } finally {
+      setIsSyncing((s) => ({ ...s, replyio: false }));
+    }
+  };
+
   const handleSyncPhoneburner = async (reset = false) => {
     if (!currentWorkspace) return;
     setError(null);
@@ -917,11 +957,90 @@ export default function Connections() {
                           </Button>
                         </div>
                       </>
+                    ) : replyioConnection.sync_status === "syncing" ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          <span className="text-sm font-medium">Syncing...</span>
+                        </div>
+                        {(replyioConnection.sync_progress as any)?.sequences_synced !== undefined && (
+                          <div className="space-y-1">
+                            <Progress
+                              value={
+                                ((replyioConnection.sync_progress as any).sequences_synced /
+                                  ((replyioConnection.sync_progress as any).total_sequences || 100)) *
+                                100
+                              }
+                            />
+                            <div className="text-xs text-muted-foreground">
+                              {(replyioConnection.sync_progress as any).sequences_synced} /{" "}
+                              {(replyioConnection.sync_progress as any).total_sequences || "?"} sequences
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     ) : (
-                      <div className="space-y-2 text-sm">
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Status</span>
-                          <span className="capitalize">{replyioConnection.sync_status || "active"}</span>
+                      <div className="space-y-3">
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Status</span>
+                            <span className="capitalize">{replyioConnection.sync_status || "active"}</span>
+                          </div>
+                          {replyioConnection.last_sync_at && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Last Sync</span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {new Date(replyioConnection.last_sync_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                          {replyioConnection.last_full_sync_at && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Last Full Sync</span>
+                              <span className="flex items-center gap-1">
+                                <Download className="h-3 w-3" />
+                                {new Date(replyioConnection.last_full_sync_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-2 border-t">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSyncReplyio()}
+                            disabled={!!isSyncing.replyio}
+                          >
+                            {isSyncing.replyio ? (
+                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                            ) : (
+                              <RefreshCw className="mr-2 h-3 w-3" />
+                            )}
+                            Sync
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSyncReplyio({ fullBackfill: true })}
+                            disabled={!!isSyncing.replyio}
+                            title="Fetch ALL sequences and historical data"
+                          >
+                            {isSyncing.replyio ? (
+                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                            ) : (
+                              <Database className="mr-2 h-3 w-3" />
+                            )}
+                            Full Backfill
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleSyncReplyio({ reset: true })}
+                            disabled={!!isSyncing.replyio}
+                          >
+                            Reset & Sync
+                          </Button>
                         </div>
                       </div>
                     )}
