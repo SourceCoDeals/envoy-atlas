@@ -20,6 +20,7 @@ const REPLYIO_V3_URL = 'https://api.reply.io/v3';
 // CRITICAL: API returns 400 "Too much requests" if called within 10 seconds
 const RATE_LIMIT_DELAY_LIST = 3000;  // 3 seconds for listing endpoints
 const RATE_LIMIT_DELAY_STATS = 10500; // 10.5 seconds for stats - API enforces 10s minimum!
+const RATE_LIMIT_DELAY_CONTACTS = 3500; // 3.5 seconds for contacts pagination
 const TIME_BUDGET_MS = 50000;
 const MAX_BATCHES = 100; // Increased due to slower rate limiting
 
@@ -250,6 +251,7 @@ Deno.serve(async (req) => {
       sequences_synced: 0,
       metrics_created: 0,
       variants_synced: 0,
+      replies_synced: 0,
       errors: [] as string[],
     };
 
@@ -699,6 +701,85 @@ Deno.serve(async (req) => {
           }
         }
 
+        // ==============================================
+        // Fetch contacts with replies for this sequence
+        // ==============================================
+        if (!isTimeBudgetExceeded()) {
+          try {
+            console.log(`  Fetching contacts with replies for ${sequence.name}...`);
+            let contactsSkip = 0;
+            let hasMoreContacts = true;
+            let repliesForSequence = 0;
+            
+            while (hasMoreContacts && !isTimeBudgetExceeded() && contactsSkip < 500) {
+              const contactsResponse = await replyioRequest(
+                `/sequences/${sequence.id}/contacts/extended?top=100&skip=${contactsSkip}&additionalColumns=CurrentStep,LastStepCompletedAt,Status`,
+                apiKey,
+                { delayMs: RATE_LIMIT_DELAY_CONTACTS, allow404: true }
+              );
+              
+              if (!contactsResponse || !contactsResponse.items || contactsResponse.items.length === 0) {
+                hasMoreContacts = false;
+                break;
+              }
+              
+              const contacts = contactsResponse.items;
+              console.log(`    Fetched ${contacts.length} contacts (skip=${contactsSkip})`);
+              
+              // Filter to contacts who have replied
+              const repliedContacts = contacts.filter((c: any) => c.status?.replied === true);
+              
+              if (repliedContacts.length > 0) {
+                console.log(`    Found ${repliedContacts.length} contacts who replied`);
+                
+                for (const contact of repliedContacts) {
+                  const messageId = `reply-${sequence.id}-${contact.email}-${contact.lastStepCompletedAt || contact.addedAt}`;
+                  
+                  // Determine sentiment based on status if available
+                  let eventType = 'replied';
+                  let sentiment = 'neutral';
+                  if (contact.status?.interested) {
+                    eventType = 'positive_reply';
+                    sentiment = 'positive';
+                  } else if (contact.status?.notInterested) {
+                    eventType = 'negative_reply';
+                    sentiment = 'negative';
+                  }
+                  
+                  const { error: eventErr } = await supabase
+                    .from('replyio_message_events')
+                    .upsert({
+                      workspace_id,
+                      campaign_id: campaignId,
+                      event_type: eventType,
+                      message_id: messageId,
+                      reply_sentiment: sentiment,
+                      event_timestamp: contact.lastStepCompletedAt || contact.addedAt || new Date().toISOString(),
+                    }, { onConflict: 'workspace_id,campaign_id,message_id' });
+                  
+                  if (!eventErr) {
+                    repliesForSequence++;
+                    progress.replies_synced++;
+                  }
+                }
+              }
+              
+              hasMoreContacts = contactsResponse.info?.hasMore === true;
+              contactsSkip += contacts.length;
+              
+              if (contacts.length < 100) {
+                hasMoreContacts = false;
+              }
+            }
+            
+            if (repliesForSequence > 0) {
+              console.log(`  ✓ Synced ${repliesForSequence} reply events for ${sequence.name}`);
+            }
+          } catch (e) {
+            console.error(`  Error fetching contacts for ${sequence.name}:`, (e as Error).message);
+          }
+        }
+
       } catch (e) {
         console.error(`Error processing sequence ${sequence.name}:`, e);
         progress.errors.push(`Sequence ${sequence.name}: ${(e as Error).message}`);
@@ -752,7 +833,7 @@ Deno.serve(async (req) => {
 
     // All sequences processed - sync complete
     console.log('=== Reply.io sync complete ===');
-    console.log(`Final stats: ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants`);
+    console.log(`Final stats: ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants, ${progress.replies_synced} replies`);
     
     await supabase.from('api_connections').update({
       sync_status: 'success',
@@ -761,6 +842,7 @@ Deno.serve(async (req) => {
         sequences_synced: progress.sequences_synced,
         metrics_created: progress.metrics_created,
         variants_synced: progress.variants_synced,
+        replies_synced: progress.replies_synced,
       },
       last_sync_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -773,7 +855,7 @@ Deno.serve(async (req) => {
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants`,
+      message: `Synced ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants, ${progress.replies_synced} replies`,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
