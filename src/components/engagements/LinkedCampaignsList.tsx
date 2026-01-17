@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Mail, Eye, MessageSquare, ThumbsUp, X, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -75,26 +76,37 @@ export function LinkedCampaignsList({ campaigns, onUnlink, unlinking }: LinkedCa
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                asChild
-              >
-                <Link to={`/campaigns/${campaign.platform}/${campaign.id}/summary`}>
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                onClick={() => onUnlink(campaign.id, campaign.platform)}
-                disabled={unlinking === campaign.id}
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
+            <div className="flex items-center gap-1 ml-4">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-3 gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
+                    asChild
+                  >
+                    <Link to={`/campaigns/${campaign.platform}/${campaign.id}/summary`}>
+                      <ExternalLink className="h-4 w-4" />
+                      <span className="text-xs font-medium">View</span>
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>View Campaign Dashboard</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => onUnlink(campaign.id, campaign.platform)}
+                    disabled={unlinking === campaign.id}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Unlink Campaign</TooltipContent>
+              </Tooltip>
             </div>
           </div>
         );
