@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
 import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Database } from 'lucide-react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Database, Briefcase } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface EnhancedCampaignTableProps {
@@ -17,7 +17,7 @@ interface EnhancedCampaignTableProps {
   onTierFilterChange?: (tier: string) => void;
 }
 
-type SortField = 'name' | 'score' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence';
+type SortField = 'name' | 'score' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
 type SortDirection = 'asc' | 'desc';
 
 interface CampaignWithScore extends CampaignWithMetrics {
@@ -154,6 +154,10 @@ export function EnhancedCampaignTable({
         case 'updated_at':
           aVal = new Date(a.updated_at).getTime();
           bVal = new Date(b.updated_at).getTime();
+          break;
+        case 'engagement_name':
+          aVal = a.engagement_name || '';
+          bVal = b.engagement_name || '';
           break;
         default:
           aVal = a[sortField as keyof CampaignWithMetrics] as number | string;
@@ -343,6 +347,7 @@ export function EnhancedCampaignTable({
                 />
               </TableHead>
               <SortableHeader field="name" className="min-w-[200px]">Campaign</SortableHeader>
+              <SortableHeader field="engagement_name" className="min-w-[120px]">Engagement</SortableHeader>
               <SortableHeader field="score" className="w-[70px] text-center">Score</SortableHeader>
               <TableHead className="w-[90px] text-center">Tier</TableHead>
               <SortableHeader field="confidence" className="w-[60px] text-center">Conf</SortableHeader>
@@ -358,8 +363,8 @@ export function EnhancedCampaignTable({
           </TableHeader>
           <TableBody>
             {filteredAndSortedCampaigns.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
+            <TableRow>
+                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                   No campaigns match your filters
                 </TableCell>
               </TableRow>
@@ -405,6 +410,16 @@ export function EnhancedCampaignTable({
                         <span className="text-xs text-muted-foreground">{campaign.platform}</span>
                       </div>
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    {campaign.engagement_name ? (
+                      <div className="flex items-center gap-1.5">
+                        <Briefcase className="h-3 w-3 text-muted-foreground" />
+                        <span className="truncate max-w-[120px] text-sm">{campaign.engagement_name}</span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-center">
                     <TooltipProvider>

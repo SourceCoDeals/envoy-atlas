@@ -20,6 +20,8 @@ export interface CampaignWithMetrics {
   click_rate: number;
   reply_rate: number;
   bounce_rate: number;
+  engagement_id: string | null;
+  engagement_name?: string | null;
 }
 
 interface BaseCampaign {
@@ -30,6 +32,7 @@ interface BaseCampaign {
   created_at: string;
   updated_at: string;
   workspace_id: string;
+  engagement_id: string | null;
 }
 
 interface BaseMetric {
@@ -63,8 +66,8 @@ export function useCampaigns() {
     setError(null);
 
     try {
-      // Fetch campaigns from both platforms in parallel
-      const [smartleadResult, replyioResult] = await Promise.all([
+      // Fetch campaigns from both platforms and engagements in parallel
+      const [smartleadResult, replyioResult, engagementsResult] = await Promise.all([
         supabase
           .from('smartlead_campaigns')
           .select('*')
@@ -72,11 +75,21 @@ export function useCampaigns() {
         supabase
           .from('replyio_campaigns')
           .select('*')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('engagements')
+          .select('id, engagement_name')
           .eq('workspace_id', currentWorkspace.id)
       ]);
 
       if (smartleadResult.error) throw smartleadResult.error;
       if (replyioResult.error) throw replyioResult.error;
+
+      // Build engagement lookup map
+      const engagementMap = new Map<string, string>();
+      (engagementsResult.data || []).forEach(e => {
+        engagementMap.set(e.id, e.engagement_name);
+      });
 
       // Tag campaigns with their platform
       const allCampaigns: (BaseCampaign & { platform: string })[] = [
@@ -136,6 +149,8 @@ export function useCampaigns() {
           click_rate: total_sent > 0 ? (total_clicked / total_sent) * 100 : 0,
           reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
           bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
+          engagement_id: campaign.engagement_id,
+          engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
         };
       });
 
