@@ -241,11 +241,22 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         replyioMetricsQuery = replyioMetricsQuery.lte('metric_date', endDateStr);
       }
 
-      // Fetch calling data for this engagement
+      // Fetch calling data for this engagement (server-side filtered to avoid 1000-row limit issues)
+      const clientNameLower = engagement.client_name.toLowerCase();
+      const engagementNameLower = engagement.engagement_name.toLowerCase();
+
       let callingQuery = supabase
         .from('external_calls')
         .select('*')
-        .eq('workspace_id', currentWorkspace.id);
+        .eq('workspace_id', currentWorkspace.id)
+        // Match calls to this engagement by engagement_name (primary) and call_title (fallback)
+        .or(
+          `engagement_name.ilike.%${clientNameLower}%,engagement_name.ilike.%${engagementNameLower}%,call_title.ilike.%${clientNameLower}%`
+        );
+
+      // Apply date filter using call_date where possible (it's the business date)
+      if (startDateStr) callingQuery = callingQuery.gte('call_date', startDateStr);
+      if (endDateStr) callingQuery = callingQuery.lte('call_date', endDateStr);
 
       const [smartleadMetrics, replyioMetrics, callingData] = await Promise.all([
         smartleadMetricsQuery,
@@ -253,27 +264,15 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         callingQuery,
       ]);
 
-      // Filter calling data to match engagement
-      const clientNameLower = engagement.client_name.toLowerCase();
-      const engagementNameLower = engagement.engagement_name.toLowerCase();
-      
+      // Final safety filter (handles null engagement_name/call_title edge cases)
       const matchingCalls = (callingData.data || []).filter(call => {
         const engName = (call.engagement_name || '').toLowerCase();
         const callTitle = (call.call_title || '').toLowerCase();
-        
         return (
           engName.includes(clientNameLower) ||
           engName.includes(engagementNameLower) ||
           callTitle.includes(clientNameLower)
         );
-      }).filter(call => {
-        // Apply date filter using call_date (actual call date) instead of created_at (sync date)
-        const callDateField = call.call_date || call.created_at;
-        if (!callDateField) return true;
-        const callDate = callDateField.split('T')[0];
-        if (startDateStr && callDate < startDateStr) return false;
-        if (endDateStr && callDate > endDateStr) return false;
-        return true;
       });
 
       // Aggregate email metrics
