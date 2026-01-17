@@ -953,7 +953,7 @@ Deno.serve(async (req) => {
     console.log(`Final stats: ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants, ${progress.replies_synced} replies`);
     
     await supabase.from('api_connections').update({
-      sync_status: 'success',
+      sync_status: 'idle', // Use 'idle' to stop frontend polling
       sync_progress: { 
         complete: true,
         sequences_synced: progress.sequences_synced,
