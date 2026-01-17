@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InviteTeamMemberDialog } from '@/components/settings/InviteTeamMemberDialog';
 import { TeamMembersList } from '@/components/settings/TeamMembersList';
 import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
+import { SyncStatusDashboard } from '@/components/settings/SyncStatusDashboard';
 import { Loader2, User, Building2, Users, Shield, Plug, Check } from 'lucide-react';
 
 export default function Settings() {
@@ -247,9 +248,12 @@ export default function Settings() {
           </TabsContent>
 
           {/* Connections Tab */}
-          <TabsContent value="connections" className="mt-6">
+          <TabsContent value="connections" className="mt-6 space-y-6">
             {currentWorkspace ? (
-              <ConnectionsSection workspaceId={currentWorkspace.id} />
+              <>
+                <SyncStatusDashboard />
+                <ConnectionsSection workspaceId={currentWorkspace.id} />
+              </>
             ) : (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">

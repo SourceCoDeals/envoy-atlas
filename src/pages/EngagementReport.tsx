@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { 
-  ArrowLeft, Download, Share2, 
+  ArrowLeft, Share2, 
   BarChart3, Mail, Phone, Target, Clock, Users
 } from 'lucide-react';
 import { DateRangeFilter, DateRangeOption, getDateRange } from '@/components/dashboard/DateRangeFilter';
@@ -18,6 +18,7 @@ import { CallingReportTab } from '@/components/engagementReport/CallingReportTab
 import { PipelineMeetingsTab } from '@/components/engagementReport/PipelineMeetingsTab';
 import { ActivityTimelineTab } from '@/components/engagementReport/ActivityTimelineTab';
 import { TargetsListsTab } from '@/components/engagementReport/TargetsListsTab';
+import { ExportReportButton } from '@/components/engagementReport/ExportReportButton';
 
 export default function EngagementReport() {
   const { engagementId } = useParams<{ engagementId: string }>();
@@ -102,10 +103,7 @@ export default function EngagementReport() {
               <Share2 className="mr-2 h-4 w-4" />
               Share
             </Button>
-            <Button variant="outline" size="sm">
-              <Download className="mr-2 h-4 w-4" />
-              Export PDF
-            </Button>
+            <ExportReportButton data={data} />
           </div>
         </div>
 

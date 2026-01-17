@@ -11,6 +11,15 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useState } from 'react';
 import type { InfrastructureMetrics, DomainBreakdown } from '@/hooks/useEngagementReport';
+import { DataAvailabilityWarning } from './DataAvailabilityWarning';
+
+interface DataAvailability {
+  emailDailyMetrics: boolean;
+  emailCampaignFallback: boolean;
+  callingData: boolean;
+  infrastructureData: boolean;
+  syncInProgress: boolean;
+}
 
 interface EmailReportTabProps {
   data: {
@@ -33,11 +42,12 @@ interface EmailReportTabProps {
     };
     linkedCampaigns: Array<{ id: string; name: string; platform: 'smartlead' | 'replyio' }>;
     infrastructureMetrics: InfrastructureMetrics;
+    dataAvailability?: DataAvailability;
   };
 }
 
 export function EmailReportTab({ data }: EmailReportTabProps) {
-  const { emailMetrics, linkedCampaigns, infrastructureMetrics } = data;
+  const { emailMetrics, linkedCampaigns, infrastructureMetrics, dataAvailability } = data;
   const [domainsExpanded, setDomainsExpanded] = useState(false);
 
   // Default infrastructure metrics if not available
@@ -141,6 +151,13 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Data Availability Warning */}
+      {dataAvailability?.emailCampaignFallback && (
+        <DataAvailabilityWarning type="fallback" />
+      )}
+      {dataAvailability?.syncInProgress && (
+        <DataAvailabilityWarning type="syncing" />
+      )}
       {/* Sending Infrastructure */}
       <Card>
         <CardHeader>
