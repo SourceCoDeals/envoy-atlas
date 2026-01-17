@@ -32,9 +32,16 @@ export function useSyncData() {
 
     if (connections) {
       const newProgress: SyncProgress = {};
+      let batchLimitHit = false;
+      
       connections.forEach(conn => {
         const syncProgress = conn.sync_progress as any;
         const status = conn.sync_status || 'idle';
+        
+        // Check for batch limit error
+        if (status === 'error' && syncProgress?.batch_limit_reached) {
+          batchLimitHit = true;
+        }
         
         if (conn.platform === 'smartlead' && syncProgress) {
           const total = syncProgress.total_campaigns ?? 0;
@@ -61,6 +68,15 @@ export function useSyncData() {
           newProgress.replyio = { current, total, status };
         }
       });
+      
+      // Show notification if batch limit was hit
+      if (batchLimitHit) {
+        toast.error('Sync hit batch limit', {
+          description: 'Some data may be missing. Contact support if this persists.',
+          duration: 10000,
+        });
+      }
+      
       setProgress(newProgress);
       return newProgress;
     }

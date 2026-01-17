@@ -218,15 +218,9 @@ export function OverviewTab({
       })).slice(0, 6);
     }
     
-    // Final fallback with generic data based on baseline
-    return [
-      { type: 'Soft Interest CTA', example: '"Worth a quick chat?"', rate: baselineReplyRate * 1.5, friction: 'Low' },
-      { type: 'Binary Question', example: '"Does this make sense?"', rate: baselineReplyRate * 1.3, friction: 'Very Low' },
-      { type: 'Value Offer', example: '"Want the case study?"', rate: baselineReplyRate * 1.2, friction: 'Low' },
-      { type: 'Open Meeting', example: '"Do you have 15 min?"', rate: baselineReplyRate * 0.9, friction: 'Medium' },
-      { type: 'Calendly Link', example: '"Book time here..."', rate: baselineReplyRate * 0.7, friction: 'High' },
-    ];
-  }, [discoveredPatterns, baselineReplyRate]);
+    // No fallback - return empty array if no real data
+    return [];
+  }, [discoveredPatterns]);
 
   return (
     <div className="space-y-6">
@@ -290,33 +284,31 @@ export function OverviewTab({
           <CardContent className="space-y-3">
             <div className="p-3 bg-muted/50 rounded-lg text-sm">
               Reply rate <strong>{avgReplyRate.toFixed(1)}%</strong> is {avgReplyRate >= 3.43 ? 'above' : 'below'} benchmark (3.43%).
-              {avgReplyRate >= 3.43 && ' Analysis shows combining short body copy with timeline hooks could increase by +89%.'}
+              {topPatterns.length > 0 && ` Top pattern: ${topPatterns[0]?.pattern} (+${topPatterns[0]?.comparison_to_baseline?.toFixed(0)}%).`}
             </div>
             
-            {[
-              { priority: 1, title: 'Switch Problem Hooks → Timeline', impact: '+2.1%', confidence: 'HIGH' },
-              { priority: 2, title: 'Replace Calendly → Soft Interest CTA', impact: '+1.4%', confidence: 'HIGH' },
-              { priority: 3, title: 'Shorten emails to <100 words', impact: '+0.9%', confidence: 'MEDIUM' },
-            ].map((rec) => (
-              <div key={rec.priority} className="p-3 border rounded-lg hover:border-primary/50 transition-colors">
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs">#{rec.priority}</Badge>
-                    <span className="text-sm font-medium">{rec.title}</span>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-success">{rec.impact}</div>
-                    <div className={`text-xs ${rec.confidence === 'HIGH' ? 'text-success' : 'text-yellow-500'}`}>
-                      {rec.confidence}
+            {recommendations.length > 0 ? (
+              recommendations.slice(0, 3).map((rec, i) => (
+                <div key={i} className="p-3 border rounded-lg hover:border-primary/50 transition-colors">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-xs">#{i + 1}</Badge>
+                      <span className="text-sm font-medium">{rec}</span>
                     </div>
                   </div>
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" variant="default" className="h-7 text-xs">Create A/B Test</Button>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs">View Details</Button>
+                  </div>
                 </div>
-                <div className="mt-2 flex gap-2">
-                  <Button size="sm" variant="default" className="h-7 text-xs">Create A/B Test</Button>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs">View Details</Button>
-                </div>
+              ))
+            ) : (
+              <div className="p-4 text-center text-muted-foreground">
+                <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No AI recommendations yet.</p>
+                <p className="text-xs mt-1">Run "Backfill & Analyze" to generate personalized recommendations.</p>
               </div>
-            ))}
+            )}
           </CardContent>
         </Card>
 
@@ -348,12 +340,7 @@ export function OverviewTab({
                   <CheckCircle className="h-3 w-3" /> TOP PERFORMERS
                 </div>
                 <div className="space-y-1">
-                  {(topPatterns.length > 0 ? topPatterns : [
-                    { pattern: 'Timeline Hook', comparison_to_baseline: 147, p_value: 0.001 },
-                    { pattern: 'Short Body (<100w)', comparison_to_baseline: 62, p_value: 0.001 },
-                    { pattern: 'Soft Interest CTA', comparison_to_baseline: 54, p_value: 0.001 },
-                    { pattern: 'High Personalization', comparison_to_baseline: 38, p_value: 0.05 },
-                  ]).map((p, i) => (
+                  {topPatterns.length > 0 ? topPatterns.map((p, i) => (
                     <div key={i} className="flex justify-between items-center py-1.5 border-b border-border/50 text-sm">
                       <span className="text-muted-foreground truncate">{p.pattern}</span>
                       <div className="flex gap-2 items-center">
@@ -361,7 +348,11 @@ export function OverviewTab({
                         <span className="text-xs text-muted-foreground">p&lt;{(p.p_value || 0.05).toFixed(2)}</span>
                       </div>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="text-sm text-muted-foreground py-2">
+                      No high-performing patterns found yet.
+                    </div>
+                  )}
                 </div>
               </div>
               <div>
@@ -369,12 +360,7 @@ export function OverviewTab({
                   <XCircle className="h-3 w-3" /> UNDERPERFORMERS
                 </div>
                 <div className="space-y-1">
-                  {(bottomPatterns.length > 0 ? bottomPatterns : [
-                    { pattern: 'Generic Hook', comparison_to_baseline: -40, p_value: 0.001 },
-                    { pattern: 'Calendly CTA', comparison_to_baseline: -31, p_value: 0.001 },
-                    { pattern: 'Long Body (200+w)', comparison_to_baseline: -44, p_value: 0.001 },
-                    { pattern: 'You:We <1:1', comparison_to_baseline: -29, p_value: 0.05 },
-                  ]).map((p, i) => (
+                  {bottomPatterns.length > 0 ? bottomPatterns.map((p, i) => (
                     <div key={i} className="flex justify-between items-center py-1.5 border-b border-border/50 text-sm">
                       <span className="text-muted-foreground truncate">{p.pattern}</span>
                       <div className="flex gap-2 items-center">
@@ -382,7 +368,11 @@ export function OverviewTab({
                         <span className="text-xs text-muted-foreground">p&lt;{(p.p_value || 0.05).toFixed(2)}</span>
                       </div>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="text-sm text-muted-foreground py-2">
+                      No underperforming patterns detected.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -431,12 +421,15 @@ export function OverviewTab({
               </div>
             )}
             
-            <div className="mt-4 p-3 bg-destructive/10 rounded-lg border border-destructive/20">
-              <p className="text-sm text-destructive">
-                <strong>🚨 Alert:</strong> 54% of emails use Problem/Generic hooks (-23 to -40%). 
-                Switch to Timeline hooks for +1.2% reply rate.
-              </p>
-            </div>
+            {/* Only show alert if we have data showing underperforming hooks */}
+            {hookTypeStats.some(h => h.status === 'bad' && parseFloat(h.usage) > 30) && (
+              <div className="mt-4 p-3 bg-destructive/10 rounded-lg border border-destructive/20">
+                <p className="text-sm text-destructive">
+                  <strong>🚨 Alert:</strong> {hookTypeStats.filter(h => h.status === 'bad').map(h => h.type).join(', ')} hooks are underperforming.
+                  Consider switching to {hookTypeStats.find(h => h.status === 'best')?.type || 'higher-performing'} hooks.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -447,7 +440,7 @@ export function OverviewTab({
             <CardDescription>Lower friction CTAs get more responses</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {ctaTypeStats.map((cta, i) => (
+            {ctaTypeStats.length > 0 ? ctaTypeStats.map((cta, i) => (
               <div key={i} className="flex items-center gap-2 text-sm">
                 <div className="w-24 text-muted-foreground truncate">{cta.type}</div>
                 <div className="flex-1 relative h-4 bg-muted rounded">
@@ -472,7 +465,11 @@ export function OverviewTab({
                   {cta.friction}
                 </Badge>
               </div>
-            ))}
+            )) : (
+              <div className="text-sm text-muted-foreground p-3 text-center">
+                No CTA data available yet. Run "Backfill & Analyze" to extract CTA patterns.
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
