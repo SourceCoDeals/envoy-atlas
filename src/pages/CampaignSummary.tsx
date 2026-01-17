@@ -15,6 +15,7 @@ import { CampaignInfrastructure } from '@/components/campaigns/CampaignInfrastru
 import { CampaignBounceAnalysis } from '@/components/campaigns/CampaignBounceAnalysis';
 import { CampaignLeadBreakdown } from '@/components/campaigns/CampaignLeadBreakdown';
 import { CampaignPositiveReplies } from '@/components/campaigns/CampaignPositiveReplies';
+import { CampaignInbox } from '@/components/campaigns/CampaignInbox';
 
 export default function CampaignSummary() {
   const { campaignId, platform } = useParams<{ campaignId: string; platform?: string }>();
@@ -129,6 +130,11 @@ export default function CampaignSummary() {
               totalDailyCapacity={infrastructure.total_daily_capacity}
               warmupCount={infrastructure.warmup_count}
             />
+
+            {/* Campaign Inbox */}
+            {campaignId && validPlatform && (
+              <CampaignInbox campaignId={campaignId} platform={validPlatform} />
+            )}
 
             {/* Bounce, Leads, Positive Replies */}
             <div className="grid gap-4 md:grid-cols-3">
