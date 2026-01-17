@@ -35,6 +35,7 @@ import DataInsights from "./pages/DataInsights";
 import CallLibrary from "./pages/CallLibrary";
 import CallingInformation from "./pages/CallingInformation";
 import AISummary from "./pages/AISummary";
+import EngagementReport from "./pages/EngagementReport";
 import { Navigate } from "react-router-dom";
 import CallSessions from "./pages/CallSessions";
 import CallAnalytics from "./pages/CallAnalytics";
@@ -94,6 +95,7 @@ const App = () => (
                   {/* Engagements routes - Top-level channel */}
                   <Route path="/engagements" element={<EngagementDashboard />} />
                   <Route path="/engagements/performance" element={<EngagementDashboard />} />
+                  <Route path="/engagements/:engagementId/report" element={<EngagementReport />} />
 
                   {/* Calling routes - New 9 pages from requirements */}
                   <Route path="/calling" element={<CallerDashboard />} />

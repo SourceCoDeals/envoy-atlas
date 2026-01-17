@@ -312,7 +312,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         c.call_category && c.call_category.toLowerCase().includes('meeting')
       ).length;
       const avgDuration = totalCalls > 0 
-        ? matchingCalls.reduce((sum, c) => sum + (c.duration_seconds || 0), 0) / totalCalls 
+        ? matchingCalls.reduce((sum, c) => sum + (c.duration || 0), 0) / totalCalls 
         : 0;
       const avgScore = totalCalls > 0
         ? matchingCalls.filter(c => c.composite_score).reduce((sum, c) => sum + (c.composite_score || 0), 0) / 

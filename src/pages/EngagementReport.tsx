@@ -1,17 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { useEngagementReport, DateRange } from '@/hooks/useEngagementReport';
+import { useEngagementReport } from '@/hooks/useEngagementReport';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { 
-  ArrowLeft, Download, Share2, Calendar, 
+  ArrowLeft, Download, Share2, 
   BarChart3, Mail, Phone, Target, Clock, Users
 } from 'lucide-react';
-import { DateRangeFilter } from '@/components/dashboard/DateRangeFilter';
+import { DateRangeFilter, DateRangeOption, getDateRange } from '@/components/dashboard/DateRangeFilter';
 import { ExecutiveSummaryTab } from '@/components/engagementReport/ExecutiveSummaryTab';
 import { EmailReportTab } from '@/components/engagementReport/EmailReportTab';
 import { CallingReportTab } from '@/components/engagementReport/CallingReportTab';
@@ -23,11 +23,13 @@ export default function EngagementReport() {
   const { engagementId } = useParams<{ engagementId: string }>();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const [dateRange, setDateRange] = useState<DateRange>({
-    startDate: null,
-    endDate: new Date(),
-  });
+  const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('last30');
   const [activeTab, setActiveTab] = useState('executive');
+
+  const dateRange = useMemo(() => {
+    const { startDate, endDate } = getDateRange(dateRangeOption);
+    return { startDate, endDate };
+  }, [dateRangeOption]);
 
   const { data, loading, error } = useEngagementReport(engagementId || '', dateRange);
 
@@ -95,7 +97,7 @@ export default function EngagementReport() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <DateRangeFilter dateRange={dateRange} setDateRange={setDateRange} />
+            <DateRangeFilter value={dateRangeOption} onChange={setDateRangeOption} />
             <Button variant="outline" size="sm">
               <Share2 className="mr-2 h-4 w-4" />
               Share
