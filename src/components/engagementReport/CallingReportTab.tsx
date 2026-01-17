@@ -1,5 +1,4 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { 
   Phone, PhoneCall, Users, MessageCircle, CalendarCheck, 
   Voicemail, Clock, Star
@@ -8,6 +7,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts';
+import { ReportMetricCard } from './components/ReportMetricCard';
+import { ReportProgressBar } from './components/ReportProgressBar';
+import { formatDuration } from './utils/formatters';
+import { CALLING_BENCHMARKS } from './constants/thresholds';
 
 interface CallingReportTabProps {
   data: {
@@ -42,41 +45,35 @@ const COLORS = [
 export function CallingReportTab({ data }: CallingReportTabProps) {
   const { callingMetrics, callDispositions, callOutcomes } = data;
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-  };
-
   const metrics = [
     { 
       label: 'Total Calls', 
-      value: callingMetrics.totalCalls.toLocaleString(), 
+      value: callingMetrics.totalCalls, 
       icon: Phone,
     },
     { 
       label: 'Connections', 
-      value: callingMetrics.connections.toLocaleString(), 
+      value: callingMetrics.connections, 
       rate: callingMetrics.connectRate,
       icon: PhoneCall,
       subtitle: 'connect rate',
     },
     { 
       label: 'Conversations', 
-      value: callingMetrics.conversations.toLocaleString(), 
+      value: callingMetrics.conversations, 
       rate: callingMetrics.conversationRate,
       icon: MessageCircle,
       subtitle: 'of calls',
     },
     { 
       label: 'DM Conversations', 
-      value: callingMetrics.dmConversations.toLocaleString(), 
+      value: callingMetrics.dmConversations, 
       icon: Users,
       highlight: true,
     },
     { 
       label: 'Meetings', 
-      value: callingMetrics.meetings.toLocaleString(), 
+      value: callingMetrics.meetings, 
       rate: callingMetrics.meetingRate,
       icon: CalendarCheck,
       subtitle: 'meeting rate',
@@ -84,7 +81,7 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
     },
     { 
       label: 'Voicemails', 
-      value: callingMetrics.voicemails.toLocaleString(), 
+      value: callingMetrics.voicemails, 
       rate: callingMetrics.voicemailRate,
       icon: Voicemail,
       subtitle: 'of calls',
@@ -93,11 +90,13 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
       label: 'Avg Duration', 
       value: formatDuration(callingMetrics.avgDuration), 
       icon: Clock,
+      isFormatted: true,
     },
     { 
       label: 'Avg Score', 
       value: callingMetrics.avgScore.toFixed(1), 
       icon: Star,
+      isFormatted: true,
     },
   ];
 
@@ -113,30 +112,19 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
-            {metrics.map((metric) => {
-              const Icon = metric.icon;
-              return (
-                <div 
-                  key={metric.label} 
-                  className={`p-4 rounded-lg border ${metric.highlight ? 'bg-primary/5 border-primary/20' : 'bg-card'}`}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <Icon className={`h-4 w-4 ${metric.highlight ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {metric.label}
-                    </span>
-                  </div>
-                  <p className={`text-2xl font-bold ${metric.highlight ? 'text-primary' : ''}`}>
-                    {metric.value}
-                  </p>
-                  {metric.rate !== undefined && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {metric.rate.toFixed(1)}% {metric.subtitle}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
+            {metrics.map((metric) => (
+              <ReportMetricCard
+                key={metric.label}
+                label={metric.label}
+                value={metric.isFormatted ? metric.value : metric.value}
+                subtitle={metric.rate !== undefined 
+                  ? `${metric.rate.toFixed(1)}% ${metric.subtitle}` 
+                  : undefined
+                }
+                icon={metric.icon}
+                highlight={metric.highlight}
+              />
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -240,31 +228,34 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm font-medium">Overall Connect Rate</span>
-                <span className="text-sm font-bold">{callingMetrics.connectRate.toFixed(1)}%</span>
-              </div>
-              <Progress value={callingMetrics.connectRate} className="h-3" />
+              <ReportProgressBar
+                value={callingMetrics.connectRate}
+                label="Overall Connect Rate"
+                valueLabel={`${callingMetrics.connectRate.toFixed(1)}%`}
+                size="lg"
+              />
               <p className="text-xs text-muted-foreground">
-                Industry benchmark: 15-20%
+                Industry benchmark: {CALLING_BENCHMARKS.connectRate.min}-{CALLING_BENCHMARKS.connectRate.max}%
               </p>
             </div>
             <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm font-medium">Conversation Rate</span>
-                <span className="text-sm font-bold">{callingMetrics.conversationRate.toFixed(1)}%</span>
-              </div>
-              <Progress value={callingMetrics.conversationRate} className="h-3" />
+              <ReportProgressBar
+                value={callingMetrics.conversationRate}
+                label="Conversation Rate"
+                valueLabel={`${callingMetrics.conversationRate.toFixed(1)}%`}
+                size="lg"
+              />
               <p className="text-xs text-muted-foreground">
                 Of connections that became conversations
               </p>
             </div>
             <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm font-medium">Meeting Conversion</span>
-                <span className="text-sm font-bold">{callingMetrics.meetingRate.toFixed(1)}%</span>
-              </div>
-              <Progress value={Math.min(100, callingMetrics.meetingRate * 10)} className="h-3" />
+              <ReportProgressBar
+                value={Math.min(100, callingMetrics.meetingRate * 10)}
+                label="Meeting Conversion"
+                valueLabel={`${callingMetrics.meetingRate.toFixed(1)}%`}
+                size="lg"
+              />
               <p className="text-xs text-muted-foreground">
                 Calls that resulted in meetings
               </p>
