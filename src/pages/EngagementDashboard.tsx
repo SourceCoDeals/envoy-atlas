@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -31,18 +31,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2, ChevronDown, ChevronRight,
-  Phone, Target, TrendingUp, Users, Calendar
+  Phone, Target, TrendingUp, Users, Link as LinkIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { LinkedCampaignsList, LinkedCampaign } from '@/components/engagements/LinkedCampaignsList';
+import { LinkCampaignsDialog, UnlinkedCampaign } from '@/components/engagements/LinkCampaignsDialog';
 
 interface Engagement {
   id: string;
@@ -97,6 +94,13 @@ export default function EngagementDashboard() {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  
+  // Campaign linking state
+  const [linkedCampaigns, setLinkedCampaigns] = useState<Record<string, LinkedCampaign[]>>({});
+  const [unlinkedCampaigns, setUnlinkedCampaigns] = useState<UnlinkedCampaign[]>([]);
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkingEngagementId, setLinkingEngagementId] = useState<string | null>(null);
+  const [unlinkingCampaign, setUnlinkingCampaign] = useState<string | null>(null);
 
   const emptyForm = {
     sponsor: '',
@@ -128,6 +132,7 @@ export default function EngagementDashboard() {
     if (currentWorkspace?.id) {
       fetchEngagements();
       fetchCampaignSummaries();
+      fetchAllCampaigns();
     }
   }, [currentWorkspace?.id]);
 
@@ -215,6 +220,122 @@ export default function EngagementDashboard() {
     }
   };
 
+  // Fetch all campaigns from SmartLead and Reply.io and categorize as linked/unlinked
+  const fetchAllCampaigns = useCallback(async () => {
+    if (!currentWorkspace?.id) return;
+
+    try {
+      // Fetch campaigns from both platforms in parallel
+      const [smartleadRes, replyioRes, smartleadMetrics, replyioMetrics] = await Promise.all([
+        supabase
+          .from('smartlead_campaigns')
+          .select('id, name, status, engagement_id')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('replyio_campaigns')
+          .select('id, name, status, engagement_id')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('smartlead_daily_metrics')
+          .select('campaign_id, sent_count, opened_count, replied_count, positive_reply_count')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('replyio_daily_metrics')
+          .select('campaign_id, sent_count, opened_count, replied_count, positive_reply_count')
+          .eq('workspace_id', currentWorkspace.id),
+      ]);
+
+      // Aggregate SmartLead metrics by campaign
+      const smartleadMetricsMap: Record<string, { sent: number; opened: number; replied: number; positive: number }> = {};
+      (smartleadMetrics.data || []).forEach((m) => {
+        if (!smartleadMetricsMap[m.campaign_id]) {
+          smartleadMetricsMap[m.campaign_id] = { sent: 0, opened: 0, replied: 0, positive: 0 };
+        }
+        smartleadMetricsMap[m.campaign_id].sent += m.sent_count || 0;
+        smartleadMetricsMap[m.campaign_id].opened += m.opened_count || 0;
+        smartleadMetricsMap[m.campaign_id].replied += m.replied_count || 0;
+        smartleadMetricsMap[m.campaign_id].positive += m.positive_reply_count || 0;
+      });
+
+      // Aggregate Reply.io metrics by campaign
+      const replyioMetricsMap: Record<string, { sent: number; opened: number; replied: number; positive: number }> = {};
+      (replyioMetrics.data || []).forEach((m) => {
+        if (!replyioMetricsMap[m.campaign_id]) {
+          replyioMetricsMap[m.campaign_id] = { sent: 0, opened: 0, replied: 0, positive: 0 };
+        }
+        replyioMetricsMap[m.campaign_id].sent += m.sent_count || 0;
+        replyioMetricsMap[m.campaign_id].opened += m.opened_count || 0;
+        replyioMetricsMap[m.campaign_id].replied += m.replied_count || 0;
+        replyioMetricsMap[m.campaign_id].positive += m.positive_reply_count || 0;
+      });
+
+      // Process campaigns into linked and unlinked
+      const linkedMap: Record<string, LinkedCampaign[]> = {};
+      const unlinked: UnlinkedCampaign[] = [];
+
+      // Process SmartLead campaigns
+      (smartleadRes.data || []).forEach((c) => {
+        const metrics = smartleadMetricsMap[c.id] || { sent: 0, opened: 0, replied: 0, positive: 0 };
+        const campaign: LinkedCampaign = {
+          id: c.id,
+          name: c.name,
+          platform: 'smartlead',
+          status: c.status,
+          totalSent: metrics.sent,
+          totalOpened: metrics.opened,
+          totalReplied: metrics.replied,
+          totalPositive: metrics.positive,
+        };
+
+        if (c.engagement_id) {
+          if (!linkedMap[c.engagement_id]) linkedMap[c.engagement_id] = [];
+          linkedMap[c.engagement_id].push(campaign);
+        } else {
+          unlinked.push({
+            id: c.id,
+            name: c.name,
+            platform: 'smartlead',
+            status: c.status,
+            totalSent: metrics.sent,
+          });
+        }
+      });
+
+      // Process Reply.io campaigns
+      (replyioRes.data || []).forEach((c) => {
+        const metrics = replyioMetricsMap[c.id] || { sent: 0, opened: 0, replied: 0, positive: 0 };
+        const campaign: LinkedCampaign = {
+          id: c.id,
+          name: c.name,
+          platform: 'replyio',
+          status: c.status,
+          totalSent: metrics.sent,
+          totalOpened: metrics.opened,
+          totalReplied: metrics.replied,
+          totalPositive: metrics.positive,
+        };
+
+        if (c.engagement_id) {
+          if (!linkedMap[c.engagement_id]) linkedMap[c.engagement_id] = [];
+          linkedMap[c.engagement_id].push(campaign);
+        } else {
+          unlinked.push({
+            id: c.id,
+            name: c.name,
+            platform: 'replyio',
+            status: c.status,
+            totalSent: metrics.sent,
+          });
+        }
+      });
+
+      setLinkedCampaigns(linkedMap);
+      setUnlinkedCampaigns(unlinked);
+    } catch (err) {
+      console.error('Error fetching campaigns:', err);
+    }
+  }, [currentWorkspace?.id]);
+
   const fetchCampaignSummaries = async () => {
     if (!currentWorkspace?.id) return;
 
@@ -277,6 +398,72 @@ export default function EngagementDashboard() {
       }
       return next;
     });
+  };
+
+  // Open link campaigns dialog
+  const openLinkDialog = (engagementId: string) => {
+    setLinkingEngagementId(engagementId);
+    setLinkDialogOpen(true);
+  };
+
+  // Handle linking campaigns to engagement
+  const handleLinkCampaigns = async (campaigns: { id: string; platform: 'smartlead' | 'replyio' }[]) => {
+    if (!linkingEngagementId) return;
+
+    try {
+      // Group by platform
+      const smartleadIds = campaigns.filter(c => c.platform === 'smartlead').map(c => c.id);
+      const replyioIds = campaigns.filter(c => c.platform === 'replyio').map(c => c.id);
+
+      const updates = [];
+
+      if (smartleadIds.length > 0) {
+        updates.push(
+          supabase
+            .from('smartlead_campaigns')
+            .update({ engagement_id: linkingEngagementId })
+            .in('id', smartleadIds)
+        );
+      }
+
+      if (replyioIds.length > 0) {
+        updates.push(
+          supabase
+            .from('replyio_campaigns')
+            .update({ engagement_id: linkingEngagementId })
+            .in('id', replyioIds)
+        );
+      }
+
+      await Promise.all(updates);
+      toast.success(`Linked ${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''}`);
+      fetchAllCampaigns();
+    } catch (err) {
+      console.error('Error linking campaigns:', err);
+      toast.error('Failed to link campaigns');
+      throw err;
+    }
+  };
+
+  // Handle unlinking a campaign from engagement
+  const handleUnlinkCampaign = async (campaignId: string, platform: 'smartlead' | 'replyio') => {
+    setUnlinkingCampaign(campaignId);
+    try {
+      const table = platform === 'smartlead' ? 'smartlead_campaigns' : 'replyio_campaigns';
+      const { error } = await supabase
+        .from(table)
+        .update({ engagement_id: null })
+        .eq('id', campaignId);
+
+      if (error) throw error;
+      toast.success('Campaign unlinked');
+      fetchAllCampaigns();
+    } catch (err) {
+      console.error('Error unlinking campaign:', err);
+      toast.error('Failed to unlink campaign');
+    } finally {
+      setUnlinkingCampaign(null);
+    }
   };
 
   const openCreate = () => {
@@ -719,31 +906,62 @@ export default function EngagementDashboard() {
                       {isExpanded && (
                         <TableRow className="bg-muted/30">
                           <TableCell colSpan={10} className="p-4">
-                            <div className="grid grid-cols-4 gap-6">
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-1">Calls Progress</p>
-                                <div className="space-y-1">
-                                  <div className="flex justify-between text-sm">
-                                    <span>{metrics?.totalCalls || 0}</span>
-                                    <span className="text-muted-foreground">/ {engagement.total_calls_target || 500}</span>
+                            <div className="space-y-6">
+                              {/* Metrics Row */}
+                              <div className="grid grid-cols-4 gap-6">
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Calls Progress</p>
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-sm">
+                                      <span>{metrics?.totalCalls || 0}</span>
+                                      <span className="text-muted-foreground">/ {engagement.total_calls_target || 500}</span>
+                                    </div>
+                                    <Progress value={Math.min(callsProgress, 100)} className="h-2" />
                                   </div>
-                                  <Progress value={Math.min(callsProgress, 100)} className="h-2" />
+                                </div>
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Avg AI Score</p>
+                                  <p className="text-2xl font-bold">{metrics?.avgScore || '-'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Conversations</p>
+                                  <p className="text-2xl font-bold">{metrics?.conversations || 0}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Meetings Target</p>
+                                  <p className="text-2xl font-bold">
+                                    <span className="text-success">{metrics?.meetingsSet || 0}</span>
+                                    <span className="text-muted-foreground text-base"> / {engagement.meetings_target || 20}</span>
+                                  </p>
                                 </div>
                               </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-1">Avg AI Score</p>
-                                <p className="text-2xl font-bold">{metrics?.avgScore || '-'}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-1">Conversations</p>
-                                <p className="text-2xl font-bold">{metrics?.conversations || 0}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-1">Meetings Target</p>
-                                <p className="text-2xl font-bold">
-                                  <span className="text-success">{metrics?.meetingsSet || 0}</span>
-                                  <span className="text-muted-foreground text-base"> / {engagement.meetings_target || 20}</span>
-                                </p>
+
+                              {/* Linked Campaigns Section */}
+                              <div className="border-t pt-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div>
+                                    <h4 className="font-medium text-sm">Linked Email Campaigns</h4>
+                                    <p className="text-xs text-muted-foreground">
+                                      {(linkedCampaigns[engagement.id] || []).length} campaign{(linkedCampaigns[engagement.id] || []).length !== 1 ? 's' : ''} linked
+                                    </p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openLinkDialog(engagement.id);
+                                    }}
+                                  >
+                                    <LinkIcon className="h-3.5 w-3.5 mr-1.5" />
+                                    Link Campaigns
+                                  </Button>
+                                </div>
+                                <LinkedCampaignsList
+                                  campaigns={linkedCampaigns[engagement.id] || []}
+                                  onUnlink={handleUnlinkCampaign}
+                                  unlinking={unlinkingCampaign}
+                                />
                               </div>
                             </div>
                           </TableCell>
@@ -817,6 +1035,15 @@ export default function EngagementDashboard() {
             </Table>
           )}
         </Card>
+
+        {/* Link Campaigns Dialog */}
+        <LinkCampaignsDialog
+          open={linkDialogOpen}
+          onOpenChange={setLinkDialogOpen}
+          campaigns={unlinkedCampaigns}
+          onLink={handleLinkCampaigns}
+          engagementName={engagements.find(e => e.id === linkingEngagementId)?.engagement_name || ''}
+        />
       </div>
     </DashboardLayout>
   );
