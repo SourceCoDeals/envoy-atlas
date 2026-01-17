@@ -775,12 +775,36 @@ Deno.serve(async (req) => {
               last_synced_at: new Date().toISOString(),
             }, { onConflict: 'campaign_id' });
             
-            // Store daily delta (NOT full cumulative on first sync!)
-            // On first sync, we skip daily_metrics since we don't know actual send dates
-            // The workspace aggregation from historical data handles accurate trends
+            // Store daily delta OR initial cumulative on first sync
+            // FIX: On first sync, store cumulative totals as initial data point
+            // This ensures dashboards have data immediately
             const isFirstSync = !prevCumulative;
             
-            if (!isFirstSync && (deltaSent > 0 || deltaOpened > 0 || deltaReplied > 0 || deltaBounced > 0)) {
+            if (isFirstSync && (totalSent > 0 || totalOpened > 0 || totalReplied > 0 || totalBounced > 0)) {
+              // First sync: Store current totals as today's baseline
+              // Use campaign's start date if available, otherwise use today
+              const campaignStartDate = seqDetails.createdAt 
+                ? new Date(seqDetails.createdAt).toISOString().split('T')[0]
+                : today;
+              
+              const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
+                workspace_id,
+                campaign_id: campaignId,
+                metric_date: campaignStartDate,
+                sent_count: totalSent,
+                opened_count: totalOpened,
+                clicked_count: totalClicked,
+                replied_count: totalReplied,
+                positive_reply_count: totalInterested,
+                bounced_count: totalBounced,
+              }, { onConflict: 'campaign_id,metric_date' });
+
+              if (!metricsErr) {
+                progress.metrics_created++;
+                metricsStored = true;
+                console.log(`  ✓ First sync - stored cumulative as baseline (date=${campaignStartDate}): sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
+              }
+            } else if (!isFirstSync && (deltaSent > 0 || deltaOpened > 0 || deltaReplied > 0 || deltaBounced > 0)) {
               const { error: metricsErr } = await supabase.from('replyio_daily_metrics').upsert({
                 workspace_id,
                 campaign_id: campaignId,
@@ -799,8 +823,8 @@ Deno.serve(async (req) => {
                 console.log(`  ✓ Daily delta stored: sent=${deltaSent}, opens=${deltaOpened}, replies=${deltaReplied}`);
               }
             } else if (isFirstSync) {
-              console.log(`  First sync - skipping daily_metrics (let historical aggregation handle trends)`);
-              metricsStored = true; // Mark as handled
+              console.log(`  First sync but no activity - skipping daily_metrics`);
+              metricsStored = true;
             } else {
               console.log(`  No new activity today - skipping daily_metrics upsert`);
               metricsStored = true;
