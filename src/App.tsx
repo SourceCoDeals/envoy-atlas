@@ -89,10 +89,13 @@ const App = () => (
                   <Route path="/alerts" element={<Alerts />} />
                   <Route path="/settings" element={<Settings />} />
 
+                  {/* Engagements routes - Top-level channel */}
+                  <Route path="/engagements" element={<EngagementDashboard />} />
+                  <Route path="/engagements/performance" element={<EngagementDashboard />} />
+
                   {/* Calling routes - New 9 pages from requirements */}
                   <Route path="/calling" element={<CallerDashboard />} />
                   <Route path="/calling/phoneburner" element={<PhoneBurnerDashboard />} />
-                  <Route path="/calling/engagements" element={<EngagementDashboard />} />
                   <Route path="/calling/deals" element={<TopDeals />} />
                   <Route path="/calling/top-calls" element={<TopCallsWeek />} />
                   <Route path="/calling/insights" element={<DataInsights />} />

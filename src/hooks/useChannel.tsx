@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export type Channel = 'email' | 'calling' | 'contacts';
+export type Channel = 'email' | 'calling' | 'contacts' | 'engagements';
 
 interface ChannelContextType {
   channel: Channel;
@@ -12,7 +12,10 @@ const ChannelContext = createContext<ChannelContextType | undefined>(undefined);
 export function ChannelProvider({ children }: { children: React.ReactNode }) {
   const [channel, setChannelState] = useState<Channel>(() => {
     const stored = localStorage.getItem('selectedChannel');
-    return (stored === 'calling' ? 'calling' : 'email') as Channel;
+    if (stored === 'calling' || stored === 'contacts' || stored === 'engagements') {
+      return stored as Channel;
+    }
+    return 'email';
   });
 
   const setChannel = (newChannel: Channel) => {
