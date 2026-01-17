@@ -6,82 +6,60 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useCallLibrary } from '@/hooks/useCallLibrary';
+import { useTrainingAssignments, TrainingAssignment } from '@/hooks/useTrainingAssignments';
 import { GraduationCap, Play, CheckCircle2, Clock, User, Target, Headphones } from 'lucide-react';
+import { format } from 'date-fns';
 
-interface TrainingAssignment {
-  id: string;
-  callId: string;
-  callTitle: string;
-  category: string;
-  focusArea: string;
-  assignedBy: string;
-  dueDate: string;
-  completed: boolean;
-  notes?: string;
-}
-
-// Mock data - would come from database in real implementation
-const mockAssignments: TrainingAssignment[] = [
-  {
-    id: '1',
-    callId: 'call-1',
-    callTitle: 'Strong Discovery Call - Manufacturing CEO',
-    category: 'discovery_excellence',
-    focusArea: 'Note how rep builds rapport before asking about timeline',
-    assignedBy: 'John Manager',
-    dueDate: '2026-01-10',
-    completed: false,
-  },
-  {
-    id: '2',
-    callId: 'call-2',
-    callTitle: '"Not Interested" Recovery',
-    category: 'objection_handling',
-    focusArea: 'Study the pattern: acknowledge → reframe → value statement',
-    assignedBy: 'John Manager',
-    dueDate: '2026-01-08',
-    completed: true,
-  },
-];
-
-function AssignmentCard({ assignment }: { assignment: TrainingAssignment }) {
-  const [completed, setCompleted] = useState(assignment.completed);
+function AssignmentCard({ 
+  assignment, 
+  onToggleComplete 
+}: { 
+  assignment: TrainingAssignment;
+  onToggleComplete: (id: string, completed: boolean) => void;
+}) {
+  const isCompleted = !!assignment.completed_at;
+  const callTitle = assignment.call 
+    ? `${assignment.call.contact_name || 'Unknown'} - ${assignment.call.company_name || 'Unknown Company'}`
+    : 'Call Recording';
 
   return (
-    <Card className={completed ? 'opacity-60' : ''}>
+    <Card className={isCompleted ? 'opacity-60' : ''}>
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
           <Checkbox
-            checked={completed}
-            onCheckedChange={(checked) => setCompleted(!!checked)}
+            checked={isCompleted}
+            onCheckedChange={(checked) => onToggleComplete(assignment.id, !!checked)}
             className="mt-1"
           />
           <div className="flex-1">
             <div className="flex items-start justify-between">
               <div>
-                <h4 className="font-medium">{assignment.callTitle}</h4>
+                <h4 className="font-medium">{callTitle}</h4>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {assignment.focusArea}
+                  {assignment.focus_area || 'Review this call for training purposes'}
                 </p>
               </div>
               <Badge variant={
-                assignment.category === 'discovery_excellence' ? 'default' :
-                assignment.category === 'objection_handling' ? 'secondary' :
+                assignment.assignment_type === 'discovery_excellence' ? 'default' :
+                assignment.assignment_type === 'objection_handling' ? 'secondary' :
                 'outline'
               }>
-                {assignment.category.replace('_', ' ')}
+                {assignment.assignment_type?.replace(/_/g, ' ') || 'Training'}
               </Badge>
             </div>
             <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">
                 <User className="h-3 w-3" />
-                Assigned by {assignment.assignedBy}
+                Assigned by {assignment.assigner?.full_name || assignment.assigner?.email || 'Manager'}
               </span>
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                Due {new Date(assignment.dueDate).toLocaleDateString()}
-              </span>
+              {assignment.due_date && (
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Due {format(new Date(assignment.due_date), 'MMM d, yyyy')}
+                </span>
+              )}
             </div>
           </div>
           <Button variant="ghost" size="sm">
@@ -94,13 +72,45 @@ function AssignmentCard({ assignment }: { assignment: TrainingAssignment }) {
 }
 
 export default function TrainingQueue() {
-  const { entries: libraryEntries = [] } = useCallLibrary();
+  const { entries: libraryEntries = [], isLoading: isLoadingLibrary } = useCallLibrary();
+  const { 
+    pendingAssignments, 
+    completedAssignments, 
+    assignments,
+    isLoading: isLoadingAssignments,
+    markComplete,
+    markIncomplete 
+  } = useTrainingAssignments();
   
-  const pendingAssignments = mockAssignments.filter(a => !a.completed);
-  const completedAssignments = mockAssignments.filter(a => a.completed);
-  const completionRate = mockAssignments.length > 0 
-    ? (completedAssignments.length / mockAssignments.length) * 100 
+  const isLoading = isLoadingAssignments || isLoadingLibrary;
+  
+  const completionRate = assignments.length > 0 
+    ? (completedAssignments.length / assignments.length) * 100 
     : 0;
+
+  const handleToggleComplete = (assignmentId: string, completed: boolean) => {
+    if (completed) {
+      markComplete.mutate({ assignmentId });
+    } else {
+      markIncomplete.mutate(assignmentId);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="space-y-6">
+          <Skeleton className="h-10 w-64" />
+          <div className="grid gap-4 md:grid-cols-4">
+            {[1, 2, 3, 4].map(i => (
+              <Skeleton key={i} className="h-24" />
+            ))}
+          </div>
+          <Skeleton className="h-64" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -184,7 +194,11 @@ export default function TrainingQueue() {
               </Card>
             ) : (
               pendingAssignments.map(assignment => (
-                <AssignmentCard key={assignment.id} assignment={assignment} />
+                <AssignmentCard 
+                  key={assignment.id} 
+                  assignment={assignment} 
+                  onToggleComplete={handleToggleComplete}
+                />
               ))
             )}
           </TabsContent>
@@ -199,7 +213,11 @@ export default function TrainingQueue() {
               </Card>
             ) : (
               completedAssignments.map(assignment => (
-                <AssignmentCard key={assignment.id} assignment={assignment} />
+                <AssignmentCard 
+                  key={assignment.id} 
+                  assignment={assignment}
+                  onToggleComplete={handleToggleComplete}
+                />
               ))
             )}
           </TabsContent>
@@ -220,7 +238,7 @@ export default function TrainingQueue() {
                     <CardHeader className="pb-2">
                       <div className="flex items-start justify-between">
                         <CardTitle className="text-base">{entry.title}</CardTitle>
-                        <Badge variant="outline">{entry.category.replace('_', ' ')}</Badge>
+                        <Badge variant="outline">{entry.category.replace(/_/g, ' ')}</Badge>
                       </div>
                       <CardDescription>{entry.description}</CardDescription>
                     </CardHeader>
