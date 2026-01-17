@@ -1,14 +1,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Declare EdgeRuntime global for Supabase Edge Functions
+declare const EdgeRuntime: {
+  waitUntil: (promise: Promise<any>) => void;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 const NOCODB_BASE_URL = "https://nocodb-1b0ku-u5603.vm.elestio.app";
-// Updated table ID from user's link
 const NOCODB_TABLE_ID = "m9klgus7som6u7q";
+const TIME_BUDGET_MS = 50000; // 50 seconds before triggering continuation
+const UPSERT_BATCH_SIZE = 100;
 
 // Column mapping from NocoDB "All Data" table to our external_calls table
 const COLUMN_MAP: Record<string, string> = {
@@ -179,24 +185,62 @@ function extractContactInfo(record: Record<string, any>): { name: string; compan
   };
 }
 
+// Self-continuation helper
+async function triggerContinuation(
+  supabaseUrl: string,
+  authToken: string,
+  workspaceId: string,
+  currentOffset: number,
+  action: string
+) {
+  console.log(`[nocodb-sync] Triggering continuation from offset ${currentOffset}...`);
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/nocodb-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        action: action,
+        continue_from_offset: currentOffset,
+      }),
+    });
+    console.log(`[nocodb-sync] Continuation triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('[nocodb-sync] Failed to trigger continuation:', error);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const startTime = Date.now();
+  const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const nocodbApiToken = Deno.env.get("NOCODB_API_TOKEN");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const authHeader = req.headers.get('Authorization') || `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`;
 
-    const { workspace_id, action = "stats", since_date } = await req.json();
+    const { 
+      workspace_id, 
+      action = "stats", 
+      since_date,
+      continue_from_offset = 0 
+    } = await req.json();
 
     if (!workspace_id) {
       throw new Error("workspace_id is required");
     }
 
-    console.log(`[nocodb-sync] Action: ${action} for workspace ${workspace_id}`);
+    const isContinuation = continue_from_offset > 0;
+    console.log(`[nocodb-sync] Action: ${action} for workspace ${workspace_id}${isContinuation ? ` (continuation from offset ${continue_from_offset})` : ''}`);
 
     // Stats action - return current processing status
     if (action === "stats") {
@@ -233,11 +277,10 @@ serve(async (req) => {
       throw new Error("NOCODB_API_TOKEN is not configured. Please add it in the Connections settings.");
     }
 
-    // Full sync - clear existing data first
-    if (action === "full_sync") {
+    // Full sync - clear existing data first (only on initial call, not continuation)
+    if (action === "full_sync" && !isContinuation) {
       console.log("[nocodb-sync] Full sync: clearing existing data...");
       
-      // Delete existing leads from external_calls platform
       const { error: leadsError } = await supabase
         .from("leads")
         .delete()
@@ -246,7 +289,6 @@ serve(async (req) => {
       
       if (leadsError) console.error("[nocodb-sync] Error deleting leads:", leadsError);
       
-      // Delete existing external_calls
       const { error: callsError } = await supabase
         .from("external_calls")
         .delete()
@@ -258,17 +300,18 @@ serve(async (req) => {
     }
 
     // Helper to update sync progress in real-time
-    const updateSyncProgress = async (phase: string, current: number, total: number, message: string) => {
+    const updateSyncProgress = async (phase: string, current: number, total: number, message: string, currentOffset?: number) => {
       await supabase
         .from("api_connections")
         .update({
-          sync_status: "syncing",
+          sync_status: phase === "paused" ? "partial" : "syncing",
           sync_progress: {
             phase,
             current,
             total,
             percent: total > 0 ? Math.round((current / total) * 100) : 0,
             message,
+            current_offset: currentOffset,
             updated_at: new Date().toISOString(),
           },
         })
@@ -277,17 +320,19 @@ serve(async (req) => {
     };
 
     // Set initial syncing status
-    await updateSyncProgress("fetching", 0, 0, "Connecting to NocoDB...");
+    if (!isContinuation) {
+      await updateSyncProgress("fetching", 0, 0, "Connecting to NocoDB...");
+    }
 
-    // Fetch all records from NocoDB with pagination
+    // Fetch records from NocoDB with pagination
     let allRecords: Record<string, any>[] = [];
-    let offset = 0;
-    const limit = 200; // Larger batch for faster fetching
+    let offset = continue_from_offset;
+    const limit = 200;
     let hasMore = true;
 
-    console.log("[nocodb-sync] Fetching records from NocoDB...");
+    console.log(`[nocodb-sync] Fetching records from NocoDB (starting offset: ${offset})...`);
 
-    // First, get total count
+    // Get total count
     const countUrl = `${NOCODB_BASE_URL}/api/v2/tables/${NOCODB_TABLE_ID}/records?limit=1&offset=0`;
     const countResponse = await fetch(countUrl, {
       headers: {
@@ -305,13 +350,13 @@ serve(async (req) => {
     // Build filter for incremental sync
     let filterParam = "";
     if (action === "sync" && since_date) {
-      // Only fetch records updated since the last sync
       filterParam = `&where=(UpdatedAt,gt,${since_date})`;
       console.log(`[nocodb-sync] Incremental sync since: ${since_date}`);
     }
 
-    while (hasMore) {
-      await updateSyncProgress("fetching", allRecords.length, estimatedTotal, `Fetching records... (${allRecords.length}/${estimatedTotal})`);
+    // Fetch records with time budget awareness
+    while (hasMore && !isTimeBudgetExceeded()) {
+      await updateSyncProgress("fetching", offset, estimatedTotal, `Fetching records... (${offset}/${estimatedTotal})`, offset);
       
       const url = `${NOCODB_BASE_URL}/api/v2/tables/${NOCODB_TABLE_ID}/records?limit=${limit}&offset=${offset}${filterParam}`;
       console.log(`[nocodb-sync] Fetching: offset=${offset}`);
@@ -332,12 +377,11 @@ serve(async (req) => {
       const records = data.list || [];
       allRecords = allRecords.concat(records);
       
-      // Update estimated total from actual pageInfo if available
       if (data.pageInfo?.totalRows) {
         estimatedTotal = data.pageInfo.totalRows;
       }
       
-      console.log(`[nocodb-sync] Fetched ${records.length} records (total: ${allRecords.length})`);
+      console.log(`[nocodb-sync] Fetched ${records.length} records (batch total: ${allRecords.length}, overall offset: ${offset})`);
       
       if (records.length < limit) {
         hasMore = false;
@@ -346,24 +390,27 @@ serve(async (req) => {
       }
     }
 
-    console.log(`[nocodb-sync] Total records fetched: ${allRecords.length}`);
+    // Check if we need to continue in another batch
+    const needsContinuation = hasMore && isTimeBudgetExceeded();
+    if (needsContinuation) {
+      console.log(`[nocodb-sync] Time budget exceeded, will continue from offset ${offset}`);
+    }
+
+    console.log(`[nocodb-sync] This batch fetched: ${allRecords.length} records`);
 
     // Map and upsert records
-    await updateSyncProgress("processing", 0, allRecords.length, "Processing records...");
+    await updateSyncProgress("processing", 0, allRecords.length, "Processing records...", offset);
     const mappedRecords = allRecords.map(r => mapNocoDBRecord(r, workspace_id));
     
     let inserted = 0;
-    let updated = 0;
     let errors = 0;
     const errorDetails: string[] = [];
 
     // Upsert in batches
-    const BATCH_SIZE = 100;
-    for (let i = 0; i < mappedRecords.length; i += BATCH_SIZE) {
-      const batch = mappedRecords.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < mappedRecords.length; i += UPSERT_BATCH_SIZE) {
+      const batch = mappedRecords.slice(i, i + UPSERT_BATCH_SIZE);
       
-      // Update progress for each batch
-      await updateSyncProgress("saving", i, mappedRecords.length, `Saving records... (${i}/${mappedRecords.length})`);
+      await updateSyncProgress("saving", continue_from_offset + i, estimatedTotal, `Saving records... (${continue_from_offset + i}/${estimatedTotal})`, offset);
       
       const { data, error } = await supabase
         .from("external_calls")
@@ -376,7 +423,7 @@ serve(async (req) => {
       if (error) {
         console.error(`[nocodb-sync] Batch upsert error:`, error);
         errors += batch.length;
-        errorDetails.push(`Batch ${Math.floor(i / BATCH_SIZE)}: ${error.message}`);
+        errorDetails.push(`Batch ${Math.floor(i / UPSERT_BATCH_SIZE)}: ${error.message}`);
       } else {
         inserted += data?.length || 0;
       }
@@ -413,8 +460,8 @@ serve(async (req) => {
     );
 
     if (uniqueContacts.length > 0) {
-      for (let i = 0; i < uniqueContacts.length; i += BATCH_SIZE) {
-        const batch = uniqueContacts.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < uniqueContacts.length; i += UPSERT_BATCH_SIZE) {
+        const batch = uniqueContacts.slice(i, i + UPSERT_BATCH_SIZE);
         
         const { data, error } = await supabase
           .from("leads")
@@ -430,6 +477,30 @@ serve(async (req) => {
           leadsCreated += data?.length || 0;
         }
       }
+    }
+
+    // If we need to continue, trigger next batch
+    if (needsContinuation) {
+      await updateSyncProgress("paused", offset, estimatedTotal, `Paused at offset ${offset}, continuing...`, offset);
+      
+      EdgeRuntime.waitUntil(
+        triggerContinuation(supabaseUrl, authHeader, workspace_id, offset, action)
+      );
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          action,
+          status: "continuing",
+          stats: {
+            batch_fetched: allRecords.length,
+            batch_inserted: inserted,
+            current_offset: offset,
+            total_records: estimatedTotal,
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // Update API connection record with sync status

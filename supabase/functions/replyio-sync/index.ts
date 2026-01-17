@@ -411,48 +411,71 @@ Deno.serve(async (req) => {
 
         const upsertStepsAsVariants = async (steps: any[], source: string) => {
           if (!steps.length) return false;
-          console.log(`  ${source} Found ${steps.length} templates`);
-          console.log(`  ${source} First template keys:`, Object.keys(steps[0] || {}).join(', '));
+          console.log(`  ${source} Found ${steps.length} step(s)`);
+          console.log(`  ${source} First step keys:`, Object.keys(steps[0] || {}).join(', '));
 
           let storedAny = false;
           for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
             const step = steps[stepIdx];
+            
+            // ======================================================
+            // CRITICAL FIX: v3 API nests templates inside step.templates[]
+            // Format: [{ id, type, templates: [{id, subject, body}], ... }]
+            // We need to extract from nested templates array, not step directly
+            // ======================================================
+            const templates = step.templates || step.emails || [step];
+            
+            for (let tplIdx = 0; tplIdx < templates.length; tplIdx++) {
+              const tpl = templates[tplIdx];
+              
+              // Log first template structure for debugging
+              if (stepIdx === 0 && tplIdx === 0) {
+                console.log(`  ${source} First template keys:`, Object.keys(tpl || {}).join(', '));
+              }
 
-            const subject = step.subject || step.emailSubject || step.title || step.subjectLine || '';
-            const body = step.body || step.emailBody || step.text || step.content || step.template || step.html || '';
-            const vars = extractPersonalizationVars(`${subject} ${body}`);
-            const wordCount = String(body).split(/\s+/).filter(Boolean).length;
+              const subject = tpl.subject || tpl.emailSubject || tpl.title || tpl.subjectLine || step.subject || '';
+              const body = tpl.body || tpl.emailBody || tpl.text || tpl.content || tpl.template || tpl.html || step.body || '';
+              const vars = extractPersonalizationVars(`${subject} ${body}`);
+              const wordCount = String(body).split(/\s+/).filter(Boolean).length;
 
-            if (!subject && !body) continue;
+              // Skip if no meaningful content (but allow "default" placeholder templates)
+              if (!subject && !body) {
+                console.log(`  Skipping step ${stepIdx + 1}, template ${tplIdx + 1}: no subject/body`);
+                continue;
+              }
 
-            const platformVariantId = `step-${step.id ?? step.stepId ?? step.templateId ?? stepIdx + 1}`;
+              // Use template ID if available, fallback to step ID
+              const templateId = tpl.id || tpl.templateId || step.id || step.stepId;
+              const platformVariantId = `step-${templateId ?? `${stepIdx + 1}-${tplIdx + 1}`}`;
 
-            const { error: varErr } = await supabase
-              .from('replyio_variants')
-              .upsert({
-                campaign_id: campaignId,
-                platform_variant_id: platformVariantId,
-                name: step.name || step.title || `Step ${stepIdx + 1}`,
-                variant_type: step.type || step.stepType || 'email',
-                subject_line: subject,
-                body_preview: String(body).substring(0, 500),
-                email_body: String(body),
-                word_count: wordCount,
-                personalization_vars: vars,
-                is_control: true,
-              }, { onConflict: 'campaign_id,platform_variant_id' });
+              const { error: varErr } = await supabase
+                .from('replyio_variants')
+                .upsert({
+                  campaign_id: campaignId,
+                  platform_variant_id: platformVariantId,
+                  name: tpl.name || step.name || step.title || `Step ${stepIdx + 1}`,
+                  variant_type: step.type || step.stepType || tpl.type || 'email',
+                  subject_line: subject,
+                  body_preview: String(body).substring(0, 500),
+                  email_body: String(body),
+                  word_count: wordCount,
+                  personalization_vars: vars,
+                  is_control: tplIdx === 0, // First template is control
+                }, { onConflict: 'campaign_id,platform_variant_id' });
 
-            if (varErr) {
-              console.error(`    Failed to upsert ${source} variant ${platformVariantId}:`, varErr.message);
-            } else {
-              progress.variants_synced++;
-              storedAny = true;
+              if (varErr) {
+                console.error(`    Failed to upsert ${source} variant ${platformVariantId}:`, varErr.message);
+              } else {
+                progress.variants_synced++;
+                storedAny = true;
+                console.log(`    ✓ Stored variant: ${platformVariantId} - "${subject.substring(0, 50)}..."`);
+              }
             }
           }
 
           if (storedAny) {
             variantsStored = true;
-            console.log(`  ✓ ${source} Variants stored`);
+            console.log(`  ✓ ${source} Variants stored (total: ${progress.variants_synced})`);
           }
 
           return storedAny;
