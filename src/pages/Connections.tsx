@@ -168,17 +168,31 @@ export default function Connections() {
     if (currentWorkspace?.id) void fetchConnections();
   }, [currentWorkspace?.id]);
 
-  // light polling when any sync is running
+  // Memoize syncing status for stable dependency
+  const anySyncing = useMemo(
+    () => connections.some((c) => c.sync_status === "syncing"),
+    [connections]
+  );
+
+  // Light polling when any sync is running - with timeout safety
   useEffect(() => {
-    const anySyncing = connections.some((c) => c.sync_status === "syncing");
-    if (!anySyncing) return;
+    if (!anySyncing || !currentWorkspace?.id) return;
+
+    const startTime = Date.now();
+    const MAX_POLL_DURATION = 30 * 60 * 1000; // 30 minutes max
 
     const t = window.setInterval(() => {
+      // Auto-stop polling after 30 minutes to prevent infinite loops
+      if (Date.now() - startTime > MAX_POLL_DURATION) {
+        console.warn('[Connections] Polling timeout reached, stopping automatic refresh');
+        clearInterval(t);
+        return;
+      }
       void fetchConnections();
-    }, 2000);
+    }, 5000); // Increased from 2s to 5s to reduce load
 
     return () => window.clearInterval(t);
-  }, [connections.map((c) => c.sync_status).join("|")]);
+  }, [anySyncing, currentWorkspace?.id]);
 
   const handleConnect = async (platform: "smartlead" | "replyio" | "phoneburner" | "nocodb") => {
     if (!currentWorkspace || !user) return;

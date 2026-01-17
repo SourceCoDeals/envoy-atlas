@@ -1073,7 +1073,7 @@ serve(async (req) => {
     // PHASE 4: Sync Complete
     // ============================================
     await supabase.from('api_connections').update({
-      sync_status: 'success',
+      sync_status: 'idle', // Use 'idle' to stop frontend polling
       sync_progress: { 
         completed: true, 
         historical_complete: true,
@@ -1081,6 +1081,7 @@ serve(async (req) => {
         historical_days: progress.historical_days,
         variants_synced: progress.variants_synced,
         replies_fetched: progress.replies_fetched,
+        finished_at: new Date().toISOString(),
       },
       last_sync_at: new Date().toISOString(),
       last_full_sync_at: new Date().toISOString(),
