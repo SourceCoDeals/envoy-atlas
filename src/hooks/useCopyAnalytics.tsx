@@ -284,21 +284,55 @@ export function useCopyAnalytics(): CopyAnalyticsData {
 
       console.log(`[useCopyAnalytics] Loaded ${smartleadVariantsRes.data?.length || 0} Smartlead + ${replyioVariantsRes.data?.length || 0} Reply.io variants`);
 
-      // Fetch extracted features from campaign_variant_features (still unified)
-      const { data: features, error: featuresError } = await supabase
-        .from('campaign_variant_features')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id);
+      // Fetch extracted features from PLATFORM-SPECIFIC tables first, fallback to legacy
+      const smartleadVariantIds = (smartleadVariantsRes.data || []).map(v => v.id);
+      const replyioVariantIds = (replyioVariantsRes.data || []).map(v => v.id);
+      
+      const [smartleadFeaturesRes, replyioFeaturesRes] = await Promise.all([
+        smartleadVariantIds.length > 0
+          ? supabase.from('smartlead_variant_features')
+              .select('*')
+              .eq('workspace_id', currentWorkspace.id)
+          : Promise.resolve({ data: [], error: null }),
+        replyioVariantIds.length > 0
+          ? supabase.from('replyio_variant_features')
+              .select('*')
+              .eq('workspace_id', currentWorkspace.id)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
 
-      if (featuresError) {
-        console.warn('Features table query failed, using fallback analysis:', featuresError);
-      }
-
-      // Create features map
+      // Create features map from platform-specific tables
       const featuresMap = new Map<string, VariantFeatures>();
-      (features || []).forEach(f => {
+      
+      // Add Smartlead features
+      (smartleadFeaturesRes.data || []).forEach((f: any) => {
         featuresMap.set(f.variant_id, f as VariantFeatures);
       });
+      
+      // Add Reply.io features
+      (replyioFeaturesRes.data || []).forEach((f: any) => {
+        featuresMap.set(f.variant_id, f as VariantFeatures);
+      });
+      
+      console.log(`[useCopyAnalytics] Platform features: ${smartleadFeaturesRes.data?.length || 0} Smartlead + ${replyioFeaturesRes.data?.length || 0} Reply.io`);
+
+      // Fallback to legacy campaign_variant_features if platform tables are empty
+      if (featuresMap.size === 0) {
+        console.log('[useCopyAnalytics] Platform feature tables empty, falling back to legacy campaign_variant_features');
+        const { data: legacyFeatures, error: legacyError } = await supabase
+          .from('campaign_variant_features')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id);
+
+        if (legacyError) {
+          console.warn('Legacy features table query failed:', legacyError);
+        } else {
+          (legacyFeatures || []).forEach(f => {
+            featuresMap.set(f.variant_id, f as VariantFeatures);
+          });
+          console.log(`[useCopyAnalytics] Loaded ${legacyFeatures?.length || 0} legacy features`);
+        }
+      }
 
       // Fetch discovered patterns from copy_patterns table
       const { data: dbPatterns, error: patternsError } = await supabase
