@@ -3736,6 +3736,7 @@ export type Database = {
       replyio_campaigns: {
         Row: {
           created_at: string
+          engagement_id: string | null
           id: string
           name: string
           platform_id: string
@@ -3745,6 +3746,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          engagement_id?: string | null
           id?: string
           name: string
           platform_id: string
@@ -3754,6 +3756,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          engagement_id?: string | null
           id?: string
           name?: string
           platform_id?: string
@@ -3762,6 +3765,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "replyio_campaigns_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "replyio_campaigns_workspace_id_fkey"
             columns: ["workspace_id"]
@@ -4296,6 +4306,7 @@ export type Database = {
       smartlead_campaigns: {
         Row: {
           created_at: string
+          engagement_id: string | null
           id: string
           name: string
           platform_id: string
@@ -4305,6 +4316,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          engagement_id?: string | null
           id?: string
           name: string
           platform_id: string
@@ -4314,6 +4326,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          engagement_id?: string | null
           id?: string
           name?: string
           platform_id?: string
@@ -4322,6 +4335,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "smartlead_campaigns_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "smartlead_campaigns_workspace_id_fkey"
             columns: ["workspace_id"]
