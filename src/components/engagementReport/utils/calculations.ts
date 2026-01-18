@@ -56,29 +56,12 @@ export function calculateFunnelConversion(
   return (currentStage / previousStage) * 100;
 }
 
-/**
- * Calculate estimated meeting breakdown
- */
-export function calculateMeetingBreakdown(totalMeetings: number) {
-  return {
-    completed: Math.floor(totalMeetings * 0.75),
-    scheduled: Math.floor(totalMeetings * 0.2),
-    cancelled: Math.max(0, totalMeetings - Math.floor(totalMeetings * 0.75) - Math.floor(totalMeetings * 0.2)),
-  };
-}
-
-/**
- * Calculate channel attribution for meetings
- */
-export function calculateChannelAttribution(
-  totalMeetings: number,
-  emailMeetings: number,
-  callMeetings: number
-) {
-  const multiChannel = Math.floor(totalMeetings * 0.3);
-  return {
-    emailOnly: emailMeetings,
-    callOnly: callMeetings,
-    multiChannel,
-  };
-}
+// NOTE: The following functions have been REMOVED because they produced 
+// hardcoded/estimated data that was displayed as if it were real:
+//
+// - calculateMeetingBreakdown() - was hardcoding 75% completed, 20% scheduled, 5% cancelled
+// - calculateChannelAttribution() - was hardcoding 30% multi-channel
+//
+// These functions were removed to prevent fake data from being shown.
+// If meeting tracking is implemented in the future, these should be 
+// replaced with actual data queries.

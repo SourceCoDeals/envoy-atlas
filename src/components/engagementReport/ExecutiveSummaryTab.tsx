@@ -11,6 +11,7 @@ import { ReportMetricCard } from './components/ReportMetricCard';
 import { ReportProgressBar } from './components/ReportProgressBar';
 import { calculateHealthScore, calculateMeetingProgress } from './utils/calculations';
 import { getHealthColor } from './constants/statusConfig';
+import { DataErrorFlag } from '@/components/ui/data-error-flag';
 
 interface ExecutiveSummaryTabProps {
   data: {
@@ -48,11 +49,20 @@ interface ExecutiveSummaryTabProps {
       meetings_target: number | null;
       total_calls_target: number | null;
     } | null;
+    // Flags for actual vs estimated data
+    callingMetrics?: {
+      totalCalls: number;
+    };
   };
 }
 
 export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
-  const { keyMetrics, funnel, channelComparison, trendData, engagement } = data;
+  const { keyMetrics, funnel, channelComparison, trendData, engagement, callingMetrics } = data;
+
+  // Determine which metrics are estimated
+  const hasActualCallData = (callingMetrics?.totalCalls || 0) > 0;
+  const meetingsFromEmail = keyMetrics.emailTouchpoints > 0 && 
+    keyMetrics.meetingsScheduled > (callingMetrics?.totalCalls ? 0 : keyMetrics.meetingsScheduled);
 
   const meetingProgress = calculateMeetingProgress(
     keyMetrics.meetingsScheduled,
@@ -92,12 +102,19 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
                 valueLabel={`${keyMetrics.responseRate.toFixed(1)}%`}
                 size="md"
               />
-              <ReportProgressBar
-                value={keyMetrics.meetingRate * 20}
-                label="Meeting Conversion"
-                valueLabel={`${keyMetrics.meetingRate.toFixed(1)}%`}
-                size="md"
-              />
+              <div className="flex items-center gap-2">
+                <ReportProgressBar
+                  value={keyMetrics.meetingRate * 20}
+                  label="Meeting Conversion"
+                  valueLabel={`${keyMetrics.meetingRate.toFixed(1)}%`}
+                  size="md"
+                  className="flex-1"
+                />
+                <DataErrorFlag 
+                  type="estimated" 
+                  tooltip="Meeting rate includes estimated email-to-meeting conversions (positive replies × 0.3)"
+                />
+              </div>
               <ReportProgressBar
                 value={meetingProgress}
                 label="Meetings Progress"
@@ -111,12 +128,24 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
 
       {/* Key Metrics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <ReportMetricCard
-          label="Companies"
-          value={keyMetrics.companiesContacted}
-          subtitle="contacted"
-          icon={Building2}
-        />
+        <Card className="p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Companies</p>
+                <DataErrorFlag 
+                  type="estimated" 
+                  tooltip="Email companies estimated as sent/2. Call companies are actual unique values."
+                  size="sm"
+                />
+              </div>
+              <p className="text-2xl font-bold mt-1">{keyMetrics.companiesContacted.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">contacted</p>
+            </div>
+            <Building2 className="h-5 w-5 text-muted-foreground" />
+          </div>
+        </Card>
+        
         <ReportMetricCard
           label="Contacts"
           value={keyMetrics.contactsReached}
@@ -148,19 +177,40 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
           highlight
           valueClassName="text-green-600"
         />
-        <ReportMetricCard
-          label="Meetings"
-          value={keyMetrics.meetingsScheduled}
-          subtitle={`${keyMetrics.meetingRate.toFixed(1)}% rate`}
-          icon={CalendarCheck}
-          highlight
-        />
-        <ReportMetricCard
-          label="Opportunities"
-          value={keyMetrics.opportunities}
-          subtitle="identified"
-          icon={TrendingUp}
-        />
+        <Card className="p-4 bg-primary/5 border-primary/20">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Meetings</p>
+                <DataErrorFlag 
+                  type="estimated" 
+                  tooltip="Includes actual call meetings + estimated email meetings (positive replies × 0.3)"
+                  size="sm"
+                />
+              </div>
+              <p className="text-2xl font-bold mt-1">{keyMetrics.meetingsScheduled}</p>
+              <p className="text-xs text-muted-foreground">{keyMetrics.meetingRate.toFixed(1)}% rate</p>
+            </div>
+            <CalendarCheck className="h-5 w-5 text-primary" />
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Opportunities</p>
+                <DataErrorFlag 
+                  type="estimated" 
+                  tooltip="Estimated as meetings × 0.35. Not tracked from CRM."
+                  size="sm"
+                />
+              </div>
+              <p className="text-2xl font-bold mt-1">{keyMetrics.opportunities}</p>
+              <p className="text-xs text-muted-foreground">identified</p>
+            </div>
+            <TrendingUp className="h-5 w-5 text-muted-foreground" />
+          </div>
+        </Card>
       </div>
 
       {/* Funnel Visualization */}
@@ -173,7 +223,12 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
             {funnel.map((stage, index) => (
               <div key={stage.name} className="space-y-1">
                 <div className="flex justify-between text-sm">
-                  <span className="font-medium">{stage.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{stage.name}</span>
+                    {(stage.name === 'Meeting' || stage.name === 'Opportunity') && (
+                      <DataErrorFlag type="estimated" size="sm" />
+                    )}
+                  </div>
                   <span className="text-muted-foreground">
                     {stage.count.toLocaleString()} {index > 0 && `(${stage.percentage}%)`}
                   </span>
@@ -242,7 +297,10 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
                   ))}
                 </tr>
                 <tr className="border-b">
-                  <td className="py-3 px-2">Meetings Generated</td>
+                  <td className="py-3 px-2 flex items-center gap-2">
+                    Meetings Generated
+                    <DataErrorFlag type="estimated" size="sm" tooltip="Email meetings estimated from positive replies" />
+                  </td>
                   {channelComparison.map(c => (
                     <td key={c.channel} className="text-center py-3 px-4 font-medium text-primary">
                       {c.meetings}

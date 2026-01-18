@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   Phone, PhoneCall, Users, MessageCircle, CalendarCheck, 
-  Voicemail, Clock, Star
+  Voicemail, Clock, Star, AlertTriangle
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -11,6 +11,7 @@ import { ReportMetricCard } from './components/ReportMetricCard';
 import { ReportProgressBar } from './components/ReportProgressBar';
 import { formatDuration } from './utils/formatters';
 import { CALLING_BENCHMARKS } from './constants/thresholds';
+import { DataErrorFlag } from '@/components/ui/data-error-flag';
 
 interface CallingReportTabProps {
   data: {
@@ -45,11 +46,23 @@ const COLORS = [
 export function CallingReportTab({ data }: CallingReportTabProps) {
   const { callingMetrics, callDispositions, callOutcomes } = data;
 
+  // Check if we have scored calls
+  const hasAIScores = callingMetrics.avgScore > 0;
+  
+  // Filter out estimated outcomes
+  const actualOutcomes = callOutcomes.filter(o => 
+    o.outcome === 'Meeting Booked' || o.outcome === 'Interested'
+  );
+  const estimatedOutcomes = callOutcomes.filter(o => 
+    o.outcome !== 'Meeting Booked' && o.outcome !== 'Interested'
+  );
+
   const metrics = [
     { 
       label: 'Total Calls', 
       value: callingMetrics.totalCalls, 
       icon: Phone,
+      isActual: true,
     },
     { 
       label: 'Connections', 
@@ -57,6 +70,7 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
       rate: callingMetrics.connectRate,
       icon: PhoneCall,
       subtitle: 'connect rate',
+      isActual: true,
     },
     { 
       label: 'Conversations', 
@@ -64,12 +78,14 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
       rate: callingMetrics.conversationRate,
       icon: MessageCircle,
       subtitle: 'of calls',
+      isActual: true,
     },
     { 
       label: 'DM Conversations', 
       value: callingMetrics.dmConversations, 
       icon: Users,
       highlight: true,
+      isActual: true,
     },
     { 
       label: 'Meetings', 
@@ -78,6 +94,7 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
       icon: CalendarCheck,
       subtitle: 'meeting rate',
       highlight: true,
+      isActual: true,
     },
     { 
       label: 'Voicemails', 
@@ -85,18 +102,22 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
       rate: callingMetrics.voicemailRate,
       icon: Voicemail,
       subtitle: 'of calls',
+      isActual: true,
     },
     { 
       label: 'Avg Duration', 
       value: formatDuration(callingMetrics.avgDuration), 
       icon: Clock,
       isFormatted: true,
+      isActual: true,
     },
     { 
       label: 'Avg Score', 
       value: callingMetrics.avgScore.toFixed(1), 
       icon: Star,
       isFormatted: true,
+      isActual: hasAIScores,
+      tooltip: hasAIScores ? undefined : 'No calls have been AI scored yet',
     },
   ];
 
@@ -113,17 +134,28 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
             {metrics.map((metric) => (
-              <ReportMetricCard
+              <div 
                 key={metric.label}
-                label={metric.label}
-                value={metric.isFormatted ? metric.value : metric.value}
-                subtitle={metric.rate !== undefined 
-                  ? `${metric.rate.toFixed(1)}% ${metric.subtitle}` 
-                  : undefined
-                }
-                icon={metric.icon}
-                highlight={metric.highlight}
-              />
+                className={`p-4 rounded-lg border ${metric.highlight ? 'bg-primary/5 border-primary/20' : 'bg-card'}`}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <metric.icon className={`h-4 w-4 ${metric.highlight ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {metric.label}
+                  </span>
+                  {!metric.isActual && (
+                    <DataErrorFlag type="partial" size="sm" tooltip={metric.tooltip} />
+                  )}
+                </div>
+                <p className={`text-2xl font-bold ${metric.highlight ? 'text-primary' : ''}`}>
+                  {metric.isFormatted ? metric.value : metric.value.toLocaleString()}
+                </p>
+                {metric.rate !== undefined && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {metric.rate.toFixed(1)}% {metric.subtitle}
+                  </p>
+                )}
+              </div>
             ))}
           </div>
         </CardContent>
@@ -187,33 +219,50 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
         {/* Conversation Outcomes */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Conversation Outcomes</CardTitle>
+            <CardTitle className="text-lg flex items-center gap-2">
+              Conversation Outcomes
+              {estimatedOutcomes.length > 0 && (
+                <DataErrorFlag 
+                  type="partial" 
+                  size="sm" 
+                  tooltip="Some outcome categories are estimated from conversation counts"
+                />
+              )}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {callOutcomes.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">No outcome data available</p>
             ) : (
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={callOutcomes} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis type="number" tick={{ fontSize: 12 }} />
-                    <YAxis 
-                      type="category" 
-                      dataKey="outcome" 
-                      width={100}
-                      tick={{ fontSize: 12 }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'hsl(var(--card))', 
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px'
-                      }}
-                    />
-                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="space-y-4">
+                {/* Actual outcomes */}
+                <div className="space-y-2">
+                  {actualOutcomes.map((outcome) => (
+                    <div key={outcome.outcome} className="flex items-center justify-between p-2 rounded bg-green-500/10">
+                      <span className="text-sm font-medium">{outcome.outcome}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">{outcome.count}</span>
+                        <span className="text-xs text-green-600">✓ Tracked</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Estimated outcomes */}
+                {estimatedOutcomes.length > 0 && (
+                  <div className="pt-2 border-t border-dashed">
+                    <p className="text-xs text-muted-foreground mb-2">Estimated from conversation data:</p>
+                    {estimatedOutcomes.map((outcome) => (
+                      <div key={outcome.outcome} className="flex items-center justify-between p-2 rounded bg-muted/30 opacity-60">
+                        <span className="text-sm">{outcome.outcome}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{outcome.count}</span>
+                          <DataErrorFlag type="estimated" size="sm" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

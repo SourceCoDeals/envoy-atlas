@@ -296,7 +296,6 @@ export default function Dashboard() {
                 label="Reply Rate"
                 value={stats.replyRate}
                 format="percent"
-                trend={{ value: -0.4, label: 'wow' }}
                 target={{ value: 3.5 }}
                 icon={MessageSquare}
                 iconColor="text-chart-1"
@@ -308,7 +307,6 @@ export default function Dashboard() {
                 label="Positive Rate"
                 value={stats.positiveRate}
                 format="percent"
-                trend={{ value: -0.2, label: 'wow' }}
                 target={{ value: 1.8 }}
                 icon={Target}
                 iconColor="text-success"
