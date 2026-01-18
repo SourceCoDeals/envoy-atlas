@@ -111,8 +111,8 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
                   className="flex-1"
                 />
                 <DataErrorFlag 
-                  type="estimated" 
-                  tooltip="Meeting rate includes estimated email-to-meeting conversions (positive replies × 0.3)"
+                  type="not-tracked" 
+                  tooltip="Email-to-meeting conversion requires calendar integration. Only call meetings are tracked."
                 />
               </div>
               <ReportProgressBar
@@ -134,8 +134,8 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
               <div className="flex items-center gap-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Companies</p>
                 <DataErrorFlag 
-                  type="estimated" 
-                  tooltip="Email companies estimated as sent/2. Call companies are actual unique values."
+                  type="not-tracked" 
+                  tooltip="Only unique companies from calls are tracked. Email company data requires CRM integration."
                   size="sm"
                 />
               </div>
@@ -183,8 +183,8 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
               <div className="flex items-center gap-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Meetings</p>
                 <DataErrorFlag 
-                  type="estimated" 
-                  tooltip="Includes actual call meetings + estimated email meetings (positive replies × 0.3)"
+                  type="not-tracked" 
+                  tooltip="Only call meetings are tracked. Email meetings require calendar integration."
                   size="sm"
                 />
               </div>
@@ -200,8 +200,8 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
               <div className="flex items-center gap-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Opportunities</p>
                 <DataErrorFlag 
-                  type="estimated" 
-                  tooltip="Estimated as meetings × 0.35. Not tracked from CRM."
+                  type="not-tracked" 
+                  tooltip="Opportunities require CRM integration to track."
                   size="sm"
                 />
               </div>
@@ -226,7 +226,7 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{stage.name}</span>
                     {(stage.name === 'Meeting' || stage.name === 'Opportunity') && (
-                      <DataErrorFlag type="estimated" size="sm" />
+                      <DataErrorFlag type="not-tracked" size="sm" tooltip="Requires calendar/CRM integration" />
                     )}
                   </div>
                   <span className="text-muted-foreground">
@@ -299,7 +299,7 @@ export function ExecutiveSummaryTab({ data }: ExecutiveSummaryTabProps) {
                 <tr className="border-b">
                   <td className="py-3 px-2 flex items-center gap-2">
                     Meetings Generated
-                    <DataErrorFlag type="estimated" size="sm" tooltip="Email meetings estimated from positive replies" />
+                    <DataErrorFlag type="not-tracked" size="sm" tooltip="Email meetings require calendar integration. Only call meetings shown." />
                   </td>
                   {channelComparison.map(c => (
                     <td key={c.channel} className="text-center py-3 px-4 font-medium text-primary">

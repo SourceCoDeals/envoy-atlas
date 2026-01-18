@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
+import { DataErrorFlag } from '@/components/ui/data-error-flag';
 
 interface CampaignFunnelAnalysisProps {
   campaign: CampaignWithMetrics;
@@ -17,22 +18,25 @@ interface FunnelStep {
 
 export function CampaignFunnelAnalysis({ campaign }: CampaignFunnelAnalysisProps) {
   const delivered = campaign.total_sent - (campaign.total_bounced || 0);
-  const deliveryRate = (delivered / campaign.total_sent) * 100;
+  const deliveryRate = campaign.total_sent > 0 ? (delivered / campaign.total_sent) * 100 : 0;
   
-  // Estimate positive replies (typically ~40-50% of total replies for good campaigns)
-  const estimatedPositiveReplies = Math.round(campaign.total_replied * 0.45);
-  const positiveRate = campaign.total_replied > 0 ? (estimatedPositiveReplies / campaign.total_replied) * 100 : 0;
+  // NOTE: Positive replies are not tracked in campaign metrics
+  // Would require message_events classification data
+  // Showing 0 to indicate this is not available
+  const actualPositiveReplies = 0;
+  const positiveRate = 0;
   
-  // Estimate meetings (typically ~15-20% of positive replies convert to meetings)
-  const estimatedMeetings = Math.round(estimatedPositiveReplies * 0.16);
-  const meetingRate = estimatedPositiveReplies > 0 ? (estimatedMeetings / estimatedPositiveReplies) * 100 : 0;
+  // Meetings are NOT tracked from email campaigns - requires calendar integration
+  // Show 0 to indicate this data is not available
+  const actualMeetings = 0;
+  const meetingRate = 0;
 
   const funnelSteps: FunnelStep[] = [
     { name: 'SENT', count: campaign.total_sent, rate: 100, benchmark: 100, vsBenchmark: 0 },
     { name: 'DELIVERED', count: delivered, rate: deliveryRate, benchmark: 95, vsBenchmark: deliveryRate - 95 },
     { name: 'REPLIED', count: campaign.total_replied, rate: campaign.reply_rate, benchmark: 2.8, vsBenchmark: campaign.reply_rate - 2.8 },
-    { name: 'POSITIVE', count: estimatedPositiveReplies, rate: positiveRate, benchmark: 40, vsBenchmark: positiveRate - 40 },
-    { name: 'MEETINGS', count: estimatedMeetings, rate: meetingRate, benchmark: 15, vsBenchmark: meetingRate - 15 },
+    { name: 'POSITIVE', count: actualPositiveReplies, rate: positiveRate, benchmark: 40, vsBenchmark: positiveRate - 40 },
+    { name: 'MEETINGS', count: actualMeetings, rate: meetingRate, benchmark: 15, vsBenchmark: meetingRate - 15 },
   ];
 
   const maxCount = campaign.total_sent;
@@ -54,7 +58,12 @@ export function CampaignFunnelAnalysis({ campaign }: CampaignFunnelAnalysisProps
             return (
               <div key={step.name} className="space-y-1">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">{step.name}</span>
+                  <span className="font-medium flex items-center gap-1">
+                    {step.name}
+                    {(step.name === 'POSITIVE' || step.name === 'MEETINGS') && (
+                      <DataErrorFlag type="not-tracked" size="sm" tooltip={step.name === 'POSITIVE' ? 'Requires reply sentiment tracking' : 'Requires calendar integration'} />
+                    )}
+                  </span>
                   <div className="flex items-center gap-2">
                     <span className="font-mono">{step.count.toLocaleString()}</span>
                     {!isFirst && (

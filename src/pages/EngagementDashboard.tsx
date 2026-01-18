@@ -205,12 +205,17 @@ export default function EngagementDashboard() {
           )
         ).length;
 
+        // Count actual meetings from call categories
+        const actualMeetings = matchingCalls.filter(c => 
+          c.call_category && (c.call_category.toLowerCase().includes('meeting') || c.call_category.toLowerCase().includes('appointment'))
+        ).length;
+        
         metricsMap[eng.id] = {
           totalCalls,
           avgScore: Math.round(avgScore * 10) / 10,
           interestedLeads,
           conversations,
-          meetingsSet: Math.round(interestedLeads * 0.15), // Estimate
+          meetingsSet: actualMeetings, // Actual meetings from call data only
         };
       }
       
