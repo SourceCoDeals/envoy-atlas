@@ -109,14 +109,15 @@ export default function AudienceInsights() {
     )
   );
 
-  // Create fatigue data
+  // Create fatigue data using real metrics where available
+  // NOTE: avgEmailsPerLead, trend30d, and unsubscribeRate require lead-level tracking not currently implemented
   const fatigueData = seniorityRankings.map(s =>
     calculateSegmentFatigue(s.segment, s.segment, {
-      avgEmailsPerLead: 2 + Math.random() * 2,
-      replyRateFirstTouch: s.replyRate * 1.3,
+      avgEmailsPerLead: 3, // Default assumption - not tracked per lead
+      replyRateFirstTouch: s.replyRate * 1.3, // Estimated based on typical first-touch lift
       replyRateSubsequent: s.replyRate,
-      trend30d: -5 - Math.random() * 20,
-      unsubscribeRate: 0.005 + Math.random() * 0.01,
+      trend30d: 0, // Not tracked - would require historical comparison
+      unsubscribeRate: 0, // Not tracked
     })
   );
 

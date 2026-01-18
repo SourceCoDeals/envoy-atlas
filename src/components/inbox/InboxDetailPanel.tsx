@@ -85,47 +85,21 @@ export function InboxDetailPanel({ item, onClose }: InboxDetailPanelProps) {
 
   const config = CLASSIFICATION_CONFIG[item.classification];
 
-  // Mock thread data
+  // Thread data showing only the actual reply we have
+  // NOTE: Full thread history would require email integration to fetch prior messages
   const thread: ThreadMessage[] = [
     {
       id: '1',
-      sender: 'you',
-      senderName: 'You',
-      content: `Hi ${item.first_name},\n\nI noticed ${item.company || 'your company'} has been scaling quickly. As you grow the team, how are you handling the outbound process?\n\nBest,\n[Your name]`,
-      timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
-      isLatest: false,
-    },
-    {
-      id: '2',
       sender: 'lead',
-      senderName: `${item.first_name} ${item.last_name || ''}`,
+      senderName: `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Lead',
       content: item.reply_content || 'No reply content',
       timestamp: item.occurred_at,
       isLatest: true,
     },
   ];
 
-  // Mock suggestions based on classification
-  const suggestions: ResponseSuggestion[] = [
-    {
-      id: '1',
-      name: item.classification === 'meeting_request' ? 'Send Calendar Link' : 'Interest Follow-up',
-      preview: `Hi ${item.first_name},\n\nThanks for your response! Here's my calendar link to grab a time that works for you: [calendar_link]\n\nLooking forward to chatting!\n\nBest,\n[Your name]`,
-      fullText: `Hi ${item.first_name},\n\nThanks for your response! Here's my calendar link to grab a time that works for you: [calendar_link]\n\nLooking forward to chatting!\n\nBest,\n[Your name]`,
-      isRecommended: true,
-      stats: {
-        meetingRate: 68,
-        usageCount: 142,
-      },
-    },
-    {
-      id: '2',
-      name: 'Propose Specific Times',
-      preview: `Hi ${item.first_name},\n\nGreat! Would Thursday 2pm or 3pm PT work for a quick 15-minute call?\n\nBest,\n[Your name]`,
-      fullText: `Hi ${item.first_name},\n\nGreat! Would Thursday 2pm or 3pm PT work for a quick 15-minute call?\n\nBest,\n[Your name]`,
-      isRecommended: false,
-    },
-  ];
+  // NOTE: Response suggestions are not implemented - would require AI generation or template library
+  const suggestions: ResponseSuggestion[] = [];
 
   const handleUseSuggestion = (suggestion: ResponseSuggestion) => {
     setReplyText(suggestion.fullText);

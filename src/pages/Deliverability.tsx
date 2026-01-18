@@ -240,9 +240,11 @@ export default function Deliverability() {
       utilizationPercent,
       trend: 'stable' as const,
       trendPercent: 0,
+      // NOTE: Daily breakdown by day of week is not available from the API
+      // Showing uniform daily average as we don't have per-day data
       volumeByDay: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => ({
         day,
-        sent: Math.round(dailyAverage * (0.8 + Math.random() * 0.4)), // Realistic daily variation
+        sent: dailyAverage,
         capacity: stats.totalDailyCapacity,
       })),
       peakHour: 10,
