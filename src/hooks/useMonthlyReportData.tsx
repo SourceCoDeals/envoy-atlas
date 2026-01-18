@@ -175,7 +175,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         }
 
         // Aggregate current month
-        const current = (currentData || []).reduce((acc, row) => ({
+        let current = (currentData || []).reduce((acc, row) => ({
           sent: acc.sent + (row.sent_count || 0),
           delivered: acc.delivered + (row.sent_count || 0) - (row.bounced_count || 0),
           opened: acc.opened + (row.opened_count || 0),
@@ -186,6 +186,37 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
           spamComplaints: 0,
           unsubscribed: 0,
         }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
+
+        // ==============================================================
+        // FALLBACK: If sent is 0, try cumulative tables
+        // ==============================================================
+        if (current.sent === 0) {
+          const [slCumulative, rioCumulative] = await Promise.all([
+            supabase.from('smartlead_campaign_cumulative').select('total_sent, total_opened, total_clicked, total_replied, total_bounced').eq('workspace_id', currentWorkspace.id),
+            supabase.from('replyio_campaign_cumulative').select('total_sent, total_opened, total_clicked, total_replied, total_bounced').eq('workspace_id', currentWorkspace.id),
+          ]);
+          
+          const cumulativeTotals = [...(slCumulative.data || []), ...(rioCumulative.data || [])].reduce((acc, c) => ({
+            sent: acc.sent + (c.total_sent || 0),
+            opened: acc.opened + (c.total_opened || 0),
+            clicked: acc.clicked + (c.total_clicked || 0),
+            replied: acc.replied + (c.total_replied || 0),
+            bounced: acc.bounced + (c.total_bounced || 0),
+          }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
+          
+          if (cumulativeTotals.sent > 0) {
+            console.log('MonthlyReport: Using cumulative fallback');
+            current = {
+              ...current,
+              sent: cumulativeTotals.sent,
+              delivered: cumulativeTotals.sent - cumulativeTotals.bounced,
+              opened: cumulativeTotals.opened,
+              clicked: cumulativeTotals.clicked,
+              replied: cumulativeTotals.replied,
+              bounced: cumulativeTotals.bounced,
+            };
+          }
+        }
 
         // Aggregate previous month
         const previous = (previousData || []).reduce((acc, row) => ({

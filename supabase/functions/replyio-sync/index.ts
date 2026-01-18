@@ -733,15 +733,34 @@ Deno.serve(async (req) => {
           
           if (seqDetails) {
             const today = new Date().toISOString().split('T')[0];
-            const stats = seqDetails.stats || seqDetails.statistics || seqDetails.counters || {};
+          const stats = seqDetails.stats || seqDetails.statistics || seqDetails.counters || {};
             
-            // Extract lifetime totals (current cumulative values)
-            const totalSent = Number(stats.deliveredContacts ?? stats.delivered ?? seqDetails.deliveredContacts ?? seqDetails.delivered ?? 0);
-            const totalOpened = Number(stats.openedContacts ?? stats.opened ?? seqDetails.openedContacts ?? seqDetails.opened ?? 0);
-            const totalClicked = Number(stats.clickedContacts ?? stats.clicked ?? seqDetails.clickedContacts ?? seqDetails.clicked ?? 0);
-            const totalReplied = Number(stats.repliedContacts ?? stats.replied ?? seqDetails.repliedContacts ?? seqDetails.replied ?? 0);
-            const totalBounced = Number(stats.bouncedContacts ?? stats.bounced ?? seqDetails.bouncedContacts ?? seqDetails.bounced ?? 0);
+            // ==========================================================
+            // FIX: Extract lifetime totals - check ALL possible field names
+            // Reply.io API uses inconsistent naming across versions
+            // Priority: peopleContacted > contactedPeople > contacted > deliveredContacts > sent
+            // ==========================================================
+            const totalSent = Number(
+              stats.peopleContacted ?? stats.contactedPeople ?? stats.contacted ?? 
+              stats.sentCount ?? stats.sent ?? stats.totalSent ??
+              stats.deliveredContacts ?? stats.delivered ?? 
+              seqDetails.peopleContacted ?? seqDetails.contactedPeople ?? seqDetails.contacted ??
+              seqDetails.sentCount ?? seqDetails.sent ?? seqDetails.totalSent ??
+              seqDetails.deliveredContacts ?? seqDetails.delivered ??
+              // Fallback to peopleInSequence or contactCount as last resort
+              seqDetails.peopleInSequence ?? seqDetails.contactCount ?? seqDetails.people ?? 0
+            );
+            const totalOpened = Number(stats.openedContacts ?? stats.opened ?? stats.opens ?? seqDetails.openedContacts ?? seqDetails.opened ?? seqDetails.opens ?? 0);
+            const totalClicked = Number(stats.clickedContacts ?? stats.clicked ?? stats.clicks ?? seqDetails.clickedContacts ?? seqDetails.clicked ?? seqDetails.clicks ?? 0);
+            const totalReplied = Number(stats.repliedContacts ?? stats.replied ?? stats.replies ?? seqDetails.repliedContacts ?? seqDetails.replied ?? seqDetails.replies ?? 0);
+            const totalBounced = Number(stats.bouncedContacts ?? stats.bounced ?? stats.bounces ?? seqDetails.bouncedContacts ?? seqDetails.bounced ?? seqDetails.bounces ?? 0);
             const totalInterested = Number(stats.interestedContacts ?? stats.interested ?? seqDetails.interestedContacts ?? seqDetails.interested ?? 0);
+            
+            // Log all stats fields for debugging
+            if (i === startIndex) {
+              console.log(`  v1 API stats fields: ${JSON.stringify(Object.keys(stats))}`);
+              console.log(`  v1 API seqDetails fields: ${JSON.stringify(Object.keys(seqDetails))}`);
+            }
             
             console.log(`  v1 Lifetime totals: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
             
@@ -879,7 +898,10 @@ Deno.serve(async (req) => {
             
             if (stats) {
               const today = new Date().toISOString().split('T')[0];
-              const sentCount = stats.deliveredContacts ?? stats.delivered ?? stats.sent ?? 0;
+              // Use same broader field name checking as v1 API
+              const sentCount = stats.peopleContacted ?? stats.contactedPeople ?? stats.contacted ?? 
+                stats.sentCount ?? stats.sent ?? stats.totalSent ??
+                stats.deliveredContacts ?? stats.delivered ?? stats.peopleInSequence ?? 0;
               const repliedCount = stats.repliedContacts ?? stats.replied ?? stats.replies ?? 0;
               
               if (sentCount > 0 || repliedCount > 0) {
@@ -888,11 +910,11 @@ Deno.serve(async (req) => {
                   campaign_id: campaignId,
                   metric_date: today,
                   sent_count: sentCount,
-                  opened_count: stats.openedContacts ?? stats.opened ?? 0,
-                  clicked_count: stats.clickedContacts ?? stats.clicked ?? 0,
+                  opened_count: stats.openedContacts ?? stats.opened ?? stats.opens ?? 0,
+                  clicked_count: stats.clickedContacts ?? stats.clicked ?? stats.clicks ?? 0,
                   replied_count: repliedCount,
                   positive_reply_count: stats.interestedContacts ?? stats.interested ?? 0,
-                  bounced_count: stats.bouncedContacts ?? stats.bounced ?? 0,
+                  bounced_count: stats.bouncedContacts ?? stats.bounced ?? stats.bounces ?? 0,
                 }, { onConflict: 'campaign_id,metric_date' });
                 progress.metrics_created++;
               }
