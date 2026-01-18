@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Loader2 } from "lucide-react";
 import { ReactNode } from "react";
 
@@ -11,6 +12,7 @@ interface SyncButtonProps {
   size?: "default" | "sm" | "lg" | "icon";
   disabled?: boolean;
   className?: string;
+  tooltip?: string;
 }
 
 export function SyncButton({
@@ -22,8 +24,9 @@ export function SyncButton({
   size = "sm",
   disabled,
   className,
+  tooltip,
 }: SyncButtonProps) {
-  return (
+  const button = (
     <Button
       size={size}
       variant={variant}
@@ -38,5 +41,18 @@ export function SyncButton({
       ) : null}
       {children}
     </Button>
+  );
+
+  if (!tooltip) return button;
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-[200px] text-xs">
+          <p>{tooltip}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

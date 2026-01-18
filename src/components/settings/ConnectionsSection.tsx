@@ -296,22 +296,27 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     onClick={() => handleSync("smartlead")}
                     isLoading={isSyncing.smartlead}
                     icon={<RefreshCw className="h-3 w-3" />}
+                    tooltip="Fetch latest data since last sync"
                   >
-                    Sync
+                    Quick Sync
                   </SyncButton>
                   <SyncButton
                     onClick={() => handleSync("smartlead", { fullBackfill: true })}
                     isLoading={isSyncing.smartlead}
                     icon={<Database className="h-3 w-3" />}
+                    variant="ghost"
+                    tooltip="Re-sync all historical data (may take several minutes)"
                   >
-                    Full Backfill
+                    Full History
                   </SyncButton>
                   <SyncButton
                     onClick={() => handleSync("smartlead", { fetchRepliesOnly: true })}
                     isLoading={isSyncing.smartlead_replies}
                     icon={<Inbox className="h-3 w-3" />}
+                    variant="ghost"
+                    tooltip="Download reply content from master inbox"
                   >
-                    Sync Inbox
+                    Fetch Replies
                   </SyncButton>
                 </>
               }
@@ -343,15 +348,18 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     onClick={() => handleSync("replyio")}
                     isLoading={isSyncing.replyio}
                     icon={<RefreshCw className="h-3 w-3" />}
+                    tooltip="Fetch latest data since last sync"
                   >
-                    Sync
+                    Quick Sync
                   </SyncButton>
                   <SyncButton
                     onClick={() => handleSync("replyio", { fullBackfill: true })}
                     isLoading={isSyncing.replyio}
                     icon={<Database className="h-3 w-3" />}
+                    variant="ghost"
+                    tooltip="Re-sync all historical data (may take several minutes)"
                   >
-                    Full Backfill
+                    Full History
                   </SyncButton>
                 </>
               }
@@ -395,13 +403,15 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     onClick={() => handleSync("phoneburner")}
                     isLoading={isSyncing.phoneburner}
                     icon={<RefreshCw className="h-3 w-3" />}
+                    tooltip="Fetch latest call sessions and contacts"
                   >
-                    Sync
+                    Quick Sync
                   </SyncButton>
                   <SyncButton
                     onClick={() => handleSync("phoneburner", { reset: true })}
                     isLoading={isSyncing.phoneburner}
                     variant="ghost"
+                    tooltip="Clear cached data and re-sync from scratch"
                   >
                     Full Reset
                   </SyncButton>
