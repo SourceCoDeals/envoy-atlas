@@ -297,10 +297,6 @@ export default function Dashboard() {
                 icon={Target}
                 iconColor="text-success"
                 status={getKPIStatus(stats.positiveRate, 1.5, 1)}
-                dataFlag={stats.positiveRate === 0 ? undefined : {
-                  type: 'estimated',
-                  tooltip: 'Positive reply classification may vary by platform. Some use AI, others use manual tagging.'
-                }}
               />
               <KPICard
                 label="Bounce Rate"
