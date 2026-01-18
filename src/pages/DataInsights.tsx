@@ -154,7 +154,7 @@ export default function DataInsights() {
 
     const engagementMetrics = {
       connectRate: Math.round(connectRate * 10) / 10,
-      decisionMakerConnectRate: Math.round(connectRate * 0.6 * 10) / 10,
+      decisionMakerConnectRate: 0, // Not tracked - would require contact title matching
       meaningfulConversationRate: Math.round(meaningfulRate * 10) / 10,
       avgCallDuration: Math.round(avgDuration),
       objectionHandlingRate: Math.round(avgObjHandling * 10) / 10,

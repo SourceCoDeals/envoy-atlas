@@ -146,9 +146,9 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
       value: emailMetrics.meetings, 
       icon: Mail,
       subtitle: 'from email',
-      highlight: true,
-      isActual: false, // This is estimated
-      tooltip: 'Estimated as positive replies × 0.3',
+      highlight: emailMetrics.meetings > 0,
+      isActual: false, // Not tracked - requires calendar integration
+      tooltip: 'Not tracked - requires calendar integration',
     },
   ];
 

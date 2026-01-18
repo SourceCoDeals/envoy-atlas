@@ -469,23 +469,23 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
 
       // Build key metrics - use actual unique companies from calls
       const uniqueCompaniesFromCalls = new Set(matchingCalls.map(c => c.company_name).filter(Boolean)).size;
-      // For email, we don't have company data so we use a reasonable estimate based on leads/contacts
-      const estimatedEmailCompanies = emailTotals.sent > 0 ? Math.min(Math.ceil(emailTotals.sent / 2), emailTotals.sent) : 0;
-      // Combine unique companies - calls are actual, email is estimated
-      const totalUniqueCompanies = uniqueCompaniesFromCalls + estimatedEmailCompanies;
+      // NOTE: Email company data not available - only show actual call companies
+      // Removed: estimatedEmailCompanies estimation which used fake emailTotals.sent / 2
       
       const keyMetrics: KeyMetrics = {
-        companiesContacted: totalUniqueCompanies,
-        contactsReached: new Set(matchingCalls.map(c => c.contact_name).filter(Boolean)).size + emailTotals.sent,
+        companiesContacted: uniqueCompaniesFromCalls, // Only actual unique companies from calls
+        contactsReached: new Set(matchingCalls.map(c => c.contact_name).filter(Boolean)).size + emailTotals.replied, // Only contacts who replied
         totalTouchpoints: emailTotals.sent + totalCalls,
         emailTouchpoints: emailTotals.sent,
         callTouchpoints: totalCalls,
         positiveResponses: emailTotals.positive + dmConversations,
-        meetingsScheduled: callMeetings + Math.floor(emailTotals.positive * 0.3),
-        opportunities: Math.floor((callMeetings + emailTotals.positive * 0.3) * 0.35),
+        // NOTE: meetingsScheduled only counts actual call meetings - email meetings require calendar integration
+        meetingsScheduled: callMeetings, // Removed fake: + Math.floor(emailTotals.positive * 0.3)
+        // NOTE: opportunities require CRM integration to track accurately
+        opportunities: 0, // Removed fake: Math.floor((callMeetings + emailTotals.positive * 0.3) * 0.35)
         responseRate: emailTotals.sent > 0 ? (emailTotals.replied / emailTotals.sent) * 100 : 0,
         meetingRate: (emailTotals.sent + totalCalls) > 0 
-          ? ((callMeetings + emailTotals.positive * 0.3) / (emailTotals.sent + totalCalls)) * 100 
+          ? (callMeetings / (emailTotals.sent + totalCalls)) * 100 
           : 0,
       };
 
@@ -505,7 +505,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         bounced: emailTotals.bounced,
         bounceRate: emailTotals.sent > 0 ? (emailTotals.bounced / emailTotals.sent) * 100 : 0,
         unsubscribed: 0, // Not tracked
-        meetings: Math.floor(emailTotals.positive * 0.3),
+        meetings: 0, // Not tracked - requires calendar integration (removed fake: Math.floor(emailTotals.positive * 0.3))
       };
 
       // Build calling metrics
