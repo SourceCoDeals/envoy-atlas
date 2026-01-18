@@ -258,7 +258,7 @@ export function useDataInsights() {
 
       setEngagementMetrics({
         connectRate: Math.round(connectRate * 10) / 10, 
-        decisionMakerConnectRate: Math.round(connectRate * 0.6 * 10) / 10, // Estimate
+        decisionMakerConnectRate: 0, // Not tracked - would require contact title matching
         meaningfulConversationRate: Math.round(meaningfulRate * 10) / 10, 
         avgCallDuration: Math.round(avgDuration),
         objectionHandlingRate: Math.round(avgObjHandling * 10) / 10, 
@@ -433,14 +433,11 @@ export function useDataInsights() {
       setWrongNumberMetrics({
         totalWrongNumbers: wrongNumbers.length,
         wrongNumberRate: totalDials > 0 ? Math.round((wrongNumbers.length / totalDials) * 100 * 10) / 10 : 0,
-        typeBreakdown: [
-          { type: 'Disconnected', count: Math.floor(wrongNumbers.length * 0.4), percentage: 40 },
-          { type: 'Wrong Person', count: Math.floor(wrongNumbers.length * 0.35), percentage: 35 },
-          { type: 'Bad Data', count: Math.ceil(wrongNumbers.length * 0.25), percentage: 25 },
-        ].filter(t => t.count > 0),
+        // NOTE: Type breakdown not tracked - would require call disposition subcategories
+        typeBreakdown: [], // Removed fake hardcoded 40/35/25% split
         sourceQuality,
-        correctedCount: Math.floor(wrongNumbers.length * 0.2),
-        timeWasted: wrongNumbers.length * 2, // Estimate 2 min per wrong number
+        correctedCount: 0, // Not tracked - would require data correction workflow
+        timeWasted: 0, // Not tracked - was fake estimate
       });
 
     } catch (error) {

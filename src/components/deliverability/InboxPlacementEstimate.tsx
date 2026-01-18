@@ -164,30 +164,38 @@ export function InboxPlacementEstimate({
         {/* By ISP */}
         <div>
           <h4 className="text-sm font-medium mb-3">Placement by Provider</h4>
-          <div className="space-y-3">
-            {byISP.map(isp => (
-              <div key={isp.name} className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-2">
-                    <Mail className="h-3 w-3 text-muted-foreground" />
-                    {isp.name}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {isp.volume.toLocaleString()} sent
+          {byISP.length === 0 ? (
+            <div className="p-4 bg-muted/30 rounded-lg text-center">
+              <p className="text-sm text-muted-foreground">
+                ISP-specific placement data not available — requires Google Postmaster Tools or seed testing integration
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {byISP.map(isp => (
+                <div key={isp.name} className="space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-2">
+                      <Mail className="h-3 w-3 text-muted-foreground" />
+                      {isp.name}
                     </span>
-                    <span className={`font-medium ${isp.estimatedInboxRate >= 0.8 ? 'text-success' : isp.estimatedInboxRate >= 0.6 ? 'text-warning' : 'text-destructive'}`}>
-                      {(isp.estimatedInboxRate * 100).toFixed(0)}%
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {isp.volume.toLocaleString()} sent
+                      </span>
+                      <span className={`font-medium ${isp.estimatedInboxRate >= 0.8 ? 'text-success' : isp.estimatedInboxRate >= 0.6 ? 'text-warning' : 'text-destructive'}`}>
+                        {(isp.estimatedInboxRate * 100).toFixed(0)}%
+                      </span>
+                    </div>
                   </div>
+                  <Progress 
+                    value={isp.estimatedInboxRate * 100} 
+                    className="h-2"
+                  />
                 </div>
-                <Progress 
-                  value={isp.estimatedInboxRate * 100} 
-                  className="h-2"
-                />
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Warning */}

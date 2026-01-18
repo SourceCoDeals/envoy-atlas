@@ -100,10 +100,11 @@ export default function Deliverability() {
   }, [stats]);
 
   // Calculate inbox placement estimate from real data
+  // NOTE: Actual inbox placement requires seed testing or Google Postmaster Tools integration
   const placementData = useMemo(() => {
     if (!stats) return null;
     
-    // Estimate based on bounce rate and auth status
+    // Estimate based on bounce rate and auth status (but clearly marked as estimated)
     const authBonus = stats.domainsWithFullAuth / Math.max(1, stats.totalDomains);
     const bounceImpact = Math.max(0, 1 - stats.avgBounceRate / 10);
     const baseInboxRate = 0.75 + (authBonus * 0.15) * bounceImpact;
@@ -111,18 +112,15 @@ export default function Deliverability() {
     
     return {
       overallInboxRate,
+      // NOTE: Breakdown by placement type not available without seed testing
       breakdown: { 
-        inbox: overallInboxRate * 0.85, 
-        promotions: overallInboxRate * 0.15, 
-        spam: (1 - overallInboxRate) * 0.6, 
-        blocked: (1 - overallInboxRate) * 0.4 
+        inbox: overallInboxRate, 
+        promotions: 0, // Not tracked
+        spam: 1 - overallInboxRate, // Estimated as non-inbox
+        blocked: 0 // Not tracked
       },
-      byISP: [
-        { name: 'Gmail', estimatedInboxRate: overallInboxRate * 0.95, volume: Math.round(stats.totalSent30d * 0.4), deliveryRate: 0.96 },
-        { name: 'Outlook', estimatedInboxRate: overallInboxRate * 1.05, volume: Math.round(stats.totalSent30d * 0.25), deliveryRate: 0.98 },
-        { name: 'Yahoo', estimatedInboxRate: overallInboxRate * 0.9, volume: Math.round(stats.totalSent30d * 0.1), deliveryRate: 0.94 },
-        { name: 'Corporate', estimatedInboxRate: Math.min(0.98, overallInboxRate * 1.1), volume: Math.round(stats.totalSent30d * 0.25), deliveryRate: 0.99 },
-      ],
+      // NOTE: ISP-specific rates not available - would require Google Postmaster Tools or seed testing
+      byISP: [], // Removed fake ISP breakdown with hardcoded volume percentages
       confidence: 'estimated' as const,
     };
   }, [stats]);
@@ -163,15 +161,13 @@ export default function Deliverability() {
     const totalBounces = campaignBounces.reduce((sum, c) => sum + c.bounces, 0);
     const totalSent = campaignBounces.reduce((sum, c) => sum + c.sent, 0);
     
-    // Estimate hard vs soft bounces (typically 70/30 split)
-    const hardBounces = Math.round(totalBounces * 0.7);
-    const softBounces = totalBounces - hardBounces;
-    
+    // NOTE: Hard vs soft bounce breakdown not available from API
+    // Would require SmartLead/Reply.io to expose bounce reason types
     return {
       totalBounces,
       bounceRate: totalSent > 0 ? (totalBounces / totalSent) * 100 : 0,
-      hardBounces,
-      softBounces,
+      hardBounces: 0, // Not tracked - removed fake 70/30 split
+      softBounces: 0, // Not tracked
       threshold: 3.0,
       byCampaign: campaignBounces.slice(0, 5).map(c => ({
         name: c.name,
@@ -179,12 +175,8 @@ export default function Deliverability() {
         bounces: c.bounces,
         sent: c.sent,
       })),
-      byReason: [
-        { reason: 'Invalid email address', count: Math.round(hardBounces * 0.6), type: 'hard' as const },
-        { reason: 'Mailbox not found', count: Math.round(hardBounces * 0.4), type: 'hard' as const },
-        { reason: 'Mailbox full', count: Math.round(softBounces * 0.6), type: 'soft' as const },
-        { reason: 'Server temporarily unavailable', count: Math.round(softBounces * 0.4), type: 'soft' as const },
-      ],
+      // NOTE: Bounce reason breakdown not available
+      byReason: [], // Removed fake reason breakdown with hardcoded percentages
     };
   }, [stats, campaignBounces]);
 

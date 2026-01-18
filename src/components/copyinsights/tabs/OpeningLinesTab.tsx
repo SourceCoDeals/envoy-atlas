@@ -75,19 +75,18 @@ export function OpeningLinesTab({ bodyCopy, baselineReplyRate }: OpeningLinesTab
     { type: 'Generic Hook', target: 0 },
   ];
 
-  // Calculate estimated impact of shifting to optimal
+  // Calculate impact based on actual data only (no projections)
+  // NOTE: Projected lift removed - was using fake formula with hardcoded weights
   const estimatedImpact = useMemo(() => {
     const currentAvg = hookPerformance.reduce((sum, h) => sum + (h.rate * h.usage / 100), 0);
-    
-    // Estimate optimal average based on best performers
-    const bestRate = hookPerformance.length > 0 ? hookPerformance[0].rate : 5;
-    const optimalAvg = bestRate * 0.4 + (bestRate * 0.7) * 0.35 + currentAvg * 0.25;
+    const bestRate = hookPerformance.length > 0 ? hookPerformance[0].rate : 0;
     
     return {
       current: currentAvg,
-      projected: optimalAvg,
-      lift: optimalAvg - currentAvg,
-      liftPercent: currentAvg > 0 ? ((optimalAvg - currentAvg) / currentAvg) * 100 : 0,
+      projected: 0, // Not calculated - would require A/B testing data
+      lift: 0, // Not calculated
+      liftPercent: 0, // Not calculated
+      bestPerformerRate: bestRate, // Show actual best performer instead
     };
   }, [hookPerformance]);
 

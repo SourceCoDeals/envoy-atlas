@@ -89,26 +89,34 @@ export function BounceBreakdown({ data, onCleanLists, onViewBounced }: BounceBre
         {/* Hard vs Soft Breakdown */}
         <div>
           <h4 className="text-sm font-medium mb-3">Bounce Type Breakdown</h4>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium">Hard Bounces</span>
-                <Badge variant="destructive">{data.hardBounces}</Badge>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Invalid addresses — remove immediately
+          {data.hardBounces === 0 && data.softBounces === 0 ? (
+            <div className="p-4 bg-muted/30 rounded-lg text-center">
+              <p className="text-sm text-muted-foreground">
+                Hard/soft bounce breakdown not available — API does not provide bounce reason types
               </p>
             </div>
-            <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium">Soft Bounces</span>
-                <Badge className="bg-warning/20 text-warning border-warning/30">{data.softBounces}</Badge>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium">Hard Bounces</span>
+                  <Badge variant="destructive">{data.hardBounces}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Invalid addresses — remove immediately
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Temporary issues — will retry
-              </p>
+              <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium">Soft Bounces</span>
+                  <Badge className="bg-warning/20 text-warning border-warning/30">{data.softBounces}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Temporary issues — will retry
+                </p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* By Campaign */}
