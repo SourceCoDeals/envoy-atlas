@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 
+// Phase D: Add metricsStatus to distinguish "zero" vs "missing/broken source"
+export type MetricsStatus = 'verified' | 'partial' | 'missing' | 'broken';
+export type MetricsSource = 'cumulative' | 'daily' | 'none';
+
 export interface CampaignWithMetrics {
   id: string;
   name: string;
@@ -22,6 +26,9 @@ export interface CampaignWithMetrics {
   bounce_rate: number;
   engagement_id: string | null;
   engagement_name?: string | null;
+  // New: metrics reliability indicators
+  metricsStatus: MetricsStatus;
+  metricsSource: MetricsSource;
 }
 
 interface BaseCampaign {
@@ -161,12 +168,14 @@ export function useCampaigns() {
       aggregateDaily(replyioDailyResult.data);
 
       // Build campaigns with metrics (cumulative first, then daily fallback)
+      // Phase D: Attach metricsStatus + metricsSource to each campaign
       const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
         const cumulative = cumulativeMap.get(campaign.id);
         const dailyAggregate = dailyAggregateMap.get(campaign.id);
 
         // Use cumulative if it has data, otherwise fall back to daily aggregate
         const hasCumulativeData = cumulative && (cumulative.total_sent || 0) > 0;
+        const hasDailyData = dailyAggregate && (dailyAggregate.total_sent || 0) > 0;
         const source = hasCumulativeData ? cumulative : dailyAggregate;
 
         const total_sent = source?.total_sent || 0;
@@ -175,6 +184,26 @@ export function useCampaigns() {
         const total_replied = source?.total_replied || 0;
         const total_bounced = source?.total_bounced || 0;
         const total_leads = 0;
+
+        // Determine metrics status
+        let metricsStatus: MetricsStatus;
+        let metricsSource: MetricsSource;
+
+        if (hasCumulativeData) {
+          metricsStatus = 'verified';
+          metricsSource = 'cumulative';
+        } else if (hasDailyData) {
+          metricsStatus = 'partial';
+          metricsSource = 'daily';
+        } else if (total_replied > 0) {
+          // Has replies but no sent = partial (might be Reply.io with replies but broken sent)
+          metricsStatus = 'partial';
+          metricsSource = 'none';
+        } else {
+          // No metrics at all - check if it's Reply.io (known broken sent)
+          metricsStatus = campaign.platform === 'replyio' ? 'broken' : 'missing';
+          metricsSource = 'none';
+        }
 
         return {
           id: campaign.id,
@@ -196,6 +225,8 @@ export function useCampaigns() {
           bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
           engagement_id: campaign.engagement_id,
           engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
+          metricsStatus,
+          metricsSource,
         };
       });
 

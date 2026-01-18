@@ -7,8 +7,9 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
-import { CampaignWithMetrics } from '@/hooks/useCampaigns';
+import { CampaignWithMetrics, MetricsStatus } from '@/hooks/useCampaigns';
 import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
+import { useDataHealth } from '@/hooks/useDataHealth';
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Briefcase } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -84,6 +85,7 @@ export function EnhancedCampaignTable({
   onEngagementFilterChange,
   engagements = [],
 }: EnhancedCampaignTableProps) {
+  const { health: dataHealth } = useDataHealth();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [localTierFilter, setLocalTierFilter] = useState<string>(tierFilter);
@@ -91,6 +93,9 @@ export function EnhancedCampaignTable({
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
+
+  // Phase C: Check if Reply.io platform is broken
+  const isReplyioBroken = dataHealth?.email.replyio.status === 'broken';
 
   // Sync external tier filter with local state
   useEffect(() => {
@@ -460,30 +465,24 @@ export function EnhancedCampaignTable({
                       <div className="flex flex-col">
                         <div className="flex items-center gap-2">
                           <span className="truncate max-w-[260px] hover:text-primary">{campaign.name}</span>
-                          {!campaign.hasMetrics && (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger>
-                                  <div className="inline-flex items-center">
-                                    <DataHealthIndicator
-                                      status="broken"
-                                      size="sm"
-                                      showLabel={false}
-                                      tooltip="No metrics available for this campaign"
-                                    />
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent side="right" className="max-w-xs">
-                                  <p className="font-medium">No metrics available</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {campaign.platform === 'replyio'
-                                      ? 'Reply.io daily metrics are currently coming through as 0 sent. Trigger a resync from Settings → Connections.'
-                                      : 'Metrics will appear after emails are sent.'}
-                                  </p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          )}
+                          {/* Phase C: Show broken indicator for Reply.io campaigns when platform is broken, or for any campaign without metrics */}
+                          {(campaign.platform === 'replyio' && isReplyioBroken) || campaign.metricsStatus === 'broken' ? (
+                            <DataHealthIndicator
+                              status="broken"
+                              size="sm"
+                              showLabel={false}
+                              tooltip={campaign.platform === 'replyio' 
+                                ? 'Reply.io sent metrics broken — resync required from Settings → Connections' 
+                                : 'No metrics available for this campaign'}
+                            />
+                          ) : campaign.metricsStatus === 'missing' && !campaign.hasMetrics ? (
+                            <DataHealthIndicator
+                              status="empty"
+                              size="sm"
+                              showLabel={false}
+                              tooltip="Metrics will appear after emails are sent"
+                            />
+                          ) : null}
                         </div>
                         <span className="text-xs text-muted-foreground">{campaign.platform}</span>
                       </div>
@@ -564,10 +563,20 @@ export function EnhancedCampaignTable({
                     {format(new Date(campaign.updated_at), 'MMM d, yyyy')}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {campaign.total_sent.toLocaleString()}
+                    {/* Phase D: Show — with indicator if metrics are broken instead of misleading 0 */}
+                    {campaign.metricsStatus === 'broken' || (campaign.platform === 'replyio' && isReplyioBroken && campaign.total_sent === 0) ? (
+                      <span className="text-destructive">—</span>
+                    ) : (
+                      campaign.total_sent.toLocaleString()
+                    )}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {campaign.reply_rate.toFixed(1)}%
+                    {/* Phase D: Show — if sent is broken (can't calculate rate) */}
+                    {campaign.metricsStatus === 'broken' || (campaign.platform === 'replyio' && isReplyioBroken && campaign.total_sent === 0) ? (
+                      <span className="text-destructive">—</span>
+                    ) : (
+                      `${campaign.reply_rate.toFixed(1)}%`
+                    )}
                   </TableCell>
                   <TableCell className="text-right font-mono text-muted-foreground">
                     —
