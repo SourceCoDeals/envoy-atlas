@@ -12,7 +12,9 @@ import { SyncProgressBar } from '@/components/campaigns/SyncProgressBar';
 import { AutoLinkPreviewModal } from '@/components/campaigns/AutoLinkPreviewModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download, Link2 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
+import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download, Link2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Engagement {
@@ -133,6 +135,19 @@ export default function Campaigns() {
           </Card>
         ) : (
           <div className="space-y-6">
+            {/* Data Health Alert */}
+            {campaigns.some(c => c.total_sent === 0) && (
+              <Alert className="border-yellow-500/50 bg-yellow-500/10">
+                <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                <AlertDescription className="flex items-center justify-between">
+                  <span>
+                    Some campaigns show 0 sent emails. This may indicate a sync issue with Reply.io metrics.
+                  </span>
+                  <DataHealthIndicator status="degraded" label="Partial Data" size="sm" />
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Portfolio Overview - clickable filters */}
             <CampaignPortfolioOverview 
               campaigns={campaigns} 

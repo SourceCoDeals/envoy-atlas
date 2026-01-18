@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { 
   ArrowLeft, Share2, 
   BarChart3, Mail, Phone, Target, Clock, Users
@@ -87,14 +88,24 @@ export default function EngagementReport() {
             <Button variant="ghost" size="icon" onClick={() => navigate('/engagements')}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold">{engagement.client_name}</h1>
-                <Badge variant={engagement.status === 'active' ? 'default' : 'secondary'}>
-                  {engagement.status}
-                </Badge>
+            <div className="flex items-center gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold">{engagement.client_name}</h1>
+                  <Badge variant={engagement.status === 'active' ? 'default' : 'secondary'}>
+                    {engagement.status}
+                  </Badge>
+                </div>
+                <p className="text-muted-foreground">{engagement.engagement_name}</p>
               </div>
-              <p className="text-muted-foreground">{engagement.engagement_name}</p>
+              <DataHealthIndicator 
+                status={data.linkedCampaigns.length > 0 ? (data.emailMetrics.sent > 0 ? 'healthy' : 'degraded') : 'empty'} 
+                tooltip={data.linkedCampaigns.length > 0 
+                  ? (data.emailMetrics.sent > 0 
+                    ? `${data.linkedCampaigns.length} campaigns, ${data.emailMetrics.sent.toLocaleString()} sent` 
+                    : `${data.linkedCampaigns.length} campaigns linked but 0 sent emails`) 
+                  : 'No campaigns linked to this engagement'}
+              />
             </div>
           </div>
           <div className="flex items-center gap-3">

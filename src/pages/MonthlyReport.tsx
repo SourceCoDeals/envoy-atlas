@@ -3,6 +3,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { Calendar, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { format, subMonths, addMonths, startOfMonth } from 'date-fns';
 import { useMonthlyReportData } from '@/hooks/useMonthlyReportData';
@@ -76,11 +77,21 @@ export default function MonthlyReport() {
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Monthly Report</h1>
-            <p className="text-muted-foreground">
-              Comprehensive performance overview for {format(selectedMonth, 'MMMM yyyy')}
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-2xl font-bold">Monthly Report</h1>
+              <p className="text-muted-foreground">
+                Comprehensive performance overview for {format(selectedMonth, 'MMMM yyyy')}
+              </p>
+            </div>
+            <DataHealthIndicator 
+              status={hasData ? (currentMetrics.sent > 0 ? 'healthy' : 'degraded') : 'empty'} 
+              tooltip={hasData 
+                ? (currentMetrics.sent > 0 
+                  ? `${currentMetrics.sent.toLocaleString()} emails sent` 
+                  : 'Data synced but sent count is 0') 
+                : 'No data for this month'}
+            />
           </div>
           
           <div className="flex items-center gap-2">

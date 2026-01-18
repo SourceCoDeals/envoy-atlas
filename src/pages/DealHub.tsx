@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import {
   Briefcase,
   TrendingUp,
@@ -201,9 +202,15 @@ export default function DealHub() {
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Deal Hub</h1>
-            <p className="text-muted-foreground">Track and manage your deal pipeline</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-2xl font-bold">Deal Hub</h1>
+              <p className="text-muted-foreground">Track and manage your deal pipeline</p>
+            </div>
+            <DataHealthIndicator 
+              status={deals.length > 0 ? 'healthy' : 'empty'} 
+              tooltip={deals.length > 0 ? `${deals.length} deals tracked` : 'No deals. Add your first deal.'}
+            />
           </div>
         </div>
 
