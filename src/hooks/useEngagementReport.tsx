@@ -623,13 +623,17 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         }))
         .sort((a, b) => b.count - a.count);
 
-      // Build call outcomes based on seller interest
+      // Build call outcomes based on ACTUAL call categories only
+      // NOTE: Only 'Meeting Booked' and 'Interested' are tracked from actual data
+      // Other outcomes like 'Send Info', 'Not Interested', 'Call Back' require proper call disposition tracking
       const callOutcomes: CallOutcome[] = [
         { outcome: 'Meeting Booked', count: callMeetings, percentage: totalCalls > 0 ? (callMeetings / totalCalls) * 100 : 0 },
         { outcome: 'Interested', count: dmConversations - callMeetings, percentage: totalCalls > 0 ? ((dmConversations - callMeetings) / totalCalls) * 100 : 0 },
-        { outcome: 'Send Info', count: Math.floor(conversations * 0.3), percentage: totalCalls > 0 ? (Math.floor(conversations * 0.3) / totalCalls) * 100 : 0 },
-        { outcome: 'Not Interested', count: Math.floor(conversations * 0.4), percentage: totalCalls > 0 ? (Math.floor(conversations * 0.4) / totalCalls) * 100 : 0 },
-        { outcome: 'Call Back', count: Math.floor(connections * 0.2), percentage: totalCalls > 0 ? (Math.floor(connections * 0.2) / totalCalls) * 100 : 0 },
+        // These outcomes are NOT tracked - would require proper call disposition data
+        // Showing 0 instead of fake estimates
+        { outcome: 'Send Info', count: 0, percentage: 0 },
+        { outcome: 'Not Interested', count: 0, percentage: 0 },
+        { outcome: 'Call Back', count: 0, percentage: 0 },
       ];
 
       // Build recent activity (last 20 items) - use call_date for proper sorting

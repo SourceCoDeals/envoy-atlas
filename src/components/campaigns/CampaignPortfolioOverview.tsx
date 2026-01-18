@@ -56,13 +56,14 @@ export function calculateCampaignScore(campaign: CampaignWithMetrics): CampaignT
     };
   }
 
-  // Efficiency (40 points max) - based on reply rate and positive rate
+  // Efficiency (40 points max) - based on reply rate only
+  // NOTE: Positive rate is not tracked - would require sentiment analysis
   const replyRateBenchmark = 2.8;
   const replyRateScore = Math.min((campaign.reply_rate / replyRateBenchmark) * 20, 20);
   
-  // Estimate positive rate as ~40% of replies if not available
-  const estimatedPositiveRate = campaign.reply_rate * 0.4;
-  const positiveRateScore = Math.min(estimatedPositiveRate * 4, 20);
+  // Positive rate is NOT tracked - using 0 for scoring
+  // Would require message_events sentiment classification
+  const positiveRateScore = 0;
   const efficiency = replyRateScore + positiveRateScore;
   
   // Reliability (20 points max) - based on bounce rate

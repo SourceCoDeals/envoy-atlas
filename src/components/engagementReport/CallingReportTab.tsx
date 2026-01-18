@@ -49,11 +49,12 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
   // Check if we have scored calls
   const hasAIScores = callingMetrics.avgScore > 0;
   
-  // Filter out estimated outcomes
+  // Filter out tracked vs untracked outcomes
   const actualOutcomes = callOutcomes.filter(o => 
     o.outcome === 'Meeting Booked' || o.outcome === 'Interested'
   );
-  const estimatedOutcomes = callOutcomes.filter(o => 
+  // Other outcomes are NOT tracked (show 0) - no longer estimated
+  const untrackedOutcomes = callOutcomes.filter(o => 
     o.outcome !== 'Meeting Booked' && o.outcome !== 'Interested'
   );
 
@@ -221,11 +222,11 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               Conversation Outcomes
-              {estimatedOutcomes.length > 0 && (
+              {untrackedOutcomes.length > 0 && (
                 <DataErrorFlag 
                   type="partial" 
                   size="sm" 
-                  tooltip="Some outcome categories are estimated from conversation counts"
+                  tooltip="Some outcome categories require proper call disposition tracking"
                 />
               )}
             </CardTitle>
@@ -248,16 +249,16 @@ export function CallingReportTab({ data }: CallingReportTabProps) {
                   ))}
                 </div>
                 
-                {/* Estimated outcomes */}
-                {estimatedOutcomes.length > 0 && (
+                {/* Untracked outcomes - show as not available */}
+                {untrackedOutcomes.length > 0 && (
                   <div className="pt-2 border-t border-dashed">
-                    <p className="text-xs text-muted-foreground mb-2">Estimated from conversation data:</p>
-                    {estimatedOutcomes.map((outcome) => (
+                    <p className="text-xs text-muted-foreground mb-2">Not tracked (requires call disposition data):</p>
+                    {untrackedOutcomes.map((outcome) => (
                       <div key={outcome.outcome} className="flex items-center justify-between p-2 rounded bg-muted/30 opacity-60">
                         <span className="text-sm">{outcome.outcome}</span>
                         <div className="flex items-center gap-2">
-                          <span className="font-medium">{outcome.count}</span>
-                          <DataErrorFlag type="estimated" size="sm" />
+                          <span className="font-medium text-muted-foreground">—</span>
+                          <DataErrorFlag type="not-tracked" size="sm" />
                         </div>
                       </div>
                     ))}

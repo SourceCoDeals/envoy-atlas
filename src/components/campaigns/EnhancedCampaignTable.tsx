@@ -132,11 +132,14 @@ export function EnhancedCampaignTable({
   const campaignsWithScores: CampaignWithScore[] = useMemo(() => {
     return campaigns.map(campaign => {
       const tier = calculateCampaignScore(campaign);
-      const estimatedPositiveRate = campaign.reply_rate * 0.45;
-      const estimatedMeetings = Math.round(campaign.total_replied * 0.45 * 0.16);
+      // NOTE: Positive rate is not tracked in basic campaign metrics
+      // Would require message_events sentiment analysis - showing 0
+      const actualPositiveRate = 0;
+      // Meetings are not tracked from email campaigns - requires calendar integration
+      const actualMeetings = 0;
       // Check if campaign has any actual metrics data
       const hasMetrics = campaign.total_sent > 0 || campaign.total_opened > 0 || campaign.total_replied > 0;
-      return { ...campaign, tier, estimatedPositiveRate, estimatedMeetings, hasMetrics };
+      return { ...campaign, tier, estimatedPositiveRate: actualPositiveRate, estimatedMeetings: actualMeetings, hasMetrics };
     });
   }, [campaigns]);
 
@@ -561,11 +564,11 @@ export function EnhancedCampaignTable({
                   <TableCell className="text-right font-mono">
                     {campaign.reply_rate.toFixed(1)}%
                   </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {campaign.estimatedPositiveRate.toFixed(0)}%
+                  <TableCell className="text-right font-mono text-muted-foreground">
+                    —
                   </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {campaign.estimatedMeetings}
+                  <TableCell className="text-right font-mono text-muted-foreground">
+                    —
                   </TableCell>
                   <TableCell className="text-center">
                     {getActionBadge(campaign.tier)}

@@ -308,10 +308,12 @@ export function calculateSegmentFatigue(
     degradationPercent,
     trend30d: metrics.trend30d,
     unsubscribeRate: metrics.unsubscribeRate,
+    // NOTE: Performance by frequency is not actually tracked per-lead
+    // Only showing first touch data - multi-touch tracking requires lead-level sequence analytics
     performanceByFrequency: [
       { range: '1-2 emails', replyRate: metrics.replyRateFirstTouch },
-      { range: '3-4 emails', replyRate: metrics.replyRateFirstTouch * 0.6 },
-      { range: '5+ emails', replyRate: metrics.replyRateFirstTouch * 0.3 },
+      { range: '3-4 emails', replyRate: 0 }, // Not tracked
+      { range: '5+ emails', replyRate: 0 }, // Not tracked
     ],
     recommendation,
     recoveryEstimateDays: fatigueLevel === 'critical' ? 21 : fatigueLevel === 'fatigued' ? 14 : undefined,
