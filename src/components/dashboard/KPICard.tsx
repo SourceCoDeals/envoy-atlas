@@ -64,8 +64,9 @@ export function KPICard({
   const formatValue = (val: number) => {
     switch (format) {
       case 'percent':
+        return `${val.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}%`;
       case 'currency':
-        return `$${val.toLocaleString()}`;
+        return `$${val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals })}`;
       case 'number':
       default:
         return val.toLocaleString(undefined, { 
