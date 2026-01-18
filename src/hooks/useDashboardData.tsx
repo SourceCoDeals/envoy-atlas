@@ -250,6 +250,33 @@ export function useDashboardData(dateRange?: DateRange) {
         totals = { ...campaignTotals, spam: 0, delivered: 0 };
         console.log(`Dashboard: Using campaign totals (fallback) - sent=${totals.sent}, replied=${totals.replied}`);
       }
+      
+      // ==============================================================
+      // FALLBACK #3: If sent is still 0, try cumulative tables
+      // ==============================================================
+      if (totals.sent === 0) {
+        const [slCumulative, rioCumulative] = await Promise.all([
+          supabase.from('smartlead_campaign_cumulative').select('total_sent, total_opened, total_clicked, total_replied, total_bounced').eq('workspace_id', currentWorkspace.id),
+          supabase.from('replyio_campaign_cumulative').select('total_sent, total_opened, total_clicked, total_replied, total_bounced').eq('workspace_id', currentWorkspace.id),
+        ]);
+        
+        const cumulativeTotals = [...(slCumulative.data || []), ...(rioCumulative.data || [])].reduce((acc, c) => ({
+          sent: acc.sent + (c.total_sent || 0),
+          opened: acc.opened + (c.total_opened || 0),
+          clicked: acc.clicked + (c.total_clicked || 0),
+          replied: acc.replied + (c.total_replied || 0),
+          bounced: acc.bounced + (c.total_bounced || 0),
+        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
+        
+        if (cumulativeTotals.sent > 0) {
+          totals.sent = cumulativeTotals.sent;
+          totals.opened = cumulativeTotals.opened;
+          totals.clicked = cumulativeTotals.clicked;
+          totals.replied = cumulativeTotals.replied;
+          totals.bounced = cumulativeTotals.bounced;
+          console.log(`Dashboard: Using cumulative totals (fallback 3) - sent=${totals.sent}, replied=${totals.replied}`);
+        }
+      }
 
       // Calculate delivered if not tracked separately (sent - bounced)
       const delivered = totals.delivered > 0 ? totals.delivered : (totals.sent - totals.bounced);

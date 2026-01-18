@@ -226,14 +226,45 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: 's
       const leadsData = leadsResult.data || [];
       const stepsData = stepsResult.data || [];
 
-      // 3. Calculate metrics
-      const total_sent = metricsData.reduce((s, m) => s + (m.sent_count || 0), 0);
-      const total_opened = metricsData.reduce((s, m) => s + (m.opened_count || 0), 0);
-      const total_clicked = metricsData.reduce((s, m) => s + (m.clicked_count || 0), 0);
-      const total_replied = metricsData.reduce((s, m) => s + (m.replied_count || 0), 0);
-      const total_bounced = metricsData.reduce((s, m) => s + (m.bounced_count || 0), 0);
+      // 3. Calculate metrics from daily_metrics
+      let total_sent = metricsData.reduce((s, m) => s + (m.sent_count || 0), 0);
+      let total_opened = metricsData.reduce((s, m) => s + (m.opened_count || 0), 0);
+      let total_clicked = metricsData.reduce((s, m) => s + (m.clicked_count || 0), 0);
+      let total_replied = metricsData.reduce((s, m) => s + (m.replied_count || 0), 0);
+      let total_bounced = metricsData.reduce((s, m) => s + (m.bounced_count || 0), 0);
+      let total_positive_replies = metricsData.reduce((s, m) => s + (m.positive_reply_count || 0), 0);
+
+      // ==============================================================
+      // FALLBACK: If daily metrics have 0 sent, check cumulative table
+      // ==============================================================
+      if (total_sent === 0) {
+        const cumulativeTable = detectedPlatform === 'smartlead' ? 'smartlead_campaign_cumulative' : 'replyio_campaign_cumulative';
+        const { data: cumulative } = await supabase
+          .from(cumulativeTable)
+          .select('*')
+          .eq('campaign_id', campaignId)
+          .single();
+        
+        if (cumulative && (cumulative.total_sent || 0) > 0) {
+          console.log(`CampaignSummary: Using cumulative fallback for campaign ${campaignId}`);
+          total_sent = cumulative.total_sent || 0;
+          total_opened = cumulative.total_opened || 0;
+          total_clicked = cumulative.total_clicked || 0;
+          total_replied = cumulative.total_replied || 0;
+          total_bounced = cumulative.total_bounced || 0;
+          total_positive_replies = cumulative.total_interested || 0;
+        }
+      }
+      
+      // ==============================================================
+      // FALLBACK #2: If still 0, use lead count as sent proxy
+      // ==============================================================
+      if (total_sent === 0 && leadsData.length > 0) {
+        console.log(`CampaignSummary: Using lead count (${leadsData.length}) as sent proxy`);
+        total_sent = leadsData.length;
+      }
+
       const total_delivered = total_sent - total_bounced;
-      const total_positive_replies = metricsData.reduce((s, m) => s + (m.positive_reply_count || 0), 0);
 
       const metrics = {
         total_sent,
