@@ -44,6 +44,15 @@ interface BaseMetric {
   bounced_count: number | null;
 }
 
+interface CumulativeMetric {
+  campaign_id: string;
+  total_sent: number | null;
+  total_opened: number | null;
+  total_clicked: number | null;
+  total_replied: number | null;
+  total_bounced: number | null;
+}
+
 export function useCampaigns() {
   const { currentWorkspace } = useWorkspace();
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([]);
@@ -103,14 +112,27 @@ export function useCampaigns() {
         return;
       }
 
-      // Fetch daily metrics using workspace_id (avoids large .in() queries that cause 400 errors)
-      const [smartleadMetricsResult, replyioMetricsResult] = await Promise.all([
+      // Fetch daily metrics AND cumulative metrics (fallback) using workspace_id
+      const [
+        smartleadMetricsResult, 
+        replyioMetricsResult,
+        smartleadCumulativeResult,
+        replyioCumulativeResult
+      ] = await Promise.all([
         supabase
           .from('smartlead_daily_metrics')
           .select('*')
           .eq('workspace_id', currentWorkspace.id),
         supabase
           .from('replyio_daily_metrics')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('smartlead_campaign_cumulative')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('replyio_campaign_cumulative')
           .select('*')
           .eq('workspace_id', currentWorkspace.id)
       ]);
@@ -120,15 +142,29 @@ export function useCampaigns() {
       const replyioMetrics = replyioMetricsResult.data || [];
       const allMetrics: BaseMetric[] = [...smartleadMetrics, ...replyioMetrics];
 
-      // Aggregate metrics per campaign
+      // Build cumulative lookup map for fallback
+      const cumulativeMap = new Map<string, CumulativeMetric>();
+      (smartleadCumulativeResult.data || []).forEach(c => cumulativeMap.set(c.campaign_id, c));
+      (replyioCumulativeResult.data || []).forEach(c => cumulativeMap.set(c.campaign_id, c));
+
+      // Aggregate metrics per campaign with cumulative fallback
       const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
         const campaignMetrics = allMetrics.filter(m => m.campaign_id === campaign.id);
+        const cumulative = cumulativeMap.get(campaign.id);
         
-        const total_sent = campaignMetrics.reduce((sum, m) => sum + (m.sent_count || 0), 0);
-        const total_opened = campaignMetrics.reduce((sum, m) => sum + (m.opened_count || 0), 0);
-        const total_clicked = campaignMetrics.reduce((sum, m) => sum + (m.clicked_count || 0), 0);
-        const total_replied = campaignMetrics.reduce((sum, m) => sum + (m.replied_count || 0), 0);
-        const total_bounced = campaignMetrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
+        // Sum daily metrics
+        const dailySent = campaignMetrics.reduce((sum, m) => sum + (m.sent_count || 0), 0);
+        const dailyOpened = campaignMetrics.reduce((sum, m) => sum + (m.opened_count || 0), 0);
+        const dailyClicked = campaignMetrics.reduce((sum, m) => sum + (m.clicked_count || 0), 0);
+        const dailyReplied = campaignMetrics.reduce((sum, m) => sum + (m.replied_count || 0), 0);
+        const dailyBounced = campaignMetrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
+        
+        // Use cumulative as fallback when daily metrics are 0 or missing
+        const total_sent = dailySent > 0 ? dailySent : (cumulative?.total_sent || 0);
+        const total_opened = dailyOpened > 0 ? dailyOpened : (cumulative?.total_opened || 0);
+        const total_clicked = dailyClicked > 0 ? dailyClicked : (cumulative?.total_clicked || 0);
+        const total_replied = dailyReplied > 0 ? dailyReplied : (cumulative?.total_replied || 0);
+        const total_bounced = dailyBounced > 0 ? dailyBounced : (cumulative?.total_bounced || 0);
         const total_leads = 0;
 
         return {
