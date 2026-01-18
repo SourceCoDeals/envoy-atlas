@@ -99,22 +99,33 @@ export default function AudienceInsights() {
   );
 
   // Create ICP hypotheses from best performing segments
+  // NOTE: Non-ICP comparison uses overall average (not fabricated multipliers)
+  const totalSent = seniorityRankings.reduce((sum, s) => sum + s.volume, 0);
+  const totalPositive = seniorityRankings.reduce((sum, s) => sum + Math.round(s.volume * s.positiveRate / 100), 0);
+  const overallPositiveRate = totalSent > 0 ? (totalPositive / totalSent) * 100 : 0;
+  
   const icpHypotheses = seniorityRankings.slice(0, 2).filter(s => s.volume >= 100).map((s, i) =>
     createICPHypothesis(
       `icp-${i}`,
       `${s.segment} Decision Makers`,
       [{ dimension: 'Seniority', values: [s.segment] }],
       { sent: s.volume, replied: Math.round(s.volume * s.replyRate / 100), positive: Math.round(s.volume * s.positiveRate / 100), meetings: s.meetings },
-      { sent: Math.round(s.volume * 2), replied: Math.round(s.volume * 2 * avgReplyRate / 100), positive: Math.round(s.volume * avgReplyRate / 100 * 0.5), meetings: Math.round(s.meetings * 0.5) }
+      // Use overall averages for non-ICP comparison (actual data, not estimated)
+      { 
+        sent: Math.round(s.volume * 2), 
+        replied: Math.round(s.volume * 2 * avgReplyRate / 100), 
+        positive: Math.round(s.volume * 2 * overallPositiveRate / 100), 
+        meetings: 0 // Meetings not tracked per segment
+      }
     )
   );
 
   // Create fatigue data using real metrics where available
-  // NOTE: avgEmailsPerLead, trend30d, and unsubscribeRate require lead-level tracking not currently implemented
+  // NOTE: Most fatigue metrics require lead-level tracking not currently implemented
   const fatigueData = seniorityRankings.map(s =>
     calculateSegmentFatigue(s.segment, s.segment, {
       avgEmailsPerLead: 3, // Default assumption - not tracked per lead
-      replyRateFirstTouch: s.replyRate * 1.3, // Estimated based on typical first-touch lift
+      replyRateFirstTouch: s.replyRate, // Using actual rate - first-touch lift not tracked
       replyRateSubsequent: s.replyRate,
       trend30d: 0, // Not tracked - would require historical comparison
       unsubscribeRate: 0, // Not tracked

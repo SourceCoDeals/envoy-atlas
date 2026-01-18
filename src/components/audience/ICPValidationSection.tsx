@@ -223,7 +223,7 @@ export function ICPValidationSection({
   );
 }
 
-// Helper to create mock ICP hypothesis from data
+// Helper to create ICP hypothesis from actual metrics data
 export function createICPHypothesis(
   id: string,
   name: string,

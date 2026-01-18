@@ -60,7 +60,7 @@ export function LengthImpactSection({
     range: d.range,
     replyRate: d.avgReplyRate,
     positiveRate: d.avgPositiveRate,
-    meetingRate: d.avgMeetingRate || d.avgPositiveRate * 0.5,
+    meetingRate: d.avgMeetingRate || 0, // NOTE: meeting rate requires calendar integration - show 0 if not tracked
     count: d.count,
   }));
 
