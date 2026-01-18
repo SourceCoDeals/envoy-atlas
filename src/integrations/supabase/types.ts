@@ -1083,6 +1083,260 @@ export type Database = {
           },
         ]
       }
+      calls: {
+        Row: {
+          analyst: string | null
+          called_at: string | null
+          category: string | null
+          composite_score: number | null
+          contact_company: string | null
+          contact_email: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string | null
+          direction: string | null
+          duration_seconds: number | null
+          engagement_score: number | null
+          external_id: string | null
+          gatekeeper_score: number | null
+          id: string
+          key_concerns: string[] | null
+          next_step_score: number | null
+          objection_handling_score: number | null
+          opening_type: string | null
+          platform: string
+          primary_opportunity: string | null
+          quality_score: number | null
+          rapport_score: number | null
+          recording_url: string | null
+          salesforce_url: string | null
+          seller_interest_score: number | null
+          summary: string | null
+          target_pain_points: string | null
+          transcript: string | null
+          updated_at: string | null
+          value_proposition_score: number | null
+          workspace_id: string
+        }
+        Insert: {
+          analyst?: string | null
+          called_at?: string | null
+          category?: string | null
+          composite_score?: number | null
+          contact_company?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          direction?: string | null
+          duration_seconds?: number | null
+          engagement_score?: number | null
+          external_id?: string | null
+          gatekeeper_score?: number | null
+          id?: string
+          key_concerns?: string[] | null
+          next_step_score?: number | null
+          objection_handling_score?: number | null
+          opening_type?: string | null
+          platform: string
+          primary_opportunity?: string | null
+          quality_score?: number | null
+          rapport_score?: number | null
+          recording_url?: string | null
+          salesforce_url?: string | null
+          seller_interest_score?: number | null
+          summary?: string | null
+          target_pain_points?: string | null
+          transcript?: string | null
+          updated_at?: string | null
+          value_proposition_score?: number | null
+          workspace_id: string
+        }
+        Update: {
+          analyst?: string | null
+          called_at?: string | null
+          category?: string | null
+          composite_score?: number | null
+          contact_company?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          direction?: string | null
+          duration_seconds?: number | null
+          engagement_score?: number | null
+          external_id?: string | null
+          gatekeeper_score?: number | null
+          id?: string
+          key_concerns?: string[] | null
+          next_step_score?: number | null
+          objection_handling_score?: number | null
+          opening_type?: string | null
+          platform?: string
+          primary_opportunity?: string | null
+          quality_score?: number | null
+          rapport_score?: number | null
+          recording_url?: string | null
+          salesforce_url?: string | null
+          seller_interest_score?: number | null
+          summary?: string | null
+          target_pain_points?: string | null
+          transcript?: string | null
+          updated_at?: string | null
+          value_proposition_score?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calls_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_cumulative: {
+        Row: {
+          baseline_bounced: number | null
+          baseline_clicked: number | null
+          baseline_opened: number | null
+          baseline_replied: number | null
+          baseline_sent: number | null
+          campaign_id: string
+          created_at: string | null
+          first_synced_at: string | null
+          id: string
+          last_synced_at: string | null
+          total_bounced: number | null
+          total_clicked: number | null
+          total_opened: number | null
+          total_positive_replies: number | null
+          total_replied: number | null
+          total_sent: number | null
+          total_unsubscribed: number | null
+          workspace_id: string
+        }
+        Insert: {
+          baseline_bounced?: number | null
+          baseline_clicked?: number | null
+          baseline_opened?: number | null
+          baseline_replied?: number | null
+          baseline_sent?: number | null
+          campaign_id: string
+          created_at?: string | null
+          first_synced_at?: string | null
+          id?: string
+          last_synced_at?: string | null
+          total_bounced?: number | null
+          total_clicked?: number | null
+          total_opened?: number | null
+          total_positive_replies?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          total_unsubscribed?: number | null
+          workspace_id: string
+        }
+        Update: {
+          baseline_bounced?: number | null
+          baseline_clicked?: number | null
+          baseline_opened?: number | null
+          baseline_replied?: number | null
+          baseline_sent?: number | null
+          campaign_id?: string
+          created_at?: string | null
+          first_synced_at?: string | null
+          id?: string
+          last_synced_at?: string | null
+          total_bounced?: number | null
+          total_clicked?: number | null
+          total_opened?: number | null
+          total_positive_replies?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          total_unsubscribed?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_cumulative_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: true
+            referencedRelation: "unified_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_cumulative_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_metrics: {
+        Row: {
+          bounced_count: number | null
+          campaign_id: string
+          clicked_count: number | null
+          created_at: string | null
+          id: string
+          metric_date: string
+          opened_count: number | null
+          positive_reply_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          unsubscribed_count: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          bounced_count?: number | null
+          campaign_id: string
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date: string
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          unsubscribed_count?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          bounced_count?: number | null
+          campaign_id?: string
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date?: string
+          opened_count?: number | null
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          unsubscribed_count?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "unified_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_metrics_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_variant_features: {
         Row: {
           body_avg_sentence_length: number | null
@@ -1209,6 +1463,70 @@ export type Database = {
           },
           {
             foreignKeyName: "campaign_variant_features_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_variant_metrics: {
+        Row: {
+          bounced_count: number | null
+          campaign_id: string
+          clicked_count: number | null
+          created_at: string | null
+          id: string
+          metric_date: string
+          opened_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          variant_id: string
+          workspace_id: string
+        }
+        Insert: {
+          bounced_count?: number | null
+          campaign_id: string
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date: string
+          opened_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          variant_id: string
+          workspace_id: string
+        }
+        Update: {
+          bounced_count?: number | null
+          campaign_id?: string
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date?: string
+          opened_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          variant_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_variant_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "unified_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_variant_metrics_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "unified_campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_variant_metrics_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -5013,6 +5331,62 @@ export type Database = {
           },
         ]
       }
+      sync_status: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          last_cursor: string | null
+          platform: string
+          records_created: number | null
+          records_processed: number | null
+          records_updated: number | null
+          started_at: string | null
+          status: string
+          sync_type: string
+          workspace_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          last_cursor?: string | null
+          platform: string
+          records_created?: number | null
+          records_processed?: number | null
+          records_updated?: number | null
+          started_at?: string | null
+          status?: string
+          sync_type: string
+          workspace_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          last_cursor?: string | null
+          platform?: string
+          records_created?: number | null
+          records_processed?: number | null
+          records_updated?: number | null
+          started_at?: string | null
+          status?: string
+          sync_type?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_status_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       training_assignments: {
         Row: {
           assigned_by: string
@@ -5066,6 +5440,123 @@ export type Database = {
           },
           {
             foreignKeyName: "training_assignments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      unified_campaign_variants: {
+        Row: {
+          body_preview: string | null
+          campaign_id: string
+          created_at: string | null
+          delay_days: number | null
+          email_body: string | null
+          id: string
+          is_control: boolean | null
+          name: string | null
+          platform: string
+          platform_variant_id: string | null
+          step_number: number
+          subject_line: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          body_preview?: string | null
+          campaign_id: string
+          created_at?: string | null
+          delay_days?: number | null
+          email_body?: string | null
+          id?: string
+          is_control?: boolean | null
+          name?: string | null
+          platform: string
+          platform_variant_id?: string | null
+          step_number: number
+          subject_line?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          body_preview?: string | null
+          campaign_id?: string
+          created_at?: string | null
+          delay_days?: number | null
+          email_body?: string | null
+          id?: string
+          is_control?: boolean | null
+          name?: string | null
+          platform?: string
+          platform_variant_id?: string | null
+          step_number?: number
+          subject_line?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "unified_campaign_variants_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "unified_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unified_campaign_variants_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      unified_campaigns: {
+        Row: {
+          created_at: string | null
+          engagement_id: string | null
+          id: string
+          name: string
+          platform: string
+          platform_id: string
+          status: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          engagement_id?: string | null
+          id?: string
+          name: string
+          platform: string
+          platform_id: string
+          status?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          engagement_id?: string | null
+          id?: string
+          name?: string
+          platform?: string
+          platform_id?: string
+          status?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "unified_campaigns_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unified_campaigns_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -5221,6 +5712,59 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "workspace_members_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_metrics: {
+        Row: {
+          active_campaigns: number | null
+          bounced_count: number | null
+          clicked_count: number | null
+          created_at: string | null
+          id: string
+          metric_date: string
+          opened_count: number | null
+          platform: string
+          positive_reply_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          workspace_id: string
+        }
+        Insert: {
+          active_campaigns?: number | null
+          bounced_count?: number | null
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date: string
+          opened_count?: number | null
+          platform: string
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          workspace_id: string
+        }
+        Update: {
+          active_campaigns?: number | null
+          bounced_count?: number | null
+          clicked_count?: number | null
+          created_at?: string | null
+          id?: string
+          metric_date?: string
+          opened_count?: number | null
+          platform?: string
+          positive_reply_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_metrics_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
