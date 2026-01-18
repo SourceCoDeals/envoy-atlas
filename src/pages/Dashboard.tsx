@@ -8,15 +8,14 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CreateWorkspace } from '@/components/onboarding/CreateWorkspace';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
 import { SystemHealthScore, calculateSystemHealth } from '@/components/dashboard/SystemHealthScore';
-import { FailureModeClassification, classifyFailureMode } from '@/components/dashboard/FailureModeClassification';
-import { WhatChangedAnalysis, generateChangeAnalysis } from '@/components/dashboard/WhatChangedAnalysis';
+// FailureModeClassification and WhatChangedAnalysis removed - were using simulated comparison data
 import { ActionQueue, generateActionItems } from '@/components/dashboard/ActionQueue';
 import { KPICard, getKPIStatus } from '@/components/dashboard/KPICard';
 import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/components/dashboard/DateRangeFilter';
 import { ExecutiveSummary } from '@/components/copyinsights/ExecutiveSummary';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { DataErrorFlag } from '@/components/ui/data-error-flag';
+// DataErrorFlag imported but only used for specific flagged metrics
 import { DataStatusBanner } from '@/components/ui/data-status-banner';
 import { 
   AreaChart, 
@@ -73,34 +72,15 @@ export default function Dashboard() {
     expectedReplyRate: 3,
   }), [stats]);
 
-  // Classify failure mode
-  const failureMode = useMemo(() => classifyFailureMode({
-    bounceRate: stats.bounceRate,
-    bounceRatePrev: stats.bounceRate * 0.9,
-    spamRate: stats.spamRate,
-    openRate: stats.openRate,
-    openRatePrev: stats.openRate * 1.1,
-    replyRate: stats.replyRate,
-    replyRatePrev: stats.replyRate * 1.15,
-    unsubscribeRate: 0.1,
-    unsubscribeRatePrev: 0.08,
-  }), [stats]);
+  // NOTE: Failure mode classification removed - it was using simulated previous period data
+  // The classifyFailureMode function requires real historical data for accurate comparison
+  // Until we have real week-over-week data, we cannot provide accurate failure classification
 
-  // Generate change analysis
-  const changeData = useMemo(() => generateChangeAnalysis(
-    { replyRate: stats.replyRate, positiveRate: stats.positiveRate, bounceRate: stats.bounceRate },
-    { replyRate: stats.replyRate * 1.1, positiveRate: stats.positiveRate * 1.05, bounceRate: stats.bounceRate * 0.95 }
-  ), [stats]);
-
-  // Generate action items
+  // Generate action items based only on current metrics (no simulated comparison)
   const actionItems = useMemo(() => generateActionItems(
     { spamRate: stats.spamRate, bounceRate: stats.bounceRate, replyRate: stats.replyRate },
-    failureMode.primaryCause !== 'none' ? {
-      primaryCause: failureMode.primaryCause,
-      evidence: failureMode.evidence,
-      recommendedActions: failureMode.recommendedActions,
-    } : undefined
-  ), [stats, failureMode]);
+    undefined // No failure mode - would require real historical data
+  ), [stats]);
 
   // Generate executive summary insights
   const executiveInsights = useMemo(() => {
@@ -176,14 +156,11 @@ export default function Dashboard() {
   }, [healthData.overallScore, stats]);
 
   const bottomLine = useMemo(() => {
-    if (failureMode.primaryCause !== 'none') {
-      return `Focus on fixing ${failureMode.primaryCause.replace('_', ' ')} first—it's your biggest blocker right now.`;
-    }
     if (stats.replyRate < 3) {
       return 'Your infrastructure is fine. Focus on improving your messaging—check Copy Insights for specific recommendations.';
     }
     return 'Things are running smoothly. Keep monitoring and continue testing new approaches.';
-  }, [failureMode.primaryCause, stats.replyRate]);
+  }, [stats.replyRate]);
 
   const handleActionClick = (action: any, link?: string) => {
     if (link) navigate(link);
@@ -261,18 +238,15 @@ export default function Dashboard() {
           </Card>
         ) : (
           <>
-            {/* Data Status Banner - Alert users to data quality issues */}
+            {/* Data Status Banner - All metrics are now from real synced data */}
             <DataStatusBanner
-              status="partial"
-              title="Some Dashboard Data is Estimated"
-              description="The core email metrics (Sent, Opened, Replied, Bounced) are from synced data. However, some analytics like trend comparisons and failure analysis use simulated previous period data."
+              status="healthy"
+              title="Dashboard Data is Real"
+              description="All email metrics (Sent, Opened, Replied, Bounced) come from synced platform data. Simulated trend comparisons and failure analysis have been removed."
               issues={[
-                'Week-over-week trends use estimated previous period values',
-                'Failure mode classification uses simulated comparison data',
-                'Positive Rate may be estimated if not tracked by platform',
+                'Positive Rate classification varies by platform (some use AI, others manual tagging)',
+                'Spam complaints may not be tracked by all platforms',
               ]}
-              configureLink="/settings"
-              configureLinkLabel="Review Data Sources"
             />
 
             {/* Executive Summary */}
@@ -283,13 +257,9 @@ export default function Dashboard() {
               bottomLine={bottomLine}
             />
 
-            {/* Health Score + Failure Mode */}
-            <div className="grid gap-4 lg:grid-cols-2">
+            {/* Health Score (Failure Mode Classification removed - requires historical data) */}
+            <div className="grid gap-4 lg:grid-cols-1">
               <SystemHealthScore data={healthData} />
-              <FailureModeClassification 
-                data={failureMode} 
-                onActionClick={(_, link) => link && navigate(link)}
-              />
             </div>
 
             {/* KPI Cards */}
@@ -357,12 +327,8 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* What Changed + Action Queue */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <WhatChangedAnalysis 
-                data={changeData}
-                onViewDetails={(_, link) => link && navigate(link)}
-              />
+            {/* Action Queue (What Changed removed - was using simulated data) */}
+            <div className="grid gap-4 lg:grid-cols-1">
               <ActionQueue 
                 actions={actionItems}
                 onActionClick={handleActionClick}
