@@ -176,6 +176,22 @@ export default function Campaigns() {
                 </AlertDescription>
               </Alert>
             )}
+
+            {/* Phase B: Active campaigns missing verified metrics */}
+            {(() => {
+              const activeStatuses = ['active', 'running', 'started'];
+              const activeMissing = campaigns.filter(c => activeStatuses.includes(c.status.toLowerCase()) && c.metricsStatus !== 'verified').length;
+              if (activeMissing === 0) return null;
+              return (
+                <Alert className="border-destructive/40 bg-destructive/5">
+                  <XCircle className="h-4 w-4 text-destructive" />
+                  <AlertDescription>
+                    <span className="font-medium text-destructive">{activeMissing} active campaigns</span>{' '}
+                    <span>don’t have verified send metrics yet (showing “—”). This is usually a sync/metrics ingestion issue.</span>
+                  </AlertDescription>
+                </Alert>
+              );
+            })()}
             
             {/* Degraded warning (non-critical) */}
             {!hasReplyioBroken && smartleadStatus === 'degraded' && (

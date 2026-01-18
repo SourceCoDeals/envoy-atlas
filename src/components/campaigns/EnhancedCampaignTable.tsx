@@ -465,24 +465,46 @@ export function EnhancedCampaignTable({
                       <div className="flex flex-col">
                         <div className="flex items-center gap-2">
                           <span className="truncate max-w-[260px] hover:text-primary">{campaign.name}</span>
-                          {/* Phase C: Show broken indicator for Reply.io campaigns when platform is broken, or for any campaign without metrics */}
-                          {(campaign.platform === 'replyio' && isReplyioBroken) || campaign.metricsStatus === 'broken' ? (
-                            <DataHealthIndicator
-                              status="broken"
-                              size="sm"
-                              showLabel={false}
-                              tooltip={campaign.platform === 'replyio' 
-                                ? 'Reply.io sent metrics broken — resync required from Settings → Connections' 
-                                : 'No metrics available for this campaign'}
-                            />
-                          ) : campaign.metricsStatus === 'missing' && !campaign.hasMetrics ? (
-                            <DataHealthIndicator
-                              status="empty"
-                              size="sm"
-                              showLabel={false}
-                              tooltip="Metrics will appear after emails are sent"
-                            />
-                          ) : null}
+
+                          {/*
+                            Visual truth-first status:
+                            - Reply.io platform broken => mark all Reply.io rows as broken
+                            - Active campaign with no verified metrics => broken (red)
+                            - Otherwise, missing metrics => empty (gray)
+                          */}
+                          {(() => {
+                            const isActive = ['active', 'running', 'started'].includes((campaign.status || '').toLowerCase());
+                            const isReplyioRowBroken = campaign.platform === 'replyio' && isReplyioBroken;
+                            const isActiveButNoVerified = isActive && campaign.metricsStatus !== 'verified' && campaign.total_sent === 0;
+
+                            if (isReplyioRowBroken || campaign.metricsStatus === 'broken' || isActiveButNoVerified) {
+                              return (
+                                <DataHealthIndicator
+                                  status="broken"
+                                  size="sm"
+                                  showLabel={false}
+                                  tooltip={
+                                    isReplyioRowBroken
+                                      ? 'Reply.io sent metrics broken — resync required from Settings → Connections'
+                                      : 'Active campaign but no verified send metrics available'
+                                  }
+                                />
+                              );
+                            }
+
+                            if (campaign.metricsStatus === 'missing' && !campaign.hasMetrics) {
+                              return (
+                                <DataHealthIndicator
+                                  status="empty"
+                                  size="sm"
+                                  showLabel={false}
+                                  tooltip="No metrics yet"
+                                />
+                              );
+                            }
+
+                            return null;
+                          })()}
                         </div>
                         <span className="text-xs text-muted-foreground">{campaign.platform}</span>
                       </div>
@@ -563,19 +585,18 @@ export function EnhancedCampaignTable({
                     {format(new Date(campaign.updated_at), 'MMM d, yyyy')}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {/* Phase D: Show — with indicator if metrics are broken instead of misleading 0 */}
-                    {campaign.metricsStatus === 'broken' || (campaign.platform === 'replyio' && isReplyioBroken && campaign.total_sent === 0) ? (
-                      <span className="text-destructive">—</span>
-                    ) : (
+                    {/* Show — when metrics aren't verified (avoids misleading zeros) */}
+                    {campaign.metricsStatus === 'verified' ? (
                       campaign.total_sent.toLocaleString()
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {/* Phase D: Show — if sent is broken (can't calculate rate) */}
-                    {campaign.metricsStatus === 'broken' || (campaign.platform === 'replyio' && isReplyioBroken && campaign.total_sent === 0) ? (
-                      <span className="text-destructive">—</span>
-                    ) : (
+                    {campaign.metricsStatus === 'verified' && campaign.total_sent > 0 ? (
                       `${campaign.reply_rate.toFixed(1)}%`
+                    ) : (
+                      <span className={campaign.platform === 'replyio' && isReplyioBroken ? 'text-destructive' : 'text-muted-foreground'}>—</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right font-mono text-muted-foreground">
