@@ -157,93 +157,14 @@ export function WhatChangedAnalysis({ data, onViewDetails }: WhatChangedAnalysis
   );
 }
 
-// Helper function to generate mock change data from metrics
-export function generateChangeAnalysis(
-  currentStats: {
-    replyRate: number;
-    positiveRate: number;
-    bounceRate: number;
-  },
-  previousStats: {
-    replyRate: number;
-    positiveRate: number;
-    bounceRate: number;
-  }
-): WhatChangedData {
-  const totalChange = currentStats.replyRate - previousStats.replyRate;
-  const contributions: ChangeContribution[] = [];
-
-  // Simulate attribution (in real implementation, this would be calculated from actual data)
-  if (Math.abs(totalChange) > 0.1) {
-    const audienceMixChange = totalChange * 0.55;
-    const copyChange = totalChange * 0.35;
-    const timingChange = totalChange * 0.1;
-
-    if (Math.abs(audienceMixChange) > 0.05) {
-      contributions.push({
-        factor: 'Audience Mix',
-        contribution: Math.abs(audienceMixChange),
-        direction: audienceMixChange < 0 ? 'negative' : 'positive',
-        confidence: 'high',
-        details: audienceMixChange < 0 
-          ? 'Higher volume to harder-to-reach segments'
-          : 'Increased volume to high-performing segments',
-        link: '/audience-insights',
-        linkLabel: 'View Segments',
-      });
-    }
-
-    if (Math.abs(copyChange) > 0.05) {
-      contributions.push({
-        factor: 'Copy Performance',
-        contribution: Math.abs(copyChange),
-        direction: copyChange < 0 ? 'negative' : 'positive',
-        confidence: 'high',
-        details: copyChange < 0 
-          ? 'Top variants showing declining performance'
-          : 'New high-performing variants added',
-        link: '/copy-insights',
-        linkLabel: 'View Copy',
-      });
-    }
-
-    if (Math.abs(timingChange) > 0.02) {
-      contributions.push({
-        factor: 'Send Timing',
-        contribution: Math.abs(timingChange),
-        direction: timingChange < 0 ? 'negative' : 'positive',
-        confidence: 'medium',
-        details: timingChange < 0 
-          ? 'More sends shifted to lower-performing windows'
-          : 'Better send time optimization',
-      });
-    }
-  }
-
-  // If no significant changes, indicate stability
-  if (contributions.length === 0) {
-    contributions.push({
-      factor: 'Stable Performance',
-      contribution: Math.abs(totalChange),
-      direction: totalChange >= 0 ? 'positive' : 'negative',
-      confidence: 'high',
-      details: 'No significant factors identified',
-    });
-  }
-
-  const interpretation = totalChange < -0.3
-    ? `The ${Math.abs(totalChange).toFixed(1)}% decline is primarily driven by ${contributions[0]?.factor.toLowerCase() || 'unknown factors'}. ${contributions.length > 1 ? `${contributions[1]?.factor} is a secondary contributor.` : ''} This is NOT a deliverability issue — inbox placement appears stable.`
-    : totalChange > 0.3
-    ? `Performance improved by ${totalChange.toFixed(1)}% driven by ${contributions[0]?.factor.toLowerCase() || 'various factors'}.`
-    : 'Performance is relatively stable with no major changes to investigate.';
-
-  return {
-    metric: 'Reply Rate',
-    previousValue: previousStats.replyRate,
-    currentValue: currentStats.replyRate,
-    totalChange,
-    contributions,
-    interpretation,
-    periodLabel: 'Last 7 Days vs Previous 7 Days',
-  };
-}
+// NOTE: generateChangeAnalysis has been REMOVED because it produced
+// simulated/fake attribution data. The function was using hardcoded 
+// percentages (55% audience, 35% copy, 10% timing) that were not 
+// derived from actual data.
+//
+// To implement real change analysis, you would need:
+// 1. Actual historical data for comparison periods
+// 2. Real attribution logic based on variant/segment performance changes
+// 3. Statistical significance testing
+//
+// Until that data infrastructure exists, this component should not be used.
