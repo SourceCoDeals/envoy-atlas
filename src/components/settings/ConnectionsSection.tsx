@@ -226,10 +226,26 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const getProgress = (conn: ApiConnection | undefined, keys: { current: string; total: string; label: string }) => {
     if (!conn?.sync_progress) return undefined;
     const progress = conn.sync_progress as any;
+    
+    // Calculate estimated time remaining based on platform rate limits
+    let estimatedTimeRemaining: string | undefined;
+    const remaining = (progress[keys.total] || 0) - (progress[keys.current] || 0);
+    if (remaining > 0 && conn.sync_status === "syncing") {
+      // Smartlead: ~250ms per item, Reply.io: ~10.5s per sequence for stats
+      const platform = conn.platform;
+      const msPerItem = platform === "replyio" ? 10500 : platform === "smartlead" ? 250 : 1000;
+      const totalMs = remaining * msPerItem;
+      const mins = Math.ceil(totalMs / 60000);
+      estimatedTimeRemaining = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+    }
+    
     return {
       current: progress[keys.current] || 0,
       total: progress[keys.total] || 0,
       label: keys.label,
+      stage: progress.stage || progress.current_stage,
+      batch: progress.batch_number || progress.batch,
+      estimatedTimeRemaining,
     };
   };
 
@@ -384,11 +400,16 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               isConnected={!!phoneburnerConnection}
               syncStatus={phoneburnerConnection?.sync_status}
               lastSyncAt={phoneburnerConnection?.last_sync_at}
+              syncProgress={getProgress(phoneburnerConnection, {
+                current: "sessions_synced",
+                total: "total_sessions",
+                label: "sessions",
+              })}
               isConnecting={isConnecting.phoneburner_oauth}
               onConnect={handlePhoneBurnerOAuth}
               connectLabel="Connect with PhoneBurner"
               statusRows={
-                phoneburnerConnection?.sync_progress
+                phoneburnerConnection?.sync_progress && phoneburnerConnection.sync_status !== "syncing"
                   ? [
                       {
                         label: "Records",
