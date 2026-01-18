@@ -6,9 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { CampaignWithMetrics } from '@/hooks/useCampaigns';
 import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Database, Briefcase } from 'lucide-react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Briefcase } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface Engagement {
@@ -463,16 +464,20 @@ export function EnhancedCampaignTable({
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger>
-                                  <Badge variant="outline" className="text-[10px] px-1 py-0 text-muted-foreground border-muted-foreground/30 gap-0.5">
-                                    <Database className="h-2.5 w-2.5" />
-                                    No Data
-                                  </Badge>
+                                  <div className="inline-flex items-center">
+                                    <DataHealthIndicator
+                                      status="broken"
+                                      size="sm"
+                                      showLabel={false}
+                                      tooltip="No metrics available for this campaign"
+                                    />
+                                  </div>
                                 </TooltipTrigger>
                                 <TooltipContent side="right" className="max-w-xs">
                                   <p className="font-medium">No metrics available</p>
                                   <p className="text-xs text-muted-foreground">
-                                    {campaign.platform === 'replyio' 
-                                      ? 'Paused Reply.io sequences may not report statistics. Try re-syncing or activating the sequence.'
+                                    {campaign.platform === 'replyio'
+                                      ? 'Reply.io daily metrics are currently coming through as 0 sent. Trigger a resync from Settings → Connections.'
                                       : 'Metrics will appear after emails are sent.'}
                                   </p>
                                 </TooltipContent>

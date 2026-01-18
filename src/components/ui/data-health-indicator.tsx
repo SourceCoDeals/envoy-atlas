@@ -21,21 +21,21 @@ const statusConfig: Record<DataHealthStatus, {
 }> = {
   healthy: {
     icon: CheckCircle2,
-    color: 'text-green-500',
-    bgColor: 'bg-green-500',
-    label: 'Connected',
+    color: 'text-success',
+    bgColor: 'bg-success',
+    label: 'Working',
   },
   degraded: {
     icon: AlertTriangle,
-    color: 'text-yellow-500',
-    bgColor: 'bg-yellow-500',
-    label: 'Partial Data',
+    color: 'text-warning',
+    bgColor: 'bg-warning',
+    label: 'Partial',
   },
   broken: {
     icon: XCircle,
-    color: 'text-red-500',
-    bgColor: 'bg-red-500',
-    label: 'Not Working',
+    color: 'text-destructive',
+    bgColor: 'bg-destructive',
+    label: 'Broken',
   },
   empty: {
     icon: Circle,

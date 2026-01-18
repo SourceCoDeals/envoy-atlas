@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { useSyncData } from '@/hooks/useSyncData';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useDataHealth } from '@/hooks/useDataHealth';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfolioOverview';
@@ -28,6 +29,7 @@ export default function Campaigns() {
   const { currentWorkspace } = useWorkspace();
   const { campaigns, loading, error, refetch } = useCampaigns();
   const { syncing, progress, elapsedTime, triggerSync } = useSyncData();
+  const { health: dataHealth } = useDataHealth();
   const [tierFilter, setTierFilter] = useState('all');
   const [engagementFilter, setEngagementFilter] = useState('all');
   const [engagements, setEngagements] = useState<Engagement[]>([]);
@@ -136,14 +138,18 @@ export default function Campaigns() {
         ) : (
           <div className="space-y-6">
             {/* Data Health Alert */}
-            {campaigns.some(c => c.total_sent === 0) && (
-              <Alert className="border-yellow-500/50 bg-yellow-500/10">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                <AlertDescription className="flex items-center justify-between">
+            {(campaigns.some(c => c.total_sent === 0) || dataHealth?.email.replyio.status === 'broken') && (
+              <Alert className="border-warning/30 bg-warning/10">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <AlertDescription className="flex items-center justify-between gap-4">
                   <span>
-                    Some campaigns show 0 sent emails. This may indicate a sync issue with Reply.io metrics.
+                    Some campaigns show 0 sent emails. Reply.io daily metrics currently report sent_count=0, so Reply.io performance views will be red until a resync fixes it.
                   </span>
-                  <DataHealthIndicator status="degraded" label="Partial Data" size="sm" />
+                  <DataHealthIndicator
+                    status={dataHealth?.email.replyio.status ?? 'degraded'}
+                    label={dataHealth?.email.replyio.status === 'healthy' ? 'Reply.io OK' : 'Reply.io Issue'}
+                    size="sm"
+                  />
                 </AlertDescription>
               </Alert>
             )}
