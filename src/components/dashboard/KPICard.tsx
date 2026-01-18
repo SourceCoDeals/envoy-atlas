@@ -1,6 +1,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { DataErrorFlag, DataErrorType } from '@/components/ui/data-error-flag';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -37,6 +38,10 @@ interface KPICardProps {
   iconColor?: string;
   onClick?: () => void;
   actionLabel?: string;
+  dataFlag?: {
+    type: DataErrorType;
+    tooltip?: string;
+  };
 }
 
 export function KPICard({
@@ -54,11 +59,11 @@ export function KPICard({
   iconColor,
   onClick,
   actionLabel,
+  dataFlag,
 }: KPICardProps) {
   const formatValue = (val: number) => {
     switch (format) {
       case 'percent':
-        return `${val.toFixed(decimals)}%`;
       case 'currency':
         return `$${val.toLocaleString()}`;
       case 'number':
@@ -150,10 +155,13 @@ export function KPICard({
             )}
           </div>
 
-          {/* Label */}
-          <p className="text-xs text-muted-foreground">{label}</p>
-
-          {/* Target Status */}
+          {/* Label + Data Flag */}
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            {dataFlag && (
+              <DataErrorFlag type={dataFlag.type} tooltip={dataFlag.tooltip} size="sm" />
+            )}
+          </div>
           {targetStatus && (
             <div className={cn("flex items-center gap-1 text-xs", targetStatus.color)}>
               <targetStatus.icon className="h-3 w-3" />
