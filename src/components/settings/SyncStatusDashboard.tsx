@@ -277,18 +277,6 @@ export function SyncStatusDashboard() {
                 <span>Last sync</span>
                 <span>{formatRelativeTime(p.lastSyncAt)}</span>
               </div>
-
-              {p.isActive && p.status !== 'syncing' && p.status !== 'partial' && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full mt-2 h-7 text-xs"
-                  onClick={() => triggerSync(p.platform)}
-                >
-                  <Play className="mr-1.5 h-3 w-3" />
-                  Sync Now
-                </Button>
-              )}
             </div>
           ))}
         </div>
