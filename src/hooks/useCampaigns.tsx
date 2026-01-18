@@ -103,10 +103,13 @@ export function useCampaigns() {
         return;
       }
 
-      // Fetch daily metrics AND cumulative metrics (fallback) using workspace_id
-      // Fetch cumulative metrics (campaign-level totals). We avoid scanning daily metric tables here
-      // because list views can exceed row limits and produce incomplete totals.
-      const [smartleadCumulativeResult, replyioCumulativeResult] = await Promise.all([
+      // Fetch cumulative metrics AND daily metrics (fallback) using workspace_id
+      const [
+        smartleadCumulativeResult, 
+        replyioCumulativeResult,
+        smartleadDailyResult,
+        replyioDailyResult
+      ] = await Promise.all([
         supabase
           .from('smartlead_campaign_cumulative')
           .select('*')
@@ -115,6 +118,15 @@ export function useCampaigns() {
           .from('replyio_campaign_cumulative')
           .select('*')
           .eq('workspace_id', currentWorkspace.id),
+        // Daily metrics aggregation as fallback
+        supabase
+          .from('smartlead_daily_metrics')
+          .select('campaign_id, sent_count, opened_count, clicked_count, replied_count, bounced_count')
+          .eq('workspace_id', currentWorkspace.id),
+        supabase
+          .from('replyio_daily_metrics')
+          .select('campaign_id, sent_count, opened_count, clicked_count, replied_count, bounced_count')
+          .eq('workspace_id', currentWorkspace.id),
       ]);
 
       // Build cumulative lookup map
@@ -122,15 +134,46 @@ export function useCampaigns() {
       (smartleadCumulativeResult.data || []).forEach(c => cumulativeMap.set(c.campaign_id, c));
       (replyioCumulativeResult.data || []).forEach(c => cumulativeMap.set(c.campaign_id, c));
 
-      // Build campaigns with metrics (cumulative only)
+      // Build daily metrics aggregation as fallback (sum all daily records per campaign)
+      const dailyAggregateMap = new Map<string, CumulativeMetric>();
+      const aggregateDaily = (rows: typeof smartleadDailyResult.data) => {
+        (rows || []).forEach(row => {
+          const existing = dailyAggregateMap.get(row.campaign_id);
+          if (existing) {
+            existing.total_sent = (existing.total_sent || 0) + (row.sent_count || 0);
+            existing.total_opened = (existing.total_opened || 0) + (row.opened_count || 0);
+            existing.total_clicked = (existing.total_clicked || 0) + (row.clicked_count || 0);
+            existing.total_replied = (existing.total_replied || 0) + (row.replied_count || 0);
+            existing.total_bounced = (existing.total_bounced || 0) + (row.bounced_count || 0);
+          } else {
+            dailyAggregateMap.set(row.campaign_id, {
+              campaign_id: row.campaign_id,
+              total_sent: row.sent_count || 0,
+              total_opened: row.opened_count || 0,
+              total_clicked: row.clicked_count || 0,
+              total_replied: row.replied_count || 0,
+              total_bounced: row.bounced_count || 0,
+            });
+          }
+        });
+      };
+      aggregateDaily(smartleadDailyResult.data);
+      aggregateDaily(replyioDailyResult.data);
+
+      // Build campaigns with metrics (cumulative first, then daily fallback)
       const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
         const cumulative = cumulativeMap.get(campaign.id);
+        const dailyAggregate = dailyAggregateMap.get(campaign.id);
 
-        const total_sent = cumulative?.total_sent || 0;
-        const total_opened = cumulative?.total_opened || 0;
-        const total_clicked = cumulative?.total_clicked || 0;
-        const total_replied = cumulative?.total_replied || 0;
-        const total_bounced = cumulative?.total_bounced || 0;
+        // Use cumulative if it has data, otherwise fall back to daily aggregate
+        const hasCumulativeData = cumulative && (cumulative.total_sent || 0) > 0;
+        const source = hasCumulativeData ? cumulative : dailyAggregate;
+
+        const total_sent = source?.total_sent || 0;
+        const total_opened = source?.total_opened || 0;
+        const total_clicked = source?.total_clicked || 0;
+        const total_replied = source?.total_replied || 0;
+        const total_bounced = source?.total_bounced || 0;
         const total_leads = 0;
 
         return {
