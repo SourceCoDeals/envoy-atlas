@@ -11,6 +11,9 @@ interface SyncProgress {
   current?: number;
   total?: number;
   label?: string;
+  stage?: string;
+  batch?: number;
+  estimatedTimeRemaining?: string;
 }
 
 interface ConnectionCardProps {
@@ -60,6 +63,13 @@ export function ConnectionCard({
   const progressPercent = syncProgress?.total 
     ? Math.round((syncProgress.current || 0) / syncProgress.total * 100) 
     : 0;
+
+  const formatStage = (stage?: string) => {
+    if (!stage) return null;
+    return stage
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
+  };
 
   return (
     <Card className={isConnected ? "border-success/30" : ""}>
@@ -126,18 +136,38 @@ export function ConnectionCard({
           </>
         ) : isSyncing ? (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <span className="text-sm font-medium">Syncing...</span>
-            </div>
-            {syncProgress?.total && syncProgress.total > 0 && (
-              <div className="space-y-1">
-                <Progress value={progressPercent} className="h-2" />
-                <div className="text-xs text-muted-foreground">
-                  {syncProgress.current || 0} / {syncProgress.total} {syncProgress.label || "items"}
-                </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm font-medium">
+                  {syncProgress?.stage ? formatStage(syncProgress.stage) : "Syncing..."}
+                </span>
               </div>
-            )}
+              {syncProgress?.batch && (
+                <Badge variant="secondary" className="text-xs">
+                  Batch {syncProgress.batch}
+                </Badge>
+              )}
+            </div>
+            
+            {/* Progress bar - always show when syncing */}
+            <div className="space-y-1.5">
+              <Progress value={progressPercent || 5} className="h-2" />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  {syncProgress?.total && syncProgress.total > 0 
+                    ? `${syncProgress.current || 0} / ${syncProgress.total} ${syncProgress.label || "items"}`
+                    : "Processing..."
+                  }
+                </span>
+                {syncProgress?.estimatedTimeRemaining && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    ~{syncProgress.estimatedTimeRemaining}
+                  </span>
+                )}
+              </div>
+            </div>
             {syncingContent}
           </div>
         ) : (
@@ -145,7 +175,12 @@ export function ConnectionCard({
             <div className="space-y-1.5 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground text-xs">Status</span>
-                <span className="capitalize text-xs">{syncStatus === "success" ? "Success" : syncStatus || "Idle"}</span>
+                <Badge 
+                  variant={syncStatus === "success" ? "outline" : syncStatus === "error" ? "destructive" : "secondary"}
+                  className="text-xs h-5"
+                >
+                  {syncStatus === "success" ? "Success" : syncStatus === "error" ? "Error" : syncStatus || "Idle"}
+                </Badge>
               </div>
               {lastSyncAt && (
                 <div className="flex items-center justify-between">
