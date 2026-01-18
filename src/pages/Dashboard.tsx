@@ -16,6 +16,8 @@ import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/component
 import { ExecutiveSummary } from '@/components/copyinsights/ExecutiveSummary';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataErrorFlag } from '@/components/ui/data-error-flag';
+import { DataStatusBanner } from '@/components/ui/data-status-banner';
 import { 
   AreaChart, 
   Area, 
@@ -259,6 +261,20 @@ export default function Dashboard() {
           </Card>
         ) : (
           <>
+            {/* Data Status Banner - Alert users to data quality issues */}
+            <DataStatusBanner
+              status="partial"
+              title="Some Dashboard Data is Estimated"
+              description="The core email metrics (Sent, Opened, Replied, Bounced) are from synced data. However, some analytics like trend comparisons and failure analysis use simulated previous period data."
+              issues={[
+                'Week-over-week trends use estimated previous period values',
+                'Failure mode classification uses simulated comparison data',
+                'Positive Rate may be estimated if not tracked by platform',
+              ]}
+              configureLink="/settings"
+              configureLinkLabel="Review Data Sources"
+            />
+
             {/* Executive Summary */}
             <ExecutiveSummary
               title="What's Happening With Your Outbound"
@@ -311,6 +327,10 @@ export default function Dashboard() {
                 icon={Target}
                 iconColor="text-success"
                 status={getKPIStatus(stats.positiveRate, 1.5, 1)}
+                dataFlag={stats.positiveRate === 0 ? undefined : {
+                  type: 'estimated',
+                  tooltip: 'Positive reply classification may vary by platform. Some use AI, others use manual tagging.'
+                }}
               />
               <KPICard
                 label="Bounce Rate"
@@ -330,6 +350,10 @@ export default function Dashboard() {
                 decimals={2}
                 target={{ value: 0.1 }}
                 status={getKPIStatus(stats.spamRate, 0.1, 0.3, false)}
+                dataFlag={stats.spamRate === 0 ? {
+                  type: 'not-tracked',
+                  tooltip: 'Spam complaints not tracked by connected platforms'
+                } : undefined}
               />
             </div>
 
