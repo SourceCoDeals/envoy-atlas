@@ -15,7 +15,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
-import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download, Link2, AlertTriangle } from 'lucide-react';
+import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download, Link2, AlertTriangle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Engagement {
@@ -72,6 +72,12 @@ export default function Campaigns() {
     );
   }
 
+  // Phase B: Determine platform statuses for status bar
+  const smartleadStatus = dataHealth?.email.smartlead.status ?? 'empty';
+  const replyioStatus = dataHealth?.email.replyio.status ?? 'empty';
+  const hasReplyioBroken = replyioStatus === 'broken';
+  const hasSmartleadBroken = smartleadStatus === 'broken';
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -84,6 +90,22 @@ export default function Campaigns() {
           </div>
           {campaigns.length > 0 && (
             <div className="flex gap-2">
+              {/* Phase B: Platform status bar */}
+              <div className="flex items-center gap-3 mr-4 px-3 py-1.5 rounded-md bg-muted/50 border">
+                <DataHealthIndicator
+                  status={smartleadStatus}
+                  label="Smartlead"
+                  size="sm"
+                  tooltip={dataHealth?.email.smartlead.details}
+                />
+                <div className="w-px h-4 bg-border" />
+                <DataHealthIndicator
+                  status={replyioStatus}
+                  label="Reply.io"
+                  size="sm"
+                  tooltip={dataHealth?.email.replyio.details}
+                />
+              </div>
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -137,19 +159,30 @@ export default function Campaigns() {
           </Card>
         ) : (
           <div className="space-y-6">
-            {/* Data Health Alert */}
-            {(campaigns.some(c => c.total_sent === 0) || dataHealth?.email.replyio.status === 'broken') && (
+            {/* Phase B: Critical Platform Broken Alert */}
+            {hasReplyioBroken && (
+              <Alert className="border-destructive/50 bg-destructive/10">
+                <XCircle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="flex items-center justify-between gap-4">
+                  <div>
+                    <span className="font-medium text-destructive">Reply.io metrics broken:</span>{' '}
+                    <span>sent_count=0 across all campaigns. Trigger a full resync from </span>
+                    <Link to="/connections" className="underline font-medium hover:text-primary">Settings → Connections</Link>
+                    <span> with "Reset" enabled.</span>
+                  </div>
+                  <Button variant="outline" size="sm" asChild className="shrink-0">
+                    <Link to="/connections">Go to Connections</Link>
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
+            
+            {/* Degraded warning (non-critical) */}
+            {!hasReplyioBroken && smartleadStatus === 'degraded' && (
               <Alert className="border-warning/30 bg-warning/10">
                 <AlertTriangle className="h-4 w-4 text-warning" />
-                <AlertDescription className="flex items-center justify-between gap-4">
-                  <span>
-                    Some campaigns show 0 sent emails. Reply.io daily metrics currently report sent_count=0, so Reply.io performance views will be red until a resync fixes it.
-                  </span>
-                  <DataHealthIndicator
-                    status={dataHealth?.email.replyio.status ?? 'degraded'}
-                    label={dataHealth?.email.replyio.status === 'healthy' ? 'Reply.io OK' : 'Reply.io Issue'}
-                    size="sm"
-                  />
+                <AlertDescription>
+                  Smartlead metrics partially available. Some opens may be missing due to API limitations.
                 </AlertDescription>
               </Alert>
             )}

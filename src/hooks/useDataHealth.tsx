@@ -98,6 +98,17 @@ export function useDataHealth() {
       const copyLibraryCount = copyLibrary.count || 0;
       const patternsCount = patterns.count || 0;
 
+      // Phase A: Fix broken vs degraded classification
+      // Reply.io is BROKEN (red) if campaigns exist but NO daily metrics have sent_count > 0
+      // Smartlead uses 'degraded' for missing opens (API limitation) but 'healthy' for sent data
+      const replyioStatus: DataHealthStatus = replyioCount > 0 
+        ? (replyioMetricsCount > 0 ? 'healthy' : 'broken')  // broken if campaigns but no sent metrics
+        : 'empty';
+      
+      const smartleadStatus: DataHealthStatus = smartleadCount > 0 
+        ? (smartleadMetricsCount > 0 ? 'healthy' : 'degraded')  // degraded OK for Smartlead (opens missing is known)
+        : 'empty';
+
       const healthData: DataHealthSummary = {
         email: {
           smartlead: {
@@ -105,10 +116,9 @@ export function useDataHealth() {
             table: 'smartlead_campaigns',
             rowCount: smartleadCount,
             hasData: smartleadCount > 0,
-            status: smartleadCount > 0 && smartleadMetricsCount > 0 ? 'healthy' : 
-                    smartleadCount > 0 ? 'degraded' : 'empty',
+            status: smartleadStatus,
             details: smartleadCount > 0 
-              ? `${smartleadCount} campaigns${smartleadMetricsCount > 0 ? ', metrics syncing' : ', metrics empty'}`
+              ? `${smartleadCount} campaigns${smartleadMetricsCount > 0 ? ', metrics OK' : ', metrics pending'}`
               : 'Not connected',
           },
           replyio: {
@@ -116,10 +126,9 @@ export function useDataHealth() {
             table: 'replyio_campaigns',
             rowCount: replyioCount,
             hasData: replyioCount > 0,
-            status: replyioCount > 0 && replyioMetricsCount > 0 ? 'healthy' : 
-                    replyioCount > 0 ? 'degraded' : 'empty',
+            status: replyioStatus,
             details: replyioCount > 0 
-              ? `${replyioCount} campaigns${replyioMetricsCount > 0 ? ', metrics syncing' : ', sent_count=0 (broken)'}`
+              ? (replyioMetricsCount > 0 ? `${replyioCount} campaigns, metrics OK` : `${replyioCount} campaigns, sent_count=0 — resync required`)
               : 'Not connected',
           },
         },
