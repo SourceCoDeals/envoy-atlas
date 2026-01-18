@@ -8,6 +8,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CreateWorkspace } from '@/components/onboarding/CreateWorkspace';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
 import { SystemHealthScore, calculateSystemHealth } from '@/components/dashboard/SystemHealthScore';
+import { DataHealthDashboard } from '@/components/dashboard/DataHealthDashboard';
 // FailureModeClassification and WhatChangedAnalysis removed - were using simulated comparison data
 import { ActionQueue, generateActionItems } from '@/components/dashboard/ActionQueue';
 import { KPICard, getKPIStatus } from '@/components/dashboard/KPICard';
@@ -238,16 +239,8 @@ export default function Dashboard() {
           </Card>
         ) : (
           <>
-            {/* Data Status Banner - All metrics are now from real synced data */}
-            <DataStatusBanner
-              status="healthy"
-              title="Dashboard Data is Real"
-              description="All email metrics (Sent, Opened, Replied, Bounced) come from synced platform data. Simulated trend comparisons and failure analysis have been removed."
-              issues={[
-                'Positive Rate classification varies by platform (some use AI, others manual tagging)',
-                'Spam complaints may not be tracked by all platforms',
-              ]}
-            />
+            {/* Data Health Dashboard */}
+            <DataHealthDashboard />
 
             {/* Executive Summary */}
             <ExecutiveSummary

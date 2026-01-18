@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { 
   Phone, 
   PhoneCall, 
@@ -16,6 +18,7 @@ import {
   Sparkles,
   RefreshCw,
   Filter,
+  AlertTriangle,
 } from 'lucide-react';
 import { useProcessCalls } from '@/hooks/useCallIntelligence';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -171,12 +174,18 @@ export default function CallingDashboard() {
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Call Intelligence</h1>
-            <p className="text-muted-foreground">
-              {totalCount.toLocaleString()} total calls • Showing {dateRangeLabel.toLowerCase()}
-              {selectedAnalyst !== 'all' && ` for ${selectedAnalyst}`}
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Call Intelligence</h1>
+              <p className="text-muted-foreground">
+                {totalCount.toLocaleString()} total calls • Showing {dateRangeLabel.toLowerCase()}
+                {selectedAnalyst !== 'all' && ` for ${selectedAnalyst}`}
+              </p>
+            </div>
+            <DataHealthIndicator 
+              status={totalCount > 0 ? 'healthy' : 'empty'} 
+              tooltip={totalCount > 0 ? `${totalCount} calls synced` : 'No calls synced. Connect PhoneBurner or sync NocoDB.'}
+            />
           </div>
           <div className="flex items-center gap-2">
             <Button 

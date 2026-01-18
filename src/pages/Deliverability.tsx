@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { Loader2, Shield } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { useDeliverabilityData } from '@/hooks/useDeliverabilityData';
@@ -271,9 +272,17 @@ export default function Deliverability() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Deliverability</h1>
-          <p className="text-muted-foreground">Predictive risk management – Are we safe to send?</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Deliverability</h1>
+            <p className="text-muted-foreground">Predictive risk management – Are we safe to send?</p>
+          </div>
+          <DataHealthIndicator 
+            status={hasData ? (stats?.totalMailboxes && stats.totalMailboxes > 0 ? 'healthy' : 'degraded') : 'empty'} 
+            tooltip={hasData 
+              ? `${stats?.totalMailboxes || 0} mailboxes, ${domains.length} domains` 
+              : 'No deliverability data. Connect email platforms.'}
+          />
         </div>
 
         {loading ? (

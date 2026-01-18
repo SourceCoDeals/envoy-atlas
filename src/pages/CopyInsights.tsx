@@ -19,7 +19,10 @@ import {
   ListOrdered,
   FlaskConical,
   GitCompare,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
+import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { useCopyAnalytics, type SubjectLineAnalysis } from '@/hooks/useCopyAnalytics';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -187,11 +190,21 @@ export default function CopyInsights() {
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Copy Insights</h1>
-            <p className="text-muted-foreground">
-              The Message Laboratory – Turn opinions into data
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Copy Insights</h1>
+              <p className="text-muted-foreground">
+                The Message Laboratory – Turn opinions into data
+              </p>
+            </div>
+            <DataHealthIndicator 
+              status={hasData ? (patterns.length > 0 ? 'healthy' : 'degraded') : 'empty'} 
+              tooltip={hasData 
+                ? (patterns.length > 0 
+                  ? `${subjectLines.length} variants, ${patterns.length} patterns` 
+                  : `${subjectLines.length} variants but no patterns computed`) 
+                : 'No copy data. Sync campaigns first.'}
+            />
           </div>
           <div className="flex items-center gap-2">
             <TooltipProvider>
