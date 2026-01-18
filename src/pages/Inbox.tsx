@@ -98,7 +98,8 @@ export default function Inbox() {
           company: item.leads?.company, title: item.leads?.title,
           reply_content: item.reply_content, occurred_at: item.occurred_at,
           classification, priority: config.priority, hoursAgo, minutesAgo, isOverdue,
-          targetResponseHours: targetHours, timeRemaining, threadLength: 1, isICP: Math.random() > 0.5,
+          targetResponseHours: targetHours, timeRemaining, threadLength: 1, 
+          isICP: false, // NOTE: ICP matching not implemented - would require segment linking
         };
       });
 
