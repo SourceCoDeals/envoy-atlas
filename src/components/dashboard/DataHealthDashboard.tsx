@@ -27,9 +27,9 @@ function DataSourceRow({ source, icon }: DataSourceRowProps) {
   return (
     <div className={cn(
       'flex items-center justify-between p-3 rounded-lg border',
-      source.status === 'healthy' && 'bg-green-500/5 border-green-500/20',
-      source.status === 'degraded' && 'bg-yellow-500/5 border-yellow-500/20',
-      source.status === 'broken' && 'bg-red-500/5 border-red-500/20',
+      source.status === 'healthy' && 'bg-success/5 border-success/20',
+      source.status === 'degraded' && 'bg-warning/5 border-warning/20',
+      source.status === 'broken' && 'bg-destructive/5 border-destructive/20',
       source.status === 'empty' && 'bg-muted/50 border-border',
     )}>
       <div className="flex items-center gap-3">
@@ -67,9 +67,9 @@ function SectionCard({
   return (
     <Card className={cn(
       'border-l-4',
-      overallStatus === 'healthy' && 'border-l-green-500',
-      overallStatus === 'degraded' && 'border-l-yellow-500',
-      overallStatus === 'broken' && 'border-l-red-500',
+      overallStatus === 'healthy' && 'border-l-success',
+      overallStatus === 'degraded' && 'border-l-warning',
+      overallStatus === 'broken' && 'border-l-destructive',
       overallStatus === 'empty' && 'border-l-muted-foreground',
     )}>
       <CardHeader className="pb-3">
