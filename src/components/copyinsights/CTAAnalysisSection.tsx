@@ -46,21 +46,18 @@ export function CTAAnalysisSection({ ctaMetrics, stepData }: CTAAnalysisSectionP
   const steps = ['Email 1', 'Email 2', 'Email 3', 'Follow-up'];
   const ctaTypes = ['binary', 'direct', 'soft', 'info'];
   
-  // Mock heatmap values if no stepData (would come from actual analysis)
+  // Get heatmap value from actual step data only (no fake fallbacks)
   const getHeatmapValue = (step: string, cta: string): number => {
     if (stepData) {
       const found = stepData.find(d => d.step === step && d.cta_type === cta);
       return found?.reply_rate || 0;
     }
-    // Generate illustrative values based on known patterns
-    const baseRates: Record<string, Record<string, number>> = {
-      'Email 1': { binary: 2.8, direct: 3.2, soft: 3.8, info: 4.2 },
-      'Email 2': { binary: 4.5, direct: 3.8, soft: 2.9, info: 3.4 },
-      'Email 3': { binary: 4.2, direct: 3.2, soft: 2.4, info: 2.8 },
-      'Follow-up': { binary: 3.6, direct: 2.8, soft: 2.0, info: 2.2 },
-    };
-    return baseRates[step]?.[cta] || 0;
+    // No data available - return 0 instead of fake values
+    return 0;
   };
+  
+  // Check if we have any step data to show the heatmap
+  const hasStepData = stepData && stepData.length > 0;
 
   const getHeatmapColor = (value: number, maxValue: number) => {
     const intensity = maxValue > 0 ? value / maxValue : 0;
@@ -152,54 +149,56 @@ export function CTAAnalysisSection({ ctaMetrics, stepData }: CTAAnalysisSectionP
             Reply rate by CTA type and email sequence position (darker = higher conversion)
           </p>
           
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="text-left text-xs font-medium text-muted-foreground p-2 w-24"></th>
-                  {steps.map(step => (
-                    <th key={step} className="text-center text-xs font-medium text-muted-foreground p-2">
-                      {step}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {ctaTypes.map(cta => (
-                  <tr key={cta}>
-                    <td className="text-xs font-medium p-2">
-                      {ctaLabels[cta]?.label || cta}
-                    </td>
-                    {steps.map(step => {
-                      const value = getHeatmapValue(step, cta);
-                      return (
-                        <td key={`${cta}-${step}`} className="p-1">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className={`h-10 rounded flex items-center justify-center text-xs font-mono ${getHeatmapColor(value, maxHeatmapValue)}`}>
-                                  {formatRate(value)}
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{ctaLabels[cta]?.label} in {step}</p>
-                                <p className="text-xs text-muted-foreground">Reply rate: {formatRate(value)}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </td>
-                      );
-                    })}
+          {hasStepData ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="text-left text-xs font-medium text-muted-foreground p-2 w-24"></th>
+                    {steps.map(step => (
+                      <th key={step} className="text-center text-xs font-medium text-muted-foreground p-2">
+                        {step}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          
-          <p className="text-xs text-muted-foreground mt-4 p-3 bg-muted/50 rounded-lg">
-            <strong>Key Insight:</strong> Choice CTAs generate higher meeting conversion in Email 2+, 
-            while Soft CTAs perform better in Email 1 for initial engagement.
-          </p>
+                </thead>
+                <tbody>
+                  {ctaTypes.map(cta => (
+                    <tr key={cta}>
+                      <td className="text-xs font-medium p-2">
+                        {ctaLabels[cta]?.label || cta}
+                      </td>
+                      {steps.map(step => {
+                        const value = getHeatmapValue(step, cta);
+                        return (
+                          <td key={`${cta}-${step}`} className="p-1">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className={`h-10 rounded flex items-center justify-center text-xs font-mono ${getHeatmapColor(value, maxHeatmapValue)}`}>
+                                    {formatRate(value)}
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>{ctaLabels[cta]?.label} in {step}</p>
+                                  <p className="text-xs text-muted-foreground">Reply rate: {formatRate(value)}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground border rounded-lg">
+              <p className="text-sm">No step-level CTA data available</p>
+              <p className="text-xs mt-1">CTA analysis by sequence step requires email variant tagging</p>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

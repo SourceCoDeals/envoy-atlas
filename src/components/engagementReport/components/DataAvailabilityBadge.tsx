@@ -116,9 +116,9 @@ export function useDataAvailability(data: {
     smartLeadOpens: data.hasSmartLeadOpens ? 'actual' : 'estimated',
     replyIoSent: data.hasReplyIoSent ? 'actual' : 'estimated',
     callScores: data.hasCallScores ? 'actual' : 'unavailable',
-    domainAuth: data.hasDomainAuth ? 'actual' : 'estimated',
+    domainAuth: data.hasDomainAuth ? 'actual' : 'unavailable',
     leadEnrichment: data.hasLeadEnrichment ? 'actual' : 'partial',
-    meetingBreakdown: 'estimated' as const, // Always estimated until calendar integration
-    listQuality: 'estimated' as const, // Always estimated based on heuristics
+    meetingBreakdown: 'unavailable' as const, // Requires calendar integration - NOT tracked
+    listQuality: 'unavailable' as const, // Requires lead enrichment integration - NOT tracked
   };
 }
