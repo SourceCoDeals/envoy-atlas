@@ -350,6 +350,7 @@ export default function EngagementReport() {
                 infrastructureMetrics: data.infrastructureMetrics,
                 enrollmentMetrics,
                 weeklyEnrollmentTrend,
+                weeklyPerformance: data.weeklyPerformance,
                 dataAvailability: dataAvailability,
               }}
             />
