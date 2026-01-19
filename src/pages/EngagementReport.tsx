@@ -134,6 +134,11 @@ export default function EngagementReport() {
 
   const engagementStatus = statusConfig[engagement.status || 'active'] || statusConfig.active;
 
+  const historicalEmailRangeLabel = dataAvailability?.historicalEmailMinDate
+    ? `${new Date(dataAvailability.historicalEmailMinDate).toLocaleDateString()} – ${new Date(
+        dataAvailability.historicalEmailMaxDate ?? dataAvailability.historicalEmailMinDate
+      ).toLocaleDateString()}`
+    : null;
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -223,6 +228,33 @@ export default function EngagementReport() {
             </div>
           </div>
         </div>
+
+        {linkedCampaignsWithStats.length > 0 &&
+          emailMetrics.sent === 0 &&
+          dateRangeOption !== 'all' &&
+          dataAvailability?.hasHistoricalEmailMetrics && (
+            <Card className="border-warning/30 bg-warning/10">
+              <CardContent className="py-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <Calendar className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">No metrics in the selected range</p>
+                      <p className="text-sm text-muted-foreground">
+                        {historicalEmailRangeLabel
+                          ? `We do have synced history (${historicalEmailRangeLabel}).`
+                          : 'We do have synced history for this engagement.'}{' '}
+                        Switch to <span className="font-medium">All time</span> to display it.
+                      </p>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setDateRangeOption('all')}>
+                    Show all time
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
         {/* Key Metrics */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
