@@ -35,6 +35,18 @@ interface SmartleadAnalytics {
   reply_count: number;
   bounce_count: number;
   unsubscribe_count: number;
+  // Lead stats for enrollment tracking
+  total_count?: number;
+  drafted_count?: number;
+  campaign_lead_stats?: {
+    total?: number;
+    notStarted?: number;
+    inprogress?: number;
+    completed?: number;
+    blocked?: number;
+    paused?: number;
+    unsubscribed?: number;
+  };
 }
 
 interface SmartleadSequence {
@@ -478,7 +490,20 @@ serve(async (req) => {
             
             console.log(`  Analytics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
 
-            // Update campaign with totals
+            // Extract lead stats for enrollment tracking
+            const leadStats = (analytics as any).campaign_lead_stats || {};
+            const enrollmentSettings = {
+              total_leads: (analytics as any).total_count || 0,
+              not_started: leadStats.notStarted || 0,
+              in_progress: leadStats.inprogress || 0,
+              completed: leadStats.completed || 0,
+              blocked: leadStats.blocked || 0,
+              paused: leadStats.paused || 0,
+              unsubscribed: leadStats.unsubscribed || (analytics as any).unsubscribe_count || 0,
+              drafted_count: (analytics as any).drafted_count || 0,
+            };
+
+            // Update campaign with totals and enrollment settings
             // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0
             await supabase.from('campaigns').update({
               total_sent: totalSent,
@@ -489,7 +514,25 @@ serve(async (req) => {
               reply_rate: totalSent > 0 ? Math.min(0.9999, totalReplied / totalSent) : null,
               open_rate: totalSent > 0 ? Math.min(0.9999, totalOpened / totalSent) : null,
               bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
+              settings: enrollmentSettings,
             }).eq('id', campaignDbId);
+
+            // Store enrollment snapshot for tracking trends
+            if (enrollmentSettings.total_leads > 0 || enrollmentSettings.not_started > 0) {
+              await supabase.from('enrollment_snapshots').upsert({
+                campaign_id: campaignDbId,
+                engagement_id: activeEngagementId,
+                date: today,
+                total_leads: enrollmentSettings.total_leads,
+                not_started: enrollmentSettings.not_started,
+                in_progress: enrollmentSettings.in_progress,
+                completed: enrollmentSettings.completed,
+                blocked: enrollmentSettings.blocked,
+                paused: enrollmentSettings.paused,
+                unsubscribed: enrollmentSettings.unsubscribed,
+              }, { onConflict: 'campaign_id,date' });
+              console.log(`  Enrollment snapshot: total=${enrollmentSettings.total_leads}, backlog=${enrollmentSettings.not_started}`);
+            }
 
             // Store daily metrics
             if (totalSent > 0 || totalOpened > 0 || totalReplied > 0) {

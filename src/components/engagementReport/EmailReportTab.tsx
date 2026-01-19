@@ -1,15 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { 
   Send, CheckCircle, MessageSquare, 
   ThumbsUp, AlertTriangle, Mail, Globe, Inbox, Activity,
   ChevronDown, ChevronUp, Shield, ShieldCheck, ShieldX,
-  Flame, Gauge
+  Flame, Gauge, Users, Clock, UserPlus
 } from 'lucide-react';
 import { useState } from 'react';
-import type { InfrastructureMetrics, DomainBreakdown } from '@/hooks/useEngagementReport';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import type { InfrastructureMetrics, DomainBreakdown, EnrollmentMetrics, WeeklyEnrollmentTrend } from '@/hooks/useEngagementReport';
 import { DataAvailabilityWarning } from './DataAvailabilityWarning';
 import { DataErrorFlag } from '@/components/ui/data-error-flag';
 import { SentimentAnalysisNotAvailable } from '@/components/ui/data-status-banner';
@@ -39,12 +41,14 @@ interface EmailReportTabProps {
     };
     linkedCampaigns: Array<{ id: string; name: string; platform: 'smartlead' | 'replyio' }>;
     infrastructureMetrics: InfrastructureMetrics;
+    enrollmentMetrics?: EnrollmentMetrics;
+    weeklyEnrollmentTrend?: WeeklyEnrollmentTrend[];
     dataAvailability?: DataAvailability;
   };
 }
 
 export function EmailReportTab({ data }: EmailReportTabProps) {
-  const { emailMetrics, linkedCampaigns, infrastructureMetrics, dataAvailability } = data;
+  const { emailMetrics, linkedCampaigns, infrastructureMetrics, enrollmentMetrics, weeklyEnrollmentTrend, dataAvailability } = data;
   const [domainsExpanded, setDomainsExpanded] = useState(false);
 
   // Default infrastructure metrics if not available
@@ -132,8 +136,114 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
     },
   ];
 
+  const hasEnrollmentData = enrollmentMetrics && enrollmentMetrics.totalLeads > 0;
+  const hasBacklog = enrollmentMetrics && enrollmentMetrics.notStarted > 0;
+
   return (
     <div className="space-y-6">
+      {/* Backlog Alert */}
+      {hasBacklog && (
+        <Alert variant="destructive" className="border-warning bg-warning/10">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Sending Backlog Detected</AlertTitle>
+          <AlertDescription>
+            {enrollmentMetrics.notStarted.toLocaleString()} contacts are enrolled but haven't received their first email yet. 
+            This may be due to campaign sending limits or mailbox capacity constraints.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Lead Enrollment Status */}
+      {hasEnrollmentData && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Lead Enrollment Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 rounded-lg border bg-card">
+                <div className="flex items-center gap-2 mb-2">
+                  <UserPlus className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total Enrolled</span>
+                </div>
+                <p className="text-2xl font-bold">{enrollmentMetrics.totalLeads.toLocaleString()}</p>
+              </div>
+              
+              <div className={`p-4 rounded-lg border ${hasBacklog ? 'bg-warning/10 border-warning/30' : 'bg-card'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="h-4 w-4 text-warning" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Backlog (Not Started)</span>
+                </div>
+                <p className={`text-2xl font-bold ${hasBacklog ? 'text-warning' : ''}`}>
+                  {enrollmentMetrics.notStarted.toLocaleString()}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {enrollmentMetrics.backlogRate.toFixed(1)}% of enrolled
+                </p>
+              </div>
+              
+              <div className="p-4 rounded-lg border bg-card">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="h-4 w-4 text-primary" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">In Progress</span>
+                </div>
+                <p className="text-2xl font-bold">{enrollmentMetrics.inProgress.toLocaleString()}</p>
+              </div>
+              
+              <div className="p-4 rounded-lg border bg-card">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle className="h-4 w-4 text-success" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Completed</span>
+                </div>
+                <p className="text-2xl font-bold text-success">{enrollmentMetrics.completed.toLocaleString()}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Weekly Enrollment Trend Chart */}
+      {weeklyEnrollmentTrend && weeklyEnrollmentTrend.length > 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-primary" />
+              New Leads Enrolled Per Week
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={weeklyEnrollmentTrend}>
+                <XAxis dataKey="weekLabel" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Legend />
+                <Line 
+                  type="monotone" 
+                  dataKey="newLeadsEnrolled" 
+                  stroke="hsl(var(--primary))" 
+                  strokeWidth={2}
+                  name="New Leads"
+                  dot={{ fill: 'hsl(var(--primary))' }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="backlog" 
+                  stroke="hsl(var(--warning))" 
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  name="Backlog"
+                  dot={{ fill: 'hsl(var(--warning))' }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Data Availability Warning */}
       {dataAvailability?.emailCampaignFallback && (
         <DataAvailabilityWarning type="fallback" />
