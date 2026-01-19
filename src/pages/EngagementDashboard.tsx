@@ -7,12 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,7 +37,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2, ChevronDown, ChevronRight,
-  Phone, Target, TrendingUp, Users, Link as LinkIcon, BarChart3
+  Phone, Target, TrendingUp, Users, Link as LinkIcon, BarChart3, Wand2, Check, X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LinkedCampaignsList, LinkedCampaign } from '@/components/engagements/LinkedCampaignsList';
@@ -88,6 +90,17 @@ export default function EngagementDashboard() {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkingEngagementId, setLinkingEngagementId] = useState<string | null>(null);
   const [unlinkingCampaign, setUnlinkingCampaign] = useState<string | null>(null);
+
+  // Auto-pair state
+  const [autoPairDialogOpen, setAutoPairDialogOpen] = useState(false);
+  const [autoPairLoading, setAutoPairLoading] = useState(false);
+  const [autoPairResults, setAutoPairResults] = useState<{
+    engagementsCreated: number;
+    campaignsLinked: number;
+    campaignsSkipped: number;
+    skippedReasons: { name: string; reason: string }[];
+    details: { engagement: string; campaigns: string[] }[];
+  } | null>(null);
 
   const emptyForm = {
     name: '',
@@ -481,7 +494,46 @@ export default function EngagementDashboard() {
     }
   };
 
-  // Summary totals
+  // Handle auto-pairing campaigns
+  const handleAutoPair = async () => {
+    if (!currentWorkspace?.id) return;
+    
+    setAutoPairLoading(true);
+    setAutoPairResults(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('auto-pair-engagements', {
+        body: {
+          client_id: currentWorkspace.id,
+          dry_run: false,
+        },
+      });
+
+      if (error) throw error;
+
+      setAutoPairResults({
+        engagementsCreated: data.engagementsCreated,
+        campaignsLinked: data.campaignsLinked,
+        campaignsSkipped: data.campaignsSkipped,
+        skippedReasons: data.skippedReasons || [],
+        details: data.details || [],
+      });
+
+      if (data.engagementsCreated > 0 || data.campaignsLinked > 0) {
+        toast.success(`Created ${data.engagementsCreated} engagements, linked ${data.campaignsLinked} campaigns`);
+        // Refresh data
+        fetchEngagements();
+        fetchAllCampaigns();
+      } else {
+        toast.info('No new matches found to auto-pair');
+      }
+    } catch (err) {
+      console.error('Error auto-pairing:', err);
+      toast.error('Failed to auto-pair campaigns');
+    } finally {
+      setAutoPairLoading(false);
+    }
+  };
   const totals = useMemo(() => {
     return campaignSummaries.reduce(
       (acc, c) => ({
@@ -512,13 +564,19 @@ export default function EngagementDashboard() {
               Manage client engagements and track performance
             </p>
           </div>
-          <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Engagement
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setAutoPairDialogOpen(true)}>
+              <Wand2 className="mr-2 h-4 w-4" />
+              Auto-Pair Campaigns
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Engagement
+            </Button>
+          </div>
         </div>
 
-        {/* Summary Cards */}
+
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -784,6 +842,146 @@ export default function EngagementDashboard() {
           onLink={handleLinkCampaigns}
           engagementName={engagements.find(e => e.id === linkingEngagementId)?.name || ''}
         />
+
+        {/* Auto-Pair Dialog */}
+        <Dialog open={autoPairDialogOpen} onOpenChange={setAutoPairDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[80vh]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Wand2 className="h-5 w-5" />
+                Auto-Pair Campaigns to Engagements
+              </DialogTitle>
+              <DialogDescription>
+                Automatically create engagements and link campaigns based on client name and industry patterns.
+              </DialogDescription>
+            </DialogHeader>
+
+            {!autoPairResults && !autoPairLoading && (
+              <div className="py-6 space-y-4">
+                <div className="rounded-lg border p-4 bg-muted/50">
+                  <h4 className="font-medium mb-2">How it works:</h4>
+                  <ul className="text-sm text-muted-foreground space-y-2">
+                    <li className="flex items-start gap-2">
+                      <Check className="h-4 w-4 mt-0.5 text-green-500" />
+                      Analyzes campaign names to extract client and industry
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="h-4 w-4 mt-0.5 text-green-500" />
+                      Creates one engagement per client + industry combination
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="h-4 w-4 mt-0.5 text-green-500" />
+                      Links matching campaigns automatically
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <X className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                      Skips SourceCo campaigns (internal)
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <X className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                      Skips campaigns with unidentifiable clients
+                    </li>
+                  </ul>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  This will create new engagements and link all matching campaigns immediately.
+                </p>
+              </div>
+            )}
+
+            {autoPairLoading && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                <p className="text-muted-foreground">Analyzing and pairing campaigns...</p>
+              </div>
+            )}
+
+            {autoPairResults && (
+              <ScrollArea className="max-h-[400px]">
+                <div className="space-y-4">
+                  {/* Summary */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="rounded-lg border p-4 text-center">
+                      <div className="text-2xl font-bold text-green-600">{autoPairResults.engagementsCreated}</div>
+                      <div className="text-sm text-muted-foreground">Engagements Created</div>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <div className="text-2xl font-bold text-blue-600">{autoPairResults.campaignsLinked}</div>
+                      <div className="text-sm text-muted-foreground">Campaigns Linked</div>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <div className="text-2xl font-bold text-muted-foreground">{autoPairResults.campaignsSkipped}</div>
+                      <div className="text-sm text-muted-foreground">Skipped</div>
+                    </div>
+                  </div>
+
+                  {/* Details */}
+                  {autoPairResults.details.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="font-medium">Engagements & Campaigns:</h4>
+                      <div className="space-y-2">
+                        {autoPairResults.details.slice(0, 20).map((detail, i) => (
+                          <div key={i} className="rounded-lg border p-3">
+                            <div className="font-medium text-sm flex items-center gap-2">
+                              <Building2 className="h-4 w-4" />
+                              {detail.engagement}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {detail.campaigns.length} campaign{detail.campaigns.length !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        ))}
+                        {autoPairResults.details.length > 20 && (
+                          <p className="text-sm text-muted-foreground">
+                            ...and {autoPairResults.details.length - 20} more
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Skipped */}
+                  {autoPairResults.skippedReasons.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-muted-foreground">Skipped ({autoPairResults.skippedReasons.length}):</h4>
+                      <div className="text-xs text-muted-foreground space-y-1 max-h-32 overflow-y-auto">
+                        {autoPairResults.skippedReasons.slice(0, 10).map((s, i) => (
+                          <div key={i} className="truncate">
+                            {s.name}: {s.reason}
+                          </div>
+                        ))}
+                        {autoPairResults.skippedReasons.length > 10 && (
+                          <div>...and {autoPairResults.skippedReasons.length - 10} more</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            )}
+
+            <DialogFooter>
+              {!autoPairResults ? (
+                <>
+                  <Button variant="outline" onClick={() => setAutoPairDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleAutoPair} disabled={autoPairLoading}>
+                    {autoPairLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Run Auto-Pair
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => {
+                  setAutoPairDialogOpen(false);
+                  setAutoPairResults(null);
+                }}>
+                  Done
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );
