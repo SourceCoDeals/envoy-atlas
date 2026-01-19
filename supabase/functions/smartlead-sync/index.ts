@@ -20,11 +20,31 @@ const TIME_BUDGET_MS = 120000;
 const MAX_BATCHES = 100;
 const CONTINUATION_RETRIES = 3;
 
+// ============================================
+// COMPREHENSIVE DATA INTERFACES
+// ============================================
 interface SmartleadCampaign {
   id: number;
   name: string;
   status: string;
   created_at: string;
+  // Additional fields from API
+  scheduler_cron_value?: string;
+  min_time_btwn_emails?: number;
+  max_leads_per_day?: number;
+  track_settings?: {
+    track_open?: boolean;
+    track_click?: boolean;
+    track_reply?: boolean;
+  };
+  stop_lead_settings?: {
+    stop_on_reply?: boolean;
+    stop_on_auto_reply?: boolean;
+    stop_on_meeting_booked?: boolean;
+  };
+  timezone?: string;
+  client_id?: number;
+  user_id?: number;
 }
 
 interface SmartleadAnalytics {
@@ -57,10 +77,13 @@ interface SmartleadSequence {
   subject: string;
   email_body: string;
   seq_delay_details?: { delay_in_days: number };
+  variant_label?: string;
+  send_as_reply?: boolean;
   sequence_variants?: Array<{
     variant_id: string;
     subject: string;
     email_body: string;
+    variant_label?: string;
   }>;
 }
 
@@ -76,7 +99,79 @@ interface SmartleadLead {
   custom_fields?: Record<string, any>;
   lead_status?: string;
   email_status?: string;
-  created_at?: string; // When lead was enrolled in campaign
+  created_at?: string;
+  // Extended lead data
+  status?: string;
+  is_interested?: boolean;
+  is_unsubscribed?: boolean;
+  last_email_sequence_sent?: number;
+  open_count?: number;
+  click_count?: number;
+  reply_count?: number;
+  category_id?: string | number;
+  lead_category?: string;
+}
+
+interface SmartleadEmailAccount {
+  id: number;
+  from_email: string;
+  from_name?: string;
+  smtp_host?: string;
+  smtp_port?: number;
+  is_smtp_success?: boolean;
+  smtp_failure_error?: string;
+  imap_host?: string;
+  imap_port?: number;
+  is_imap_success?: boolean;
+  imap_failure_error?: string;
+  message_per_day?: number;
+  daily_sent_count?: number;
+  warmup_enabled?: boolean;
+  warmup_details?: {
+    status?: string;
+    warmup_reputation?: number;
+    total_spam_count?: number;
+    total_sent_count?: number;
+  };
+  custom_tracking_domain?: string;
+  type?: string;
+}
+
+interface SmartleadCategory {
+  id: number | string;
+  name: string;
+  color?: string;
+  is_positive?: boolean;
+  is_meeting?: boolean;
+  is_ooo?: boolean;
+  sort_order?: number;
+}
+
+interface SmartleadMessageHistory {
+  stats_id: string;
+  email_subject?: string;
+  email_body?: string;
+  sent_time?: string;
+  type: 'SENT' | 'REPLY';
+  from_email?: string;
+  to_email?: string;
+}
+
+interface SmartleadStatistic {
+  id: number | string;
+  lead_id: number;
+  email: string;
+  sent_time?: string;
+  open_time?: string;
+  click_time?: string;
+  reply_time?: string;
+  seq_number?: number;
+  variant_id?: string;
+  is_bounced?: boolean;
+  bounce_type?: string;
+  is_unsubscribed?: boolean;
+  lead_category?: string;
+  lead_category_id?: string | number;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -299,9 +394,12 @@ serve(async (req) => {
       batch_number = 1, 
       auto_continue = true,
       current_phase = 'campaigns',
-      sync_leads = true, // Enable leads sync by default
-      sync_email_activities = false, // DISABLED: SmartLead API doesn't support /email-sent endpoint
-      classify_replies = true, // Trigger AI reply classification after sync
+      sync_leads = true,
+      sync_email_accounts = true,  // NEW: Sync email accounts/mailboxes
+      sync_lead_categories = true, // NEW: Sync lead categories
+      sync_statistics = true,      // NEW: Sync individual email statistics
+      sync_message_history = false, // NEW: Sync message history (expensive - off by default)
+      classify_replies = true,
     } = await req.json();
     
     if (!client_id) throw new Error('client_id is required');
@@ -381,7 +479,10 @@ serve(async (req) => {
       metrics_created: 0,
       leads_synced: 0,
       companies_synced: 0,
+      email_accounts_synced: 0,
+      lead_categories_synced: 0,
       email_activities_synced: 0,
+      message_threads_synced: 0,
       errors: [] as string[],
     };
 
@@ -406,14 +507,59 @@ serve(async (req) => {
         await supabase.from('daily_metrics').delete().in('campaign_id', campaignIds);
         await supabase.from('campaign_variants').delete().in('campaign_id', campaignIds);
         await supabase.from('email_activities').delete().in('campaign_id', campaignIds);
+        await supabase.from('message_threads').delete().in('campaign_id', campaignIds);
+        await supabase.from('campaign_email_accounts').delete().in('campaign_id', campaignIds);
         await supabase.from('campaigns').delete().in('id', campaignIds);
       }
       
-      // Also reset contacts/companies for this engagement (optional, be careful)
-      // await supabase.from('contacts').delete().eq('engagement_id', activeEngagementId);
-      // await supabase.from('companies').delete().eq('engagement_id', activeEngagementId);
+      // Reset email accounts and categories for this engagement
+      await supabase.from('email_accounts').delete().eq('engagement_id', activeEngagementId).eq('data_source_id', data_source_id);
+      await supabase.from('lead_categories').delete().eq('engagement_id', activeEngagementId).eq('data_source_id', data_source_id);
       
       console.log('Reset complete');
+    }
+
+    // ============================================
+    // PHASE 0: Sync Lead Categories (once)
+    // ============================================
+    if (sync_lead_categories && batch_number === 1 && current_phase === 'campaigns') {
+      console.log('=== Fetching lead categories ===');
+      try {
+        const categoriesResponse = await smartleadRequest('/leads/fetch-categories', apiKey);
+        const categories: SmartleadCategory[] = Array.isArray(categoriesResponse) 
+          ? categoriesResponse 
+          : (categoriesResponse?.categories || []);
+        
+        console.log(`Found ${categories.length} lead categories`);
+        
+        for (const cat of categories) {
+          const isPositive = cat.is_positive ?? (
+            (cat.name?.toLowerCase().includes('interested') && !cat.name?.toLowerCase().includes('not')) ||
+            cat.name?.toLowerCase().includes('meeting') ||
+            cat.name?.toLowerCase().includes('positive')
+          );
+          
+          const isMeeting = cat.is_meeting ?? (cat.name?.toLowerCase().includes('meeting'));
+          const isOoo = cat.is_ooo ?? (cat.name?.toLowerCase().includes('ooo') || cat.name?.toLowerCase().includes('out of office'));
+          
+          const { error: catError } = await supabase.from('lead_categories').upsert({
+            engagement_id: activeEngagementId,
+            data_source_id: data_source_id,
+            external_id: String(cat.id),
+            name: cat.name,
+            color: cat.color || null,
+            is_positive: isPositive,
+            is_meeting: isMeeting,
+            is_ooo: isOoo,
+            sort_order: cat.sort_order || null,
+          }, { onConflict: 'engagement_id,external_id' });
+          
+          if (!catError) progress.lead_categories_synced++;
+        }
+      } catch (e) {
+        console.error('Failed to fetch lead categories:', e);
+        progress.errors.push(`Lead categories: ${(e as Error).message}`);
+      }
     }
 
     // ============================================
@@ -421,7 +567,8 @@ serve(async (req) => {
     // ============================================
     if (current_phase === 'campaigns') {
       console.log('=== PHASE 1: Fetching all campaigns ===');
-      const campaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
+      const campaignsRaw = await smartleadRequest('/campaigns', apiKey);
+      const campaigns: SmartleadCampaign[] = Array.isArray(campaignsRaw) ? campaignsRaw : (campaignsRaw?.campaigns || []);
       console.log(`Found ${campaigns.length} total campaigns`);
 
       // Sort: active first, then by created_at
@@ -473,7 +620,18 @@ serve(async (req) => {
         console.log(`[${i + 1}/${campaigns.length}] Processing: ${campaign.name} (${campaign.status})`);
 
         try {
-          // Upsert campaign to unified campaigns table
+          // Build schedule and sending limits config
+          const scheduleConfig = {
+            scheduler_cron_value: campaign.scheduler_cron_value || null,
+            timezone: campaign.timezone || null,
+          };
+          
+          const sendingLimits = {
+            max_leads_per_day: campaign.max_leads_per_day || null,
+            min_time_between_emails: campaign.min_time_btwn_emails || null,
+          };
+
+          // Upsert campaign to unified campaigns table with extended fields
           const { data: upsertedCampaign, error: campError } = await supabase
             .from('campaigns')
             .upsert({
@@ -485,6 +643,16 @@ serve(async (req) => {
               status: campaign.status?.toLowerCase() || 'unknown',
               started_at: campaign.created_at ? new Date(campaign.created_at).toISOString() : null,
               last_synced_at: new Date().toISOString(),
+              // Extended fields
+              owner_id: campaign.user_id ? String(campaign.user_id) : null,
+              team_id: campaign.client_id ? String(campaign.client_id) : null,
+              timezone: campaign.timezone || null,
+              schedule_config: scheduleConfig,
+              sending_limits: sendingLimits,
+              track_settings: campaign.track_settings || null,
+              stop_lead_settings: campaign.stop_lead_settings || null,
+              max_leads_per_day: campaign.max_leads_per_day || null,
+              min_time_between_emails: campaign.min_time_btwn_emails || null,
             }, { onConflict: 'engagement_id,data_source_id,external_id' })
             .select('id')
             .single();
@@ -497,6 +665,71 @@ serve(async (req) => {
 
           const campaignDbId = upsertedCampaign.id;
           progress.campaigns_synced++;
+
+          // ============================================
+          // Fetch Email Accounts for this campaign
+          // ============================================
+          if (sync_email_accounts) {
+            try {
+              const emailAccountsRaw = await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, apiKey);
+              const emailAccounts: SmartleadEmailAccount[] = Array.isArray(emailAccountsRaw) 
+                ? emailAccountsRaw 
+                : (emailAccountsRaw?.email_accounts || emailAccountsRaw?.accounts || []);
+              
+              if (emailAccounts.length > 0) {
+                console.log(`  Found ${emailAccounts.length} email accounts`);
+                
+                for (const account of emailAccounts) {
+                  // Upsert email account
+                  const warmupDetails = account.warmup_details || {};
+                  
+                  const { data: emailAccountData, error: eaError } = await supabase
+                    .from('email_accounts')
+                    .upsert({
+                      engagement_id: activeEngagementId,
+                      data_source_id: data_source_id,
+                      external_id: String(account.id),
+                      from_email: account.from_email,
+                      from_name: account.from_name || null,
+                      smtp_host: account.smtp_host || null,
+                      smtp_port: account.smtp_port || null,
+                      is_smtp_success: account.is_smtp_success ?? null,
+                      smtp_failure_error: account.smtp_failure_error || null,
+                      imap_host: account.imap_host || null,
+                      imap_port: account.imap_port || null,
+                      is_imap_success: account.is_imap_success ?? null,
+                      imap_failure_error: account.imap_failure_error || null,
+                      message_per_day: account.message_per_day || null,
+                      daily_sent_count: account.daily_sent_count || 0,
+                      warmup_enabled: account.warmup_enabled ?? false,
+                      warmup_status: warmupDetails.status || null,
+                      warmup_reputation: warmupDetails.warmup_reputation || null,
+                      warmup_spam_count: warmupDetails.total_spam_count || 0,
+                      warmup_sent_count: warmupDetails.total_sent_count || 0,
+                      custom_tracking_domain: account.custom_tracking_domain || null,
+                      account_type: account.type || 'smtp',
+                      is_active: true,
+                      last_synced_at: new Date().toISOString(),
+                    }, { onConflict: 'engagement_id,from_email' })
+                    .select('id')
+                    .single();
+                  
+                  if (!eaError && emailAccountData) {
+                    progress.email_accounts_synced++;
+                    
+                    // Link account to campaign
+                    await supabase.from('campaign_email_accounts').upsert({
+                      campaign_id: campaignDbId,
+                      email_account_id: emailAccountData.id,
+                      is_active: true,
+                    }, { onConflict: 'campaign_id,email_account_id' });
+                  }
+                }
+              }
+            } catch (e) {
+              console.log(`  Email accounts not available for ${campaign.name}:`, (e as Error).message);
+            }
+          }
 
           // Fetch analytics
           try {
@@ -525,7 +758,6 @@ serve(async (req) => {
             };
 
             // Update campaign with totals and enrollment settings
-            // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0
             await supabase.from('campaigns').update({
               total_sent: totalSent,
               total_opened: totalOpened,
@@ -579,7 +811,7 @@ serve(async (req) => {
             progress.errors.push(`Analytics ${campaign.name}: ${(e as Error).message}`);
           }
 
-          // Fetch sequences/variants
+          // Fetch sequences/variants with extended fields
           try {
             const sequencesRaw = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
             
@@ -607,6 +839,7 @@ serve(async (req) => {
                 const bodyPlain = stripHtml(mainBody);
                 const seqId = seq.seq_id || (seq as any).id || seqIdx;
                 const seqNumber = seq.seq_number || (seq as any).step_number || (seqIdx + 1);
+                const delayDays = seq.seq_delay_details?.delay_in_days || null;
                 
                 const { error: variantError } = await supabase.from('campaign_variants')
                   .upsert({
@@ -620,6 +853,11 @@ serve(async (req) => {
                     personalization_vars: mainVars,
                     step_number: seqNumber,
                     is_control: seqIdx === 0,
+                    // Extended fields
+                    variant_label: seq.variant_label || null,
+                    delay_days: delayDays,
+                    delay_config: seq.seq_delay_details || null,
+                    send_as_reply: seq.send_as_reply ?? (seqNumber > 1),
                   }, { onConflict: 'campaign_id,external_id' });
                 
                 if (variantError) {
@@ -647,6 +885,8 @@ serve(async (req) => {
                       personalization_vars: varVars,
                       step_number: seqNumber,
                       is_control: false,
+                      variant_label: variant.variant_label || null,
+                      delay_days: delayDays,
                     }, { onConflict: 'campaign_id,external_id' });
                     
                     if (!abError) progress.variants_synced++;
@@ -660,13 +900,113 @@ serve(async (req) => {
           }
 
           // ============================================
-          // NEW: Fetch Leads for this campaign
+          // Fetch Individual Statistics (Email Events)
+          // ============================================
+          if (sync_statistics) {
+            try {
+              let offset = 0;
+              const limit = 100;
+              let hasMoreStats = true;
+              
+              while (hasMoreStats && !isTimeBudgetExceeded()) {
+                const statsUrl = `/campaigns/${campaign.id}/statistics?offset=${offset}&limit=${limit}`;
+                const statsResponse = await smartleadRequest(statsUrl, apiKey);
+                
+                const stats: SmartleadStatistic[] = Array.isArray(statsResponse) 
+                  ? statsResponse 
+                  : (statsResponse?.statistics || statsResponse?.data || []);
+                
+                if (stats.length === 0) {
+                  hasMoreStats = false;
+                  break;
+                }
+                
+                console.log(`  Fetched ${stats.length} statistics (offset ${offset})`);
+                
+                // Get category lookup for this engagement
+                const { data: categoriesLookup } = await supabase
+                  .from('lead_categories')
+                  .select('id, external_id')
+                  .eq('engagement_id', activeEngagementId);
+                const categoryMap = new Map(categoriesLookup?.map(c => [c.external_id, c.id]) || []);
+                
+                for (const stat of stats) {
+                  try {
+                    const email = stat.email;
+                    if (!email) continue;
+                    
+                    // Get contact for this email
+                    const { data: contact } = await supabase
+                      .from('contacts')
+                      .select('id, company_id')
+                      .eq('engagement_id', activeEngagementId)
+                      .eq('email', email)
+                      .single();
+                    
+                    if (!contact) continue;
+                    
+                    // Map category if available
+                    const categoryId = stat.lead_category_id 
+                      ? categoryMap.get(String(stat.lead_category_id)) 
+                      : null;
+                    
+                    const { error: activityError } = await supabase
+                      .from('email_activities')
+                      .upsert({
+                        engagement_id: activeEngagementId,
+                        campaign_id: campaignDbId,
+                        data_source_id: data_source_id,
+                        contact_id: contact.id,
+                        company_id: contact.company_id,
+                        external_id: stat.id ? String(stat.id) : null,
+                        to_email: email,
+                        sent: !!stat.sent_time,
+                        sent_at: stat.sent_time ? new Date(stat.sent_time).toISOString() : null,
+                        opened: !!stat.open_time,
+                        first_opened_at: stat.open_time ? new Date(stat.open_time).toISOString() : null,
+                        clicked: !!stat.click_time,
+                        first_clicked_at: stat.click_time ? new Date(stat.click_time).toISOString() : null,
+                        replied: !!stat.reply_time,
+                        replied_at: stat.reply_time ? new Date(stat.reply_time).toISOString() : null,
+                        bounced: stat.is_bounced ?? false,
+                        bounce_type: stat.bounce_type || null,
+                        unsubscribed: stat.is_unsubscribed ?? false,
+                        step_number: stat.seq_number || null,
+                        lead_category: stat.lead_category || null,
+                        category_id: categoryId,
+                      }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
+                    
+                    if (!activityError) {
+                      progress.email_activities_synced++;
+                    }
+                  } catch (e) {
+                    // Continue on individual stat errors
+                  }
+                }
+                
+                offset += stats.length;
+                if (stats.length < limit) hasMoreStats = false;
+              }
+            } catch (e) {
+              console.log(`  Statistics not available for ${campaign.name}:`, (e as Error).message);
+            }
+          }
+
+          // ============================================
+          // Fetch Leads with Extended Data
           // ============================================
           if (sync_leads) {
             try {
               let offset = 0;
               const limit = 100;
               let hasMoreLeads = true;
+              
+              // Get category lookup for this engagement
+              const { data: categoriesLookup } = await supabase
+                .from('lead_categories')
+                .select('id, external_id')
+                .eq('engagement_id', activeEngagementId);
+              const categoryMap = new Map(categoriesLookup?.map(c => [c.external_id, c.id]) || []);
               
               while (hasMoreLeads && !isTimeBudgetExceeded()) {
                 const leadsUrl = `/campaigns/${campaign.id}/leads?offset=${offset}&limit=${limit}`;
@@ -725,8 +1065,13 @@ serve(async (req) => {
                     
                     if (!companyId) continue;
                     
-                    // Upsert contact with enrolled_at date
-                    const enrolledAt = (lead as any).created_at || null;
+                    // Map category if available
+                    const categoryId = lead.category_id 
+                      ? categoryMap.get(String(lead.category_id)) 
+                      : null;
+                    
+                    // Upsert contact with extended fields
+                    const enrolledAt = lead.created_at || null;
                     const { error: contactError } = await supabase
                       .from('contacts')
                       .upsert({
@@ -741,10 +1086,84 @@ serve(async (req) => {
                         email_status: lead.email_status || null,
                         enrolled_at: enrolledAt,
                         source: 'smartlead',
+                        // Extended fields
+                        external_lead_id: String(lead.id),
+                        sequence_status: lead.status || lead.lead_status || null,
+                        current_step: lead.last_email_sequence_sent || null,
+                        is_interested: lead.is_interested ?? null,
+                        is_unsubscribed: lead.is_unsubscribed ?? false,
+                        category_id: categoryId,
+                        open_count: lead.open_count || 0,
+                        click_count: lead.click_count || 0,
+                        reply_count: lead.reply_count || 0,
                       }, { onConflict: 'engagement_id,email' });
                     
                     if (!contactError) {
                       progress.leads_synced++;
+                    }
+
+                    // ============================================
+                    // Fetch Message History for replied leads
+                    // ============================================
+                    if (sync_message_history && lead.reply_count && lead.reply_count > 0) {
+                      try {
+                        const messagesUrl = `/campaigns/${campaign.id}/leads/${lead.id}/message-history`;
+                        const messagesResponse = await smartleadRequest(messagesUrl, apiKey);
+                        
+                        const messages: SmartleadMessageHistory[] = Array.isArray(messagesResponse)
+                          ? messagesResponse
+                          : (messagesResponse?.messages || messagesResponse?.history || []);
+                        
+                        if (messages.length > 0) {
+                          // Get contact ID
+                          const { data: contactData } = await supabase
+                            .from('contacts')
+                            .select('id')
+                            .eq('engagement_id', activeEngagementId)
+                            .eq('email', lead.email)
+                            .single();
+                          
+                          if (contactData) {
+                            for (const msg of messages) {
+                              const { error: msgError } = await supabase
+                                .from('message_threads')
+                                .upsert({
+                                  contact_id: contactData.id,
+                                  campaign_id: campaignDbId,
+                                  engagement_id: activeEngagementId,
+                                  external_stats_id: msg.stats_id || null,
+                                  message_type: msg.type?.toLowerCase() || 'sent',
+                                  subject: msg.email_subject || null,
+                                  body_html: msg.email_body || null,
+                                  body_plain: msg.email_body ? stripHtml(msg.email_body) : null,
+                                  body_preview: msg.email_body ? stripHtml(msg.email_body).substring(0, 200) : null,
+                                  sent_at: msg.sent_time ? new Date(msg.sent_time).toISOString() : null,
+                                  from_email: msg.from_email || null,
+                                  to_email: msg.to_email || lead.email,
+                                  is_automated: msg.type === 'SENT',
+                                }, { onConflict: 'engagement_id,external_stats_id,message_type' });
+                              
+                              if (!msgError) {
+                                progress.message_threads_synced++;
+                                
+                                // If this is a reply, update the email_activities with reply text
+                                if (msg.type === 'REPLY' && msg.email_body) {
+                                  await supabase
+                                    .from('email_activities')
+                                    .update({
+                                      reply_text: stripHtml(msg.email_body).substring(0, 2000),
+                                    })
+                                    .eq('campaign_id', campaignDbId)
+                                    .eq('contact_id', contactData.id)
+                                    .eq('replied', true);
+                                }
+                              }
+                            }
+                          }
+                        }
+                      } catch (e) {
+                        // Message history is rate limited, continue silently
+                      }
                     }
                   } catch (leadError) {
                     // Silently continue on individual lead errors
@@ -759,16 +1178,6 @@ serve(async (req) => {
               console.error(`  Leads error for ${campaign.name}:`, e);
               progress.errors.push(`Leads ${campaign.name}: ${(e as Error).message}`);
             }
-          }
-
-          // ============================================
-          // NOTE: Email Activities sync is DISABLED by default
-          // SmartLead API does not support /campaigns/{id}/email-sent endpoint
-          // Email activity data is derived from campaign analytics instead
-          // ============================================
-          if (sync_email_activities) {
-            // This is disabled by default - the API returns 404 for email-sent endpoint
-            console.log(`  Skipping email activities (API not supported)`);
           }
 
         } catch (e) {
@@ -796,7 +1205,10 @@ serve(async (req) => {
         variants_synced: progress.variants_synced,
         leads_synced: progress.leads_synced,
         companies_synced: progress.companies_synced,
+        email_accounts_synced: progress.email_accounts_synced,
+        lead_categories_synced: progress.lead_categories_synced,
         email_activities_synced: progress.email_activities_synced,
+        message_threads_synced: progress.message_threads_synced,
       },
     }).eq('id', data_source_id);
 
@@ -809,7 +1221,7 @@ serve(async (req) => {
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.leads_synced} contacts, ${progress.companies_synced} companies, ${progress.email_activities_synced} email activities`,
+      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.leads_synced} contacts, ${progress.companies_synced} companies, ${progress.email_accounts_synced} email accounts, ${progress.lead_categories_synced} categories, ${progress.email_activities_synced} email activities, ${progress.message_threads_synced} message threads`,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
