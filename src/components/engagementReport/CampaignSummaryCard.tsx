@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router-dom';
-import { Mail, MessageSquare } from 'lucide-react';
+import { Users, Mail, MessageSquare, ThumbsUp } from 'lucide-react';
 
 interface CampaignSummaryCardProps {
   campaign: {
@@ -9,8 +9,12 @@ interface CampaignSummaryCardProps {
     name: string;
     platform: string;
     status?: string | null;
+    enrolled?: number;
     sent?: number;
+    replied?: number;
     replyRate?: number;
+    positiveReplies?: number;
+    positiveRate?: number;
   };
 }
 
@@ -32,6 +36,10 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
     ? 'bg-blue-500/10 text-blue-600 border-blue-500/30'
     : 'bg-muted text-muted-foreground';
 
+  // Convert decimal rates to percentages (database stores as 0.043, display as 4.3%)
+  const replyRateDisplay = ((campaign.replyRate || 0) * 100).toFixed(1);
+  const positiveRateDisplay = ((campaign.positiveRate || 0) * 100).toFixed(1);
+
   return (
     <Card 
       className="p-4 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -51,7 +59,14 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
         </div>
       </div>
       
-      <div className="grid grid-cols-2 gap-2 text-center">
+      <div className="grid grid-cols-4 gap-2 text-center">
+        <div className="p-2 rounded bg-muted/50">
+          <div className="flex items-center justify-center gap-1 mb-1">
+            <Users className="h-3 w-3 text-muted-foreground" />
+          </div>
+          <p className="text-xs font-bold">{(campaign.enrolled || 0).toLocaleString()}</p>
+          <p className="text-[10px] text-muted-foreground">Enrolled</p>
+        </div>
         <div className="p-2 rounded bg-muted/50">
           <div className="flex items-center justify-center gap-1 mb-1">
             <Mail className="h-3 w-3 text-muted-foreground" />
@@ -63,8 +78,15 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
           <div className="flex items-center justify-center gap-1 mb-1">
             <MessageSquare className="h-3 w-3 text-muted-foreground" />
           </div>
-          <p className="text-xs font-bold">{(campaign.replyRate || 0).toFixed(1)}%</p>
+          <p className="text-xs font-bold">{replyRateDisplay}%</p>
           <p className="text-[10px] text-muted-foreground">Reply</p>
+        </div>
+        <div className="p-2 rounded bg-muted/50">
+          <div className="flex items-center justify-center gap-1 mb-1">
+            <ThumbsUp className="h-3 w-3 text-muted-foreground" />
+          </div>
+          <p className="text-xs font-bold">{positiveRateDisplay}%</p>
+          <p className="text-[10px] text-muted-foreground">Positive</p>
         </div>
       </div>
     </Card>
