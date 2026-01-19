@@ -1685,16 +1685,27 @@ export type Database = {
       }
       engagements: {
         Row: {
+          analyst_2_id: string | null
+          analyst_id: string | null
+          associate_id: string | null
           auto_created: boolean | null
           client_id: string
           created_at: string | null
+          deal_lead_id: string | null
           deleted_at: string | null
           description: string | null
           end_date: string | null
+          fee_schedule: string | null
           id: string
           industry: string | null
+          is_platform: boolean | null
           meeting_goal: number | null
+          monthly_retainer: number | null
           name: string
+          portfolio_company: string | null
+          research_lead_id: string | null
+          research_mid_id: string | null
+          sponsor_name: string | null
           start_date: string | null
           status: string | null
           target_criteria: Json | null
@@ -1702,16 +1713,27 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          analyst_2_id?: string | null
+          analyst_id?: string | null
+          associate_id?: string | null
           auto_created?: boolean | null
           client_id: string
           created_at?: string | null
+          deal_lead_id?: string | null
           deleted_at?: string | null
           description?: string | null
           end_date?: string | null
+          fee_schedule?: string | null
           id?: string
           industry?: string | null
+          is_platform?: boolean | null
           meeting_goal?: number | null
+          monthly_retainer?: number | null
           name: string
+          portfolio_company?: string | null
+          research_lead_id?: string | null
+          research_mid_id?: string | null
+          sponsor_name?: string | null
           start_date?: string | null
           status?: string | null
           target_criteria?: Json | null
@@ -1719,16 +1741,27 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          analyst_2_id?: string | null
+          analyst_id?: string | null
+          associate_id?: string | null
           auto_created?: boolean | null
           client_id?: string
           created_at?: string | null
+          deal_lead_id?: string | null
           deleted_at?: string | null
           description?: string | null
           end_date?: string | null
+          fee_schedule?: string | null
           id?: string
           industry?: string | null
+          is_platform?: boolean | null
           meeting_goal?: number | null
+          monthly_retainer?: number | null
           name?: string
+          portfolio_company?: string | null
+          research_lead_id?: string | null
+          research_mid_id?: string | null
+          sponsor_name?: string | null
           start_date?: string | null
           status?: string | null
           target_criteria?: Json | null
@@ -1737,10 +1770,52 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "engagements_analyst_2_id_fkey"
+            columns: ["analyst_2_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engagements_analyst_id_fkey"
+            columns: ["analyst_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engagements_associate_id_fkey"
+            columns: ["associate_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "engagements_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engagements_deal_lead_id_fkey"
+            columns: ["deal_lead_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engagements_research_lead_id_fkey"
+            columns: ["research_lead_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engagements_research_mid_id_fkey"
+            columns: ["research_mid_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
             referencedColumns: ["id"]
           },
         ]
@@ -2870,6 +2945,53 @@ export type Database = {
             columns: ["data_source_id"]
             isOneToOne: false
             referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      team_members: {
+        Row: {
+          client_id: string
+          created_at: string | null
+          email: string | null
+          first_name: string
+          id: string
+          is_active: boolean | null
+          last_name: string | null
+          title: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string | null
+          email?: string | null
+          first_name: string
+          id?: string
+          is_active?: boolean | null
+          last_name?: string | null
+          title?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string | null
+          email?: string | null
+          first_name?: string
+          id?: string
+          is_active?: boolean | null
+          last_name?: string | null
+          title?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_members_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
             referencedColumns: ["id"]
           },
         ]

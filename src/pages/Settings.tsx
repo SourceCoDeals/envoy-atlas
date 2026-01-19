@@ -12,9 +12,10 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InviteTeamMemberDialog } from '@/components/settings/InviteTeamMemberDialog';
 import { TeamMembersList } from '@/components/settings/TeamMembersList';
+import { TeamMembersSettings } from '@/components/settings/TeamMembersSettings';
 import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
 import { SyncStatusDashboard } from '@/components/settings/SyncStatusDashboard';
-import { Loader2, User, Building2, Users, Shield, Plug, Check } from 'lucide-react';
+import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle } from 'lucide-react';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -103,7 +104,7 @@ export default function Settings() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               <span className="hidden sm:inline">Profile</span>
@@ -114,6 +115,10 @@ export default function Settings() {
             </TabsTrigger>
             <TabsTrigger value="team" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
+              <span className="hidden sm:inline">Access</span>
+            </TabsTrigger>
+            <TabsTrigger value="team-members" className="flex items-center gap-2">
+              <UserCircle className="h-4 w-4" />
               <span className="hidden sm:inline">Team</span>
             </TabsTrigger>
             <TabsTrigger value="connections" className="flex items-center gap-2">
@@ -207,16 +212,16 @@ export default function Settings() {
             )}
           </TabsContent>
 
-          {/* Team Tab */}
+          {/* Team Access Tab */}
           <TabsContent value="team" className="mt-6">
             {currentWorkspace ? (
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div>
-                      <CardTitle className="text-lg">Team Members</CardTitle>
+                      <CardTitle className="text-lg">Workspace Access</CardTitle>
                       <CardDescription>
-                        {members.length} member{members.length !== 1 ? 's' : ''} in this workspace
+                        {members.length} member{members.length !== 1 ? 's' : ''} with login access
                       </CardDescription>
                     </div>
                     {userRole === 'admin' && (
@@ -238,6 +243,19 @@ export default function Settings() {
                   />
                 </CardContent>
               </Card>
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  No workspace selected
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Team Members Tab (for engagement assignments) */}
+          <TabsContent value="team-members" className="mt-6">
+            {currentWorkspace ? (
+              <TeamMembersSettings />
             ) : (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
