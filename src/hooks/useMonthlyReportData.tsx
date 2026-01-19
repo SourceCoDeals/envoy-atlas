@@ -6,8 +6,6 @@ import { startOfMonth, endOfMonth, subMonths, format, endOfWeek, eachWeekOfInter
 export interface MonthlyMetrics {
   sent: number;
   delivered: number;
-  opened: number;
-  clicked: number;
   replied: number;
   positiveReplies: number;
   bounced: number;
@@ -75,11 +73,11 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
   const [month, setSelectedMonth] = useState(selectedMonth);
   const [loading, setLoading] = useState(true);
   const [currentMetrics, setCurrentMetrics] = useState<MonthlyMetrics>({
-    sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0,
+    sent: 0, delivered: 0, replied: 0,
     positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0
   });
   const [previousMetrics, setPreviousMetrics] = useState<MonthlyMetrics>({
-    sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0,
+    sent: 0, delivered: 0, replied: 0,
     positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0
   });
   const [weeklyBreakdown, setWeeklyBreakdown] = useState<WeeklyBreakdown[]>([]);
@@ -118,7 +116,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         // Fetch current month metrics from daily_metrics table
         const { data: currentDailyMetrics } = await supabase
           .from('daily_metrics')
-          .select('date, emails_sent, emails_opened, emails_clicked, emails_replied, positive_replies, emails_bounced')
+          .select('date, emails_sent, emails_replied, positive_replies, emails_bounced')
           .in('engagement_id', engagementIds)
           .gte('date', format(monthStart, 'yyyy-MM-dd'))
           .lte('date', format(monthEnd, 'yyyy-MM-dd'));
@@ -126,8 +124,6 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         const currentData = (currentDailyMetrics || []).map(d => ({
           ...d,
           sent_count: d.emails_sent || 0,
-          opened_count: d.emails_opened || 0,
-          clicked_count: d.emails_clicked || 0,
           replied_count: d.emails_replied || 0,
           positive_reply_count: d.positive_replies || 0,
           bounced_count: d.emails_bounced || 0,
@@ -136,15 +132,13 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         // Fetch previous month metrics
         const { data: previousDailyMetrics } = await supabase
           .from('daily_metrics')
-          .select('emails_sent, emails_opened, emails_clicked, emails_replied, positive_replies, emails_bounced')
+          .select('emails_sent, emails_replied, positive_replies, emails_bounced')
           .in('engagement_id', engagementIds)
           .gte('date', format(prevMonthStart, 'yyyy-MM-dd'))
           .lte('date', format(prevMonthEnd, 'yyyy-MM-dd'));
 
         const previousData = (previousDailyMetrics || []).map(d => ({
           sent_count: d.emails_sent || 0,
-          opened_count: d.emails_opened || 0,
-          clicked_count: d.emails_clicked || 0,
           replied_count: d.emails_replied || 0,
           positive_reply_count: d.positive_replies || 0,
           bounced_count: d.emails_bounced || 0,
@@ -154,27 +148,23 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         const current = currentData.reduce((acc, row) => ({
           sent: acc.sent + row.sent_count,
           delivered: acc.delivered + row.sent_count - row.bounced_count,
-          opened: acc.opened + row.opened_count,
-          clicked: acc.clicked + row.clicked_count,
           replied: acc.replied + row.replied_count,
           positiveReplies: acc.positiveReplies + row.positive_reply_count,
           bounced: acc.bounced + row.bounced_count,
           spamComplaints: 0,
           unsubscribed: 0,
-        }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
+        }), { sent: 0, delivered: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
 
         // Aggregate previous month
         const previous = previousData.reduce((acc, row) => ({
           sent: acc.sent + row.sent_count,
           delivered: acc.delivered + row.sent_count - row.bounced_count,
-          opened: acc.opened + row.opened_count,
-          clicked: acc.clicked + row.clicked_count,
           replied: acc.replied + row.replied_count,
           positiveReplies: acc.positiveReplies + row.positive_reply_count,
           bounced: acc.bounced + row.bounced_count,
           spamComplaints: 0,
           unsubscribed: 0,
-        }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
+        }), { sent: 0, delivered: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
 
         setCurrentMetrics(current);
         setPreviousMetrics(previous);

@@ -131,8 +131,8 @@ export function LinkCampaignsDialog({
                       variant="outline"
                       className={
                         campaign.platform === 'smartlead'
-                          ? 'bg-blue-500/10 text-blue-500 border-blue-500/30'
-                          : 'bg-purple-500/10 text-purple-500 border-purple-500/30'
+                          ? 'bg-primary/10 text-primary border-primary/30'
+                          : 'bg-accent text-accent-foreground'
                       }
                     >
                       {campaign.platform === 'smartlead' ? 'SL' : 'R.io'}
