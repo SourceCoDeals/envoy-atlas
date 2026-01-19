@@ -811,6 +811,7 @@ export type Database = {
           email: string | null
           email_status: string | null
           engagement_id: string
+          enrolled_at: string | null
           first_name: string | null
           id: string
           is_decision_maker: boolean | null
@@ -847,6 +848,7 @@ export type Database = {
           email?: string | null
           email_status?: string | null
           engagement_id: string
+          enrolled_at?: string | null
           first_name?: string | null
           id?: string
           is_decision_maker?: boolean | null
@@ -883,6 +885,7 @@ export type Database = {
           email?: string | null
           email_status?: string | null
           engagement_id?: string
+          enrolled_at?: string | null
           first_name?: string | null
           id?: string
           is_decision_maker?: boolean | null

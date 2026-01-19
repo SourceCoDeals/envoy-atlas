@@ -16,7 +16,9 @@ import { EmailReportTab } from '@/components/engagementReport/EmailReportTab';
 import { CallingReportTab } from '@/components/engagementReport/CallingReportTab';
 import { CampaignSummaryCard } from '@/components/engagementReport/CampaignSummaryCard';
 import { LinkCampaignsDialog, UnlinkedCampaign as DialogCampaign } from '@/components/engagements/LinkCampaignsDialog';
-import { ArrowLeft, Share2, Mail, Phone, Target, Calendar, Building2, Briefcase, Building, Link2, Plus } from 'lucide-react';
+import { ArrowLeft, Share2, Mail, Phone, Target, Calendar, Building2, Briefcase, Building, Link2, Plus, History, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 export default function EngagementReport() {
   const navigate = useNavigate();
@@ -26,6 +28,7 @@ export default function EngagementReport() {
   const [activeTab, setActiveTab] = useState('email');
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [unlinkedCampaigns, setUnlinkedCampaigns] = useState<UnlinkedCampaign[]>([]);
+  const [isBackfilling, setIsBackfilling] = useState(false);
   const dateRange = getDateRange(dateRangeOption);
   
   const { linkCampaignsToEngagement, fetchCampaignsNotInEngagement } = useCampaignLinking();
@@ -54,6 +57,28 @@ export default function EngagementReport() {
       refetch();
     }
   }, [engagementId, linkCampaignsToEngagement, refetch]);
+
+  // Handle backfilling historical enrollment data
+  const handleBackfillEnrollment = useCallback(async () => {
+    if (!engagementId) return;
+    
+    setIsBackfilling(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('backfill-enrollment', {
+        body: { engagement_id: engagementId },
+      });
+      
+      if (error) throw error;
+      
+      toast.success(`Backfill complete: ${data?.progress?.leads_processed || 0} leads processed`);
+      refetch();
+    } catch (err) {
+      console.error('Backfill error:', err);
+      toast.error('Failed to backfill enrollment data');
+    } finally {
+      setIsBackfilling(false);
+    }
+  }, [engagementId, refetch]);
 
   useEffect(() => {
     if (!authLoading && !user) navigate('/auth');
@@ -101,7 +126,9 @@ export default function EngagementReport() {
     linkedCampaignsWithStats,
     callDispositions,
     callOutcomes,
-    dataAvailability
+    dataAvailability,
+    enrollmentMetrics,
+    weeklyEnrollmentTrend,
   } = data;
 
   // Determine status styling using semantic tokens
@@ -151,6 +178,22 @@ export default function EngagementReport() {
               <Link2 className="mr-2 h-4 w-4" />
               Link Campaigns
             </Button>
+            {/* Show backfill button when no enrollment data exists */}
+            {!enrollmentMetrics?.totalLeads && linkedCampaignsWithStats.length > 0 && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleBackfillEnrollment}
+                disabled={isBackfilling}
+              >
+                {isBackfilling ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <History className="mr-2 h-4 w-4" />
+                )}
+                {isBackfilling ? 'Backfilling...' : 'Backfill Enrollment'}
+              </Button>
+            )}
             <DateRangeFilter value={dateRangeOption} onChange={setDateRangeOption} />
             <Button variant="outline" size="sm">
               <Share2 className="mr-2 h-4 w-4" />
@@ -281,6 +324,8 @@ export default function EngagementReport() {
                   platform: c.platform as 'smartlead' | 'replyio'
                 })),
                 infrastructureMetrics: data.infrastructureMetrics,
+                enrollmentMetrics,
+                weeklyEnrollmentTrend,
                 dataAvailability: dataAvailability,
               }}
             />
