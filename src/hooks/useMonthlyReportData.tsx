@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { supabase } from '@/integrations/supabase/client';
-import { startOfMonth, endOfMonth, subMonths, format, startOfWeek, endOfWeek, eachWeekOfInterval } from 'date-fns';
+import { startOfMonth, endOfMonth, subMonths, format, endOfWeek, eachWeekOfInterval } from 'date-fns';
 
 export interface MonthlyMetrics {
   sent: number;
@@ -102,131 +102,76 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
       setLoading(true);
 
       try {
-        // Fetch current month metrics from WORKSPACE-LEVEL tables (aggregated, more reliable)
-        const [smartleadWorkspaceCurrent, replyioWorkspaceCurrent] = await Promise.all([
-          supabase.from('smartlead_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
-            .eq('workspace_id', currentWorkspace.id)
-            .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
-            .lte('metric_date', format(monthEnd, 'yyyy-MM-dd')),
-          supabase.from('replyio_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
-            .eq('workspace_id', currentWorkspace.id)
-            .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
-            .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
-        ]);
+        // Get engagements for this client/workspace
+        const { data: engagements } = await supabase
+          .from('engagements')
+          .select('id')
+          .eq('client_id', currentWorkspace.id);
 
-        let currentData = [
-          ...(smartleadWorkspaceCurrent.data || []).map(d => ({ ...d, date: d.metric_date })),
-          ...(replyioWorkspaceCurrent.data || []).map(d => ({ ...d, date: d.metric_date }))
-        ];
+        const engagementIds = (engagements || []).map(e => e.id);
 
-        // Fallback to campaign-level metrics if workspace metrics are empty
-        if (currentData.length === 0) {
-          const [smartleadCampaignCurrent, replyioCampaignCurrent] = await Promise.all([
-            supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
-              .eq('workspace_id', currentWorkspace.id)
-              .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
-              .lte('metric_date', format(monthEnd, 'yyyy-MM-dd')),
-            supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count, metric_date')
-              .eq('workspace_id', currentWorkspace.id)
-              .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
-              .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
-          ]);
-
-          currentData = [
-            ...(smartleadCampaignCurrent.data || []).map(d => ({ ...d, date: d.metric_date })),
-            ...(replyioCampaignCurrent.data || []).map(d => ({ ...d, date: d.metric_date }))
-          ];
+        if (engagementIds.length === 0) {
+          setLoading(false);
+          return;
         }
 
-        // Fetch previous month metrics from WORKSPACE-LEVEL tables
-        const [smartleadWorkspacePrevious, replyioWorkspacePrevious] = await Promise.all([
-          supabase.from('smartlead_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
-            .eq('workspace_id', currentWorkspace.id)
-            .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
-            .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd')),
-          supabase.from('replyio_workspace_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
-            .eq('workspace_id', currentWorkspace.id)
-            .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
-            .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd'))
-        ]);
+        // Fetch current month metrics from daily_metrics table
+        const { data: currentDailyMetrics } = await supabase
+          .from('daily_metrics')
+          .select('date, emails_sent, emails_opened, emails_clicked, emails_replied, positive_replies, emails_bounced')
+          .in('engagement_id', engagementIds)
+          .gte('date', format(monthStart, 'yyyy-MM-dd'))
+          .lte('date', format(monthEnd, 'yyyy-MM-dd'));
 
-        let previousData = [
-          ...(smartleadWorkspacePrevious.data || []),
-          ...(replyioWorkspacePrevious.data || [])
-        ];
+        const currentData = (currentDailyMetrics || []).map(d => ({
+          ...d,
+          sent_count: d.emails_sent || 0,
+          opened_count: d.emails_opened || 0,
+          clicked_count: d.emails_clicked || 0,
+          replied_count: d.emails_replied || 0,
+          positive_reply_count: d.positive_replies || 0,
+          bounced_count: d.emails_bounced || 0,
+        }));
 
-        // Fallback to campaign-level metrics if workspace metrics are empty
-        if (previousData.length === 0) {
-          const [smartleadCampaignPrevious, replyioCampaignPrevious] = await Promise.all([
-            supabase.from('smartlead_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
-              .eq('workspace_id', currentWorkspace.id)
-              .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
-              .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd')),
-            supabase.from('replyio_daily_metrics').select('sent_count, opened_count, clicked_count, replied_count, positive_reply_count, bounced_count')
-              .eq('workspace_id', currentWorkspace.id)
-              .gte('metric_date', format(prevMonthStart, 'yyyy-MM-dd'))
-              .lte('metric_date', format(prevMonthEnd, 'yyyy-MM-dd'))
-          ]);
+        // Fetch previous month metrics
+        const { data: previousDailyMetrics } = await supabase
+          .from('daily_metrics')
+          .select('emails_sent, emails_opened, emails_clicked, emails_replied, positive_replies, emails_bounced')
+          .in('engagement_id', engagementIds)
+          .gte('date', format(prevMonthStart, 'yyyy-MM-dd'))
+          .lte('date', format(prevMonthEnd, 'yyyy-MM-dd'));
 
-          previousData = [
-            ...(smartleadCampaignPrevious.data || []),
-            ...(replyioCampaignPrevious.data || [])
-          ];
-        }
+        const previousData = (previousDailyMetrics || []).map(d => ({
+          sent_count: d.emails_sent || 0,
+          opened_count: d.emails_opened || 0,
+          clicked_count: d.emails_clicked || 0,
+          replied_count: d.emails_replied || 0,
+          positive_reply_count: d.positive_replies || 0,
+          bounced_count: d.emails_bounced || 0,
+        }));
 
         // Aggregate current month
-        let current = (currentData || []).reduce((acc, row) => ({
-          sent: acc.sent + (row.sent_count || 0),
-          delivered: acc.delivered + (row.sent_count || 0) - (row.bounced_count || 0),
-          opened: acc.opened + (row.opened_count || 0),
-          clicked: acc.clicked + (row.clicked_count || 0),
-          replied: acc.replied + (row.replied_count || 0),
-          positiveReplies: acc.positiveReplies + (row.positive_reply_count || 0),
-          bounced: acc.bounced + (row.bounced_count || 0),
+        const current = currentData.reduce((acc, row) => ({
+          sent: acc.sent + row.sent_count,
+          delivered: acc.delivered + row.sent_count - row.bounced_count,
+          opened: acc.opened + row.opened_count,
+          clicked: acc.clicked + row.clicked_count,
+          replied: acc.replied + row.replied_count,
+          positiveReplies: acc.positiveReplies + row.positive_reply_count,
+          bounced: acc.bounced + row.bounced_count,
           spamComplaints: 0,
           unsubscribed: 0,
         }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
 
-        // ==============================================================
-        // FALLBACK: If sent is 0, try cumulative tables
-        // ==============================================================
-        if (current.sent === 0) {
-          const [slCumulative, rioCumulative] = await Promise.all([
-            supabase.from('smartlead_campaign_cumulative').select('total_sent, total_opened, total_clicked, total_replied, total_bounced').eq('workspace_id', currentWorkspace.id),
-            supabase.from('replyio_campaign_cumulative').select('total_sent, total_opened, total_clicked, total_replied, total_bounced').eq('workspace_id', currentWorkspace.id),
-          ]);
-          
-          const cumulativeTotals = [...(slCumulative.data || []), ...(rioCumulative.data || [])].reduce((acc, c) => ({
-            sent: acc.sent + (c.total_sent || 0),
-            opened: acc.opened + (c.total_opened || 0),
-            clicked: acc.clicked + (c.total_clicked || 0),
-            replied: acc.replied + (c.total_replied || 0),
-            bounced: acc.bounced + (c.total_bounced || 0),
-          }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
-          
-          if (cumulativeTotals.sent > 0) {
-            console.log('MonthlyReport: Using cumulative fallback');
-            current = {
-              ...current,
-              sent: cumulativeTotals.sent,
-              delivered: cumulativeTotals.sent - cumulativeTotals.bounced,
-              opened: cumulativeTotals.opened,
-              clicked: cumulativeTotals.clicked,
-              replied: cumulativeTotals.replied,
-              bounced: cumulativeTotals.bounced,
-            };
-          }
-        }
-
         // Aggregate previous month
-        const previous = (previousData || []).reduce((acc, row) => ({
-          sent: acc.sent + (row.sent_count || 0),
-          delivered: acc.delivered + (row.sent_count || 0) - (row.bounced_count || 0),
-          opened: acc.opened + (row.opened_count || 0),
-          clicked: acc.clicked + (row.clicked_count || 0),
-          replied: acc.replied + (row.replied_count || 0),
-          positiveReplies: acc.positiveReplies + (row.positive_reply_count || 0),
-          bounced: acc.bounced + (row.bounced_count || 0),
+        const previous = previousData.reduce((acc, row) => ({
+          sent: acc.sent + row.sent_count,
+          delivered: acc.delivered + row.sent_count - row.bounced_count,
+          opened: acc.opened + row.opened_count,
+          clicked: acc.clicked + row.clicked_count,
+          replied: acc.replied + row.replied_count,
+          positiveReplies: acc.positiveReplies + row.positive_reply_count,
+          bounced: acc.bounced + row.bounced_count,
           spamComplaints: 0,
           unsubscribed: 0,
         }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, positiveReplies: 0, bounced: 0, spamComplaints: 0, unsubscribed: 0 });
@@ -236,10 +181,10 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
 
         // Build daily trends
         const dailyMap = new Map<string, DailyTrend>();
-        (currentData || []).forEach(row => {
+        currentData.forEach(row => {
           const existing = dailyMap.get(row.date) || { date: row.date, sent: 0, replied: 0, replyRate: 0 };
-          existing.sent += row.sent_count || 0;
-          existing.replied += row.replied_count || 0;
+          existing.sent += row.sent_count;
+          existing.replied += row.replied_count;
           dailyMap.set(row.date, existing);
         });
         const trends = Array.from(dailyMap.values())
@@ -251,16 +196,16 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         const weeks = eachWeekOfInterval({ start: monthStart, end: monthEnd }, { weekStartsOn: 1 });
         const weeklyData: WeeklyBreakdown[] = weeks.map((weekStart, idx) => {
           const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
-          const weekRows = (currentData || []).filter(row => {
+          const weekRows = currentData.filter(row => {
             const d = new Date(row.date);
             return d >= weekStart && d <= weekEnd;
           });
           const agg = weekRows.reduce((acc, row) => ({
-            sent: acc.sent + (row.sent_count || 0),
-            delivered: acc.delivered + (row.sent_count || 0) - (row.bounced_count || 0),
-            replied: acc.replied + (row.replied_count || 0),
-            positiveReplies: acc.positiveReplies + (row.positive_reply_count || 0),
-            bounced: acc.bounced + (row.bounced_count || 0),
+            sent: acc.sent + row.sent_count,
+            delivered: acc.delivered + row.sent_count - row.bounced_count,
+            replied: acc.replied + row.replied_count,
+            positiveReplies: acc.positiveReplies + row.positive_reply_count,
+            bounced: acc.bounced + row.bounced_count,
           }), { sent: 0, delivered: 0, replied: 0, positiveReplies: 0, bounced: 0 });
           return {
             weekStart: format(weekStart, 'MMM d'),
@@ -271,101 +216,45 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         });
         setWeeklyBreakdown(weeklyData);
 
-        // Fetch campaigns from both platform tables for performance
-        const [smartleadCampaigns, replyioCampaigns] = await Promise.all([
-          supabase.from('smartlead_campaigns').select('id, name, status').eq('workspace_id', currentWorkspace.id),
-          supabase.from('replyio_campaigns').select('id, name, status').eq('workspace_id', currentWorkspace.id)
-        ]);
+        // Fetch campaigns from unified campaigns table
+        const { data: campaigns } = await supabase
+          .from('campaigns')
+          .select('id, name, status, total_sent, total_opened, total_replied, total_bounced')
+          .in('engagement_id', engagementIds);
 
-        const campaignsData = [
-          ...(smartleadCampaigns.data || []),
-          ...(replyioCampaigns.data || [])
-        ];
-
-        // Get campaign IDs
-        const smartleadIds = (smartleadCampaigns.data || []).map(c => c.id);
-        const replyioIds = (replyioCampaigns.data || []).map(c => c.id);
-
-        // Fetch campaign metrics from both platform tables
-        const [smartleadCampMetrics, replyioCampMetrics] = await Promise.all([
-          smartleadIds.length > 0 
-            ? supabase.from('smartlead_daily_metrics').select('campaign_id, sent_count, replied_count, positive_reply_count, bounced_count')
-                .eq('workspace_id', currentWorkspace.id)
-                .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
-                .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
-                .not('campaign_id', 'is', null)
-            : Promise.resolve({ data: [], error: null }),
-          replyioIds.length > 0
-            ? supabase.from('replyio_daily_metrics').select('campaign_id, sent_count, replied_count, positive_reply_count, bounced_count')
-                .eq('workspace_id', currentWorkspace.id)
-                .gte('metric_date', format(monthStart, 'yyyy-MM-dd'))
-                .lte('metric_date', format(monthEnd, 'yyyy-MM-dd'))
-                .not('campaign_id', 'is', null)
-            : Promise.resolve({ data: [], error: null })
-        ]);
-
-        const campaignMetrics = [
-          ...(smartleadCampMetrics.data || []),
-          ...(replyioCampMetrics.data || [])
-        ];
-
-        const campaignAgg = new Map<string, { sent: number; delivered: number; replied: number; positiveReplies: number; bounced: number }>();
-        (campaignMetrics || []).forEach(row => {
-          if (!row.campaign_id) return;
-          const existing = campaignAgg.get(row.campaign_id) || { sent: 0, delivered: 0, replied: 0, positiveReplies: 0, bounced: 0 };
-          existing.sent += row.sent_count || 0;
-          existing.delivered += (row.sent_count || 0) - (row.bounced_count || 0);
-          existing.replied += row.replied_count || 0;
-          existing.positiveReplies += row.positive_reply_count || 0;
-          existing.bounced += row.bounced_count || 0;
-          campaignAgg.set(row.campaign_id, existing);
-        });
-
-        const campPerf: CampaignPerformance[] = (campaignsData || [])
+        const campPerf: CampaignPerformance[] = (campaigns || [])
           .map(c => {
-            const metrics = campaignAgg.get(c.id) || { sent: 0, delivered: 0, replied: 0, positiveReplies: 0, bounced: 0 };
+            const sent = c.total_sent || 0;
+            const replied = c.total_replied || 0;
+            const bounced = c.total_bounced || 0;
             return {
               id: c.id,
               name: c.name,
               status: c.status || 'unknown',
-              ...metrics,
-              replyRate: metrics.sent > 0 ? (metrics.replied / metrics.sent) * 100 : 0,
-              positiveRate: metrics.sent > 0 ? (metrics.positiveReplies / metrics.sent) * 100 : 0,
-              bounceRate: metrics.sent > 0 ? (metrics.bounced / metrics.sent) * 100 : 0,
+              sent,
+              delivered: sent - bounced,
+              replied,
+              positiveReplies: 0, // Not tracked at campaign level
+              bounced,
+              replyRate: sent > 0 ? (replied / sent) * 100 : 0,
+              positiveRate: 0,
+              bounceRate: sent > 0 ? (bounced / sent) * 100 : 0,
             };
           })
           .filter(c => c.sent > 0)
           .sort((a, b) => b.replyRate - a.replyRate);
         setCampaignPerformance(campPerf);
 
-        // Fetch infrastructure stats
-        const { data: domains } = await supabase
-          .from('sending_domains')
-          .select('spf_valid, dkim_valid, dmarc_valid')
-          .eq('workspace_id', currentWorkspace.id);
-
-        const { data: accounts } = await supabase
-          .from('email_accounts')
-          .select('is_active, daily_limit, warmup_enabled')
-          .eq('workspace_id', currentWorkspace.id);
-
-        // Count unique domains from email accounts if no sending_domains
-        const { data: emailAccounts } = await supabase
-          .from('email_accounts')
-          .select('email_address')
-          .eq('workspace_id', currentWorkspace.id);
-
-        const uniqueDomains = new Set((emailAccounts || []).map(e => e.email_address.split('@')[1]));
-
+        // Infrastructure stats - simplified since we don't have those tables
         setInfrastructure({
-          totalDomains: (domains && domains.length > 0) ? domains.length : uniqueDomains.size,
-          domainsWithSpf: (domains || []).filter(d => d.spf_valid).length,
-          domainsWithDkim: (domains || []).filter(d => d.dkim_valid).length,
-          domainsWithDmarc: (domains || []).filter(d => d.dmarc_valid).length,
-          totalMailboxes: (accounts || []).length,
-          activeMailboxes: (accounts || []).filter(a => a.is_active).length,
-          totalDailyCapacity: (accounts || []).reduce((sum, a) => sum + (a.daily_limit || 50), 0),
-          warmupEnabled: (accounts || []).filter(a => a.warmup_enabled).length,
+          totalDomains: 0,
+          domainsWithSpf: 0,
+          domainsWithDkim: 0,
+          domainsWithDmarc: 0,
+          totalMailboxes: 0,
+          activeMailboxes: 0,
+          totalDailyCapacity: 0,
+          warmupEnabled: 0,
         });
 
       } catch (error) {
@@ -382,7 +271,6 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
 
   return {
     selectedMonth: month,
-    setSelectedMonth,
     currentMetrics,
     previousMetrics,
     weeklyBreakdown,
@@ -390,6 +278,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
     infrastructure,
     dailyTrends,
     loading,
-    hasData
+    hasData,
+    setSelectedMonth,
   };
 }

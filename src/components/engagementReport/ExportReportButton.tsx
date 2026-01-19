@@ -24,7 +24,7 @@ interface ExportReportButtonProps {
     emailMetrics: EmailMetrics;
     callingMetrics: CallingMetrics;
     infrastructureMetrics: InfrastructureMetrics;
-    linkedCampaigns: Array<{ id: string; name: string; platform: 'smartlead' | 'replyio' }>;
+    linkedCampaigns: Array<{ id: string; name: string; platform: string }>;
   };
 }
 
@@ -38,8 +38,8 @@ export function ExportReportButton({ data }: ExportReportButtonProps) {
     
     // Header
     sections.push('ENGAGEMENT REPORT');
-    sections.push(`Client,${engagement?.client_name || 'N/A'}`);
-    sections.push(`Engagement,${engagement?.engagement_name || 'N/A'}`);
+    sections.push(`Engagement,${engagement?.name || 'N/A'}`);
+    sections.push(`Status,${engagement?.status || 'N/A'}`);
     sections.push(`Generated,${new Date().toISOString()}`);
     sections.push('');
     
@@ -131,7 +131,7 @@ export function ExportReportButton({ data }: ExportReportButtonProps) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `engagement-report-${data.engagement?.client_name || 'export'}-${new Date().toISOString().split('T')[0]}.csv`;
+      link.download = `engagement-report-${data.engagement?.name || 'export'}-${new Date().toISOString().split('T')[0]}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -153,7 +153,7 @@ export function ExportReportButton({ data }: ExportReportButtonProps) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `engagement-report-${data.engagement?.client_name || 'export'}-${new Date().toISOString().split('T')[0]}.json`;
+      link.download = `engagement-report-${data.engagement?.name || 'export'}-${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
