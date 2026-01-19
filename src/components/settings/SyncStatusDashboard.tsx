@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { 
   RefreshCw, CheckCircle, XCircle, AlertTriangle, 
-  Clock, Play, RotateCcw, Zap, Pause
+  Clock, RotateCcw, Zap, Pause
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -15,20 +15,16 @@ interface PlatformStatus {
   platform: string;
   displayName: string;
   status: 'idle' | 'syncing' | 'success' | 'error' | 'partial' | 'paused';
-  current: number;
-  total: number;
   lastSyncAt: string | null;
   errorMessage?: string;
-  batchLimitReached?: boolean;
-  estimatedTimeRemaining?: number;
   isActive: boolean;
 }
 
-const PLATFORM_CONFIG: Record<string, { displayName: string; rateDelaySeconds: number }> = {
-  smartlead: { displayName: 'SmartLead', rateDelaySeconds: 0.25 },
-  replyio: { displayName: 'Reply.io', rateDelaySeconds: 10.5 },
-  nocodb: { displayName: 'NocoDB', rateDelaySeconds: 0.5 },
-  phoneburner: { displayName: 'PhoneBurner', rateDelaySeconds: 1 },
+const PLATFORM_CONFIG: Record<string, { displayName: string }> = {
+  smartlead: { displayName: 'SmartLead' },
+  replyio: { displayName: 'Reply.io' },
+  nocodb: { displayName: 'NocoDB' },
+  phoneburner: { displayName: 'PhoneBurner' },
 };
 
 export function SyncStatusDashboard() {
@@ -41,45 +37,22 @@ export function SyncStatusDashboard() {
     if (!currentWorkspace?.id) return;
 
     try {
-      const { data: connections, error } = await supabase
-        .from('api_connections')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id);
+      const { data: dataSources, error } = await supabase
+        .from('data_sources')
+        .select('source_type, status, last_sync_at, last_sync_status, last_sync_error');
 
       if (error) throw error;
 
-      const statuses: PlatformStatus[] = (connections || []).map((conn: any) => {
-        const progress = conn.sync_progress || {};
-        const config = PLATFORM_CONFIG[conn.platform] || { displayName: conn.platform, rateDelaySeconds: 1 };
+      const statuses: PlatformStatus[] = (dataSources || []).map((ds: any) => {
+        const config = PLATFORM_CONFIG[ds.source_type] || { displayName: ds.source_type };
         
-        let current = 0;
-        let total = 0;
-        
-        if (conn.platform === 'replyio') {
-          current = progress.sequence_index || 0;
-          total = progress.total_sequences || 0;
-        } else if (conn.platform === 'smartlead') {
-          current = progress.campaign_offset || progress.current_campaign || 0;
-          total = progress.total_campaigns || 0;
-        }
-
-        let estimatedTimeRemaining: number | undefined;
-        if (conn.sync_status === 'syncing' && total > 0 && current > 0) {
-          const remaining = total - current;
-          estimatedTimeRemaining = Math.round(remaining * config.rateDelaySeconds);
-        }
-
         return {
-          platform: conn.platform,
+          platform: ds.source_type,
           displayName: config.displayName,
-          status: conn.sync_status || 'idle',
-          current,
-          total,
-          lastSyncAt: conn.last_sync_at,
-          errorMessage: progress.error_message || progress.failure_reason,
-          batchLimitReached: progress.batch_limit_reached,
-          estimatedTimeRemaining,
-          isActive: conn.is_active,
+          status: ds.last_sync_status || 'idle',
+          lastSyncAt: ds.last_sync_at,
+          errorMessage: ds.last_sync_error,
+          isActive: ds.status === 'active',
         };
       });
 
@@ -148,10 +121,7 @@ export function SyncStatusDashboard() {
     }
   };
 
-  const getStatusBadge = (status: string, batchLimitReached?: boolean) => {
-    if (batchLimitReached) {
-      return <Badge variant="destructive" className="text-[10px] h-5">Batch Limit</Badge>;
-    }
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'syncing':
         return <Badge className="bg-primary/10 text-primary text-[10px] h-5">Syncing</Badge>;
@@ -167,12 +137,6 @@ export function SyncStatusDashboard() {
       default:
         return <Badge variant="outline" className="text-[10px] h-5">Unknown</Badge>;
     }
-  };
-
-  const formatDuration = (seconds: number): string => {
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   };
 
   const formatRelativeTime = (dateStr: string | null): string => {
@@ -205,7 +169,7 @@ export function SyncStatusDashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent className="text-center text-muted-foreground py-6 text-sm">
-          No connections configured yet.
+          No data sources configured yet.
         </CardContent>
       </Card>
     );
@@ -249,23 +213,8 @@ export function SyncStatusDashboard() {
                   {getStatusIcon(p.status)}
                   <span className="font-medium text-sm">{p.displayName}</span>
                 </div>
-                {getStatusBadge(p.status, p.batchLimitReached)}
+                {getStatusBadge(p.status)}
               </div>
-
-              {(p.status === 'syncing' || p.status === 'partial') && p.total > 0 && (
-                <div className="space-y-1.5 mb-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Progress</span>
-                    <span>{p.current}/{p.total} ({Math.round((p.current / p.total) * 100)}%)</span>
-                  </div>
-                  <Progress value={(p.current / p.total) * 100} className="h-1.5" />
-                  {p.estimatedTimeRemaining && (
-                    <p className="text-[10px] text-muted-foreground">
-                      ~{formatDuration(p.estimatedTimeRemaining)} remaining
-                    </p>
-                  )}
-                </div>
-              )}
 
               {p.errorMessage && (
                 <div className="mb-2 p-1.5 rounded bg-destructive/10 border border-destructive/20">

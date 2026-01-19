@@ -97,226 +97,82 @@ export function useDeliverabilityData() {
     setError(null);
     
     try {
-      // Fetch email accounts with all metrics
-      const { data: accountsData, error: accountsError } = await supabase
-        .from('email_accounts')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id);
-      
-      if (accountsError) throw accountsError;
-      
-      // Fetch sending domains
-      const { data: domainsData, error: domainsError } = await supabase
-        .from('sending_domains')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id);
-      
-      if (domainsError) throw domainsError;
-      
-      // Fetch deliverability alerts
-      const { data: alertsData, error: alertsError } = await supabase
-        .from('deliverability_alerts')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .eq('is_resolved', false)
-        .order('created_at', { ascending: false })
-        .limit(50);
-      
-      if (alertsError) throw alertsError;
-      
-      // Fetch campaign bounce data from SmartLead with aggregated metrics
-      const { data: smartleadCampaigns, error: slError } = await supabase
-        .from('smartlead_campaigns')
-        .select(`
-          id, 
-          name,
-          smartlead_daily_metrics(sent_count, bounced_count)
-        `)
-        .eq('workspace_id', currentWorkspace.id);
-      
-      if (slError) throw slError;
-      
-      // Fetch campaign bounce data from Reply.io with aggregated metrics
-      const { data: replyioCampaigns, error: rError } = await supabase
-        .from('replyio_campaigns')
-        .select(`
-          id, 
-          name,
-          replyio_daily_metrics(sent_count, bounced_count)
-        `)
-        .eq('workspace_id', currentWorkspace.id);
-      
-      if (rError) throw rError;
-      
-      // Process mailboxes
-      const processedMailboxes: MailboxHealth[] = (accountsData || []).map(a => ({
-        id: a.id,
-        email: a.email_address,
-        domain: a.email_address.split('@')[1] || '',
-        isActive: a.is_active,
-        healthScore: a.health_score * 100,
-        warmupEnabled: a.warmup_enabled,
-        warmupPercentage: a.warmup_percentage || 0,
-        warmupStatus: a.warmup_status || 'not_started',
-        dailyLimit: a.daily_limit,
-        bounceRate: a.bounce_rate || 0,
-        replyRate: a.reply_rate || 0,
-        spamComplaintRate: a.spam_complaint_rate || 0,
-        sent30d: a.sent_30d || 0,
-        accountStatus: a.account_status || 'active',
-        platform: a.platform,
-      }));
-      
-      // Aggregate to domain level
-      const domainMap = new Map<string, DomainHealth>();
-      
-      processedMailboxes.forEach(m => {
-        if (!domainMap.has(m.domain)) {
-          const domainData = domainsData?.find(d => d.domain === m.domain);
-          domainMap.set(m.domain, {
-            domain: m.domain,
-            mailboxCount: 0,
-            activeMailboxes: 0,
-            totalDailyCapacity: 0,
-            avgHealthScore: 0,
-            avgWarmupPercentage: 0,
-            warmingUpCount: 0,
-            avgBounceRate: 0,
-            avgReplyRate: 0,
-            spfValid: domainData?.spf_valid || false,
-            dkimValid: domainData?.dkim_valid || false,
-            dmarcValid: domainData?.dmarc_valid || false,
-            isBulkSender: domainData?.is_bulk_sender || false,
-            blacklistStatus: domainData?.blacklist_status || 'clean',
-            googlePostmasterReputation: domainData?.google_postmaster_reputation,
-            domainStatus: domainData?.domain_status || 'active',
-          });
-        }
-        
-        const d = domainMap.get(m.domain)!;
-        d.mailboxCount++;
-        if (m.isActive) d.activeMailboxes++;
-        d.totalDailyCapacity += m.dailyLimit;
-        d.avgHealthScore += m.healthScore;
-        d.avgWarmupPercentage += m.warmupPercentage;
-        if (m.warmupEnabled) d.warmingUpCount++;
-        d.avgBounceRate += m.bounceRate;
-        d.avgReplyRate += m.replyRate;
-      });
-      
-      // Calculate averages
-      domainMap.forEach(d => {
-        if (d.mailboxCount > 0) {
-          d.avgHealthScore /= d.mailboxCount;
-          d.avgWarmupPercentage /= d.mailboxCount;
-          d.avgBounceRate /= d.mailboxCount;
-          d.avgReplyRate /= d.mailboxCount;
-        }
-      });
-      
-      const processedDomains = Array.from(domainMap.values());
-      
-      // Process alerts
-      const processedAlerts: DeliverabilityAlert[] = (alertsData || []).map(a => ({
-        id: a.id,
-        alertType: a.alert_type,
-        severity: a.severity as 'info' | 'warning' | 'critical',
-        title: a.title,
-        message: a.message,
-        entityType: a.entity_type,
-        entityId: a.entity_id,
-        entityName: a.entity_name,
-        metricValue: a.metric_value,
-        thresholdValue: a.threshold_value,
-        isRead: a.is_read,
-        isResolved: a.is_resolved,
-        createdAt: a.created_at,
-      }));
-      
+      // Get engagement IDs for this client
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = (engagements || []).map(e => e.id);
+
+      if (engagementIds.length === 0) {
+        // No engagements, return empty data
+        setStats({
+          totalMailboxes: 0,
+          activeMailboxes: 0,
+          totalDomains: 0,
+          totalDailyCapacity: 0,
+          totalSent30d: 0,
+          avgBounceRate: 0,
+          avgReplyRate: 0,
+          avgHealthScore: 0,
+          warmingUpCount: 0,
+          domainsWithFullAuth: 0,
+          blacklistedDomains: 0,
+          criticalAlerts: 0,
+          warningAlerts: 0,
+        });
+        setMailboxes([]);
+        setDomains([]);
+        setAlerts([]);
+        setCampaignBounces([]);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch campaign bounce data from campaigns table
+      const { data: campaignsData } = await supabase
+        .from('campaigns')
+        .select('id, name, total_sent, total_bounced, campaign_type')
+        .in('engagement_id', engagementIds);
+
       // Process campaign bounces
-      const bounceData: CampaignBounceData[] = [];
-      
-      (smartleadCampaigns || []).forEach(c => {
-        // Aggregate metrics from daily_metrics
-        const metrics = c.smartlead_daily_metrics || [];
-        const totalSent = metrics.reduce((sum, m) => sum + (m.sent_count || 0), 0);
-        const totalBounced = metrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
-        
-        if (totalSent > 0) {
-          const bounceRate = (totalBounced / totalSent) * 100;
-          bounceData.push({
-            id: c.id,
-            name: c.name,
-            bounceRate,
-            bounces: totalBounced,
-            sent: totalSent,
-            platform: 'smartlead',
-          });
-        }
-      });
-      
-      (replyioCampaigns || []).forEach(c => {
-        // Aggregate metrics from daily_metrics
-        const metrics = c.replyio_daily_metrics || [];
-        const totalSent = metrics.reduce((sum, m) => sum + (m.sent_count || 0), 0);
-        const totalBounced = metrics.reduce((sum, m) => sum + (m.bounced_count || 0), 0);
-        
-        if (totalSent > 0) {
-          const bounceRate = (totalBounced / totalSent) * 100;
-          bounceData.push({
-            id: c.id,
-            name: c.name,
-            bounceRate,
-            bounces: totalBounced,
-            sent: totalSent,
-            platform: 'replyio',
-          });
-        }
-      });
-      
-      // Sort by bounce rate descending
-      bounceData.sort((a, b) => b.bounceRate - a.bounceRate);
-      
-      // Calculate aggregate stats
-      const totalMailboxes = processedMailboxes.length;
-      const activeMailboxes = processedMailboxes.filter(m => m.isActive).length;
-      const totalDomains = processedDomains.length;
-      const totalDailyCapacity = processedMailboxes.reduce((sum, m) => sum + m.dailyLimit, 0);
-      const totalSent30d = processedMailboxes.reduce((sum, m) => sum + m.sent30d, 0);
-      const avgBounceRate = totalMailboxes > 0 
-        ? processedMailboxes.reduce((sum, m) => sum + m.bounceRate, 0) / totalMailboxes 
-        : 0;
-      const avgReplyRate = totalMailboxes > 0
-        ? processedMailboxes.reduce((sum, m) => sum + m.replyRate, 0) / totalMailboxes
-        : 0;
-      const avgHealthScore = totalMailboxes > 0
-        ? processedMailboxes.reduce((sum, m) => sum + m.healthScore, 0) / totalMailboxes
-        : 0;
-      const warmingUpCount = processedMailboxes.filter(m => m.warmupEnabled).length;
-      const domainsWithFullAuth = processedDomains.filter(d => d.spfValid && d.dkimValid && d.dmarcValid).length;
-      const blacklistedDomains = processedDomains.filter(d => d.blacklistStatus !== 'clean').length;
-      const criticalAlerts = processedAlerts.filter(a => a.severity === 'critical').length;
-      const warningAlerts = processedAlerts.filter(a => a.severity === 'warning').length;
-      
+      const bounceData: CampaignBounceData[] = (campaignsData || [])
+        .filter(c => (c.total_sent || 0) > 0)
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          bounceRate: ((c.total_bounced || 0) / (c.total_sent || 1)) * 100,
+          bounces: c.total_bounced || 0,
+          sent: c.total_sent || 0,
+          platform: c.campaign_type,
+        }))
+        .sort((a, b) => b.bounceRate - a.bounceRate);
+
+      // Calculate aggregate stats from campaigns
+      const totalSent = bounceData.reduce((sum, c) => sum + c.sent, 0);
+      const totalBounced = bounceData.reduce((sum, c) => sum + c.bounces, 0);
+      const avgBounceRate = totalSent > 0 ? (totalBounced / totalSent) * 100 : 0;
+
       setStats({
-        totalMailboxes,
-        activeMailboxes,
-        totalDomains,
-        totalDailyCapacity,
-        totalSent30d,
+        totalMailboxes: 0,
+        activeMailboxes: 0,
+        totalDomains: 0,
+        totalDailyCapacity: 0,
+        totalSent30d: totalSent,
         avgBounceRate,
-        avgReplyRate,
-        avgHealthScore,
-        warmingUpCount,
-        domainsWithFullAuth,
-        blacklistedDomains,
-        criticalAlerts,
-        warningAlerts,
+        avgReplyRate: 0,
+        avgHealthScore: 100 - avgBounceRate,
+        warmingUpCount: 0,
+        domainsWithFullAuth: 0,
+        blacklistedDomains: 0,
+        criticalAlerts: 0,
+        warningAlerts: 0,
       });
       
-      setMailboxes(processedMailboxes);
-      setDomains(processedDomains);
-      setAlerts(processedAlerts);
+      setMailboxes([]);
+      setDomains([]);
+      setAlerts([]);
       setCampaignBounces(bounceData);
       
     } catch (err) {
@@ -328,31 +184,13 @@ export function useDeliverabilityData() {
   }, [currentWorkspace?.id]);
 
   const dismissAlert = useCallback(async (alertId: string) => {
-    try {
-      await supabase
-        .from('deliverability_alerts')
-        .update({ is_resolved: true, resolved_at: new Date().toISOString() })
-        .eq('id', alertId);
-      
-      setAlerts(prev => prev.filter(a => a.id !== alertId));
-    } catch (err) {
-      console.error('Error dismissing alert:', err);
-    }
+    setAlerts(prev => prev.filter(a => a.id !== alertId));
   }, []);
 
   const markAlertRead = useCallback(async (alertId: string) => {
-    try {
-      await supabase
-        .from('deliverability_alerts')
-        .update({ is_read: true })
-        .eq('id', alertId);
-      
-      setAlerts(prev => prev.map(a => 
-        a.id === alertId ? { ...a, isRead: true } : a
-      ));
-    } catch (err) {
-      console.error('Error marking alert read:', err);
-    }
+    setAlerts(prev => prev.map(a => 
+      a.id === alertId ? { ...a, isRead: true } : a
+    ));
   }, []);
 
   useEffect(() => {

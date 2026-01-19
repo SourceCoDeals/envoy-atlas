@@ -10,10 +10,11 @@ export interface CampaignWithMetrics {
   id: string;
   name: string;
   status: string;
-  platform: string;
-  platform_campaign_id: string | null;
+  campaign_type: string;
+  platform: string; // Alias for campaign_type for backward compatibility
+  data_source_id: string | null;
   created_at: string;
-  updated_at: string;
+  updated_at: string | null;
   total_sent: number;
   total_opened: number;
   total_clicked: number;
@@ -52,43 +53,35 @@ export function useCampaigns() {
     setError(null);
 
     try {
-      // Fetch campaigns with cumulative metrics and engagements in parallel
-      const [campaignsResult, cumulativeResult, engagementsResult] = await Promise.all([
-        supabase
-          .from('campaigns')
-          .select('*')
-          .eq('workspace_id', currentWorkspace.id),
-        supabase
-          .from('campaign_cumulative')
-          .select('*')
-          .eq('workspace_id', currentWorkspace.id),
-        supabase
-          .from('engagements')
-          .select('id, engagement_name')
-          .eq('workspace_id', currentWorkspace.id)
-      ]);
+      // Get engagement IDs for this client
+      const { data: engagements, error: engError } = await supabase
+        .from('engagements')
+        .select('id, engagement_name')
+        .eq('client_id', currentWorkspace.id);
 
-      if (campaignsResult.error) throw campaignsResult.error;
+      if (engError) throw engError;
 
-      // Build engagement lookup map
+      const engagementIds = (engagements || []).map(e => e.id);
       const engagementMap = new Map<string, string>();
-      (engagementsResult.data || []).forEach(e => {
+      (engagements || []).forEach(e => {
         engagementMap.set(e.id, e.engagement_name);
       });
 
-      // Build cumulative lookup map
-      const cumulativeMap = new Map<string, {
-        total_sent: number | null;
-        total_opened: number | null;
-        total_clicked: number | null;
-        total_replied: number | null;
-        total_bounced: number | null;
-      }>();
-      (cumulativeResult.data || []).forEach(c => {
-        cumulativeMap.set(c.campaign_id, c);
-      });
+      if (engagementIds.length === 0) {
+        setCampaigns([]);
+        setLoading(false);
+        return;
+      }
 
-      const allCampaigns = campaignsResult.data || [];
+      // Fetch campaigns for these engagements
+      const { data: campaignsData, error: campError } = await supabase
+        .from('campaigns')
+        .select('*')
+        .in('engagement_id', engagementIds);
+
+      if (campError) throw campError;
+
+      const allCampaigns = campaignsData || [];
 
       if (allCampaigns.length === 0) {
         setCampaigns([]);
@@ -96,11 +89,13 @@ export function useCampaigns() {
         return;
       }
 
-      // Fetch daily metrics aggregated per campaign (as fallback if cumulative is empty)
-      const dailyResult = await supabase
-        .from('campaign_metrics')
-        .select('campaign_id, sent_count, opened_count, clicked_count, replied_count, bounced_count')
-        .eq('workspace_id', currentWorkspace.id);
+      const campaignIds = allCampaigns.map(c => c.id);
+
+      // Fetch daily metrics aggregated per campaign
+      const { data: dailyData } = await supabase
+        .from('daily_metrics')
+        .select('campaign_id, emails_sent, emails_opened, emails_clicked, emails_replied, emails_bounced')
+        .in('campaign_id', campaignIds);
 
       // Build daily aggregation map
       const dailyAggregateMap = new Map<string, {
@@ -111,50 +106,55 @@ export function useCampaigns() {
         total_bounced: number;
       }>();
 
-      (dailyResult.data || []).forEach(row => {
+      (dailyData || []).forEach(row => {
         const existing = dailyAggregateMap.get(row.campaign_id);
         if (existing) {
-          existing.total_sent += row.sent_count || 0;
-          existing.total_opened += row.opened_count || 0;
-          existing.total_clicked += row.clicked_count || 0;
-          existing.total_replied += row.replied_count || 0;
-          existing.total_bounced += row.bounced_count || 0;
+          existing.total_sent += row.emails_sent || 0;
+          existing.total_opened += row.emails_opened || 0;
+          existing.total_clicked += row.emails_clicked || 0;
+          existing.total_replied += row.emails_replied || 0;
+          existing.total_bounced += row.emails_bounced || 0;
         } else {
           dailyAggregateMap.set(row.campaign_id, {
-            total_sent: row.sent_count || 0,
-            total_opened: row.opened_count || 0,
-            total_clicked: row.clicked_count || 0,
-            total_replied: row.replied_count || 0,
-            total_bounced: row.bounced_count || 0,
+            total_sent: row.emails_sent || 0,
+            total_opened: row.emails_opened || 0,
+            total_clicked: row.emails_clicked || 0,
+            total_replied: row.emails_replied || 0,
+            total_bounced: row.emails_bounced || 0,
           });
         }
       });
 
       // Build campaigns with metrics
       const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
-        const cumulative = cumulativeMap.get(campaign.id);
         const dailyAggregate = dailyAggregateMap.get(campaign.id);
-
-        // Use cumulative if it has data, otherwise fall back to daily aggregate
-        const hasCumulativeData = cumulative && (cumulative.total_sent || 0) > 0;
+        
+        // Use campaign cumulative fields first, then fall back to daily aggregate
+        const hasCumulativeData = (campaign.total_sent || 0) > 0;
         const hasDailyData = dailyAggregate && dailyAggregate.total_sent > 0;
-        const source = hasCumulativeData ? cumulative : dailyAggregate;
 
-        const total_sent = source?.total_sent || 0;
-        const total_opened = source?.total_opened || 0;
-        const total_clicked = source?.total_clicked || 0;
-        const total_replied = source?.total_replied || 0;
-        const total_bounced = source?.total_bounced || 0;
-        const total_leads = 0;
-
-        // Determine metrics status
+        let total_sent = 0;
+        let total_opened = 0;
+        let total_clicked = 0;
+        let total_replied = 0;
+        let total_bounced = 0;
         let metricsStatus: MetricsStatus;
         let metricsSource: MetricsSource;
 
         if (hasCumulativeData) {
+          total_sent = campaign.total_sent || 0;
+          total_opened = campaign.total_opened || 0;
+          total_clicked = 0; // Not in campaign table
+          total_replied = campaign.total_replied || 0;
+          total_bounced = campaign.total_bounced || 0;
           metricsStatus = 'verified';
           metricsSource = 'cumulative';
         } else if (hasDailyData) {
+          total_sent = dailyAggregate!.total_sent;
+          total_opened = dailyAggregate!.total_opened;
+          total_clicked = dailyAggregate!.total_clicked;
+          total_replied = dailyAggregate!.total_replied;
+          total_bounced = dailyAggregate!.total_bounced;
           metricsStatus = 'partial';
           metricsSource = 'daily';
         } else {
@@ -162,29 +162,27 @@ export function useCampaigns() {
           metricsSource = 'none';
         }
 
-        // Cast to include engagement_id from the schema
-        const c = campaign as typeof campaign & { engagement_id?: string | null };
-        
         return {
           id: campaign.id,
           name: campaign.name,
           status: campaign.status || 'unknown',
-          platform: campaign.platform,
-          platform_campaign_id: campaign.platform_id,
-          created_at: campaign.created_at,
+          campaign_type: campaign.campaign_type,
+          platform: campaign.campaign_type, // Backward compatibility alias
+          data_source_id: campaign.data_source_id,
+          created_at: campaign.created_at || new Date().toISOString(),
           updated_at: campaign.updated_at,
           total_sent,
           total_opened,
           total_clicked,
           total_replied,
           total_bounced,
-          total_leads,
+          total_leads: 0,
           open_rate: total_sent > 0 ? (total_opened / total_sent) * 100 : 0,
           click_rate: total_sent > 0 ? (total_clicked / total_sent) * 100 : 0,
           reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
           bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
-          engagement_id: c.engagement_id || null,
-          engagement_name: c.engagement_id ? engagementMap.get(c.engagement_id) || null : null,
+          engagement_id: campaign.engagement_id || null,
+          engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
           metricsStatus,
           metricsSource,
         };

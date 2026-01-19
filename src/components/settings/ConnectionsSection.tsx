@@ -13,16 +13,14 @@ import { ConnectionCard, SyncButton } from "./connections";
 
 type SyncProgress = Record<string, any> | null;
 
-type ApiConnection = {
+interface DataSource {
   id: string;
-  platform: string;
-  is_active: boolean;
+  source_type: string;
+  status: string | null;
   last_sync_at: string | null;
-  last_full_sync_at: string | null;
-  sync_status: string | null;
-  sync_progress: SyncProgress;
-  created_at: string;
-};
+  last_sync_status: string | null;
+  created_at: string | null;
+}
 
 interface ConnectionsSectionProps {
   workspaceId: string;
@@ -41,7 +39,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [connections, setConnections] = useState<ApiConnection[]>([]);
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("email");
 
@@ -54,25 +52,24 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const smartleadConnection = useMemo(() => connections.find((c) => c.platform === "smartlead"), [connections]);
-  const replyioConnection = useMemo(() => connections.find((c) => c.platform === "replyio"), [connections]);
-  const phoneburnerConnection = useMemo(() => connections.find((c) => c.platform === "phoneburner"), [connections]);
+  const smartleadSource = useMemo(() => dataSources.find((s) => s.source_type === "smartlead"), [dataSources]);
+  const replyioSource = useMemo(() => dataSources.find((s) => s.source_type === "replyio"), [dataSources]);
+  const phoneburnerSource = useMemo(() => dataSources.find((s) => s.source_type === "phoneburner"), [dataSources]);
 
-  const fetchConnections = async () => {
+  const fetchDataSources = async () => {
     if (!workspaceId) return;
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from("api_connections")
-        .select("id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at")
-        .eq("workspace_id", workspaceId)
+        .from("data_sources")
+        .select("id, source_type, status, last_sync_at, last_sync_status, created_at")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setConnections((data as ApiConnection[]) ?? []);
+      setDataSources((data as DataSource[]) ?? []);
     } catch (e: any) {
       console.error(e);
-      setError(e?.message || "Failed to load connections");
+      setError(e?.message || "Failed to load data sources");
     } finally {
       setLoading(false);
     }
@@ -85,7 +82,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     if (successParam === "phoneburner_connected") {
       setSuccess("PhoneBurner connected successfully!");
       setSearchParams({}, { replace: true });
-      if (workspaceId) fetchConnections();
+      if (workspaceId) fetchDataSources();
     } else if (errorParam) {
       const errorMessages: Record<string, string> = {
         oauth_denied: "PhoneBurner authorization was denied.",
@@ -99,10 +96,10 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   }, [searchParams]);
 
   useEffect(() => {
-    if (workspaceId) void fetchConnections();
+    if (workspaceId) void fetchDataSources();
   }, [workspaceId]);
 
-  const anySyncing = useMemo(() => connections.some((c) => c.sync_status === "syncing"), [connections]);
+  const anySyncing = useMemo(() => dataSources.some((s) => s.last_sync_status === "syncing"), [dataSources]);
 
   useEffect(() => {
     if (!anySyncing || !workspaceId) return;
@@ -113,7 +110,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         clearInterval(t);
         return;
       }
-      void fetchConnections();
+      void fetchDataSources();
     }, 5000);
     return () => window.clearInterval(t);
   }, [anySyncing, workspaceId]);
@@ -130,23 +127,19 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     setIsConnecting((s) => ({ ...s, [platform]: true }));
 
     try {
-      const { error } = await supabase.from("api_connections").upsert(
-        {
-          workspace_id: workspaceId,
-          platform,
-          api_key_encrypted: apiKey,
-          is_active: true,
-          sync_status: "pending",
-          created_by: user.id,
-        },
-        { onConflict: "workspace_id,platform" }
-      );
+      const { error } = await supabase.from("data_sources").insert({
+        name: platform === "smartlead" ? "SmartLead" : "Reply.io",
+        source_type: platform,
+        api_key_encrypted: apiKey,
+        status: "active",
+        sync_enabled: true,
+      });
       if (error) throw error;
 
       setSuccess(`${platform === "smartlead" ? "Smartlead" : "Reply.io"} connected successfully!`);
       if (platform === "smartlead") setSmartleadApiKey("");
       if (platform === "replyio") setReplyioApiKey("");
-      await fetchConnections();
+      await fetchDataSources();
     } catch (e: any) {
       console.error(e);
       setError(e?.message || `Failed to connect ${platform}`);
@@ -188,7 +181,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
           : "Sync started, processing in background...";
         setSuccess(msg);
       }
-      await fetchConnections();
+      await fetchDataSources();
     } catch (e: any) {
       console.error(e);
       setError(e?.message || `Failed to sync ${platform}`);
@@ -221,32 +214,6 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     } finally {
       setIsConnecting((s) => ({ ...s, phoneburner_oauth: false }));
     }
-  };
-
-  const getProgress = (conn: ApiConnection | undefined, keys: { current: string; total: string; label: string }) => {
-    if (!conn?.sync_progress) return undefined;
-    const progress = conn.sync_progress as any;
-    
-    // Calculate estimated time remaining based on platform rate limits
-    let estimatedTimeRemaining: string | undefined;
-    const remaining = (progress[keys.total] || 0) - (progress[keys.current] || 0);
-    if (remaining > 0 && conn.sync_status === "syncing") {
-      // Smartlead: ~250ms per item, Reply.io: ~10.5s per sequence for stats
-      const platform = conn.platform;
-      const msPerItem = platform === "replyio" ? 10500 : platform === "smartlead" ? 250 : 1000;
-      const totalMs = remaining * msPerItem;
-      const mins = Math.ceil(totalMs / 60000);
-      estimatedTimeRemaining = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
-    }
-    
-    return {
-      current: progress[keys.current] || 0,
-      total: progress[keys.total] || 0,
-      label: keys.label,
-      stage: progress.stage || progress.current_stage,
-      batch: progress.batch_number || progress.batch,
-      estimatedTimeRemaining,
-    };
   };
 
   if (loading) {
@@ -292,14 +259,9 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               title="Smartlead"
               description="Primary outreach platform"
               icon={<Plug className="h-5 w-5 text-primary" />}
-              isConnected={!!smartleadConnection}
-              syncStatus={smartleadConnection?.sync_status}
-              lastSyncAt={smartleadConnection?.last_sync_at}
-              syncProgress={getProgress(smartleadConnection, {
-                current: "campaign_index",
-                total: "total_campaigns",
-                label: "campaigns",
-              })}
+              isConnected={!!smartleadSource}
+              syncStatus={smartleadSource?.last_sync_status}
+              lastSyncAt={smartleadSource?.last_sync_at}
               apiKeyValue={smartleadApiKey}
               onApiKeyChange={setSmartleadApiKey}
               apiKeyPlaceholder="Paste Smartlead API key"
@@ -343,14 +305,9 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               title="Reply.io"
               description="Email automation platform"
               icon={<Plug className="h-5 w-5 text-primary" />}
-              isConnected={!!replyioConnection}
-              syncStatus={replyioConnection?.sync_status}
-              lastSyncAt={replyioConnection?.last_sync_at}
-              syncProgress={getProgress(replyioConnection, {
-                current: "sequences_synced",
-                total: "total_sequences",
-                label: "sequences",
-              })}
+              isConnected={!!replyioSource}
+              syncStatus={replyioSource?.last_sync_status}
+              lastSyncAt={replyioSource?.last_sync_at}
               apiKeyValue={replyioApiKey}
               onApiKeyChange={setReplyioApiKey}
               apiKeyPlaceholder="Paste Reply.io API key"
@@ -382,7 +339,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             />
 
             {/* Data Coverage */}
-            {(smartleadConnection || replyioConnection) && (
+            {(smartleadSource || replyioSource) && (
               <div className="md:col-span-2">
                 <DataCoverageIndicator workspaceId={workspaceId} />
               </div>
@@ -397,27 +354,12 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               title="PhoneBurner"
               description="Power dialer & call tracking"
               icon={<Phone className="h-5 w-5 text-primary" />}
-              isConnected={!!phoneburnerConnection}
-              syncStatus={phoneburnerConnection?.sync_status}
-              lastSyncAt={phoneburnerConnection?.last_sync_at}
-              syncProgress={getProgress(phoneburnerConnection, {
-                current: "sessions_synced",
-                total: "total_sessions",
-                label: "sessions",
-              })}
+              isConnected={!!phoneburnerSource}
+              syncStatus={phoneburnerSource?.last_sync_status}
+              lastSyncAt={phoneburnerSource?.last_sync_at}
               isConnecting={isConnecting.phoneburner_oauth}
               onConnect={handlePhoneBurnerOAuth}
               connectLabel="Connect with PhoneBurner"
-              statusRows={
-                phoneburnerConnection?.sync_progress && phoneburnerConnection.sync_status !== "syncing"
-                  ? [
-                      {
-                        label: "Records",
-                        value: `${(phoneburnerConnection.sync_progress as any)?.sessions_synced || 0} sessions, ${(phoneburnerConnection.sync_progress as any)?.contacts_synced || 0} contacts`,
-                      },
-                    ]
-                  : undefined
-              }
               syncActions={
                 <>
                   <SyncButton

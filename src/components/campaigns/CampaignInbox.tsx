@@ -49,50 +49,42 @@ export function CampaignInbox({ campaignId, platform }: CampaignInboxProps) {
     setLoading(true);
 
     try {
-      // Try normalized message_events first via inbox_items view
-      const { data: inboxData, error: inboxError } = await supabase
-        .from('inbox_items')
-        .select('*')
+      // Query responses table for campaign replies
+      const { data: responses, error } = await supabase
+        .from('responses')
+        .select(`
+          id,
+          response_type,
+          sentiment,
+          reply_text,
+          received_at,
+          contact_id,
+          contacts(email, first_name, last_name, title, companies(name))
+        `)
         .eq('campaign_id', campaignId)
-        .order('occurred_at', { ascending: false })
+        .order('received_at', { ascending: false })
         .limit(100);
 
-      if (!inboxError && inboxData && inboxData.length > 0) {
-        setItems(inboxData);
-        setLoading(false);
-        return;
-      }
-
-      // Fallback: Query platform-specific message_events table directly
-      const eventsTable = platform === 'smartlead' ? 'smartlead_message_events' : 'replyio_message_events';
-      const { data: platformEvents, error: platformError } = await supabase
-        .from(eventsTable)
-        .select('*')
-        .eq('campaign_id', campaignId)
-        .in('event_type', ['reply', 'replied', 'positive_reply', 'negative_reply', 'interested', 'not_interested'])
-        .order('event_timestamp', { ascending: false })
-        .limit(100);
-
-      if (platformError) {
-        console.error('Error fetching platform events:', platformError);
+      if (error) {
+        console.error('Error fetching responses:', error);
         setItems([]);
         setLoading(false);
         return;
       }
 
-      // Transform platform events to match InboxItem interface
-      const transformedItems: InboxItem[] = (platformEvents || []).map((evt: any) => ({
-        id: evt.id,
-        lead_email: evt.lead_email || null,
-        first_name: null,
-        last_name: null,
-        company: null,
-        title: null,
-        event_type: evt.event_type,
-        reply_content: evt.reply_text || null,
-        reply_sentiment: evt.reply_sentiment || null,
+      // Transform responses to match InboxItem interface
+      const transformedItems: InboxItem[] = (responses || []).map((resp: any) => ({
+        id: resp.id,
+        lead_email: resp.contacts?.email || null,
+        first_name: resp.contacts?.first_name || null,
+        last_name: resp.contacts?.last_name || null,
+        company: resp.contacts?.companies?.name || null,
+        title: resp.contacts?.title || null,
+        event_type: resp.response_type || 'reply',
+        reply_content: resp.reply_text || null,
+        reply_sentiment: resp.sentiment || null,
         sequence_step: null,
-        occurred_at: evt.event_timestamp || evt.created_at,
+        occurred_at: resp.received_at || resp.created_at,
         subject_line: null,
         variant_name: null,
       }));

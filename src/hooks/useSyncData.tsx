@@ -24,58 +24,31 @@ export function useSyncData() {
   const fetchProgress = useCallback(async () => {
     if (!currentWorkspace?.id) return null;
 
-    const { data: connections } = await supabase
-      .from('api_connections')
-      .select('platform, sync_status, sync_progress')
-      .eq('workspace_id', currentWorkspace.id)
-      .eq('is_active', true);
+    const { data: dataSources } = await supabase
+      .from('data_sources')
+      .select('source_type, last_sync_status, additional_config')
+      .in('source_type', ['smartlead', 'replyio'])
+      .eq('status', 'active');
 
-    if (connections) {
+    if (dataSources) {
       const newProgress: SyncProgress = {};
-      let batchLimitHit = false;
       
-      connections.forEach(conn => {
-        const syncProgress = conn.sync_progress as any;
-        const status = conn.sync_status || 'idle';
+      dataSources.forEach(ds => {
+        const config = ds.additional_config as any;
+        const status = ds.last_sync_status || 'idle';
         
-        // Check for batch limit error
-        if (status === 'error' && syncProgress?.batch_limit_reached) {
-          batchLimitHit = true;
-        }
-        
-        if (conn.platform === 'smartlead' && syncProgress) {
-          const total = syncProgress.total_campaigns ?? 0;
-          // If sync is complete (success status or completed flag), set current = total
-          const isComplete = status === 'success' || syncProgress.completed === true;
-          const current = isComplete 
-            ? total 
-            : (syncProgress.campaign_index ?? syncProgress.current_index ?? 0);
-          
+        if (ds.source_type === 'smartlead' && config) {
+          const total = config.total_campaigns ?? 0;
+          const isComplete = status === 'success' || config.completed === true;
+          const current = isComplete ? total : (config.campaign_index ?? 0);
           newProgress.smartlead = { current, total, status };
-        } else if (conn.platform === 'replyio' && syncProgress) {
-          // Get total from cached_sequences array length or total_sequences
-          const cachedSequences = syncProgress.cached_sequences;
-          const total = Array.isArray(cachedSequences) 
-            ? cachedSequences.length 
-            : (syncProgress.total_sequences ?? 0);
-          
-          // If sync is complete, set current = total
-          const isComplete = status === 'success' || syncProgress.completed === true;
-          const current = isComplete 
-            ? total 
-            : (syncProgress.sequence_index ?? syncProgress.current_index ?? 0);
-          
+        } else if (ds.source_type === 'replyio' && config) {
+          const total = config.total_sequences ?? 0;
+          const isComplete = status === 'success' || config.completed === true;
+          const current = isComplete ? total : (config.sequence_index ?? 0);
           newProgress.replyio = { current, total, status };
         }
       });
-      
-      // Show notification if batch limit was hit
-      if (batchLimitHit) {
-        toast.error('Sync hit batch limit', {
-          description: 'Some data may be missing. Contact support if this persists.',
-          duration: 10000,
-        });
-      }
       
       setProgress(newProgress);
       return newProgress;
@@ -93,7 +66,6 @@ export function useSyncData() {
     const rioIncomplete = rioProgress && rioProgress.total > 0 && 
       rioProgress.current < rioProgress.total && rioProgress.status !== 'error';
     
-    // Also check if status is 'syncing' or 'in_progress'
     const slSyncing = slProgress?.status === 'syncing' || slProgress?.status === 'in_progress';
     const rioSyncing = rioProgress?.status === 'syncing' || rioProgress?.status === 'in_progress';
     
@@ -151,7 +123,7 @@ export function useSyncData() {
     };
   }, [syncing]);
 
-  // Auto-detect an in-progress sync (e.g. after refresh/navigation) and start polling
+  // Auto-detect an in-progress sync on mount
   useEffect(() => {
     let cancelled = false;
 
@@ -178,10 +150,9 @@ export function useSyncData() {
   const triggerSync = async () => {
     if (!currentWorkspace?.id || syncing) return;
 
-    // Check if sync is already in progress in DB
+    // Check if sync is already in progress
     const currentProgress = await fetchProgress();
     if (currentProgress && isSyncInProgress(currentProgress)) {
-      // Sync already running - just start polling to show progress
       toast.info('Sync already in progress', {
         description: 'Watching for updates...'
       });
@@ -200,14 +171,14 @@ export function useSyncData() {
         throw new Error('Not authenticated');
       }
 
-      // Fetch connected platforms for this workspace
-      const { data: connections } = await supabase
-        .from('api_connections')
-        .select('platform, sync_progress')
-        .eq('workspace_id', currentWorkspace.id)
-        .eq('is_active', true);
+      // Fetch connected data sources
+      const { data: dataSources } = await supabase
+        .from('data_sources')
+        .select('source_type')
+        .in('source_type', ['smartlead', 'replyio'])
+        .eq('status', 'active');
 
-      const connectedPlatforms = (connections || []).map(c => c.platform);
+      const connectedPlatforms = (dataSources || []).map(ds => ds.source_type);
       
       if (connectedPlatforms.length === 0) {
         toast.info('No platforms connected', {
@@ -219,7 +190,6 @@ export function useSyncData() {
 
       const syncPromises: Promise<any>[] = [];
       
-      // Only trigger SmartLead - it will chain to Reply.io
       if (connectedPlatforms.includes('smartlead')) {
         syncPromises.push(
           supabase.functions.invoke('smartlead-sync', {
@@ -232,7 +202,6 @@ export function useSyncData() {
           })
         );
       } else if (connectedPlatforms.includes('replyio')) {
-        // Only trigger Reply.io if SmartLead not connected
         syncPromises.push(
           supabase.functions.invoke('replyio-sync', {
             body: { 
@@ -251,10 +220,7 @@ export function useSyncData() {
 
       await Promise.allSettled(syncPromises);
       
-      // Start polling for progress updates
       startPolling();
-      
-      // Initial progress fetch
       await fetchProgress();
 
       return { platforms: connectedPlatforms };
