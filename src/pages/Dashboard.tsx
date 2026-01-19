@@ -9,7 +9,7 @@ import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
 import { SystemHealthScore, calculateSystemHealth } from '@/components/dashboard/SystemHealthScore';
 import { DataHealthDashboard } from '@/components/dashboard/DataHealthDashboard';
 import { SyncStatusIndicator } from '@/components/dashboard/SyncStatusIndicator';
-import { BenchmarkBadge } from '@/components/dashboard/BenchmarkIndicator';
+import { BenchmarkIndicator } from '@/components/engagementReport/components';
 // FailureModeClassification and WhatChangedAnalysis removed - were using simulated comparison data
 import { ActionQueue, generateActionItems } from '@/components/dashboard/ActionQueue';
 import { KPICard, getKPIStatus } from '@/components/dashboard/KPICard';
@@ -272,6 +272,7 @@ export default function Dashboard() {
                 status={getKPIStatus(stats.replyRate, 3, 2)}
                 onClick={() => navigate('/copy-insights')}
                 actionLabel="Diagnose"
+                benchmarkElement={<BenchmarkIndicator value={stats.replyRate} benchmark={3.5} />}
               />
               <KPICard
                 label="Positive Rate"
