@@ -3534,26 +3534,26 @@ export type Database = {
       }
       copy_performance: {
         Row: {
-          body_bullet_count: number | null
-          body_cta_type: string | null
           body_preview: string | null
-          body_word_count: number | null
+          bounce_rate: number | null
           campaign_id: string | null
-          campaign_name: string | null
           confidence_level: string | null
           engagement_id: string | null
-          margin_of_error: number | null
-          opening_line_type: string | null
+          first_sent_at: string | null
+          last_sent_at: string | null
+          open_rate: number | null
           positive_replies: number | null
+          positive_reply_rate: number | null
           reply_rate: number | null
+          sample_size_sufficient: boolean | null
           step_number: number | null
-          subject_format: string | null
-          subject_length: number | null
           subject_line: string | null
-          tone: string | null
+          total_bounced: number | null
+          total_opened: number | null
           total_replied: number | null
           total_sent: number | null
           variant_id: string | null
+          variant_label: string | null
         }
         Relationships: [
           {

@@ -271,9 +271,9 @@ serve(async (req) => {
         }
       }
       
-      // Update campaign positive_replies counts
+      // Update campaign and daily_metrics positive_replies counts
       if (classified > 0) {
-        console.log(`Updating campaign positive reply counts...`);
+        console.log(`Updating campaign and daily_metrics positive reply counts...`);
         
         // Get all campaigns for this engagement
         const { data: campaigns } = await supabase
@@ -304,6 +304,34 @@ serve(async (req) => {
             positive_rate: positiveRate,
             updated_at: new Date().toISOString(),
           }).eq('id', campaign.id);
+          
+          // Update daily_metrics with positive reply counts
+          const { data: dailyPositives } = await supabase
+            .from('email_activities')
+            .select('replied_at, sent_at')
+            .eq('campaign_id', campaign.id)
+            .in('reply_category', ['meeting_request', 'interested']);
+          
+          // Group by date and update daily_metrics
+          const dateGroups = new Map<string, number>();
+          for (const activity of dailyPositives || []) {
+            const dateStr = activity.replied_at || activity.sent_at;
+            if (dateStr) {
+              const date = new Date(dateStr).toISOString().split('T')[0];
+              dateGroups.set(date, (dateGroups.get(date) || 0) + 1);
+            }
+          }
+          
+          for (const [date, count] of dateGroups) {
+            await supabase
+              .from('daily_metrics')
+              .update({ 
+                positive_replies: count,
+                updated_at: new Date().toISOString() 
+              })
+              .eq('campaign_id', campaign.id)
+              .eq('date', date);
+          }
         }
       }
       

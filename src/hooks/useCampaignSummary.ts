@@ -249,7 +249,11 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
       };
 
       // 7. Positive replies
-      const positiveEmails = emailActivities.filter(e => e.reply_category === 'positive' || e.reply_category === 'interested');
+      // Positive categories: 'meeting_request' and 'interested' (not 'positive' which is never stored)
+      const positiveEmails = emailActivities.filter(e => 
+        e.reply_category === 'meeting_request' || 
+        e.reply_category === 'interested'
+      );
       const positiveReplies = {
         count: total_positive_replies || positiveEmails.length,
         rate: metrics.positive_rate,
