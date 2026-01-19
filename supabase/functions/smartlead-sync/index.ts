@@ -726,25 +726,33 @@ serve(async (req) => {
                 
                 // Debug: Log first lead structure to understand API response
                 if (leads.length > 0 && offset === 0) {
-                  const sampleLead = leads[0];
-                  console.log(`  DEBUG Lead sample keys: ${Object.keys(sampleLead).join(', ')}`);
-                  console.log(`  DEBUG Lead sample: email=${sampleLead.email}, id=${sampleLead.id}, lead_id=${(sampleLead as any).lead_id}`);
+                  const sampleLead = leads[0] as any;
+                  console.log(`  DEBUG Top-level keys: ${Object.keys(sampleLead).join(', ')}`);
+                  // Check if there's a nested 'lead' object
+                  if (sampleLead.lead && typeof sampleLead.lead === 'object') {
+                    console.log(`  DEBUG Nested lead keys: ${Object.keys(sampleLead.lead).join(', ')}`);
+                    console.log(`  DEBUG Nested lead email: ${sampleLead.lead.email}, first_name: ${sampleLead.lead.first_name}`);
+                  }
                 }
                 
                 // Process leads in batch
                 for (const leadRaw of leads) {
                   try {
-                    // SmartLead API sometimes returns leads in different structures
-                    // Handle both flat and nested formats
-                    const lead = (leadRaw as any).lead || (leadRaw as any).lead_data || leadRaw;
+                    const rawItem = leadRaw as any;
                     
-                    // Extract email - try multiple possible field names
-                    const leadEmail = lead.email || (leadRaw as any).email || (leadRaw as any).lead_email;
-                    const leadId = lead.id || (leadRaw as any).id || (leadRaw as any).lead_id;
+                    // SmartLead API returns leads with a nested 'lead' object
+                    // Structure: { campaign_lead_map_id, lead_category_id, status, created_at, lead: { email, first_name, ... } }
+                    const lead = rawItem.lead || rawItem.lead_data || rawItem;
+                    
+                    // Extract email - the email is inside the nested 'lead' object
+                    const leadEmail = lead?.email || rawItem.email || rawItem.lead_email;
+                    const leadId = lead?.id || rawItem.id || rawItem.lead_id;
                     
                     // Skip if no email (critical field)
                     if (!leadEmail) {
-                      console.log(`  Skipping lead without email. Keys: ${Object.keys(leadRaw).slice(0, 10).join(', ')}`);
+                      if (offset === 0) {
+                        console.log(`  Skipping lead without email. lead obj type: ${typeof lead}, has lead prop: ${!!rawItem.lead}`);
+                      }
                       continue;
                     }
                     
