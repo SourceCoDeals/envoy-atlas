@@ -248,8 +248,8 @@ serve(async (req) => {
       batch_number = 1, 
       auto_continue = true,
       current_phase = 'campaigns',
-      sync_leads = true, // New: enable leads sync
-      sync_email_activities = true, // New: enable email activity sync
+      sync_leads = true, // Enable leads sync by default
+      sync_email_activities = false, // DISABLED: SmartLead API doesn't support /email-sent endpoint
     } = await req.json();
     
     if (!client_id) throw new Error('client_id is required');
@@ -675,74 +675,13 @@ serve(async (req) => {
           }
 
           // ============================================
-          // NEW: Fetch Email Activities for this campaign
+          // NOTE: Email Activities sync is DISABLED by default
+          // SmartLead API does not support /campaigns/{id}/email-sent endpoint
+          // Email activity data is derived from campaign analytics instead
           // ============================================
           if (sync_email_activities) {
-            try {
-              // Fetch message history for campaign
-              const messagesUrl = `/campaigns/${campaign.id}/email-sent`;
-              const messagesResponse = await smartleadRequest(messagesUrl, apiKey);
-              
-              const messages = Array.isArray(messagesResponse)
-                ? messagesResponse
-                : (messagesResponse?.emails || messagesResponse?.data || []);
-              
-              if (messages.length > 0) {
-                console.log(`  Found ${messages.length} email activities`);
-                
-                for (const msg of messages) {
-                  try {
-                    // Get contact for this email
-                    const { data: contact } = await supabase
-                      .from('contacts')
-                      .select('id, company_id')
-                      .eq('engagement_id', activeEngagementId)
-                      .eq('email', msg.to_email || msg.email || msg.lead_email)
-                      .single();
-                    
-                    if (!contact) continue;
-                    
-                    const { error: activityError } = await supabase
-                      .from('email_activities')
-                      .upsert({
-                        engagement_id: activeEngagementId,
-                        campaign_id: campaignDbId,
-                        data_source_id: data_source_id,
-                        contact_id: contact.id,
-                        company_id: contact.company_id,
-                        external_id: msg.id ? String(msg.id) : null,
-                        to_email: msg.to_email || msg.email || msg.lead_email,
-                        subject: msg.subject || null,
-                        sent: true,
-                        sent_at: msg.sent_at || msg.created_at ? new Date(msg.sent_at || msg.created_at).toISOString() : null,
-                        delivered: msg.delivered ?? null,
-                        delivered_at: msg.delivered_at ? new Date(msg.delivered_at).toISOString() : null,
-                        opened: msg.opened ?? msg.open_count > 0,
-                        first_opened_at: msg.opened_at ? new Date(msg.opened_at).toISOString() : null,
-                        open_count: msg.open_count || 0,
-                        clicked: msg.clicked ?? msg.click_count > 0,
-                        click_count: msg.click_count || 0,
-                        replied: msg.replied ?? false,
-                        replied_at: msg.replied_at ? new Date(msg.replied_at).toISOString() : null,
-                        bounced: msg.bounced ?? false,
-                        bounced_at: msg.bounced_at ? new Date(msg.bounced_at).toISOString() : null,
-                        bounce_type: msg.bounce_type || null,
-                        unsubscribed: msg.unsubscribed ?? false,
-                        step_number: msg.sequence_number || msg.step_number || null,
-                      }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
-                    
-                    if (!activityError) {
-                      progress.email_activities_synced++;
-                    }
-                  } catch (e) {
-                    // Continue on individual activity errors
-                  }
-                }
-              }
-            } catch (e) {
-              // Email activities endpoint may not exist in older API versions
-              console.log(`  Email activities not available for ${campaign.name}`);
-            }
+            // This is disabled by default - the API returns 404 for email-sent endpoint
+            console.log(`  Skipping email activities (API not supported)`);
           }
 
         } catch (e) {
