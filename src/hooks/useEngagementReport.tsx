@@ -326,9 +326,10 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       let hasHistoricalEmailMetrics = false;
       let historicalEmailMinDate: string | null = null;
       let historicalEmailMaxDate: string | null = null;
+      let allHistoricalDailyMetrics: typeof dailyMetrics = [];
 
       if (startDateStr && dailyMetrics.length === 0) {
-        const [minRes, maxRes] = await Promise.all([
+        const [minRes, maxRes, allHistoricalRes] = await Promise.all([
           supabase
             .from('daily_metrics')
             .select('date')
@@ -341,12 +342,21 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
             .eq('engagement_id', engagementId)
             .order('date', { ascending: false })
             .limit(1),
+          supabase
+            .from('daily_metrics')
+            .select('*')
+            .eq('engagement_id', engagementId)
+            .order('date', { ascending: true }),
         ]);
 
         historicalEmailMinDate = (minRes.data?.[0]?.date as string | undefined) ?? null;
         historicalEmailMaxDate = (maxRes.data?.[0]?.date as string | undefined) ?? null;
         hasHistoricalEmailMetrics = Boolean(historicalEmailMinDate || historicalEmailMaxDate);
+        allHistoricalDailyMetrics = allHistoricalRes.data || [];
       }
+      
+      // For weekly performance, use all historical data if date filter returns empty
+      const metricsForWeeklyBreakdown = dailyMetrics.length > 0 ? dailyMetrics : allHistoricalDailyMetrics;
 
       // Calculate email metrics from daily_metrics first
       const dailyTotals = dailyMetrics.reduce((acc, m) => ({
@@ -484,9 +494,8 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         },
       ];
 
-      // Build trend data
+      // Build trend data from filtered daily metrics
       const trendMap = new Map<string, TrendDataPoint>();
-      const weeklyPerfMap = new Map<string, { sent: number; replied: number; positive: number; bounced: number; weekLabel: string }>();
       
       dailyMetrics.forEach(m => {
         const date = new Date(m.date);
@@ -509,8 +518,18 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         existing.responses += m.emails_replied || 0;
         existing.meetings += m.meetings_booked || 0;
         trendMap.set(weekKey, existing);
+      });
+      
+      // Build weekly performance data from metricsForWeeklyBreakdown (includes historical data if current filter is empty)
+      const weeklyPerfMap = new Map<string, { sent: number; replied: number; positive: number; bounced: number; weekLabel: string }>();
+      
+      metricsForWeeklyBreakdown.forEach(m => {
+        const date = new Date(m.date);
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - date.getDay());
+        const weekKey = weekStart.toISOString().split('T')[0];
+        const weekLabel = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
         
-        // Build weekly performance data
         const existingPerf = weeklyPerfMap.get(weekKey) || {
           sent: 0,
           replied: 0,
