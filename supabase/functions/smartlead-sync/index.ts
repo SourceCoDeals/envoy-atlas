@@ -681,7 +681,35 @@ serve(async (req) => {
                 
                 for (const account of emailAccounts) {
                   // Upsert email account
-                  const warmupDetails = account.warmup_details || {};
+                  let warmupDetails = account.warmup_details || {};
+                  
+                  // ============================================
+                  // NEW: Fetch warmup-stats for enhanced deliverability data
+                  // ============================================
+                  let warmupScore: number | null = null;
+                  let inboxRate: number | null = null;
+                  let spamRate: number | null = null;
+                  
+                  try {
+                    const warmupStatsUrl = `/email-accounts/${account.id}/warmup-stats`;
+                    const warmupStats = await smartleadRequest(warmupStatsUrl, apiKey);
+                    
+                    if (warmupStats) {
+                      warmupDetails = {
+                        ...warmupDetails,
+                        status: warmupStats.status || warmupDetails.status,
+                        warmup_reputation: warmupStats.warmup_reputation ?? warmupStats.reputation ?? warmupDetails.warmup_reputation,
+                        total_spam_count: warmupStats.spam_count ?? warmupStats.total_spam_count ?? warmupDetails.total_spam_count,
+                        total_sent_count: warmupStats.sent_count ?? warmupStats.total_sent_count ?? warmupDetails.total_sent_count,
+                      };
+                      warmupScore = warmupStats.score ?? warmupStats.warmup_score ?? null;
+                      inboxRate = warmupStats.inbox_rate ?? warmupStats.inboxRate ?? null;
+                      spamRate = warmupStats.spam_rate ?? warmupStats.spamRate ?? null;
+                      console.log(`    Warmup stats for ${account.from_email}: rep=${warmupDetails.warmup_reputation}, spam=${warmupDetails.total_spam_count}`);
+                    }
+                  } catch (e) {
+                    // Warmup stats may not be available for all accounts
+                  }
                   
                   const { data: emailAccountData, error: eaError } = await supabase
                     .from('email_accounts')
@@ -787,24 +815,79 @@ serve(async (req) => {
               console.log(`  Enrollment snapshot: total=${enrollmentSettings.total_leads}, backlog=${enrollmentSettings.not_started}`);
             }
 
-            // Store daily metrics
-            if (totalSent > 0 || totalOpened > 0 || totalReplied > 0) {
-              const metricDate = campaign.created_at 
+            // ============================================
+            // NEW: Fetch analytics-by-date for granular daily metrics
+            // ============================================
+            try {
+              // Get date range: campaign start to today
+              const campaignStartDate = campaign.created_at 
                 ? new Date(campaign.created_at).toISOString().split('T')[0]
-                : today;
+                : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 90 days ago
+              
+              const analyticsUrl = `/campaigns/${campaign.id}/analytics-by-date?start_date=${campaignStartDate}&end_date=${today}`;
+              const dailyAnalytics = await smartleadRequest(analyticsUrl, apiKey);
+              
+              const dailyData = Array.isArray(dailyAnalytics) 
+                ? dailyAnalytics 
+                : (dailyAnalytics?.data || dailyAnalytics?.analytics || []);
+              
+              if (dailyData.length > 0) {
+                console.log(`  Found ${dailyData.length} days of analytics-by-date`);
+                
+                for (const day of dailyData) {
+                  const metricDate = day.date || day.metric_date;
+                  if (!metricDate) continue;
+                  
+                  const daySent = day.sent_count || day.sent || 0;
+                  const dayOpened = day.open_count || day.unique_open_count || day.opened || 0;
+                  const dayClicked = day.click_count || day.unique_click_count || day.clicked || 0;
+                  const dayReplied = day.reply_count || day.replied || 0;
+                  const dayBounced = day.bounce_count || day.bounced || 0;
+                  const dayPositive = day.positive_count || day.positive_replies || 0;
+                  
+                  if (daySent > 0 || dayOpened > 0 || dayReplied > 0) {
+                    await supabase.from('daily_metrics').upsert({
+                      engagement_id: activeEngagementId,
+                      campaign_id: campaignDbId,
+                      data_source_id: data_source_id,
+                      date: metricDate,
+                      emails_sent: daySent,
+                      emails_opened: dayOpened,
+                      emails_clicked: dayClicked,
+                      emails_replied: dayReplied,
+                      emails_bounced: dayBounced,
+                      positive_replies: dayPositive,
+                      open_rate: daySent > 0 ? Math.min(0.9999, dayOpened / daySent) : null,
+                      reply_rate: daySent > 0 ? Math.min(0.9999, dayReplied / daySent) : null,
+                      bounce_rate: daySent > 0 ? Math.min(0.9999, dayBounced / daySent) : null,
+                    }, { onConflict: 'engagement_id,campaign_id,date' });
+                    progress.metrics_created++;
+                  }
+                }
+              }
+            } catch (e) {
+              // analytics-by-date may not be available for all campaigns - fall back to totals
+              console.log(`  analytics-by-date not available: ${(e as Error).message}`);
+              
+              // Store daily metrics as before
+              if (totalSent > 0 || totalOpened > 0 || totalReplied > 0) {
+                const metricDate = campaign.created_at 
+                  ? new Date(campaign.created_at).toISOString().split('T')[0]
+                  : today;
 
-              await supabase.from('daily_metrics').upsert({
-                engagement_id: activeEngagementId,
-                campaign_id: campaignDbId,
-                data_source_id: data_source_id,
-                date: metricDate,
-                emails_sent: totalSent,
-                emails_opened: totalOpened,
-                emails_clicked: totalClicked,
-                emails_replied: totalReplied,
-                emails_bounced: totalBounced,
-              }, { onConflict: 'engagement_id,campaign_id,date' });
-              progress.metrics_created++;
+                await supabase.from('daily_metrics').upsert({
+                  engagement_id: activeEngagementId,
+                  campaign_id: campaignDbId,
+                  data_source_id: data_source_id,
+                  date: metricDate,
+                  emails_sent: totalSent,
+                  emails_opened: totalOpened,
+                  emails_clicked: totalClicked,
+                  emails_replied: totalReplied,
+                  emails_bounced: totalBounced,
+                }, { onConflict: 'engagement_id,campaign_id,date' });
+                progress.metrics_created++;
+              }
             }
           } catch (e) {
             console.error(`  Analytics error for ${campaign.name}:`, e);
@@ -1029,38 +1112,63 @@ serve(async (req) => {
                     // First, create/upsert company if we have company info
                     let companyId: string | null = null;
                     const domain = extractDomain(lead.email);
+                    const companyName = lead.company_name || domain || 'Unknown';
                     
-                    if (lead.company_name || domain) {
-                      const { data: companyData, error: companyError } = await supabase
+                    // Try to find existing company first
+                    if (domain) {
+                      const { data: existingByDomain } = await supabase
                         .from('companies')
-                        .upsert({
-                          engagement_id: activeEngagementId,
-                          name: lead.company_name || domain || 'Unknown',
-                          domain: domain,
-                          website: lead.website || (domain ? `https://${domain}` : null),
-                          source: 'smartlead',
-                        }, { onConflict: 'engagement_id,domain', ignoreDuplicates: false })
                         .select('id')
-                        .single();
+                        .eq('engagement_id', activeEngagementId)
+                        .eq('domain', domain)
+                        .maybeSingle();
                       
-                      if (!companyError && companyData) {
-                        companyId = companyData.id;
-                        progress.companies_synced++;
+                      if (existingByDomain) {
+                        companyId = existingByDomain.id;
                       }
                     }
                     
-                    // Create placeholder company if needed
+                    // If not found by domain, try by name
                     if (!companyId) {
-                      const { data: placeholderCompany } = await supabase
+                      const { data: existingByName } = await supabase
                         .from('companies')
-                        .upsert({
+                        .select('id')
+                        .eq('engagement_id', activeEngagementId)
+                        .eq('name', companyName)
+                        .maybeSingle();
+                      
+                      if (existingByName) {
+                        companyId = existingByName.id;
+                      }
+                    }
+                    
+                    // Create new company if not found
+                    if (!companyId) {
+                      const { data: newCompany, error: companyError } = await supabase
+                        .from('companies')
+                        .insert({
                           engagement_id: activeEngagementId,
-                          name: 'Unknown Company',
+                          name: companyName,
+                          domain: domain,
+                          website: lead.website || (domain ? `https://${domain}` : null),
                           source: 'smartlead',
-                        }, { onConflict: 'engagement_id,name', ignoreDuplicates: true })
+                        })
                         .select('id')
                         .single();
-                      companyId = placeholderCompany?.id;
+                      
+                      if (!companyError && newCompany) {
+                        companyId = newCompany.id;
+                        progress.companies_synced++;
+                      } else if (companyError?.code === '23505') {
+                        // Duplicate - try to fetch again
+                        const { data: retryCompany } = await supabase
+                          .from('companies')
+                          .select('id')
+                          .eq('engagement_id', activeEngagementId)
+                          .or(`domain.eq.${domain},name.eq.${companyName}`)
+                          .maybeSingle();
+                        companyId = retryCompany?.id;
+                      }
                     }
                     
                     if (!companyId) continue;
