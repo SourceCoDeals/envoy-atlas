@@ -28,9 +28,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2,
-  Phone, Target, BarChart3, Wand2, Check, X, Archive, DollarSign
+  Phone, Target, BarChart3, Wand2, Check, X, Archive, DollarSign, Search, Filter
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { EngagementForm, EngagementFormData } from '@/components/engagements/EngagementForm';
 
@@ -85,6 +93,10 @@ export default function EngagementDashboard() {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'active' | 'closed'>('active');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterDealLead, setFilterDealLead] = useState<string>('all');
+  const [filterSponsor, setFilterSponsor] = useState<string>('all');
+  const [filterType, setFilterType] = useState<string>('all');
 
   // Auto-pair state
   const [autoPairDialogOpen, setAutoPairDialogOpen] = useState(false);
@@ -401,14 +413,62 @@ export default function EngagementDashboard() {
     }
   };
 
-  // Filter engagements by active tab
+  // Get unique filter options
+  const filterOptions = useMemo(() => {
+    const dealLeads = new Set<string>();
+    const sponsors = new Set<string>();
+    
+    engagements.forEach(e => {
+      if (e.deal_lead_id) dealLeads.add(e.deal_lead_id);
+      if (e.sponsor_name) sponsors.add(e.sponsor_name);
+    });
+    
+    return {
+      dealLeads: Array.from(dealLeads),
+      sponsors: Array.from(sponsors).sort(),
+    };
+  }, [engagements]);
+
+  // Filter engagements by active tab, search, and column filters
   const filteredEngagements = useMemo(() => {
     return engagements.filter(e => {
       const status = e.status || 'active';
       const isActive = ['active', 'contracted', 'paused'].includes(status);
-      return activeTab === 'active' ? isActive : !isActive;
+      const matchesTab = activeTab === 'active' ? isActive : !isActive;
+      
+      if (!matchesTab) return false;
+      
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesSearch = 
+          e.name?.toLowerCase().includes(query) ||
+          e.sponsor_name?.toLowerCase().includes(query) ||
+          e.portfolio_company?.toLowerCase().includes(query) ||
+          e.description?.toLowerCase().includes(query);
+        if (!matchesSearch) return false;
+      }
+      
+      // Deal Lead filter
+      if (filterDealLead !== 'all' && e.deal_lead_id !== filterDealLead) {
+        return false;
+      }
+      
+      // Sponsor filter
+      if (filterSponsor !== 'all' && e.sponsor_name !== filterSponsor) {
+        return false;
+      }
+      
+      // Type filter
+      if (filterType !== 'all') {
+        const isPlatform = e.is_platform ?? true;
+        if (filterType === 'platform' && !isPlatform) return false;
+        if (filterType === 'addon' && isPlatform) return false;
+      }
+      
+      return true;
     });
-  }, [engagements, activeTab]);
+  }, [engagements, activeTab, searchQuery, filterDealLead, filterSponsor, filterType]);
 
   // Count by status
   const statusCounts = useMemo(() => {
@@ -525,21 +585,113 @@ export default function EngagementDashboard() {
 
         {/* Engagements Table with Tabs */}
         <Card>
-          <CardHeader className="pb-3">
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'active' | 'closed')}>
-              <TabsList>
-                <TabsTrigger value="active" className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4" />
-                  Active
-                  <Badge variant="secondary" className="ml-1 h-5 px-1.5">{statusCounts.active}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="closed" className="flex items-center gap-2">
-                  <Archive className="h-4 w-4" />
-                  Closed
-                  <Badge variant="secondary" className="ml-1 h-5 px-1.5">{statusCounts.closed}</Badge>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+          <CardHeader className="pb-3 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'active' | 'closed')}>
+                <TabsList>
+                  <TabsTrigger value="active" className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4" />
+                    Active
+                    <Badge variant="secondary" className="ml-1 h-5 px-1.5">{statusCounts.active}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="closed" className="flex items-center gap-2">
+                    <Archive className="h-4 w-4" />
+                    Closed
+                    <Badge variant="secondary" className="ml-1 h-5 px-1.5">{statusCounts.closed}</Badge>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+              
+              {/* Search Bar */}
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search engagements..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            
+            {/* Column Filters */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Filter className="h-4 w-4" />
+                <span>Filter:</span>
+              </div>
+              
+              <Select value={filterSponsor} onValueChange={setFilterSponsor}>
+                <SelectTrigger className="w-[160px] h-8">
+                  <SelectValue placeholder="Sponsor" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sponsors</SelectItem>
+                  {filterOptions.sponsors.map(sponsor => (
+                    <SelectItem key={sponsor} value={sponsor}>{sponsor}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              
+              <Select value={filterDealLead} onValueChange={setFilterDealLead}>
+                <SelectTrigger className="w-[160px] h-8">
+                  <SelectValue placeholder="Deal Lead" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Deal Leads</SelectItem>
+                  {filterOptions.dealLeads.map(id => {
+                    const member = getTeamMemberById(id);
+                    return (
+                      <SelectItem key={id} value={id}>
+                        {member ? getTeamMemberName(member) : id}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              
+              <Select value={filterType} onValueChange={setFilterType}>
+                <SelectTrigger className="w-[130px] h-8">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="platform">Platform</SelectItem>
+                  <SelectItem value="addon">Add-on</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {(searchQuery || filterSponsor !== 'all' || filterDealLead !== 'all' || filterType !== 'all') && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setFilterSponsor('all');
+                    setFilterDealLead('all');
+                    setFilterType('all');
+                  }}
+                  className="h-8 px-2 text-muted-foreground"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Clear
+                </Button>
+              )}
+              
+              {filteredEngagements.length !== engagements.filter(e => {
+                const status = e.status || 'active';
+                const isActive = ['active', 'contracted', 'paused'].includes(status);
+                return activeTab === 'active' ? isActive : !isActive;
+              }).length && (
+                <span className="text-sm text-muted-foreground">
+                  Showing {filteredEngagements.length} of {engagements.filter(e => {
+                    const status = e.status || 'active';
+                    const isActive = ['active', 'contracted', 'paused'].includes(status);
+                    return activeTab === 'active' ? isActive : !isActive;
+                  }).length}
+                </span>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
