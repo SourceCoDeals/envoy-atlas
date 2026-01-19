@@ -166,6 +166,10 @@ export interface WeeklyEnrollmentTrend {
 interface DataAvailability {
   emailDailyMetrics: boolean;
   emailCampaignFallback: boolean;
+  /** True when the selected date range has no rows, but the engagement has older daily_metrics. */
+  hasHistoricalEmailMetrics: boolean;
+  historicalEmailMinDate: string | null;
+  historicalEmailMaxDate: string | null;
   callingData: boolean;
   infrastructureData: boolean;
   syncInProgress: boolean;
@@ -306,6 +310,33 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       const dailyMetrics = dailyMetricsResult.data || [];
       const calls = callsResult.data || [];
       const meetings = meetingsResult.data || [];
+
+      // If the selected date range returns no rows, detect whether this engagement has
+      // older daily metrics so the UI can suggest switching to "All time".
+      let hasHistoricalEmailMetrics = false;
+      let historicalEmailMinDate: string | null = null;
+      let historicalEmailMaxDate: string | null = null;
+
+      if (startDateStr && dailyMetrics.length === 0) {
+        const [minRes, maxRes] = await Promise.all([
+          supabase
+            .from('daily_metrics')
+            .select('date')
+            .eq('engagement_id', engagementId)
+            .order('date', { ascending: true })
+            .limit(1),
+          supabase
+            .from('daily_metrics')
+            .select('date')
+            .eq('engagement_id', engagementId)
+            .order('date', { ascending: false })
+            .limit(1),
+        ]);
+
+        historicalEmailMinDate = (minRes.data?.[0]?.date as string | undefined) ?? null;
+        historicalEmailMaxDate = (maxRes.data?.[0]?.date as string | undefined) ?? null;
+        hasHistoricalEmailMetrics = Boolean(historicalEmailMinDate || historicalEmailMaxDate);
+      }
 
       // Calculate email metrics from daily_metrics
       const emailTotals = dailyMetrics.reduce((acc, m) => ({
@@ -581,7 +612,10 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         linkedCampaigns,
         dataAvailability: {
           emailDailyMetrics: dailyMetrics.length > 0,
-          emailCampaignFallback: false,
+          emailCampaignFallback: (campaigns || []).some(c => (c.total_sent || 0) > 0),
+          hasHistoricalEmailMetrics,
+          historicalEmailMinDate,
+          historicalEmailMaxDate,
           callingData: calls.length > 0,
           infrastructureData: false,
           syncInProgress: false,
