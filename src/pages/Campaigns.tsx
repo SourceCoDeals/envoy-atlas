@@ -72,11 +72,10 @@ export default function Campaigns() {
     );
   }
 
-  // Phase B: Determine platform statuses for status bar
-  const smartleadStatus = dataHealth?.email.smartlead.status ?? 'empty';
-  const replyioStatus = dataHealth?.email.replyio.status ?? 'empty';
-  const hasReplyioBroken = replyioStatus === 'broken';
-  const hasSmartleadBroken = smartleadStatus === 'broken';
+  // Phase B: Determine data statuses for status bar
+  const campaignsStatus = dataHealth?.email.campaigns.status ?? 'empty';
+  const metricsStatus = dataHealth?.email.metrics.status ?? 'empty';
+  const hasMetricsBroken = metricsStatus === 'broken';
 
   return (
     <DashboardLayout>
@@ -90,20 +89,20 @@ export default function Campaigns() {
           </div>
           {campaigns.length > 0 && (
             <div className="flex gap-2">
-              {/* Phase B: Platform status bar */}
+              {/* Phase B: Data status bar */}
               <div className="flex items-center gap-3 mr-4 px-3 py-1.5 rounded-md bg-muted/50 border">
                 <DataHealthIndicator
-                  status={smartleadStatus}
-                  label="Smartlead"
+                  status={campaignsStatus}
+                  label="Campaigns"
                   size="sm"
-                  tooltip={dataHealth?.email.smartlead.details}
+                  tooltip={dataHealth?.email.campaigns.details}
                 />
                 <div className="w-px h-4 bg-border" />
                 <DataHealthIndicator
-                  status={replyioStatus}
-                  label="Reply.io"
+                  status={metricsStatus}
+                  label="Metrics"
                   size="sm"
-                  tooltip={dataHealth?.email.replyio.details}
+                  tooltip={dataHealth?.email.metrics.details}
                 />
               </div>
               <Button 
@@ -159,13 +158,13 @@ export default function Campaigns() {
           </Card>
         ) : (
           <div className="space-y-6">
-            {/* Phase B: Critical Platform Broken Alert */}
-            {hasReplyioBroken && (
+            {/* Phase B: Critical Metrics Broken Alert */}
+            {hasMetricsBroken && (
               <Alert className="border-destructive/50 bg-destructive/10">
                 <XCircle className="h-4 w-4 text-destructive" />
                 <AlertDescription className="flex items-center justify-between gap-4">
                   <div>
-                    <span className="font-medium text-destructive">Reply.io metrics broken:</span>{' '}
+                    <span className="font-medium text-destructive">Campaign metrics broken:</span>{' '}
                     <span>sent_count=0 across all campaigns. Trigger a full resync from </span>
                     <Link to="/connections" className="underline font-medium hover:text-primary">Settings → Connections</Link>
                     <span> with "Reset" enabled.</span>
@@ -194,11 +193,11 @@ export default function Campaigns() {
             })()}
             
             {/* Degraded warning (non-critical) */}
-            {!hasReplyioBroken && smartleadStatus === 'degraded' && (
+            {!hasMetricsBroken && metricsStatus === 'degraded' && (
               <Alert className="border-warning/30 bg-warning/10">
                 <AlertTriangle className="h-4 w-4 text-warning" />
                 <AlertDescription>
-                  Smartlead metrics partially available. Some opens may be missing due to API limitations.
+                  Some metrics may be incomplete. Check connection status for details.
                 </AlertDescription>
               </Alert>
             )}

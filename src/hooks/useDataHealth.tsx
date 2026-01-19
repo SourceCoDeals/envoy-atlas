@@ -16,12 +16,11 @@ export interface DataSourceHealth {
 
 export interface DataHealthSummary {
   email: {
-    smartlead: DataSourceHealth;
-    replyio: DataSourceHealth;
+    campaigns: DataSourceHealth;
+    metrics: DataSourceHealth;
   };
   calling: {
-    phoneburner: DataSourceHealth;
-    coldCalls: DataSourceHealth;
+    calls: DataSourceHealth;
   };
   insights: {
     copyVariants: DataSourceHealth;
@@ -56,41 +55,27 @@ export function useDataHealth() {
     try {
       setLoading(true);
 
-      // Fetch all counts in parallel
-      const [
-        smartleadCampaigns,
-        replyioCampaigns,
-        smartleadMetrics,
-        replyioMetrics,
-        phoneburnerCalls,
-        coldCalls,
-        leads,
-        deals,
-        engagements,
-        copyVariants,
-        copyLibrary,
-        patterns,
-      ] = await Promise.all([
-        supabase.from('smartlead_campaigns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('replyio_campaigns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('smartlead_daily_metrics').select('sent_count', { count: 'exact' }).eq('workspace_id', currentWorkspace.id).gt('sent_count', 0).limit(1),
-        supabase.from('replyio_daily_metrics').select('sent_count', { count: 'exact' }).eq('workspace_id', currentWorkspace.id).gt('sent_count', 0).limit(1),
-        supabase.from('phoneburner_calls').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('cold_calls').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('leads').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('calling_deals').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('engagements').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('campaign_variants').select('id', { count: 'exact', head: true }),
-        supabase.from('copy_library').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-        supabase.from('copy_patterns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id),
-      ]);
+      // Fetch all counts in parallel using unified tables
+      // Fetch counts sequentially to avoid deep type instantiation
+      const campaignsResult = await supabase.from('campaigns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const metricsResult = await supabase.from('campaign_metrics').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const callsResult = await supabase.from('calls').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const leadsResult = await supabase.from('leads').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const dealsResult = await supabase.from('calling_deals').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const engagementsResult = await supabase.from('engagements').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const variantsResult = await supabase.from('campaign_variants').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const libraryResult = await supabase.from('copy_library').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const patternsResult = await supabase.from('copy_patterns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
 
-      const smartleadCount = smartleadCampaigns.count || 0;
-      const replyioCount = replyioCampaigns.count || 0;
-      const smartleadMetricsCount = smartleadMetrics.count || 0;
-      const replyioMetricsCount = replyioMetrics.count || 0;
-      const phoneburnerCount = phoneburnerCalls.count || 0;
-      const coldCallsCount = coldCalls.count || 0;
+      const campaignsCount = campaignsResult.count || 0;
+      const metricsCount = metricsResult.count || 0;
+      const callsCount = callsResult.count || 0;
+      const leadsCount = leadsResult.count || 0;
+      const dealsCount = dealsResult.count || 0;
+      const engagementsCount = engagementsResult.count || 0;
+      const copyVariantsCount = variantsResult.count || 0;
+      const copyLibraryCount = libraryResult.count || 0;
+      const patternsCount = patternsResult.count || 0;
       const leadsCount = leads.count || 0;
       const dealsCount = deals.count || 0;
       const engagementsCount = engagements.count || 0;
@@ -98,56 +83,43 @@ export function useDataHealth() {
       const copyLibraryCount = copyLibrary.count || 0;
       const patternsCount = patterns.count || 0;
 
-      // Phase A: Fix broken vs degraded classification
-      // Reply.io is BROKEN (red) if campaigns exist but NO daily metrics have sent_count > 0
-      // Smartlead uses 'degraded' for missing opens (API limitation) but 'healthy' for sent data
-      const replyioStatus: DataHealthStatus = replyioCount > 0 
-        ? (replyioMetricsCount > 0 ? 'healthy' : 'broken')  // broken if campaigns but no sent metrics
-        : 'empty';
+      // Determine campaign status
+      const campaignsStatus: DataHealthStatus = campaignsCount > 0 ? 'healthy' : 'empty';
       
-      const smartleadStatus: DataHealthStatus = smartleadCount > 0 
-        ? (smartleadMetricsCount > 0 ? 'healthy' : 'degraded')  // degraded OK for Smartlead (opens missing is known)
+      // Metrics are healthy if we have sent_count > 0, broken if campaigns exist but no metrics
+      const metricsStatus: DataHealthStatus = campaignsCount > 0
+        ? (metricsCount > 0 ? 'healthy' : 'broken')
         : 'empty';
 
       const healthData: DataHealthSummary = {
         email: {
-          smartlead: {
-            name: 'Smartlead',
-            table: 'smartlead_campaigns',
-            rowCount: smartleadCount,
-            hasData: smartleadCount > 0,
-            status: smartleadStatus,
-            details: smartleadCount > 0 
-              ? `${smartleadCount} campaigns${smartleadMetricsCount > 0 ? ', metrics OK' : ', metrics pending'}`
-              : 'Not connected',
+          campaigns: {
+            name: 'Campaigns',
+            table: 'campaigns',
+            rowCount: campaignsCount,
+            hasData: campaignsCount > 0,
+            status: campaignsStatus,
+            details: campaignsCount > 0 ? `${campaignsCount} campaigns` : 'Not connected',
           },
-          replyio: {
-            name: 'Reply.io',
-            table: 'replyio_campaigns',
-            rowCount: replyioCount,
-            hasData: replyioCount > 0,
-            status: replyioStatus,
-            details: replyioCount > 0 
-              ? (replyioMetricsCount > 0 ? `${replyioCount} campaigns, metrics OK` : `${replyioCount} campaigns, sent_count=0 — resync required`)
-              : 'Not connected',
+          metrics: {
+            name: 'Campaign Metrics',
+            table: 'campaign_metrics',
+            rowCount: metricsCount,
+            hasData: metricsCount > 0,
+            status: metricsStatus,
+            details: metricsCount > 0 
+              ? `Metrics OK (${metricsCount} days with sends)`
+              : (campaignsCount > 0 ? 'No metrics data — resync required' : 'No campaigns'),
           },
         },
         calling: {
-          phoneburner: {
-            name: 'PhoneBurner',
-            table: 'phoneburner_calls',
-            rowCount: phoneburnerCount,
-            hasData: phoneburnerCount > 0,
-            status: phoneburnerCount > 0 ? 'healthy' : 'empty',
-            details: phoneburnerCount > 0 ? `${phoneburnerCount} calls` : 'Not connected',
-          },
-          coldCalls: {
-            name: 'Cold Calls (NocoDB)',
-            table: 'cold_calls',
-            rowCount: coldCallsCount,
-            hasData: coldCallsCount > 0,
-            status: coldCallsCount > 0 ? 'healthy' : 'empty',
-            details: coldCallsCount > 0 ? `${coldCallsCount} calls` : 'Not connected',
+          calls: {
+            name: 'Calls',
+            table: 'calls',
+            rowCount: callsCount,
+            hasData: callsCount > 0,
+            status: callsCount > 0 ? 'healthy' : 'empty',
+            details: callsCount > 0 ? `${callsCount} calls` : 'Not connected',
           },
         },
         insights: {
@@ -212,10 +184,9 @@ export function useDataHealth() {
 
       // Calculate overall health
       const allSources = [
-        healthData.email.smartlead,
-        healthData.email.replyio,
-        healthData.calling.phoneburner,
-        healthData.calling.coldCalls,
+        healthData.email.campaigns,
+        healthData.email.metrics,
+        healthData.calling.calls,
         healthData.insights.copyVariants,
         healthData.insights.copyLibrary,
         healthData.insights.patterns,
@@ -225,7 +196,6 @@ export function useDataHealth() {
       ];
 
       const healthyCount = allSources.filter(s => s.status === 'healthy').length;
-      const degradedCount = allSources.filter(s => s.status === 'degraded').length;
       const totalWithData = allSources.filter(s => s.hasData).length;
 
       healthData.overall = {

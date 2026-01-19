@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 
-// Phase D: Add metricsStatus to distinguish "zero" vs "missing/broken source"
+// Metrics status to distinguish "zero" vs "missing/broken source"
 export type MetricsStatus = 'verified' | 'partial' | 'missing' | 'broken';
 export type MetricsSource = 'cumulative' | 'daily' | 'none';
 
@@ -26,29 +26,8 @@ export interface CampaignWithMetrics {
   bounce_rate: number;
   engagement_id: string | null;
   engagement_name?: string | null;
-  // New: metrics reliability indicators
   metricsStatus: MetricsStatus;
   metricsSource: MetricsSource;
-}
-
-interface BaseCampaign {
-  id: string;
-  name: string;
-  status: string | null;
-  platform_id: string;
-  created_at: string;
-  updated_at: string;
-  workspace_id: string;
-  engagement_id: string | null;
-}
-
-interface CumulativeMetric {
-  campaign_id: string;
-  total_sent: number | null;
-  total_opened: number | null;
-  total_clicked: number | null;
-  total_replied: number | null;
-  total_bounced: number | null;
 }
 
 export function useCampaigns() {
@@ -73,14 +52,14 @@ export function useCampaigns() {
     setError(null);
 
     try {
-      // Fetch campaigns from both platforms and engagements in parallel
-      const [smartleadResult, replyioResult, engagementsResult] = await Promise.all([
+      // Fetch campaigns with cumulative metrics and engagements in parallel
+      const [campaignsResult, cumulativeResult, engagementsResult] = await Promise.all([
         supabase
-          .from('smartlead_campaigns')
+          .from('campaigns')
           .select('*')
           .eq('workspace_id', currentWorkspace.id),
         supabase
-          .from('replyio_campaigns')
+          .from('campaign_cumulative')
           .select('*')
           .eq('workspace_id', currentWorkspace.id),
         supabase
@@ -89,8 +68,7 @@ export function useCampaigns() {
           .eq('workspace_id', currentWorkspace.id)
       ]);
 
-      if (smartleadResult.error) throw smartleadResult.error;
-      if (replyioResult.error) throw replyioResult.error;
+      if (campaignsResult.error) throw campaignsResult.error;
 
       // Build engagement lookup map
       const engagementMap = new Map<string, string>();
@@ -98,11 +76,19 @@ export function useCampaigns() {
         engagementMap.set(e.id, e.engagement_name);
       });
 
-      // Tag campaigns with their platform
-      const allCampaigns: (BaseCampaign & { platform: string })[] = [
-        ...(smartleadResult.data || []).map(c => ({ ...c, platform: 'smartlead' })),
-        ...(replyioResult.data || []).map(c => ({ ...c, platform: 'replyio' }))
-      ];
+      // Build cumulative lookup map
+      const cumulativeMap = new Map<string, {
+        total_sent: number | null;
+        total_opened: number | null;
+        total_clicked: number | null;
+        total_replied: number | null;
+        total_bounced: number | null;
+      }>();
+      (cumulativeResult.data || []).forEach(c => {
+        cumulativeMap.set(c.campaign_id, c);
+      });
+
+      const allCampaigns = campaignsResult.data || [];
 
       if (allCampaigns.length === 0) {
         setCampaigns([]);
@@ -110,72 +96,48 @@ export function useCampaigns() {
         return;
       }
 
-      // Fetch cumulative metrics AND daily metrics (fallback) using workspace_id
-      const [
-        smartleadCumulativeResult, 
-        replyioCumulativeResult,
-        smartleadDailyResult,
-        replyioDailyResult
-      ] = await Promise.all([
-        supabase
-          .from('smartlead_campaign_cumulative')
-          .select('*')
-          .eq('workspace_id', currentWorkspace.id),
-        supabase
-          .from('replyio_campaign_cumulative')
-          .select('*')
-          .eq('workspace_id', currentWorkspace.id),
-        // Daily metrics aggregation as fallback
-        supabase
-          .from('smartlead_daily_metrics')
-          .select('campaign_id, sent_count, opened_count, clicked_count, replied_count, bounced_count')
-          .eq('workspace_id', currentWorkspace.id),
-        supabase
-          .from('replyio_daily_metrics')
-          .select('campaign_id, sent_count, opened_count, clicked_count, replied_count, bounced_count')
-          .eq('workspace_id', currentWorkspace.id),
-      ]);
+      // Fetch daily metrics aggregated per campaign (as fallback if cumulative is empty)
+      const dailyResult = await supabase
+        .from('campaign_metrics')
+        .select('campaign_id, sent_count, opened_count, clicked_count, replied_count, bounced_count')
+        .eq('workspace_id', currentWorkspace.id);
 
-      // Build cumulative lookup map
-      const cumulativeMap = new Map<string, CumulativeMetric>();
-      (smartleadCumulativeResult.data || []).forEach(c => cumulativeMap.set(c.campaign_id, c));
-      (replyioCumulativeResult.data || []).forEach(c => cumulativeMap.set(c.campaign_id, c));
+      // Build daily aggregation map
+      const dailyAggregateMap = new Map<string, {
+        total_sent: number;
+        total_opened: number;
+        total_clicked: number;
+        total_replied: number;
+        total_bounced: number;
+      }>();
 
-      // Build daily metrics aggregation as fallback (sum all daily records per campaign)
-      const dailyAggregateMap = new Map<string, CumulativeMetric>();
-      const aggregateDaily = (rows: typeof smartleadDailyResult.data) => {
-        (rows || []).forEach(row => {
-          const existing = dailyAggregateMap.get(row.campaign_id);
-          if (existing) {
-            existing.total_sent = (existing.total_sent || 0) + (row.sent_count || 0);
-            existing.total_opened = (existing.total_opened || 0) + (row.opened_count || 0);
-            existing.total_clicked = (existing.total_clicked || 0) + (row.clicked_count || 0);
-            existing.total_replied = (existing.total_replied || 0) + (row.replied_count || 0);
-            existing.total_bounced = (existing.total_bounced || 0) + (row.bounced_count || 0);
-          } else {
-            dailyAggregateMap.set(row.campaign_id, {
-              campaign_id: row.campaign_id,
-              total_sent: row.sent_count || 0,
-              total_opened: row.opened_count || 0,
-              total_clicked: row.clicked_count || 0,
-              total_replied: row.replied_count || 0,
-              total_bounced: row.bounced_count || 0,
-            });
-          }
-        });
-      };
-      aggregateDaily(smartleadDailyResult.data);
-      aggregateDaily(replyioDailyResult.data);
+      (dailyResult.data || []).forEach(row => {
+        const existing = dailyAggregateMap.get(row.campaign_id);
+        if (existing) {
+          existing.total_sent += row.sent_count || 0;
+          existing.total_opened += row.opened_count || 0;
+          existing.total_clicked += row.clicked_count || 0;
+          existing.total_replied += row.replied_count || 0;
+          existing.total_bounced += row.bounced_count || 0;
+        } else {
+          dailyAggregateMap.set(row.campaign_id, {
+            total_sent: row.sent_count || 0,
+            total_opened: row.opened_count || 0,
+            total_clicked: row.clicked_count || 0,
+            total_replied: row.replied_count || 0,
+            total_bounced: row.bounced_count || 0,
+          });
+        }
+      });
 
-      // Build campaigns with metrics (cumulative first, then daily fallback)
-      // Phase D: Attach metricsStatus + metricsSource to each campaign
+      // Build campaigns with metrics
       const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
         const cumulative = cumulativeMap.get(campaign.id);
         const dailyAggregate = dailyAggregateMap.get(campaign.id);
 
         // Use cumulative if it has data, otherwise fall back to daily aggregate
         const hasCumulativeData = cumulative && (cumulative.total_sent || 0) > 0;
-        const hasDailyData = dailyAggregate && (dailyAggregate.total_sent || 0) > 0;
+        const hasDailyData = dailyAggregate && dailyAggregate.total_sent > 0;
         const source = hasCumulativeData ? cumulative : dailyAggregate;
 
         const total_sent = source?.total_sent || 0;
@@ -195,16 +157,14 @@ export function useCampaigns() {
         } else if (hasDailyData) {
           metricsStatus = 'partial';
           metricsSource = 'daily';
-        } else if (total_replied > 0) {
-          // Has replies but no sent = partial (might be Reply.io with replies but broken sent)
-          metricsStatus = 'partial';
-          metricsSource = 'none';
         } else {
-          // No metrics at all - check if it's Reply.io (known broken sent)
-          metricsStatus = campaign.platform === 'replyio' ? 'broken' : 'missing';
+          metricsStatus = 'missing';
           metricsSource = 'none';
         }
 
+        // Cast to include engagement_id from the schema
+        const c = campaign as typeof campaign & { engagement_id?: string | null };
+        
         return {
           id: campaign.id,
           name: campaign.name,
@@ -223,8 +183,8 @@ export function useCampaigns() {
           click_rate: total_sent > 0 ? (total_clicked / total_sent) * 100 : 0,
           reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
           bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
-          engagement_id: campaign.engagement_id,
-          engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
+          engagement_id: c.engagement_id || null,
+          engagement_name: c.engagement_id ? engagementMap.get(c.engagement_id) || null : null,
           metricsStatus,
           metricsSource,
         };
@@ -245,7 +205,6 @@ export function useCampaigns() {
       setCampaigns(campaignsWithMetrics);
     } catch (err: unknown) {
       console.error('Error fetching campaigns:', err);
-      // Better error extraction for PostgREST errors
       let errorMessage = 'Failed to fetch campaigns';
       if (err && typeof err === 'object') {
         const e = err as { message?: string; details?: string; hint?: string; code?: string };

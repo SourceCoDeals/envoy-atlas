@@ -94,8 +94,8 @@ export function EnhancedCampaignTable({
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
 
-  // Phase C: Check if Reply.io platform is broken
-  const isReplyioBroken = dataHealth?.email.replyio.status === 'broken';
+  // Phase C: Check if metrics are broken
+  const isMetricsBroken = dataHealth?.email.metrics.status === 'broken';
 
   // Sync external tier filter with local state
   useEffect(() => {
@@ -474,7 +474,7 @@ export function EnhancedCampaignTable({
                           */}
                           {(() => {
                             const isActive = ['active', 'running', 'started'].includes((campaign.status || '').toLowerCase());
-                            const isReplyioRowBroken = campaign.platform === 'replyio' && isReplyioBroken;
+                            const isReplyioRowBroken = campaign.platform === 'replyio' && isMetricsBroken;
                             const isActiveButNoVerified = isActive && campaign.metricsStatus !== 'verified' && campaign.total_sent === 0;
 
                             if (isReplyioRowBroken || campaign.metricsStatus === 'broken' || isActiveButNoVerified) {
@@ -596,7 +596,7 @@ export function EnhancedCampaignTable({
                     {campaign.metricsStatus === 'verified' && campaign.total_sent > 0 ? (
                       `${campaign.reply_rate.toFixed(1)}%`
                     ) : (
-                      <span className={campaign.platform === 'replyio' && isReplyioBroken ? 'text-destructive' : 'text-muted-foreground'}>—</span>
+                      <span className={campaign.platform === 'replyio' && isMetricsBroken ? 'text-destructive' : 'text-muted-foreground'}>—</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right font-mono text-muted-foreground">
