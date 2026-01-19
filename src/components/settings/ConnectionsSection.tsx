@@ -159,11 +159,18 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     setIsSyncing((s) => ({ ...s, [syncKey]: true }));
 
     try {
+      // Find the data source for this platform
+      const dataSource = dataSources.find((s) => s.source_type === platform);
+      if (!dataSource) {
+        throw new Error(`No ${platform} connection found. Please connect first.`);
+      }
+
       const token = await getAccessToken();
       const functionName = `${platform}-sync`;
       const res = await supabase.functions.invoke(functionName, {
         body: {
-          workspace_id: workspaceId,
+          client_id: workspaceId, // workspaceId is actually the client_id
+          data_source_id: dataSource.id,
           reset: options.reset,
           full_backfill: options.fullBackfill,
           fetch_replies_only: options.fetchRepliesOnly,

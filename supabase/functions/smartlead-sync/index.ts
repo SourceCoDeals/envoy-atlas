@@ -16,10 +16,9 @@ const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 // Using 250ms delay = 4 req/s to stay safely within limits
 const RATE_LIMIT_DELAY = 250;
 const TIME_BUDGET_MS = 55000;
-const MAX_BATCHES = 100; // Increased to handle large accounts with 2-year backfill
+const MAX_BATCHES = 100;
 const MAX_HISTORICAL_DAYS = 730; // 2 years max lookback
 const HISTORICAL_CHUNK_DAYS = 90; // Process history in 90-day chunks
-const REPLIES_PER_PAGE = 100; // Pagination for inbox replies
 
 interface SmartleadCampaign {
   id: number;
@@ -40,14 +39,6 @@ interface SmartleadAnalytics {
   unsubscribe_count: number;
 }
 
-interface SmartleadEmailAccount {
-  id: number;
-  from_email: string;
-  from_name: string;
-  message_per_day: number;
-  warmup_details?: { status: string };
-}
-
 interface SmartleadSequence {
   seq_id: number;
   seq_number: number;
@@ -61,7 +52,6 @@ interface SmartleadSequence {
   }>;
 }
 
-// Day-wise analytics - actual API response format
 interface SmartleadDayWiseStat {
   date: string; // "8 Jan" format
   day_name: string;
@@ -72,27 +62,6 @@ interface SmartleadDayWiseStat {
     bounced: number;
     unsubscribed: number;
   };
-}
-
-// Inbox reply structure from master inbox
-interface SmartleadInboxReply {
-  email_lead_id: number;
-  email_lead_map_id: number;
-  lead_email: string;
-  lead_first_name?: string;
-  lead_last_name?: string;
-  email_campaign_id: number;
-  email_campaign_name: string;
-  last_reply_time: string;
-  lead_category_id?: number;
-  lead_status?: string;
-  is_important?: boolean;
-  email_history?: Array<{
-    type: string; // 'SENT' or 'RECEIVED'
-    email_body: string;
-    time: string;
-    seq_number?: number;
-  }>;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -139,11 +108,9 @@ async function smartleadRequest(endpoint: string, apiKey: string, method = 'GET'
 // Parse SmartLead's short date format "8 Jan" to ISO date string
 function parseShortDate(shortDate: string, chunkStart: string, chunkEnd: string): string | null {
   try {
-    // Parse the chunk dates to get year context
     const startYear = parseInt(chunkStart.split('-')[0]);
     const endYear = parseInt(chunkEnd.split('-')[0]);
     
-    // Parse short date like "8 Jan", "15 Oct"
     const parts = shortDate.trim().split(' ');
     if (parts.length !== 2) return null;
     
@@ -158,8 +125,6 @@ function parseShortDate(shortDate: string, chunkStart: string, chunkEnd: string)
     const month = monthMap[monthStr];
     if (month === undefined || isNaN(day)) return null;
     
-    // Try both years if they differ (e.g., chunk spans Dec-Jan)
-    // Check which year makes the date fall within the chunk range
     for (const year of [endYear, startYear]) {
       const testDate = new Date(year, month, day);
       const testIso = testDate.toISOString().split('T')[0];
@@ -169,7 +134,6 @@ function parseShortDate(shortDate: string, chunkStart: string, chunkEnd: string)
       }
     }
     
-    // Fallback to end year
     const date = new Date(endYear, month, day);
     return date.toISOString().split('T')[0];
   } catch (e) {
@@ -196,117 +160,12 @@ function extractPersonalizationVars(content: string): string[] {
   return Array.from(vars);
 }
 
-// Self-continuation functions
-async function triggerNextBatch(
-  supabaseUrl: string,
-  anonKey: string,
-  authToken: string,
-  workspaceId: string,
-  batchNumber: number
-) {
-  console.log(`Triggering next batch (${batchNumber}) via self-continuation...`);
-  try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authToken,
-      },
-      body: JSON.stringify({
-        workspace_id: workspaceId,
-        reset: false,
-        batch_number: batchNumber,
-        auto_continue: true,
-      }),
-    });
-    console.log(`Next batch triggered, status: ${response.status}`);
-  } catch (error) {
-    console.error('Failed to trigger next batch:', error);
-  }
-}
-
-async function triggerReplyioSync(
-  supabaseUrl: string,
-  anonKey: string,
-  authToken: string,
-  workspaceId: string
-) {
-  console.log('SmartLead sync complete - triggering Reply.io sync...');
-  try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/replyio-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authToken,
-      },
-      body: JSON.stringify({
-        workspace_id: workspaceId,
-        reset: false,
-        triggered_by: 'smartlead-complete',
-        auto_continue: true,
-      }),
-    });
-    console.log(`Reply.io sync triggered, status: ${response.status}`);
-  } catch (error) {
-    console.error('Failed to trigger Reply.io sync:', error);
-  }
-}
-
-async function triggerHistoricalContinuation(
-  supabaseUrl: string,
-  authToken: string,
-  workspaceId: string,
-  chunkIndex: number,
-  totalChunks: number
-) {
-  console.log(`Triggering historical chunk ${chunkIndex + 1}/${totalChunks}...`);
-  try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authToken,
-      },
-      body: JSON.stringify({
-        workspace_id: workspaceId,
-        reset: false,
-        backfill_historical: true,
-        historical_chunk_index: chunkIndex,
-        auto_continue: true,
-      }),
-    });
-    console.log(`Historical continuation triggered, status: ${response.status}`);
-  } catch (error) {
-    console.error('Failed to trigger historical continuation:', error);
-  }
-}
-
-async function triggerRepliesContinuation(
-  supabaseUrl: string,
-  authToken: string,
-  workspaceId: string,
-  offset: number
-) {
-  console.log(`Triggering replies fetch at offset ${offset}...`);
-  try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authToken,
-      },
-      body: JSON.stringify({
-        workspace_id: workspaceId,
-        reset: false,
-        fetch_replies_only: true,
-        replies_offset: offset,
-        auto_continue: true,
-      }),
-    });
-    console.log(`Replies continuation triggered, status: ${response.status}`);
-  } catch (error) {
-    console.error('Failed to trigger replies continuation:', error);
-  }
+// Strip HTML and return plain text
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Generate date chunks for historical backfill
@@ -331,6 +190,38 @@ function generateDateChunks(startDate: Date, endDate: Date, chunkDays: number): 
   return chunks;
 }
 
+// Self-continuation for next batch
+async function triggerNextBatch(
+  supabaseUrl: string,
+  authToken: string,
+  clientId: string,
+  engagementId: string,
+  dataSourceId: string,
+  batchNumber: number
+) {
+  console.log(`Triggering next batch (${batchNumber}) via self-continuation...`);
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken,
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        engagement_id: engagementId,
+        data_source_id: dataSourceId,
+        reset: false,
+        batch_number: batchNumber,
+        auto_continue: true,
+      }),
+    });
+    console.log(`Next batch triggered, status: ${response.status}`);
+  } catch (error) {
+    console.error('Failed to trigger next batch:', error);
+  }
+}
+
 serve(async (req) => {
   console.log('smartlead-sync: Request received', { method: req.method });
 
@@ -351,6 +242,7 @@ serve(async (req) => {
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Verify user authentication
     const { data: { user }, error: authError } = await createClient(
       supabaseUrl, anonKey,
       { global: { headers: { Authorization: authHeader } } }
@@ -359,386 +251,127 @@ serve(async (req) => {
     if (authError || !user) throw new Error('Unauthorized');
 
     const { 
-      workspace_id, 
+      client_id,
+      engagement_id,
+      data_source_id,
       reset = false, 
       batch_number = 1, 
-      auto_continue = false,
-      backfill_historical = false,
+      auto_continue = true,
       full_backfill = false,
-      historical_chunk_index = 0,
-      fetch_replies_only = false,
-      replies_offset = 0,
     } = await req.json();
     
-    if (!workspace_id) throw new Error('workspace_id is required');
+    if (!client_id) throw new Error('client_id is required');
+    if (!data_source_id) throw new Error('data_source_id is required');
 
     // Safety check for max batches
     if (batch_number > MAX_BATCHES) {
       console.error(`Max batch limit (${MAX_BATCHES}) reached. Stopping sync.`);
-      
-      // Update connection status to indicate batch limit hit
-      await supabase.from('api_connections').update({
-        sync_status: 'error',
-        sync_progress: {
-          batch_limit_reached: true,
-          error_message: `Sync stopped after ${MAX_BATCHES} batches. Some data may be missing.`,
-          stopped_at: new Date().toISOString(),
-        },
+      await supabase.from('data_sources').update({
+        last_sync_status: 'error',
+        last_sync_error: `Sync stopped after ${MAX_BATCHES} batches. Some data may be missing.`,
         updated_at: new Date().toISOString(),
-      }).eq('workspace_id', workspace_id).eq('platform', 'smartlead');
+      }).eq('id', data_source_id);
       
       return new Response(JSON.stringify({ 
         error: 'Max batch limit reached',
         batch_number,
-        batch_limit_reached: true,
-        message: 'Sync stopped after too many batches. Some data may be missing.'
+        message: 'Sync stopped after too many batches.'
       }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, backfill_historical=${backfill_historical}, full_backfill=${full_backfill}, chunk=${historical_chunk_index}, fetch_replies_only=${fetch_replies_only}`);
+    console.log(`Starting batch ${batch_number}, auto_continue=${auto_continue}, full_backfill=${full_backfill}`);
 
+    // Verify user has access to this client
     const { data: membership } = await supabase
-      .from('workspace_members').select('role')
-      .eq('workspace_id', workspace_id).eq('user_id', user.id).single();
-    if (!membership) throw new Error('Access denied to workspace');
+      .from('client_members').select('role')
+      .eq('client_id', client_id).eq('user_id', user.id).single();
+    if (!membership) throw new Error('Access denied to client');
 
-    const { data: connection, error: connError } = await supabase
-      .from('api_connections').select('id, api_key_encrypted, sync_progress, sync_status')
-      .eq('workspace_id', workspace_id).eq('platform', 'smartlead').eq('is_active', true).single();
-    if (connError || !connection) throw new Error('No active Smartlead connection found');
+    // Get data source (with API key)
+    const { data: dataSource, error: dsError } = await supabase
+      .from('data_sources').select('id, api_key_encrypted, additional_config, last_sync_status')
+      .eq('id', data_source_id).eq('source_type', 'smartlead').single();
+    if (dsError || !dataSource) throw new Error('No Smartlead data source found');
 
-    const apiKey = connection.api_key_encrypted;
+    const apiKey = dataSource.api_key_encrypted;
+    if (!apiKey) throw new Error('No API key configured for Smartlead');
 
-    // Handle reset - clear all synced data
-    if (reset) {
-      console.log('Resetting SmartLead sync data for workspace:', workspace_id);
-      const { data: campaigns } = await supabase.from('smartlead_campaigns').select('id').eq('workspace_id', workspace_id);
-      const campaignIds = campaigns?.map(c => c.id) || [];
+    // Get or create engagement for this sync
+    let activeEngagementId = engagement_id;
+    if (!activeEngagementId) {
+      // Get or create a default engagement for this client
+      const { data: existingEngagement } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', client_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
       
-      if (campaignIds.length > 0) {
-        await supabase.from('smartlead_daily_metrics').delete().eq('workspace_id', workspace_id);
-        await supabase.from('smartlead_variants').delete().in('campaign_id', campaignIds);
-        await supabase.from('smartlead_sequence_steps').delete().in('campaign_id', campaignIds);
-        await supabase.from('smartlead_message_events').delete().eq('workspace_id', workspace_id);
-        await supabase.from('smartlead_campaigns').delete().eq('workspace_id', workspace_id);
+      if (existingEngagement) {
+        activeEngagementId = existingEngagement.id;
+      } else {
+        // Create a default engagement
+        const { data: newEngagement, error: engError } = await supabase
+          .from('engagements')
+          .insert({
+            client_id,
+            name: 'Default Engagement',
+            status: 'active',
+          })
+          .select('id')
+          .single();
+        
+        if (engError) throw new Error(`Failed to create engagement: ${engError.message}`);
+        activeEngagementId = newEngagement.id;
       }
-      await supabase.from('email_accounts').delete().eq('workspace_id', workspace_id).eq('platform', 'smartlead');
-      await supabase.from('smartlead_workspace_daily_metrics').delete().eq('workspace_id', workspace_id);
-      console.log('Reset complete');
     }
 
-    await supabase.from('api_connections').update({ 
-      sync_status: 'syncing',
+    // Update data source status
+    await supabase.from('data_sources').update({ 
+      last_sync_status: 'syncing',
       updated_at: new Date().toISOString(),
-    }).eq('id', connection.id);
+    }).eq('id', data_source_id);
 
     const progress = {
       campaigns_synced: 0,
-      email_accounts_synced: 0,
-      metrics_created: 0,
       variants_synced: 0,
+      metrics_created: 0,
       historical_days: 0,
-      historical_chunks_processed: 0,
-      replies_fetched: 0,
-      message_events_created: 0,
       errors: [] as string[],
     };
 
     const startTime = Date.now();
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
 
-    // ============================================
-    // MODE: Fetch Replies Only
-    // ============================================
-    if (fetch_replies_only) {
-      console.log(`=== REPLIES MODE: Fetching inbox replies at offset ${replies_offset} ===`);
+    // Reset if requested
+    if (reset) {
+      console.log('Resetting synced data for engagement:', activeEngagementId);
       
-      // Get campaign ID mapping
-      const { data: campaignMap } = await supabase
-        .from('smartlead_campaigns')
-        .select('id, platform_id')
-        .eq('workspace_id', workspace_id);
+      // Get campaign IDs first
+      const { data: existingCampaigns } = await supabase
+        .from('campaigns')
+        .select('id')
+        .eq('engagement_id', activeEngagementId)
+        .eq('data_source_id', data_source_id);
       
-      const campaignLookup = new Map(campaignMap?.map(c => [c.platform_id, c.id]) || []);
+      const campaignIds = existingCampaigns?.map(c => c.id) || [];
       
-      try {
-        // Fetch inbox replies with pagination
-        const repliesResponse = await smartleadRequest(
-          '/master-inbox/inbox-replies',
-          apiKey,
-          'POST',
-          {
-            offset: replies_offset,
-            limit: REPLIES_PER_PAGE,
-          }
-        );
-        
-        const replies = repliesResponse?.data || repliesResponse || [];
-        console.log(`Fetched ${Array.isArray(replies) ? replies.length : 0} replies at offset ${replies_offset}`);
-        
-        if (Array.isArray(replies) && replies.length > 0) {
-          for (const reply of replies as SmartleadInboxReply[]) {
-            const campaignDbId = campaignLookup.get(String(reply.email_campaign_id));
-            
-            if (!campaignDbId) {
-              console.log(`Skipping reply - campaign ${reply.email_campaign_id} not found in DB`);
-              continue;
-            }
-            
-            // Extract reply content from email_history
-            const receivedMessages = reply.email_history?.filter(e => {
-              const t = String((e as any).type || '').toUpperCase();
-              // SmartLead docs use REPLY; some payloads use RECEIVED
-              return t === 'REPLY' || t === 'RECEIVED';
-            }) || [];
-            
-            for (const msg of receivedMessages) {
-              // Create robust unique message_id that handles edge cases
-              const msgTimestamp = msg.time ? new Date(msg.time).getTime() : Date.now();
-              const messageId = `${reply.email_lead_id}-${reply.email_lead_map_id}-${msgTimestamp}`;
-              
-              const { error: upsertError } = await supabase
-                .from('smartlead_message_events')
-                .upsert({
-                  workspace_id,
-                  campaign_id: campaignDbId,
-                  lead_id: null, // We don't have lead UUIDs, could create leads table
-                  event_type: 'reply',
-                  event_timestamp: msg.time || reply.last_reply_time,
-                  message_id: messageId,
-                  reply_text: msg.email_body?.substring(0, 5000), // Limit size
-                  reply_sentiment: null, // Could add classification later
-                }, { onConflict: 'workspace_id,campaign_id,message_id' });
-              
-              if (upsertError) {
-                console.error(`Failed to store reply message: ${upsertError.message}`);
-              } else {
-                progress.message_events_created++;
-              }
-            }
-            progress.replies_fetched++;
-          }
-          
-          // If we got a full page, there might be more
-          if (replies.length >= REPLIES_PER_PAGE && !isTimeBudgetExceeded()) {
-            // Continue fetching in same invocation
-            // Note: for very large inboxes, we'd need to continue in another invocation
-          } else if (replies.length >= REPLIES_PER_PAGE) {
-            // Time budget exceeded, continue in another invocation
-            EdgeRuntime.waitUntil(
-              triggerRepliesContinuation(supabaseUrl, authHeader, workspace_id, replies_offset + REPLIES_PER_PAGE)
-            );
-          }
-        }
-      } catch (e) {
-        console.error('Error fetching inbox replies:', e);
-        progress.errors.push(`Inbox replies: ${(e as Error).message}`);
+      if (campaignIds.length > 0) {
+        // Delete related data
+        await supabase.from('daily_metrics').delete().in('campaign_id', campaignIds);
+        await supabase.from('campaign_variants').delete().in('campaign_id', campaignIds);
+        await supabase.from('email_activities').delete().in('campaign_id', campaignIds);
+        await supabase.from('campaigns').delete().in('id', campaignIds);
       }
       
-      await supabase.from('api_connections').update({
-        sync_status: 'success',
-        sync_progress: {
-          ...(connection.sync_progress as any || {}),
-          replies_complete: true,
-          replies_fetched: progress.replies_fetched,
-          message_events_created: progress.message_events_created,
-        },
-        updated_at: new Date().toISOString(),
-      }).eq('id', connection.id);
-      
-      return new Response(JSON.stringify({
-        success: true,
-        complete: true,
-        progress,
-        message: `Fetched ${progress.replies_fetched} replies, created ${progress.message_events_created} message events`,
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      console.log('Reset complete');
     }
 
     // ============================================
-    // PHASE 1: Fetch Historical Day-Wise Statistics
+    // PHASE 1: Fetch All Campaigns
     // ============================================
-    const existingProgress = (connection.sync_progress as any) || {};
-    const shouldFetchHistorical = batch_number === 1 || backfill_historical || full_backfill || !existingProgress.historical_complete;
-    
-    if (shouldFetchHistorical) {
-      console.log('=== PHASE 1: Fetching historical day-wise statistics ===');
-      
-      const allCampaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
-      console.log(`Found ${allCampaigns.length} campaigns for historical fetch`);
-      
-      if (allCampaigns.length === 0) {
-        console.log('No campaigns found - skipping historical fetch');
-      } else {
-        const campaignPlatformIds = allCampaigns.map(c => c.id);
-        
-        const endDate = new Date();
-        let historicalStartDate: Date;
-        
-        if (full_backfill || backfill_historical) {
-          const earliestCampaign = allCampaigns.reduce((earliest, c) => {
-            if (!c.created_at) return earliest;
-            const cDate = new Date(c.created_at);
-            return cDate < earliest ? cDate : earliest;
-          }, new Date());
-          
-          const twoYearsAgo = new Date(Date.now() - MAX_HISTORICAL_DAYS * 24 * 60 * 60 * 1000);
-          historicalStartDate = earliestCampaign < twoYearsAgo ? twoYearsAgo : earliestCampaign;
-          
-          console.log(`Full backfill mode: earliest campaign is ${earliestCampaign.toISOString()}`);
-          console.log(`Using start date: ${historicalStartDate.toISOString()} (max 2 years)`);
-        } else {
-          historicalStartDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-        }
-        
-        const dateChunks = generateDateChunks(historicalStartDate, endDate, HISTORICAL_CHUNK_DAYS);
-        console.log(`Processing ${dateChunks.length} date chunks (${HISTORICAL_CHUNK_DAYS} days each)`);
-        
-        const startChunk = historical_chunk_index || 0;
-        
-        if (dateChunks.length > 1) {
-          await supabase.from('api_connections').update({
-            sync_progress: {
-              ...existingProgress,
-              historical_chunks: dateChunks.length,
-              historical_chunk_index: startChunk,
-              historical_start_date: historicalStartDate.toISOString(),
-            },
-          }).eq('id', connection.id);
-        }
-        
-        for (let chunkIdx = startChunk; chunkIdx < dateChunks.length; chunkIdx++) {
-          if (isTimeBudgetExceeded()) {
-            console.log(`Time budget exceeded at chunk ${chunkIdx}/${dateChunks.length}. Will continue in next invocation.`);
-            
-            await supabase.from('api_connections').update({
-              sync_status: 'syncing',
-              sync_progress: {
-                ...existingProgress,
-                historical_chunks: dateChunks.length,
-                historical_chunk_index: chunkIdx,
-                historical_days: progress.historical_days,
-                historical_complete: false,
-              },
-            }).eq('id', connection.id);
-            
-            EdgeRuntime.waitUntil(
-              triggerHistoricalContinuation(supabaseUrl, authHeader, workspace_id, chunkIdx, dateChunks.length)
-            );
-            
-            return new Response(JSON.stringify({
-              success: true,
-              complete: false,
-              progress,
-              message: `Processing historical chunk ${chunkIdx + 1}/${dateChunks.length}. Continuing...`,
-            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-          }
-          
-          const chunk = dateChunks[chunkIdx];
-          console.log(`Processing chunk ${chunkIdx + 1}/${dateChunks.length}: ${chunk.start} to ${chunk.end}`);
-          
-          // Batch campaign IDs in groups of 100 (API limit)
-          const BATCH_SIZE_HISTORY = 100;
-          
-          for (let i = 0; i < campaignPlatformIds.length; i += BATCH_SIZE_HISTORY) {
-            const batchIds = campaignPlatformIds.slice(i, i + BATCH_SIZE_HISTORY);
-            const idsParam = batchIds.join(',');
-            
-            try {
-              console.log(`  Fetching campaign batch ${Math.floor(i / BATCH_SIZE_HISTORY) + 1}/${Math.ceil(campaignPlatformIds.length / BATCH_SIZE_HISTORY)} for date range ${chunk.start} to ${chunk.end}...`);
-              
-              const dayWiseResponse = await smartleadRequest(
-                `/analytics/day-wise-overall-stats?start_date=${chunk.start}&end_date=${chunk.end}&campaign_ids=${idsParam}`,
-                apiKey
-              );
-              
-              // Parse the ACTUAL API response format: { success, message, data: { day_wise_stats: [...] } }
-              let dailyStats: SmartleadDayWiseStat[] = [];
-              
-              if (dayWiseResponse?.data?.day_wise_stats && Array.isArray(dayWiseResponse.data.day_wise_stats)) {
-                dailyStats = dayWiseResponse.data.day_wise_stats;
-                console.log(`  Found ${dailyStats.length} daily records in day_wise_stats`);
-              } else if (Array.isArray(dayWiseResponse)) {
-                // Old format fallback
-                dailyStats = dayWiseResponse as any;
-              } else {
-                console.log(`  Unexpected response format. Keys: ${dayWiseResponse ? Object.keys(dayWiseResponse).join(', ') : 'null'}`);
-                if (dayWiseResponse?.data) {
-                  console.log(`  data keys: ${Object.keys(dayWiseResponse.data).join(', ')}`);
-                }
-              }
-              
-              // Process each day's data
-              for (const stat of dailyStats) {
-                // Parse the short date format "8 Jan" to ISO date
-                const metricDate = parseShortDate(stat.date, chunk.start, chunk.end);
-                
-                if (!metricDate) {
-                  console.log(`  Skipping - could not parse date: "${stat.date}"`);
-                  continue;
-                }
-                
-                // Extract nested metrics
-                const metrics = stat.email_engagement_metrics || {};
-                
-                const { error: upsertError } = await supabase
-                  .from('smartlead_workspace_daily_metrics')
-                  .upsert({
-                    workspace_id,
-                    metric_date: metricDate,
-                    sent_count: metrics.sent || 0,
-                    opened_count: metrics.opened || 0,
-                    clicked_count: 0, // Not in this API response
-                    replied_count: metrics.replied || 0,
-                    bounced_count: metrics.bounced || 0,
-                    unsubscribed_count: metrics.unsubscribed || 0,
-                  }, { 
-                    onConflict: 'workspace_id,metric_date',
-                  });
-                
-                if (upsertError) {
-                  console.error(`  Error upserting metrics for ${metricDate}:`, upsertError.message);
-                } else {
-                  progress.historical_days++;
-                }
-              }
-              
-            } catch (e) {
-              console.error(`  Historical stats error for batch starting at ${i}:`, e);
-              progress.errors.push(`Historical stats batch ${i}: ${(e as Error).message}`);
-            }
-          }
-          
-          progress.historical_chunks_processed++;
-          console.log(`  Chunk ${chunkIdx + 1} complete. Total days processed: ${progress.historical_days}`);
-        }
-        
-        console.log(`=== Historical fetch complete: ${progress.historical_days} days across ${progress.historical_chunks_processed} chunks ===`);
-      }
-      
-      // If backfill_historical mode only, we're done after processing all chunks
-      if (backfill_historical && !full_backfill) {
-        await supabase.from('api_connections').update({
-          sync_status: 'success',
-          sync_progress: { 
-            historical_complete: true,
-            historical_days: progress.historical_days,
-          },
-          updated_at: new Date().toISOString(),
-        }).eq('id', connection.id);
-        
-        return new Response(JSON.stringify({
-          success: true,
-          complete: true,
-          progress,
-          message: `Backfilled ${progress.historical_days} days of historical data`,
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-    }
-
-    // ============================================
-    // PHASE 2: Fetch All Campaigns
-    // ============================================
-    console.log('=== PHASE 2: Fetching all campaigns ===');
+    console.log('=== PHASE 1: Fetching all campaigns ===');
     const campaigns: SmartleadCampaign[] = await smartleadRequest('/campaigns', apiKey);
     console.log(`Found ${campaigns.length} total campaigns`);
 
@@ -751,30 +384,28 @@ serve(async (req) => {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
-    const campaignProgress = (connection.sync_progress as any) || {};
-    let startIndex = reset ? 0 : (campaignProgress.campaign_index || 0);
+    const existingConfig = (dataSource.additional_config as any) || {};
+    let startIndex = reset ? 0 : (existingConfig.campaign_index || 0);
 
-    // Process campaigns
+    // Process each campaign
     for (let i = startIndex; i < campaigns.length; i++) {
       if (isTimeBudgetExceeded()) {
         console.log(`Time budget exceeded at campaign ${i}/${campaigns.length}. Triggering continuation...`);
         
-        await supabase.from('api_connections').update({
-          sync_progress: { 
+        await supabase.from('data_sources').update({
+          additional_config: { 
+            ...existingConfig,
             campaign_index: i, 
             total_campaigns: campaigns.length,
-            batch_number: batch_number,
-            historical_complete: true,
-            historical_days: progress.historical_days,
+            batch_number,
           },
-          sync_status: 'partial',
+          last_sync_status: 'partial',
           updated_at: new Date().toISOString(),
-        }).eq('id', connection.id);
+        }).eq('id', data_source_id);
 
-        const shouldContinue = auto_continue || batch_number === 1;
-        if (shouldContinue) {
+        if (auto_continue) {
           EdgeRuntime.waitUntil(
-            triggerNextBatch(supabaseUrl, anonKey, authHeader, workspace_id, batch_number + 1)
+            triggerNextBatch(supabaseUrl, authHeader, client_id, activeEngagementId, data_source_id, batch_number + 1)
           );
         }
 
@@ -785,7 +416,7 @@ serve(async (req) => {
           current: i,
           total: campaigns.length,
           batch_number,
-          message: `Processed ${i}/${campaigns.length} campaigns. ${shouldContinue ? 'Auto-continuing...' : 'Run again to continue.'}`,
+          message: `Processed ${i}/${campaigns.length} campaigns. Auto-continuing...`,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -793,15 +424,19 @@ serve(async (req) => {
       console.log(`[${i + 1}/${campaigns.length}] Processing: ${campaign.name} (${campaign.status})`);
 
       try {
-        // Upsert campaign
+        // Upsert campaign to unified campaigns table
         const { data: upsertedCampaign, error: campError } = await supabase
-          .from('smartlead_campaigns')
+          .from('campaigns')
           .upsert({
-            workspace_id,
-            platform_id: String(campaign.id),
+            engagement_id: activeEngagementId,
+            data_source_id: data_source_id,
+            external_id: String(campaign.id),
             name: campaign.name,
+            campaign_type: 'email',
             status: campaign.status?.toLowerCase() || 'unknown',
-          }, { onConflict: 'workspace_id,platform_id' })
+            started_at: campaign.created_at ? new Date(campaign.created_at).toISOString() : null,
+            last_synced_at: new Date().toISOString(),
+          }, { onConflict: 'engagement_id,data_source_id,external_id' })
           .select('id')
           .single();
 
@@ -819,249 +454,128 @@ serve(async (req) => {
           const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
           const today = new Date().toISOString().split('T')[0];
 
-          // Extract lifetime totals (current cumulative values)
           const totalSent = analytics.sent_count || 0;
           const totalOpened = analytics.unique_open_count || 0;
           const totalClicked = analytics.unique_click_count || 0;
           const totalReplied = analytics.reply_count || 0;
           const totalBounced = analytics.bounce_count || 0;
           
-          // Get previous cumulative values to calculate delta
-          const { data: prevCumulative } = await supabase
-            .from('smartlead_campaign_cumulative')
-            .select('*')
-            .eq('campaign_id', campaignDbId)
-            .single();
-          
-          // Calculate daily delta (new activity since last sync)
-          const deltaSent = Math.max(0, totalSent - (prevCumulative?.total_sent || 0));
-          const deltaOpened = Math.max(0, totalOpened - (prevCumulative?.total_opened || 0));
-          const deltaClicked = Math.max(0, totalClicked - (prevCumulative?.total_clicked || 0));
-          const deltaReplied = Math.max(0, totalReplied - (prevCumulative?.total_replied || 0));
-          const deltaBounced = Math.max(0, totalBounced - (prevCumulative?.total_bounced || 0));
-          
-          const isFirstSync = !prevCumulative;
-          console.log(`  Analytics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied} (${isFirstSync ? 'first sync' : 'delta'})`);
-          
-          // Store cumulative values for next comparison
-          await supabase.from('smartlead_campaign_cumulative').upsert({
-            campaign_id: campaignDbId,
-            workspace_id,
+          console.log(`  Analytics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
+
+          // Update campaign with totals
+          await supabase.from('campaigns').update({
             total_sent: totalSent,
             total_opened: totalOpened,
-            total_clicked: totalClicked,
             total_replied: totalReplied,
             total_bounced: totalBounced,
-            total_interested: 0, // SmartLead doesn't track this in basic analytics
-            last_synced_at: new Date().toISOString(),
-          }, { onConflict: 'campaign_id' });
-          
-          // Store daily delta OR initial cumulative on first sync
-          // FIX: On first sync, store cumulative totals as baseline to ensure dashboards have data
-          if (isFirstSync && (totalSent > 0 || totalOpened > 0 || totalReplied > 0 || totalBounced > 0)) {
-            // First sync: Use campaign created date as baseline date if available
-            const baselineDate = campaign.created_at 
+            reply_rate: totalSent > 0 ? (totalReplied / totalSent) * 100 : null,
+            open_rate: totalSent > 0 ? (totalOpened / totalSent) * 100 : null,
+            bounce_rate: totalSent > 0 ? (totalBounced / totalSent) * 100 : null,
+          }).eq('id', campaignDbId);
+
+          // Store daily metrics (using campaign created date as baseline for initial sync)
+          if (totalSent > 0 || totalOpened > 0 || totalReplied > 0) {
+            const metricDate = campaign.created_at 
               ? new Date(campaign.created_at).toISOString().split('T')[0]
               : today;
-            
-            await supabase.from('smartlead_daily_metrics').upsert({
-              workspace_id,
+
+            await supabase.from('daily_metrics').upsert({
+              engagement_id: activeEngagementId,
               campaign_id: campaignDbId,
-              metric_date: baselineDate,
-              sent_count: totalSent,
-              opened_count: totalOpened,
-              clicked_count: totalClicked,
-              replied_count: totalReplied,
-              bounced_count: totalBounced,
-              positive_reply_count: 0,
-            }, { onConflict: 'campaign_id,metric_date' });
+              data_source_id: data_source_id,
+              date: metricDate,
+              emails_sent: totalSent,
+              emails_opened: totalOpened,
+              emails_clicked: totalClicked,
+              emails_replied: totalReplied,
+              emails_bounced: totalBounced,
+            }, { onConflict: 'engagement_id,campaign_id,date' });
             progress.metrics_created++;
-            console.log(`  ✓ First sync - stored cumulative as baseline (date=${baselineDate}): sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
-          } else if (!isFirstSync && (deltaSent > 0 || deltaOpened > 0 || deltaReplied > 0 || deltaBounced > 0)) {
-            await supabase.from('smartlead_daily_metrics').upsert({
-              workspace_id,
-              campaign_id: campaignDbId,
-              metric_date: today,
-              sent_count: deltaSent,
-              opened_count: deltaOpened,
-              clicked_count: deltaClicked,
-              replied_count: deltaReplied,
-              bounced_count: deltaBounced,
-              positive_reply_count: 0,
-            }, { onConflict: 'campaign_id,metric_date' });
-            progress.metrics_created++;
-            console.log(`  ✓ Daily delta stored: sent=${deltaSent}, opens=${deltaOpened}, replies=${deltaReplied}`);
-          } else if (isFirstSync) {
-            console.log(`  First sync but no activity - skipping daily_metrics`);
-          } else {
-            console.log(`  No new activity today - skipping daily_metrics upsert`);
           }
         } catch (e) {
           console.error(`  Analytics error for ${campaign.name}:`, e);
           progress.errors.push(`Analytics ${campaign.name}: ${(e as Error).message}`);
         }
 
-        // Fetch sequences/variants for this campaign
+        // Fetch sequences/variants
         try {
           const sequencesRaw = await smartleadRequest(`/campaigns/${campaign.id}/sequences`, apiKey);
           
-          // COMPREHENSIVE Debug: Log raw response structure
-          const rawStr = JSON.stringify(sequencesRaw).substring(0, 800);
-          console.log(`  Sequences API raw response:`, rawStr);
-          console.log(`  Sequences API type: ${typeof sequencesRaw}, isArray: ${Array.isArray(sequencesRaw)}`);
-          
-          // Store first campaign's response for debugging
-          if (i === startIndex && progress.variants_synced === 0) {
-            await supabase.from('api_connections').update({
-              sync_progress: {
-                ...((connection.sync_progress as any) || {}),
-                debug_sequences_sample: rawStr,
-                debug_sequences_type: typeof sequencesRaw,
-                debug_sequences_isArray: Array.isArray(sequencesRaw),
-                debug_sequences_keys: sequencesRaw && !Array.isArray(sequencesRaw) ? Object.keys(sequencesRaw).join(', ') : 'N/A',
-              },
-            }).eq('id', connection.id);
-          }
-          
-          if (sequencesRaw && !Array.isArray(sequencesRaw)) {
-            console.log(`  Sequences API response keys:`, Object.keys(sequencesRaw).join(', '));
-          }
-          
-          // Handle ALL possible response formats from SmartLead API
           let sequences: SmartleadSequence[] = [];
-          
           if (Array.isArray(sequencesRaw)) {
             sequences = sequencesRaw;
           } else if (sequencesRaw?.data && Array.isArray(sequencesRaw.data)) {
             sequences = sequencesRaw.data;
           } else if (sequencesRaw?.sequences && Array.isArray(sequencesRaw.sequences)) {
             sequences = sequencesRaw.sequences;
-          } else if (sequencesRaw?.steps && Array.isArray(sequencesRaw.steps)) {
-            sequences = sequencesRaw.steps;
-          } else if (sequencesRaw?.email_sequences && Array.isArray(sequencesRaw.email_sequences)) {
-            sequences = sequencesRaw.email_sequences;
-          } else if (sequencesRaw?.ok === true && sequencesRaw?.data) {
-            // SmartLead often returns { ok: true, data: [...] }
-            sequences = Array.isArray(sequencesRaw.data) ? sequencesRaw.data : [sequencesRaw.data];
-          } else if (sequencesRaw && typeof sequencesRaw === 'object' && !Array.isArray(sequencesRaw)) {
-            // Maybe it's a single sequence object
-            if (sequencesRaw.seq_id || sequencesRaw.id || sequencesRaw.subject || sequencesRaw.email_body) {
-              sequences = [sequencesRaw];
-            }
           }
           
-          if (sequences && sequences.length > 0) {
+          if (sequences.length > 0) {
             console.log(`  Found ${sequences.length} sequences for campaign`);
             
             for (let seqIdx = 0; seqIdx < sequences.length; seqIdx++) {
               const seq = sequences[seqIdx];
               
-              // Log sequence structure to debug field names
-              console.log(`    Sequence ${seqIdx + 1} keys: ${Object.keys(seq).join(', ')}`);
-              console.log(`    Sequence ${seqIdx + 1} sample:`, JSON.stringify(seq).substring(0, 300));
+              const mainSubject = seq.subject || (seq as any).email_subject || '';
+              const mainBody = seq.email_body || (seq as any).body || '';
               
-              // SmartLead sequence field variations
-              const mainSubject = seq.subject || (seq as any).email_subject || (seq as any).emailSubject || 
-                                  (seq as any).title || (seq as any).name || '';
-              const mainBody = seq.email_body || (seq as any).body || (seq as any).emailBody || 
-                               (seq as any).content || (seq as any).text || (seq as any).template || '';
-              
-              if (!mainSubject && !mainBody) {
-                console.log(`    Skipping sequence ${seqIdx + 1} - no subject or body found`);
-                continue;
-              }
+              if (!mainSubject && !mainBody) continue;
               
               const mainVars = extractPersonalizationVars(mainSubject + ' ' + mainBody);
-              const mainWordCount = mainBody.split(/\s+/).filter(Boolean).length;
-              const seqId = seq.seq_id || (seq as any).id || (seq as any).sequence_id || seqIdx;
-              const seqNumber = seq.seq_number || (seq as any).step_number || (seq as any).order || (seqIdx + 1);
+              const bodyPlain = stripHtml(mainBody);
+              const seqId = seq.seq_id || (seq as any).id || seqIdx;
+              const seqNumber = seq.seq_number || (seq as any).step_number || (seqIdx + 1);
               
-              // Upsert main sequence as variant
-              const variantData = {
-                campaign_id: campaignDbId,
-                platform_variant_id: `seq-${seqId}`,
-                name: `Step ${seqNumber}`,
-                variant_type: 'sequence',
-                subject_line: mainSubject,
-                body_preview: mainBody.substring(0, 500),
-                email_body: mainBody,
-                word_count: mainWordCount,
-                personalization_vars: mainVars,
-                is_control: true,
-              };
-              
-              console.log(`    Upserting variant: seq-${seqId} with subject "${mainSubject.substring(0, 40)}..."`);
-              
-              const { error: variantError } = await supabase.from('smartlead_variants')
-                .upsert(variantData, { onConflict: 'campaign_id,platform_variant_id' });
+              // Upsert to unified campaign_variants table
+              const { error: variantError } = await supabase.from('campaign_variants')
+                .upsert({
+                  campaign_id: campaignDbId,
+                  data_source_id: data_source_id,
+                  external_id: `seq-${seqId}`,
+                  subject_line: mainSubject,
+                  body_html: mainBody,
+                  body_plain: bodyPlain,
+                  body_preview: bodyPlain.substring(0, 200),
+                  personalization_vars: mainVars,
+                  step_number: seqNumber,
+                  is_control: seqIdx === 0,
+                }, { onConflict: 'campaign_id,external_id' });
               
               if (variantError) {
-                console.error(`    Failed to upsert variant for step ${seqNumber}:`, variantError.message);
-                console.error(`    Variant data:`, JSON.stringify(variantData).substring(0, 300));
+                console.error(`  Failed to upsert variant for step ${seqNumber}:`, variantError.message);
               } else {
                 progress.variants_synced++;
-                console.log(`    ✓ Variant synced: Step ${seqNumber} (${mainSubject.substring(0, 30)}...)`);
               }
 
               // Store A/B variants if they exist
               if (seq.sequence_variants && seq.sequence_variants.length > 0) {
-                console.log(`    Found ${seq.sequence_variants.length} A/B variants`);
                 for (const variant of seq.sequence_variants) {
                   const varSubject = variant.subject || mainSubject;
                   const varBody = variant.email_body || mainBody;
+                  const varBodyPlain = stripHtml(varBody);
                   const varVars = extractPersonalizationVars(varSubject + ' ' + varBody);
-                  const varWordCount = varBody.split(/\s+/).filter(Boolean).length;
                   
-                  const { error: abError } = await supabase.from('smartlead_variants').upsert({
+                  const { error: abError } = await supabase.from('campaign_variants').upsert({
                     campaign_id: campaignDbId,
-                    platform_variant_id: `var-${variant.variant_id}`,
-                    name: `Step ${seqNumber} Variant ${variant.variant_id}`,
-                    variant_type: 'ab_variant',
+                    data_source_id: data_source_id,
+                    external_id: `var-${variant.variant_id}`,
                     subject_line: varSubject,
-                    body_preview: varBody.substring(0, 500),
-                    email_body: varBody,
-                    word_count: varWordCount,
+                    body_html: varBody,
+                    body_plain: varBodyPlain,
+                    body_preview: varBodyPlain.substring(0, 200),
                     personalization_vars: varVars,
+                    step_number: seqNumber,
                     is_control: false,
-                  }, { onConflict: 'campaign_id,platform_variant_id' });
+                  }, { onConflict: 'campaign_id,external_id' });
                   
-                  if (abError) {
-                    console.error(`    Failed to upsert A/B variant:`, abError.message);
-                  } else {
-                    progress.variants_synced++;
-                  }
+                  if (!abError) progress.variants_synced++;
                 }
               }
             }
-            console.log(`  Variants synced for campaign: ${sequences.length} steps`);
-          } else {
-            console.log(`  No sequences found for campaign ${campaign.name} (empty or unrecognized format)`);
           }
         } catch (e) {
           console.error(`  Sequences error for ${campaign.name}:`, e);
           progress.errors.push(`Sequences ${campaign.name}: ${(e as Error).message}`);
-        }
-
-        // Fetch email accounts for this campaign
-        try {
-          const emailAccounts: SmartleadEmailAccount[] = await smartleadRequest(`/campaigns/${campaign.id}/email-accounts`, apiKey);
-          
-          for (const account of emailAccounts || []) {
-            await supabase.from('email_accounts').upsert({
-              workspace_id,
-              platform: 'smartlead',
-              platform_id: String(account.id),
-              email_address: account.from_email,
-              sender_name: account.from_name || null,
-              daily_limit: account.message_per_day || null,
-              warmup_enabled: account.warmup_details?.status === 'enabled',
-              is_active: true,
-            }, { onConflict: 'workspace_id,platform,platform_id' });
-            progress.email_accounts_synced++;
-          }
-          console.log(`  Email accounts synced: ${emailAccounts?.length || 0}`);
-        } catch (e) {
-          console.error(`  Email accounts error for ${campaign.name}:`, e);
         }
 
       } catch (e) {
@@ -1071,122 +585,28 @@ serve(async (req) => {
     }
 
     // ============================================
-    // PHASE 3: Fetch Inbox Replies (first page)
+    // PHASE 2: Sync Complete
     // ============================================
-    if (!isTimeBudgetExceeded()) {
-      console.log('=== PHASE 3: Fetching inbox replies ===');
-      
-      const { data: campaignMap } = await supabase
-        .from('smartlead_campaigns')
-        .select('id, platform_id')
-        .eq('workspace_id', workspace_id);
-      
-      const campaignLookup = new Map(campaignMap?.map(c => [c.platform_id, c.id]) || []);
-      
-      try {
-        const repliesResponse = await smartleadRequest(
-          '/master-inbox/inbox-replies',
-          apiKey,
-          'POST',
-          { offset: 0, limit: REPLIES_PER_PAGE }
-        );
-        
-        const replies = repliesResponse?.data || repliesResponse || [];
-        console.log(`Fetched ${Array.isArray(replies) ? replies.length : 0} replies`);
-        
-        if (Array.isArray(replies)) {
-          for (const reply of replies as SmartleadInboxReply[]) {
-            const campaignDbId = campaignLookup.get(String(reply.email_campaign_id));
-            if (!campaignDbId) continue;
-            
-            const receivedMessages = reply.email_history?.filter(e => {
-              const t = String((e as any).type || '').toUpperCase();
-              // SmartLead docs use REPLY; some payloads use RECEIVED
-              return t === 'REPLY' || t === 'RECEIVED';
-            }) || [];
-            
-            for (const msg of receivedMessages) {
-              // Create robust unique message_id that handles edge cases
-              const msgTimestamp = msg.time ? new Date(msg.time).getTime() : Date.now();
-              const messageId = `${reply.email_lead_id}-${reply.email_lead_map_id}-${msgTimestamp}`;
-              
-              console.log(`    Storing reply: lead=${reply.email_lead_id}, campaign=${reply.email_campaign_id}, msgId=${messageId}`);
-              
-              const { error: upsertError } = await supabase
-                .from('smartlead_message_events')
-                .upsert({
-                  workspace_id,
-                  campaign_id: campaignDbId,
-                  lead_id: null,
-                  event_type: 'reply',
-                  event_timestamp: msg.time || reply.last_reply_time,
-                  message_id: messageId,
-                  reply_text: msg.email_body?.substring(0, 5000),
-                  reply_sentiment: null,
-                }, { onConflict: 'workspace_id,campaign_id,message_id' });
-              
-              if (upsertError) {
-                console.error(`    Failed to store message: ${upsertError.message}`);
-              } else {
-                progress.message_events_created++;
-                console.log(`    ✓ Stored message event: ${messageId}`);
-              }
-            }
-            progress.replies_fetched++;
-          }
-          
-          // If there are more replies, trigger continuation
-          if (replies.length >= REPLIES_PER_PAGE) {
-            console.log('More replies available, will need additional fetch');
-          }
-        }
-      } catch (e) {
-        console.error('Error fetching inbox replies:', e);
-        progress.errors.push(`Inbox replies: ${(e as Error).message}`);
-      }
-    }
-
-    // ============================================
-    // PHASE 4: Sync Complete
-    // ============================================
-    await supabase.from('api_connections').update({
-      sync_status: 'idle', // Use 'idle' to stop frontend polling
-      sync_progress: { 
-        completed: true, 
-        historical_complete: true,
-        total_campaigns: campaigns.length,
-        historical_days: progress.historical_days,
-        variants_synced: progress.variants_synced,
-        replies_fetched: progress.replies_fetched,
-        finished_at: new Date().toISOString(),
-      },
+    await supabase.from('data_sources').update({
+      last_sync_status: 'success',
       last_sync_at: new Date().toISOString(),
-      last_full_sync_at: new Date().toISOString(),
-    }).eq('id', connection.id);
+      last_sync_records_processed: progress.campaigns_synced,
+      additional_config: {
+        ...existingConfig,
+        campaign_index: 0, // Reset for next sync
+        completed_at: new Date().toISOString(),
+        total_campaigns: campaigns.length,
+        variants_synced: progress.variants_synced,
+      },
+    }).eq('id', data_source_id);
 
     console.log('SmartLead sync complete:', progress);
-
-    // Check if Reply.io connection exists and trigger its sync
-    const { data: replyioConnection } = await supabase
-      .from('api_connections')
-      .select('id')
-      .eq('workspace_id', workspace_id)
-      .eq('platform', 'replyio')
-      .eq('is_active', true)
-      .single();
-
-    if (replyioConnection && auto_continue) {
-      EdgeRuntime.waitUntil(
-        triggerReplyioSync(supabaseUrl, anonKey, authHeader, workspace_id)
-      );
-    }
 
     return new Response(JSON.stringify({
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.metrics_created} metrics, ${progress.historical_days} historical days, ${progress.email_accounts_synced} email accounts, ${progress.replies_fetched} replies`,
-      next: replyioConnection ? 'Triggering Reply.io sync...' : null,
+      message: `Synced ${progress.campaigns_synced} campaigns, ${progress.variants_synced} variants, ${progress.metrics_created} metrics`,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
