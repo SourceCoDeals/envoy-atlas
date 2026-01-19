@@ -596,8 +596,12 @@ export default function EngagementDashboard() {
                       const researchMid = getTeamMemberById(engagement.research_mid_id);
 
                       return (
-                        <TableRow key={engagement.id} className="hover:bg-muted/50">
-                          <TableCell>
+                        <TableRow 
+                          key={engagement.id} 
+                          className="hover:bg-muted/50 cursor-pointer"
+                          onClick={() => navigate(`/engagements/${engagement.id}/report`)}
+                        >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
                             <Badge 
                               variant={statusConfig.variant}
                               className="cursor-pointer hover:opacity-80 transition-opacity"
@@ -671,7 +675,7 @@ export default function EngagementDashboard() {
                               {engagement.is_platform ? 'Platform' : 'Add-on'}
                             </Badge>
                           </TableCell>
-                          <TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex gap-1">
                               <Button
                                 variant="ghost"
