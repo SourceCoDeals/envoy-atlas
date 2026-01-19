@@ -274,62 +274,68 @@ export function OpeningLinesTab({ bodyCopy, baselineReplyRate }: OpeningLinesTab
         </CardContent>
       </Card>
 
-      {/* Hook Examples */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Target className="h-5 w-5" />
-            Best & Worst Hook Examples
-          </CardTitle>
-          <CardDescription>Learn from what works (and what doesn't)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div>
-              <h4 className="text-sm font-medium text-success mb-3">✅ High-Performing Hooks</h4>
-              <div className="space-y-3">
-                {[
-                  { hook: 'Timeline', example: '"Saw Acme just closed their Series C—congrats! Quick thought..."', rate: 8.7 },
-                  { hook: 'Numbers', example: '"Noticed you have 47 open roles—that\'s a lot of hiring ahead..."', rate: 6.4 },
-                  { hook: 'Compliment', example: '"Really enjoyed your recent post on PE deal sourcing..."', rate: 5.2 },
-                ].map((item, i) => (
-                  <div key={i} className="p-3 bg-success/5 border border-success/20 rounded-lg">
-                    <div className="flex items-center justify-between mb-1">
-                      <Badge variant="outline" className="text-xs text-success border-success/30">{item.hook}</Badge>
-                      <span className="text-sm font-medium text-success">{item.rate}% reply</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground italic">{item.example}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h4 className="text-sm font-medium text-destructive mb-3">❌ Avoid These Hooks</h4>
-              <div className="space-y-3">
-                {[
-                  { hook: 'Problem', example: '"Most PE firms struggle with deal flow..."', rate: 2.7, issue: 'Presumptuous' },
-                  { hook: 'Generic', example: '"I wanted to reach out to introduce..."', rate: 2.1, issue: 'Self-focused' },
-                  { hook: 'Cold Intro', example: '"My name is John and I work at..."', rate: 1.8, issue: 'No value' },
-                ].map((item, i) => (
-                  <div key={i} className="p-3 bg-destructive/5 border border-destructive/20 rounded-lg">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs text-destructive border-destructive/30">{item.hook}</Badge>
-                        <span className="text-xs text-destructive flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" /> {item.issue}
-                        </span>
+      {/* Hook Examples - Real Data Only */}
+      {hookPerformance.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5" />
+              Best & Worst Hook Types
+            </CardTitle>
+            <CardDescription>Based on your actual email performance data</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div>
+                <h4 className="text-sm font-medium text-success mb-3">✅ Top Performing Hook Types</h4>
+                <div className="space-y-3">
+                  {hookPerformance
+                    .filter(h => h.sample >= 10 && h.lift > 0)
+                    .slice(0, 3)
+                    .map((item, i) => (
+                      <div key={i} className="p-3 bg-success/5 border border-success/20 rounded-lg">
+                        <div className="flex items-center justify-between mb-1">
+                          <Badge variant="outline" className="text-xs text-success border-success/30">{item.type}</Badge>
+                          <span className="text-sm font-medium text-success">{item.rate.toFixed(1)}% reply</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {formatLift(item.lift)} vs baseline • {item.sample.toLocaleString()} emails
+                        </p>
                       </div>
-                      <span className="text-sm font-medium text-destructive">{item.rate}% reply</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground italic">{item.example}</p>
-                  </div>
-                ))}
+                    ))}
+                  {hookPerformance.filter(h => h.sample >= 10 && h.lift > 0).length === 0 && (
+                    <p className="text-sm text-muted-foreground">Not enough data to identify top performers yet.</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-destructive mb-3">❌ Underperforming Hook Types</h4>
+                <div className="space-y-3">
+                  {hookPerformance
+                    .filter(h => h.sample >= 10 && h.lift < 0)
+                    .slice(-3)
+                    .reverse()
+                    .map((item, i) => (
+                      <div key={i} className="p-3 bg-destructive/5 border border-destructive/20 rounded-lg">
+                        <div className="flex items-center justify-between mb-1">
+                          <Badge variant="outline" className="text-xs text-destructive border-destructive/30">{item.type}</Badge>
+                          <span className="text-sm font-medium text-destructive">{item.rate.toFixed(1)}% reply</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {formatLift(item.lift)} vs baseline • {item.sample.toLocaleString()} emails
+                        </p>
+                      </div>
+                    ))}
+                  {hookPerformance.filter(h => h.sample >= 10 && h.lift < 0).length === 0 && (
+                    <p className="text-sm text-muted-foreground">No underperforming hook types identified.</p>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
