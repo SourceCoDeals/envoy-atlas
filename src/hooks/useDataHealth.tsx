@@ -63,7 +63,7 @@ export function useDataHealth() {
       const leadsResult = await supabase.from('leads').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
       const dealsResult = await supabase.from('calling_deals').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
       const engagementsResult = await supabase.from('engagements').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const variantsResult = await supabase.from('campaign_variants').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      const variantsResult = await supabase.from('campaign_variants').select('id', { count: 'exact', head: true });
       const libraryResult = await supabase.from('copy_library').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
       const patternsResult = await supabase.from('copy_patterns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
 
@@ -76,12 +76,6 @@ export function useDataHealth() {
       const copyVariantsCount = variantsResult.count || 0;
       const copyLibraryCount = libraryResult.count || 0;
       const patternsCount = patternsResult.count || 0;
-      const leadsCount = leads.count || 0;
-      const dealsCount = deals.count || 0;
-      const engagementsCount = engagements.count || 0;
-      const copyVariantsCount = copyVariants.count || 0;
-      const copyLibraryCount = copyLibrary.count || 0;
-      const patternsCount = patterns.count || 0;
 
       // Determine campaign status
       const campaignsStatus: DataHealthStatus = campaignsCount > 0 ? 'healthy' : 'empty';
