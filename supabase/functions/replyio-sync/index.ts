@@ -413,6 +413,55 @@ Deno.serve(async (req) => {
     }
 
     // ============================================
+    // PHASE 0.5: Fetch Global Statistics (/statistics v3)
+    // ============================================
+    if (batch_number === 1 && current_phase === 'sequences') {
+      console.log('=== Fetching global statistics ===');
+      try {
+        const statsResponse = await replyioRequest('/statistics', apiKey, { 
+          delayMs: RATE_LIMIT_DELAY_LIST,
+          allow404: true 
+        });
+        
+        if (statsResponse) {
+          console.log('Global statistics available:', JSON.stringify(statsResponse).substring(0, 200));
+          
+          // Store aggregate stats in workspace/engagement metrics if useful
+          const stats = statsResponse.statistics || statsResponse;
+          const today = new Date().toISOString().split('T')[0];
+          
+          // These are account-wide stats, useful for benchmarking
+          const aggStats = {
+            total_sequences: stats.sequencesCount || stats.totalSequences || 0,
+            total_people: stats.peopleCount || stats.totalPeople || 0,
+            active_sequences: stats.activeSequencesCount || stats.activeSequences || 0,
+            active_people: stats.activeContactsCount || stats.activePeople || 0,
+            total_sent: stats.deliveriesCount || stats.sentCount || stats.sent || 0,
+            total_opened: stats.opensCount || stats.openCount || stats.opens || 0,
+            total_replied: stats.repliesCount || stats.replyCount || stats.replies || 0,
+            total_bounced: stats.bouncesCount || stats.bounceCount || stats.bounces || 0,
+            total_interested: stats.interestedCount || stats.interested || 0,
+            total_not_interested: stats.notInterestedCount || stats.notInterested || 0,
+            total_opted_out: stats.optOutsCount || stats.optedOut || 0,
+          };
+          
+          console.log(`  Global stats: ${aggStats.total_sequences} sequences, ${aggStats.total_people} people, ${aggStats.total_sent} sent`);
+          
+          // Store in additional_config for reference
+          await supabase.from('data_sources').update({
+            additional_config: {
+              ...existingConfig,
+              global_statistics: aggStats,
+              global_statistics_updated_at: new Date().toISOString(),
+            },
+          }).eq('id', data_source_id);
+        }
+      } catch (e) {
+        console.log('Global statistics not available:', (e as Error).message);
+      }
+    }
+
+    // ============================================
     // PHASE 1: Sync Sequences/Campaigns
     // ============================================
     if (current_phase === 'sequences') {
@@ -773,6 +822,91 @@ Deno.serve(async (req) => {
             }
           } catch (e) {
             console.error(`  v1 API error:`, (e as Error).message);
+          }
+
+          // ============================================
+          // Fetch Sequence Reports (/reports/sequence v3)
+          // ============================================
+          try {
+            const reportResponse = await replyioRequest(
+              `/reports/sequence?sequenceId=${sequence.id}`,
+              apiKey,
+              { retries: 1, allow404: true, delayMs: RATE_LIMIT_DELAY_STATS }
+            );
+            
+            if (reportResponse) {
+              const report = reportResponse.report || reportResponse;
+              const today = new Date().toISOString().split('T')[0];
+              
+              // Extract detailed report metrics
+              const reportMetrics = {
+                // Email metrics
+                sent: report.sent || report.deliveriesCount || 0,
+                opened: report.opened || report.opensCount || 0,
+                clicked: report.clicked || report.clicksCount || 0,
+                replied: report.replied || report.repliesCount || 0,
+                bounced: report.bounced || report.bouncesCount || 0,
+                
+                // Engagement metrics
+                interested: report.interested || report.interestedCount || 0,
+                notInterested: report.notInterested || report.notInterestedCount || 0,
+                optedOut: report.optedOut || report.optOutsCount || 0,
+                
+                // Time-based metrics if available
+                avgResponseTime: report.avgResponseTime || report.averageResponseTime || null,
+                avgOpenTime: report.avgOpenTime || report.averageOpenTime || null,
+                
+                // Conversion metrics
+                meetings: report.meetings || report.meetingsBooked || 0,
+                calls: report.calls || report.callsScheduled || 0,
+              };
+              
+              console.log(`  Sequence report: sent=${reportMetrics.sent}, replies=${reportMetrics.replied}, interested=${reportMetrics.interested}`);
+              
+              // Update campaign with report data if newer
+              if (reportMetrics.sent > 0) {
+                await supabase.from('campaigns').update({
+                  total_meetings: reportMetrics.meetings,
+                  quality_score: reportMetrics.interested > 0 && reportMetrics.replied > 0 
+                    ? Math.round((reportMetrics.interested / reportMetrics.replied) * 100) 
+                    : null,
+                }).eq('id', campaignId);
+              }
+              
+              // Store detailed daily metrics from report
+              if (report.dailyStats && Array.isArray(report.dailyStats)) {
+                for (const dayStat of report.dailyStats) {
+                  const date = dayStat.date || dayStat.day;
+                  if (!date) continue;
+                  
+                  const { data: campaignRecord } = await supabase
+                    .from('campaigns')
+                    .select('engagement_id')
+                    .eq('id', campaignId)
+                    .single();
+                  
+                  const actualEngagementId = campaignRecord?.engagement_id || engagement_id;
+                  
+                  await supabase.from('daily_metrics').upsert({
+                    engagement_id: actualEngagementId,
+                    campaign_id: campaignId,
+                    data_source_id,
+                    date: typeof date === 'string' ? date : new Date(date).toISOString().split('T')[0],
+                    emails_sent: dayStat.sent || dayStat.deliveries || 0,
+                    emails_opened: dayStat.opened || dayStat.opens || 0,
+                    emails_clicked: dayStat.clicked || dayStat.clicks || 0,
+                    emails_replied: dayStat.replied || dayStat.replies || 0,
+                    emails_bounced: dayStat.bounced || dayStat.bounces || 0,
+                    positive_replies: dayStat.interested || 0,
+                    meetings_booked: dayStat.meetings || 0,
+                  }, { onConflict: 'engagement_id,campaign_id,date' });
+                  
+                  progress.metrics_created++;
+                }
+              }
+            }
+          } catch (e) {
+            console.log(`  Sequence report not available:`, (e as Error).message);
           }
 
           // ============================================

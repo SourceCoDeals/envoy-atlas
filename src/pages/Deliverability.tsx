@@ -15,6 +15,7 @@ import { EmailAccountHealth } from '@/components/deliverability/EmailAccountHeal
 import { DeliverabilityTrends } from '@/components/deliverability/DeliverabilityTrends';
 import { BlacklistStatus } from '@/components/deliverability/BlacklistStatus';
 import { SendingVolumeAnalysis } from '@/components/deliverability/SendingVolumeAnalysis';
+import { WarmupDashboard, BounceAnalysis } from '@/components/analytics';
 import { subDays, format } from 'date-fns';
 
 export default function Deliverability() {
@@ -301,6 +302,44 @@ export default function Deliverability() {
           </Card>
         ) : (
           <div className="space-y-6">
+            {/* Warmup Dashboard - Key for monitoring mailbox health */}
+            <WarmupDashboard 
+              accounts={mailboxes.map(m => ({
+                email: m.email,
+                warmup_enabled: m.warmupEnabled,
+                warmup_status: m.warmupStatus,
+                warmup_reputation: m.healthScore,
+                warmup_sent_count: m.sent30d,
+                warmup_spam_count: 0, // Not tracked at this level yet
+                daily_limit: m.dailyLimit,
+                current_daily_sent: Math.round(m.sent30d / 30),
+              }))}
+            />
+
+            {/* Bounce Analysis - Detailed breakdown */}
+            <BounceAnalysis 
+              data={{
+                total_bounces: bounceData?.totalBounces || 0,
+                bounce_rate: bounceData?.bounceRate || 0,
+                hard_bounces: bounceData?.hardBounces || 0,
+                soft_bounces: bounceData?.softBounces || 0,
+                top_reasons: bounceData?.byReason?.slice(0, 5).map((r: { reason: string; count: number; percentage: number }) => ({
+                  reason: r.reason,
+                  count: r.count,
+                })) || [],
+                by_domain: campaignBounces.slice(0, 5).map(c => ({
+                  domain: c.name,
+                  count: c.bounces,
+                  rate: c.bounceRate,
+                })),
+                by_campaign: campaignBounces.slice(0, 5).map(c => ({
+                  campaign: c.name,
+                  count: c.bounces,
+                  rate: c.bounceRate,
+                })),
+              }}
+            />
+
             {/* Trends Chart - Full Width */}
             {trendData.length > 0 && (
               <DeliverabilityTrends data={trendData} keyEvents={[]} period="30d" />
@@ -312,7 +351,6 @@ export default function Deliverability() {
               {placementData && <InboxPlacementEstimate {...placementData} />}
               {authData.length > 0 && <AuthenticationStatus domains={authData} />}
               <DeliverabilityAlerts alerts={alerts} onDismiss={dismissAlert} />
-              {bounceData && <BounceBreakdown data={bounceData} onCleanLists={() => {}} onViewBounced={() => {}} />}
               {accountsData.length > 0 && <EmailAccountHealth accounts={accountsData} />}
               <BlacklistStatus 
                 isListed={blacklistData.isListed} 
