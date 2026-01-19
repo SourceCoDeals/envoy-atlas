@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useSyncData } from "@/hooks/useSyncData";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -12,13 +13,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { 
   AlertCircle, 
-  CheckCircle2, 
   Clock, 
   Database, 
   ExternalLink,
   Loader2, 
   Mail, 
   Phone, 
+  Play,
   RefreshCw 
 } from "lucide-react";
 
@@ -42,7 +43,7 @@ async function getAccessToken(): Promise<string> {
   return token;
 }
 
-function formatRelativeTime(dateStr: string | null): string {
+function formatRelativeTime(dateStr: string | null | undefined): string {
   if (!dateStr) return "Never";
   const diffMs = Date.now() - new Date(dateStr).getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -52,9 +53,16 @@ function formatRelativeTime(dateStr: string | null): string {
   return `${Math.floor(diffMins / 1440)}d ago`;
 }
 
+function formatElapsedTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
 export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const { progress, staleSyncs, elapsedTime, triggerPlatformSync } = useSyncData();
 
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -216,7 +224,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   }
 
   const renderConnectionCard = (
-    platform: string,
+    platform: "smartlead" | "replyio" | "phoneburner",
     title: string,
     description: string,
     Icon: React.ElementType,
@@ -226,8 +234,17 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     isOAuth?: boolean
   ) => {
     const isConnected = !!source;
-    const isSyncingNow = source?.last_sync_status === "syncing" || isSyncing[platform];
-    const lastSync = source?.last_sync_at;
+    const platformProgress = platform === "smartlead" ? progress.smartlead : 
+                             platform === "replyio" ? progress.replyio : undefined;
+    
+    const isSyncingNow = source?.last_sync_status === "syncing" || 
+                         isSyncing[platform] || 
+                         (platformProgress?.status === "syncing" || platformProgress?.status === "in_progress");
+    
+    const isStale = staleSyncs.includes(platform);
+    const hasProgress = platformProgress && platformProgress.total > 0;
+    const progressPercent = hasProgress ? Math.round((platformProgress.current / platformProgress.total) * 100) : 0;
+    const isIncomplete = hasProgress && platformProgress.current < platformProgress.total;
 
     return (
       <Card className={isConnected ? "border-success/30" : ""}>
@@ -237,16 +254,31 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center">
                 <Icon className="h-4 w-4 text-primary" />
               </div>
-              <div>
-                <CardTitle className="text-sm">{title}</CardTitle>
-                <CardDescription className="text-xs">{description}</CardDescription>
+              <div className="flex items-center gap-2">
+                <div>
+                  <CardTitle className="text-sm">{title}</CardTitle>
+                  <CardDescription className="text-xs">{description}</CardDescription>
+                </div>
+                {isStale && (
+                  <Badge variant="outline" className="border-warning text-warning text-xs h-5">
+                    Stale
+                  </Badge>
+                )}
               </div>
             </div>
-            {isConnected && (
-              <Badge variant="outline" className="border-success text-success text-xs h-5">
-                Connected
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {isSyncingNow && elapsedTime > 0 && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {formatElapsedTime(elapsedTime)}
+                </span>
+              )}
+              {isConnected && (
+                <Badge variant="outline" className="border-success text-success text-xs h-5">
+                  Connected
+                </Badge>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -284,58 +316,77 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             </>
           ) : (
             <>
-              {/* Status Row */}
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Status</span>
-                {isSyncingNow ? (
-                  <span className="flex items-center gap-1 text-primary">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Syncing...
-                  </span>
-                ) : source?.last_sync_status === "error" ? (
-                  <span className="text-destructive">Error</span>
-                ) : (
-                  <span className="text-success">Ready</span>
-                )}
-              </div>
+              {/* Progress Section - Only for email platforms with progress data */}
+              {hasProgress && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      {isSyncingNow && <Loader2 className="h-3 w-3 animate-spin" />}
+                      {isSyncingNow ? "Syncing..." : isIncomplete ? "Partial" : "Complete"}
+                    </span>
+                    <span className="font-medium">
+                      {platformProgress.current}/{platformProgress.total} ({progressPercent}%)
+                    </span>
+                  </div>
+                  <Progress 
+                    value={progressPercent} 
+                    className={`h-1.5 ${isSyncingNow ? '' : isIncomplete ? 'bg-warning/20' : ''}`}
+                  />
+                </div>
+              )}
 
-              {/* Last Sync Row */}
+              {/* Last Activity Row */}
               <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Last sync</span>
+                <span className="text-muted-foreground">Last activity</span>
                 <span className="flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  {formatRelativeTime(lastSync)}
+                  {formatRelativeTime(platformProgress?.lastSyncAt || source?.last_sync_at)}
                 </span>
               </div>
 
-              {/* Sync Progress (when syncing) */}
-              {isSyncingNow && (
-                <Progress value={15} className="h-1.5" />
-              )}
-
               {/* Action Buttons */}
               <div className="flex gap-2 pt-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs flex-1"
-                  disabled={isSyncingNow}
-                  onClick={() => handleSync(platform)}
-                >
-                  <RefreshCw className="h-3 w-3 mr-1" />
-                  Quick Sync
-                </Button>
+                {isStale || isIncomplete ? (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="h-7 text-xs flex-1"
+                    disabled={isSyncingNow}
+                    onClick={() => triggerPlatformSync(platform as "smartlead" | "replyio", { resume: true })}
+                  >
+                    <Play className="h-3 w-3 mr-1" />
+                    Resume
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs flex-1"
+                    disabled={isSyncingNow}
+                    onClick={() => handleSync(platform)}
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Quick Sync
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs"
                   disabled={isSyncingNow}
-                  onClick={() => handleSync(platform, { fullBackfill: true })}
+                  onClick={() => handleSync(platform, { fullBackfill: true, reset: true })}
                 >
                   <Database className="h-3 w-3 mr-1" />
                   Full
                 </Button>
               </div>
+
+              {/* Auto-continue notice */}
+              {isSyncingNow && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  ✓ Sync will continue automatically in background batches
+                </p>
+              )}
             </>
           )}
         </CardContent>
