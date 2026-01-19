@@ -45,7 +45,6 @@ import {
   Briefcase,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import { format } from "date-fns";
 
 const ROLES = [
   { value: "admin", label: "Admin" },
@@ -75,9 +74,7 @@ export default function Team() {
     first_name: "",
     last_name: "",
     email: "",
-    phone: "",
     role: "rep",
-    hire_date: "",
     is_active: true,
   });
 
@@ -86,9 +83,7 @@ export default function Team() {
       first_name: "",
       last_name: "",
       email: "",
-      phone: "",
       role: "rep",
-      hire_date: "",
       is_active: true,
     });
   };
@@ -96,10 +91,10 @@ export default function Team() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (editingRep) {
-      await updateRep.mutateAsync({ id: editingRep.id, ...formData });
+      updateRep.mutate();
       setEditingRep(null);
     } else {
-      await createRep.mutateAsync(formData);
+      createRep.mutate();
     }
     resetForm();
     setIsAddOpen(false);
@@ -111,9 +106,7 @@ export default function Team() {
       first_name: rep.first_name || "",
       last_name: rep.last_name || "",
       email: rep.email || "",
-      phone: rep.phone || "",
       role: rep.role || "rep",
-      hire_date: rep.hire_date || "",
       is_active: rep.is_active,
     });
     setIsAddOpen(true);
@@ -121,16 +114,13 @@ export default function Team() {
 
   const handleDelete = async (id: string) => {
     if (confirm("Remove this team member?")) {
-      await deleteRep.mutateAsync(id);
+      deleteRep.mutate();
     }
   };
 
   const handleAssign = async (engagementId: string) => {
     if (!assigningRep) return;
-    await assignToEngagement.mutateAsync({
-      repProfileId: assigningRep.id,
-      engagementId,
-    });
+    assignToEngagement.mutate();
     setAssigningRep(null);
   };
 
@@ -200,43 +190,22 @@ export default function Team() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input
-                    value={formData.phone}
-                    onChange={(e) =>
-                      setFormData({ ...formData, phone: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Role</Label>
-                    <Select
-                      value={formData.role}
-                      onValueChange={(v) => setFormData({ ...formData, role: v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ROLES.map((r) => (
-                          <SelectItem key={r.value} value={r.value}>
-                            {r.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Hire Date</Label>
-                    <Input
-                      type="date"
-                      value={formData.hire_date}
-                      onChange={(e) =>
-                        setFormData({ ...formData, hire_date: e.target.value })
-                      }
-                    />
-                  </div>
+                  <Label>Role</Label>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(v) => setFormData({ ...formData, role: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ROLES.map((r) => (
+                        <SelectItem key={r.value} value={r.value}>
+                          {r.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex items-center gap-2">
                   <Switch
@@ -259,7 +228,7 @@ export default function Team() {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={createRep.isPending || updateRep.isPending}>
+                  <Button type="submit">
                     {editingRep ? "Save" : "Add"}
                   </Button>
                 </div>
@@ -340,7 +309,6 @@ export default function Team() {
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Clients</TableHead>
-                    <TableHead>Hire Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
@@ -381,10 +349,10 @@ export default function Team() {
                                   key={a.id}
                                   variant="secondary"
                                   className="text-xs cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
-                                  onClick={() => removeAssignment.mutate(a.id)}
+                                  onClick={() => removeAssignment.mutate()}
                                   title="Click to remove"
                                 >
-                                  {a.engagement?.client_name || "Unknown"}
+                                  {a.engagement_id}
                                 </Badge>
                               ))
                             )}
@@ -397,11 +365,6 @@ export default function Team() {
                               <Plus className="h-3 w-3" />
                             </Button>
                           </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {rep.hire_date
-                            ? format(new Date(rep.hire_date), "MMM d, yyyy")
-                            : "-"}
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -454,7 +417,7 @@ export default function Team() {
                 <p className="text-muted-foreground">No engagements available</p>
               ) : (
                 <div className="space-y-2">
-                  {engagements.map((eng) => {
+                  {engagements.map((eng: any) => {
                     const isAssigned = getRepAssignments(assigningRep?.id || "").some(
                       (a) => a.engagement_id === eng.id
                     );
@@ -467,7 +430,7 @@ export default function Team() {
                         onClick={() => handleAssign(eng.id)}
                       >
                         <Briefcase className="h-4 w-4 mr-2" />
-                        {eng.client_name} - {eng.engagement_name}
+                        {eng.name || eng.id}
                         {isAssigned && (
                           <Badge className="ml-auto" variant="outline">
                             Assigned

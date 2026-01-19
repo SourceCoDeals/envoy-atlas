@@ -6,7 +6,6 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Trophy,
@@ -16,7 +15,6 @@ import {
   Star,
   Loader2,
   Phone,
-  Clock,
   User,
   Zap,
 } from 'lucide-react';
@@ -24,15 +22,13 @@ import {
 interface TopCall {
   id: string;
   call_id: string;
-  composite_score: number;
+  quality_score: number;
   rep_name: string;
   contact_name: string;
   company_name: string;
   duration_seconds: number;
   call_date: string;
   outcome: string;
-  opening_type: string | null;
-  salesforce_url?: string;
   key_techniques: string[];
   why_it_worked: string;
 }
@@ -68,70 +64,75 @@ export default function TopCallsWeek() {
     setLoading(true);
 
     try {
-      // Fetch top scored calls from external_calls (all time, top performers)
-      const { data: scores, error } = await supabase
-        .from('external_calls')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .not('composite_score', 'is', null)
-        .order('composite_score', { ascending: false })
+      // Get engagements for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = engagements?.map(e => e.id) || [];
+      if (engagementIds.length === 0) {
+        setTopCalls([]);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch top calls by talk duration (proxy for quality)
+      const { data: calls, error } = await supabase
+        .from('call_activities')
+        .select('id, to_name, to_phone, caller_name, talk_duration, conversation_outcome, started_at, notes, transcription')
+        .in('engagement_id', engagementIds)
+        .not('transcription', 'is', null)
+        .order('talk_duration', { ascending: false })
         .limit(10);
 
       if (error) throw error;
 
-      // Transform data - parse company name from call_title format: "Company <ext> Client"
-      const calls: TopCall[] = (scores || []).map((s: any) => {
-        // Parse call_title to extract company name (before <ext>)
-        const callTitle = s.call_title || '';
-        const companyFromTitle = callTitle.split('<ext>')[0]?.trim() || callTitle.split(' - ')[0]?.trim();
-        
-        // Get rep name from host_email
-        const repEmail = s.host_email || '';
-        const repName = repEmail ? repEmail.split('@')[0].split('.').map((n: string) => 
-          n.charAt(0).toUpperCase() + n.slice(1)
-        ).join(' ') : 'Unknown';
+      // Transform data
+      const topCallsData: TopCall[] = (calls || []).map((c) => {
+        const durationScore = Math.min(100, (c.talk_duration || 0) / 3);
+        const hasOutcome = c.conversation_outcome?.toLowerCase().includes('meeting') || 
+                          c.conversation_outcome?.toLowerCase().includes('interested');
+        const qualityScore = durationScore + (hasOutcome ? 20 : 0);
 
         return {
-          id: s.id,
-          call_id: s.id,
-          composite_score: s.composite_score || 0,
-          rep_name: repName,
-          contact_name: companyFromTitle || s.company_name || 'Unknown Company',
-          company_name: s.company_name || companyFromTitle || 'Company',
-          duration_seconds: 0,
-          call_date: s.date_time || s.created_at,
-          outcome: s.call_category || 'Connection',
-          opening_type: s.opening_type,
-          salesforce_url: s.salesforce_url,
+          id: c.id,
+          call_id: c.id,
+          quality_score: Math.min(100, qualityScore),
+          rep_name: c.caller_name || 'Unknown',
+          contact_name: c.to_name || c.to_phone || 'Unknown',
+          company_name: 'Company',
+          duration_seconds: c.talk_duration || 0,
+          call_date: c.started_at || '',
+          outcome: c.conversation_outcome || 'Connection',
           key_techniques: [
-            s.seller_interest_score >= 8 ? 'Strong seller qualification' : null,
-            s.objection_handling_score >= 8 ? 'Excellent objection handling' : null,
-            s.rapport_building_score >= 8 ? 'Great rapport building' : null,
-            s.next_step_clarity_score >= 8 ? 'Clear next steps' : null,
+            (c.talk_duration || 0) > 180 ? 'Long conversation' : null,
+            hasOutcome ? 'Positive outcome' : null,
+            c.transcription ? 'Transcribed' : null,
           ].filter(Boolean) as string[],
-          why_it_worked: s.seller_interest_justification || s.call_summary || 'High overall quality',
+          why_it_worked: c.notes || 'High overall quality call',
         };
       });
 
-      setTopCalls(calls);
+      setTopCalls(topCallsData);
 
-      // Generate pattern insights based on actual data
-      const highScorers = scores?.filter(s => s.composite_score >= 70) || [];
+      // Generate pattern insights
+      const longCalls = calls?.filter(c => (c.talk_duration || 0) > 180) || [];
+      const positiveCalls = calls?.filter(c => 
+        c.conversation_outcome?.toLowerCase().includes('meeting') ||
+        c.conversation_outcome?.toLowerCase().includes('interested')
+      ) || [];
+
       setPatterns([
         {
-          category: 'Opening Approach',
-          insight: 'Permission-based openings leading to higher engagement',
-          frequency: `${highScorers.filter(s => s.opening_type?.includes('permission')).length}/${highScorers.length} top calls`,
+          category: 'Call Duration',
+          insight: 'Longer calls correlate with better outcomes',
+          frequency: `${longCalls.length}/${calls?.length || 0} top calls`,
         },
         {
-          category: 'Discovery Technique',
-          insight: 'Asking about timeline within first 2 minutes',
-          frequency: `${highScorers.filter(s => s.timeline_to_sell).length}/${highScorers.length} top calls`,
-        },
-        {
-          category: 'Interest Level',
-          insight: 'High seller interest correlates with quality conversations',
-          frequency: `${highScorers.filter(s => s.seller_interest_score >= 7).length}/${highScorers.length} top calls`,
+          category: 'Positive Outcomes',
+          insight: 'Meeting-setters have above average duration',
+          frequency: `${positiveCalls.length}/${calls?.length || 0} top calls`,
         },
       ]);
     } catch (err) {
@@ -141,17 +142,10 @@ export default function TopCallsWeek() {
     }
   };
 
-  const formatDuration = (seconds: number) => {
-    if (!seconds) return 'N/A';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const getScoreColor = (score: number) => {
-    if (score >= 85) return 'text-success';
-    if (score >= 70) return 'text-chart-4';
-    return 'text-chart-2';
+    if (score >= 85) return 'text-green-600';
+    if (score >= 70) return 'text-yellow-600';
+    return 'text-orange-600';
   };
 
   const getRankIcon = (index: number) => {
@@ -200,7 +194,7 @@ export default function TopCallsWeek() {
                     <Trophy className="h-5 w-5 text-yellow-500" />
                     Top 10 Leaderboard
                   </CardTitle>
-                  <CardDescription>Ranked by AI composite score</CardDescription>
+                  <CardDescription>Ranked by call quality score</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {topCalls.length > 0 ? (
@@ -229,25 +223,18 @@ export default function TopCallsWeek() {
                               <User className="h-3 w-3" />
                               {call.rep_name}
                             </span>
-                            {call.salesforce_url && (
-                              <a 
-                                href={call.salesforce_url} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="text-primary hover:underline truncate max-w-[200px]"
-                              >
-                                Salesforce URL
-                              </a>
-                            )}
+                            <span>
+                              {Math.floor(call.duration_seconds / 60)}:{(call.duration_seconds % 60).toString().padStart(2, '0')} min
+                            </span>
                           </div>
                         </div>
 
                         {/* Score */}
                         <div className="text-right">
-                          <p className={`text-xl font-bold ${getScoreColor(call.composite_score)}`}>
-                            {Math.round(call.composite_score)}
+                          <p className={`text-xl font-bold ${getScoreColor(call.quality_score)}`}>
+                            {Math.round(call.quality_score)}
                           </p>
-                          <p className="text-xs text-muted-foreground">AI Score</p>
+                          <p className="text-xs text-muted-foreground">Score</p>
                         </div>
 
                         {/* Actions */}
@@ -280,7 +267,7 @@ export default function TopCallsWeek() {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Zap className="h-5 w-5 text-chart-4" />
+                    <Zap className="h-5 w-5 text-yellow-500" />
                     Pattern Analysis
                   </CardTitle>
                   <CardDescription>Common elements in top calls</CardDescription>

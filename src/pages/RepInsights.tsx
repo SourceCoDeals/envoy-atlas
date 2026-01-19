@@ -10,25 +10,19 @@ import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadius
 interface RepStats {
   name: string;
   totalCalls: number;
-  avgCompositeScore: number;
-  avgSellerInterest: number;
-  avgObjectionHandling: number;
-  avgRapportBuilding: number;
-  avgValueProposition: number;
-  avgEngagement: number;
-  avgNextStepClarity: number;
+  avgTalkDuration: number;
+  avgQualityScore: number;
   connectRate: number;
   meetingsSet: number;
 }
 
 function RepRadarChart({ rep }: { rep: RepStats }) {
   const data = [
-    { dimension: 'Seller Interest', value: rep.avgSellerInterest * 10, fullMark: 100 },
-    { dimension: 'Objection Handling', value: rep.avgObjectionHandling * 10, fullMark: 100 },
-    { dimension: 'Rapport Building', value: rep.avgRapportBuilding * 10, fullMark: 100 },
-    { dimension: 'Value Proposition', value: rep.avgValueProposition * 10, fullMark: 100 },
-    { dimension: 'Engagement', value: rep.avgEngagement * 10, fullMark: 100 },
-    { dimension: 'Next Step Clarity', value: rep.avgNextStepClarity * 10, fullMark: 100 },
+    { dimension: 'Talk Duration', value: Math.min(100, rep.avgTalkDuration / 3), fullMark: 100 },
+    { dimension: 'Connect Rate', value: rep.connectRate, fullMark: 100 },
+    { dimension: 'Quality Score', value: rep.avgQualityScore, fullMark: 100 },
+    { dimension: 'Meetings', value: Math.min(100, rep.meetingsSet * 20), fullMark: 100 },
+    { dimension: 'Call Volume', value: Math.min(100, rep.totalCalls * 5), fullMark: 100 },
   ];
 
   return (
@@ -52,12 +46,11 @@ function RepRadarChart({ rep }: { rep: RepStats }) {
 function RepCard({ rep, rank }: { rep: RepStats; rank: number }) {
   const strengths = useMemo(() => {
     const scores = [
-      { name: 'Seller Interest', score: rep.avgSellerInterest },
-      { name: 'Objection Handling', score: rep.avgObjectionHandling },
-      { name: 'Rapport Building', score: rep.avgRapportBuilding },
-      { name: 'Value Proposition', score: rep.avgValueProposition },
-      { name: 'Engagement', score: rep.avgEngagement },
-      { name: 'Next Step Clarity', score: rep.avgNextStepClarity },
+      { name: 'Talk Duration', score: Math.min(10, rep.avgTalkDuration / 30) },
+      { name: 'Connect Rate', score: rep.connectRate / 10 },
+      { name: 'Quality', score: rep.avgQualityScore / 10 },
+      { name: 'Meetings', score: Math.min(10, rep.meetingsSet) },
+      { name: 'Volume', score: Math.min(10, rep.totalCalls / 5) },
     ].sort((a, b) => b.score - a.score);
 
     return {
@@ -84,8 +77,8 @@ function RepCard({ rep, rank }: { rep: RepStats; rank: number }) {
               <CardDescription>{rep.totalCalls} calls scored</CardDescription>
             </div>
           </div>
-          <Badge variant={rep.avgCompositeScore >= 70 ? 'default' : rep.avgCompositeScore >= 50 ? 'secondary' : 'destructive'}>
-            {Math.round(rep.avgCompositeScore)} avg
+          <Badge variant={rep.avgQualityScore >= 70 ? 'default' : rep.avgQualityScore >= 50 ? 'secondary' : 'destructive'}>
+            {Math.round(rep.avgQualityScore)} avg
           </Badge>
         </div>
       </CardHeader>
@@ -119,7 +112,7 @@ function RepCard({ rep, rank }: { rep: RepStats; rank: number }) {
 
         <div className="grid grid-cols-2 gap-2 pt-2 border-t text-center text-sm">
           <div>
-            <p className="font-semibold">{(rep.connectRate * 100).toFixed(0)}%</p>
+            <p className="font-semibold">{(rep.connectRate).toFixed(0)}%</p>
             <p className="text-xs text-muted-foreground">Connect Rate</p>
           </div>
           <div>
@@ -135,9 +128,9 @@ function RepCard({ rep, rank }: { rep: RepStats; rank: number }) {
 function TeamComparison({ reps }: { reps: RepStats[] }) {
   const data = reps.slice(0, 10).map(rep => ({
     name: rep.name.split(' ')[0],
-    'Composite Score': Math.round(rep.avgCompositeScore),
-    'Seller Interest': Math.round(rep.avgSellerInterest * 10),
-    'Next Step Clarity': Math.round(rep.avgNextStepClarity * 10),
+    'Quality Score': Math.round(rep.avgQualityScore),
+    'Connect Rate': Math.round(rep.connectRate),
+    'Avg Duration (min)': Math.round(rep.avgTalkDuration / 60),
   }));
 
   return (
@@ -148,9 +141,8 @@ function TeamComparison({ reps }: { reps: RepStats[] }) {
         <YAxis type="category" dataKey="name" width={80} />
         <Tooltip />
         <Legend />
-        <Bar dataKey="Composite Score" fill="hsl(var(--primary))" />
-        <Bar dataKey="Seller Interest" fill="hsl(var(--chart-2))" />
-        <Bar dataKey="Next Step Clarity" fill="hsl(var(--chart-3))" />
+        <Bar dataKey="Quality Score" fill="hsl(var(--primary))" />
+        <Bar dataKey="Connect Rate" fill="hsl(var(--chart-2))" />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -162,9 +154,9 @@ export default function RepInsights() {
   const repStats = useMemo(() => {
     const repMap = new Map<string, typeof callsData>();
 
-    // Group calls by host_email
+    // Group calls by caller_name
     callsData.forEach(call => {
-      const repName = call.host_email || 'Unknown Rep';
+      const repName = call.caller_name || 'Unknown Rep';
       if (!repMap.has(repName)) {
         repMap.set(repName, []);
       }
@@ -174,36 +166,31 @@ export default function RepInsights() {
     // Calculate stats per rep
     const stats: RepStats[] = [];
     repMap.forEach((calls, name) => {
-      const scoredCalls = calls.filter(c => c.composite_score !== null);
-      if (scoredCalls.length === 0) return;
-
-      const avgScore = (key: keyof typeof scoredCalls[0]) => {
-        const values = scoredCalls.map(s => s[key]).filter((v): v is number => typeof v === 'number');
-        return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-      };
+      if (calls.length === 0) return;
 
       const connectedCalls = calls.filter(c => c.transcript_text && c.transcript_text.length > 100);
       const meetingsSet = calls.filter(c => 
-        c.call_category?.toLowerCase().includes('meeting') || 
-        c.call_category?.toLowerCase().includes('interested')
+        c.conversation_outcome?.toLowerCase().includes('meeting') || 
+        c.conversation_outcome?.toLowerCase().includes('interested')
       ).length;
+
+      const totalDuration = calls.reduce((sum, c) => sum + (c.talk_duration || 0), 0);
+      const avgDuration = calls.length > 0 ? totalDuration / calls.length : 0;
+      
+      // Calculate quality score based on duration and outcomes
+      const qualityScore = Math.min(100, (avgDuration / 3) + (meetingsSet * 10) + (connectedCalls.length / calls.length * 30));
 
       stats.push({
         name,
-        totalCalls: scoredCalls.length,
-        avgCompositeScore: avgScore('composite_score'),
-        avgSellerInterest: avgScore('seller_interest_score'),
-        avgObjectionHandling: avgScore('objection_handling_score'),
-        avgRapportBuilding: avgScore('rapport_building_score'),
-        avgValueProposition: avgScore('value_proposition_score'),
-        avgEngagement: avgScore('engagement_score'),
-        avgNextStepClarity: avgScore('next_step_clarity_score'),
-        connectRate: calls.length > 0 ? connectedCalls.length / calls.length : 0,
+        totalCalls: calls.length,
+        avgTalkDuration: avgDuration,
+        avgQualityScore: qualityScore,
+        connectRate: calls.length > 0 ? (connectedCalls.length / calls.length) * 100 : 0,
         meetingsSet,
       });
     });
 
-    return stats.sort((a, b) => b.avgCompositeScore - a.avgCompositeScore);
+    return stats.sort((a, b) => b.avgQualityScore - a.avgQualityScore);
   }, [callsData]);
 
   const teamAvg = useMemo(() => {
@@ -213,13 +200,13 @@ export default function RepInsights() {
       return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
     };
     return {
-      avgCompositeScore: avg('avgCompositeScore'),
-      avgSellerInterest: avg('avgSellerInterest'),
-      avgNextStepClarity: avg('avgNextStepClarity'),
+      avgQualityScore: avg('avgQualityScore'),
+      avgTalkDuration: avg('avgTalkDuration'),
+      connectRate: avg('connectRate'),
     };
   }, [repStats]);
 
-  const totalScoredCalls = callsData.filter(c => c.composite_score !== null).length;
+  const totalCalls = callsData.length;
 
   if (isLoading) {
     return (
@@ -239,7 +226,7 @@ export default function RepInsights() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Rep Insights</h1>
             <p className="text-muted-foreground">
-              AI-powered performance analysis across scoring dimensions
+              Performance analysis across scoring dimensions
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -256,34 +243,34 @@ export default function RepInsights() {
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Team Avg Score</CardDescription>
-                <CardTitle className="text-2xl">{Math.round(teamAvg.avgCompositeScore)}</CardTitle>
+                <CardTitle className="text-2xl">{Math.round(teamAvg.avgQualityScore)}</CardTitle>
               </CardHeader>
               <CardContent>
-                <Progress value={teamAvg.avgCompositeScore} className="h-2" />
+                <Progress value={teamAvg.avgQualityScore} className="h-2" />
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Avg Seller Interest</CardDescription>
-                <CardTitle className="text-2xl">{teamAvg.avgSellerInterest.toFixed(1)}/10</CardTitle>
+                <CardDescription>Avg Connect Rate</CardDescription>
+                <CardTitle className="text-2xl">{teamAvg.connectRate.toFixed(1)}%</CardTitle>
               </CardHeader>
               <CardContent>
-                <Progress value={teamAvg.avgSellerInterest * 10} className="h-2" />
+                <Progress value={teamAvg.connectRate} className="h-2" />
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Avg Next Step Clarity</CardDescription>
-                <CardTitle className="text-2xl">{teamAvg.avgNextStepClarity.toFixed(1)}/10</CardTitle>
+                <CardDescription>Avg Talk Duration</CardDescription>
+                <CardTitle className="text-2xl">{(teamAvg.avgTalkDuration / 60).toFixed(1)} min</CardTitle>
               </CardHeader>
               <CardContent>
-                <Progress value={teamAvg.avgNextStepClarity * 10} className="h-2" />
+                <Progress value={Math.min(100, teamAvg.avgTalkDuration / 3)} className="h-2" />
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardDescription>Total Scored Calls</CardDescription>
-                <CardTitle className="text-2xl">{totalScoredCalls}</CardTitle>
+                <CardDescription>Total Calls</CardDescription>
+                <CardTitle className="text-2xl">{totalCalls}</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground">Across {repStats.length} reps</p>
@@ -310,8 +297,8 @@ export default function RepInsights() {
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No scored calls yet</p>
-                <p className="text-sm mt-1">AI scores will appear after calls are transcribed and analyzed</p>
+                <p>No calls yet</p>
+                <p className="text-sm mt-1">Performance data will appear after calls are made</p>
               </CardContent>
             </Card>
           ) : (

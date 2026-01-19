@@ -3,7 +3,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useCallsWithScores } from '@/hooks/useCallIntelligence';
-import { Clock, TrendingUp, Calendar } from 'lucide-react';
+import { Clock, TrendingUp } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend } from 'recharts';
 import { getDay, getHours, parseISO } from 'date-fns';
 
@@ -30,7 +30,8 @@ function HeatmapCell({ value, maxValue }: { value: number; maxValue: number }) {
 export default function TimingInsights() {
   const { data: callsData = [], isLoading } = useCallsWithScores({ limit: 500 });
   const calls = callsData;
-  const scoredCalls = callsData.filter(c => c.composite_score !== null);
+  // Use talk_duration as a proxy for quality score
+  const scoredCalls = callsData.filter(c => c.talk_duration && c.talk_duration > 30);
 
   const connectRateHeatmap = useMemo(() => {
     const grid: Record<string, Record<number, { total: number; connected: number }>> = {};
@@ -99,10 +100,10 @@ export default function TimingInsights() {
   }, [connectRateHeatmap]);
 
   const hourlyData = useMemo(() => {
-    const hourlyStats: Record<number, { total: number; connected: number; avgScore: number; scores: number[] }> = {};
+    const hourlyStats: Record<number, { total: number; connected: number; avgDuration: number; durations: number[] }> = {};
     
     HOURS.forEach(hour => {
-      hourlyStats[hour] = { total: 0, connected: 0, avgScore: 0, scores: [] };
+      hourlyStats[hour] = { total: 0, connected: 0, avgDuration: 0, durations: [] };
     });
 
     calls.forEach(call => {
@@ -115,30 +116,31 @@ export default function TimingInsights() {
           hourlyStats[hour].connected++;
         }
         
-        if (call.composite_score) {
-          hourlyStats[hour].scores.push(call.composite_score);
+        if (call.talk_duration) {
+          hourlyStats[hour].durations.push(call.talk_duration);
         }
       }
     });
 
     return HOURS.map(hour => {
       const stats = hourlyStats[hour];
+      const avgDuration = stats.durations.length > 0 
+        ? stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length 
+        : 0;
       return {
         hour: `${hour}:00`,
         'Connect Rate': stats.total > 0 ? (stats.connected / stats.total) * 100 : 0,
-        'Avg AI Score': stats.scores.length > 0 
-          ? stats.scores.reduce((a, b) => a + b, 0) / stats.scores.length 
-          : 0,
+        'Avg Duration (min)': avgDuration / 60,
         'Call Volume': stats.total,
       };
     });
   }, [calls]);
 
   const dailyData = useMemo(() => {
-    const dailyStats: Record<string, { total: number; connected: number; avgScore: number; scores: number[] }> = {};
+    const dailyStats: Record<string, { total: number; connected: number; avgDuration: number; durations: number[] }> = {};
     
     DAYS_OF_WEEK.forEach(day => {
-      dailyStats[day] = { total: 0, connected: 0, avgScore: 0, scores: [] };
+      dailyStats[day] = { total: 0, connected: 0, avgDuration: 0, durations: [] };
     });
 
     calls.forEach(call => {
@@ -150,19 +152,20 @@ export default function TimingInsights() {
         dailyStats[day].connected++;
       }
       
-      if (call.composite_score) {
-        dailyStats[day].scores.push(call.composite_score);
+      if (call.talk_duration) {
+        dailyStats[day].durations.push(call.talk_duration);
       }
     });
 
     return DAYS_OF_WEEK.slice(1, 6).map(day => {
       const stats = dailyStats[day];
+      const avgDuration = stats.durations.length > 0 
+        ? stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length 
+        : 0;
       return {
         day,
         'Connect Rate': stats.total > 0 ? (stats.connected / stats.total) * 100 : 0,
-        'Avg AI Score': stats.scores.length > 0 
-          ? stats.scores.reduce((a, b) => a + b, 0) / stats.scores.length 
-          : 0,
+        'Avg Duration (min)': avgDuration / 60,
         'Call Volume': stats.total,
       };
     });
@@ -306,7 +309,7 @@ export default function TimingInsights() {
         <Card>
           <CardHeader>
             <CardTitle>Performance by Hour</CardTitle>
-            <CardDescription>Connect rate and AI score trends throughout the day</CardDescription>
+            <CardDescription>Connect rate and duration trends throughout the day</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
@@ -314,7 +317,7 @@ export default function TimingInsights() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="hour" />
                 <YAxis yAxisId="left" domain={[0, 100]} />
-                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} />
+                <YAxis yAxisId="right" orientation="right" domain={[0, 10]} />
                 <Tooltip />
                 <Legend />
                 <Line 
@@ -327,7 +330,7 @@ export default function TimingInsights() {
                 <Line 
                   yAxisId="right"
                   type="monotone" 
-                  dataKey="Avg AI Score" 
+                  dataKey="Avg Duration (min)" 
                   stroke="hsl(var(--chart-2))" 
                   strokeWidth={2}
                 />
@@ -351,7 +354,7 @@ export default function TimingInsights() {
                 <Tooltip />
                 <Legend />
                 <Bar dataKey="Connect Rate" fill="hsl(var(--primary))" />
-                <Bar dataKey="Avg AI Score" fill="hsl(var(--chart-2))" />
+                <Bar dataKey="Avg Duration (min)" fill="hsl(var(--chart-2))" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
