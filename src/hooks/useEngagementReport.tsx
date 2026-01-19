@@ -338,8 +338,8 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         hasHistoricalEmailMetrics = Boolean(historicalEmailMinDate || historicalEmailMaxDate);
       }
 
-      // Calculate email metrics from daily_metrics
-      const emailTotals = dailyMetrics.reduce((acc, m) => ({
+      // Calculate email metrics from daily_metrics first
+      const dailyTotals = dailyMetrics.reduce((acc, m) => ({
         sent: acc.sent + (m.emails_sent || 0),
         delivered: acc.delivered + (m.emails_delivered || 0),
         replied: acc.replied + (m.emails_replied || 0),
@@ -347,7 +347,35 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         positive: acc.positive + (m.positive_replies || 0),
       }), { sent: 0, delivered: 0, replied: 0, bounced: 0, positive: 0 });
 
-      const delivered = emailTotals.delivered || (emailTotals.sent - emailTotals.bounced);
+      // Calculate campaign totals as fallback (sum across all linked campaigns)
+      const campaignTotals = (campaigns || []).reduce((acc, c) => ({
+        sent: acc.sent + (c.total_sent || 0),
+        replied: acc.replied + (c.total_replied || 0),
+        positive: acc.positive + (c.positive_replies || 0),
+      }), { sent: 0, replied: 0, positive: 0 });
+
+      // Use daily_metrics if available AND has meaningful data, otherwise fall back to campaign totals
+      // This ensures we show accurate totals even when date filter excludes historical data
+      const useDailyMetrics = dailyTotals.sent > 0 && !startDateStr; // Only use daily if no date filter or has data
+      const emailTotals = {
+        sent: startDateStr ? dailyTotals.sent : Math.max(dailyTotals.sent, campaignTotals.sent),
+        delivered: dailyTotals.delivered || 0,
+        replied: startDateStr ? dailyTotals.replied : Math.max(dailyTotals.replied, campaignTotals.replied),
+        bounced: dailyTotals.bounced || 0,
+        positive: startDateStr ? dailyTotals.positive : Math.max(dailyTotals.positive, campaignTotals.positive),
+      };
+
+      // For "All Time" view, always use campaign totals as source of truth
+      const allTimeEmailTotals = !startDateStr ? {
+        sent: campaignTotals.sent,
+        replied: campaignTotals.replied,
+        positive: campaignTotals.positive,
+        delivered: campaignTotals.sent - dailyTotals.bounced, // Estimate delivered from sent - bounced
+        bounced: dailyTotals.bounced,
+      } : emailTotals;
+
+      const finalEmailTotals = startDateStr ? emailTotals : allTimeEmailTotals;
+      const delivered = finalEmailTotals.delivered || (finalEmailTotals.sent - finalEmailTotals.bounced);
 
       // Calculate calling metrics
       const totalCalls = calls.length;
@@ -371,30 +399,30 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
 
       const keyMetrics: KeyMetrics = {
         companiesContacted: uniqueCompanies,
-        contactsReached: uniqueContacts + emailTotals.replied,
-        totalTouchpoints: emailTotals.sent + totalCalls,
-        emailTouchpoints: emailTotals.sent,
+        contactsReached: uniqueContacts + finalEmailTotals.replied,
+        totalTouchpoints: finalEmailTotals.sent + totalCalls,
+        emailTouchpoints: finalEmailTotals.sent,
         callTouchpoints: totalCalls,
-        positiveResponses: emailTotals.positive + conversations,
+        positiveResponses: finalEmailTotals.positive + conversations,
         meetingsScheduled: meetingsBooked,
         opportunities: 0,
-        responseRate: emailTotals.sent > 0 ? (emailTotals.replied / emailTotals.sent) * 100 : 0,
-        meetingRate: (emailTotals.sent + totalCalls) > 0 
-          ? (meetingsBooked / (emailTotals.sent + totalCalls)) * 100 
+        responseRate: finalEmailTotals.sent > 0 ? (finalEmailTotals.replied / finalEmailTotals.sent) * 100 : 0,
+        meetingRate: (finalEmailTotals.sent + totalCalls) > 0 
+          ? (meetingsBooked / (finalEmailTotals.sent + totalCalls)) * 100 
           : 0,
       };
 
       // Build email metrics
       const emailMetrics: EmailMetrics = {
-        sent: emailTotals.sent,
+        sent: finalEmailTotals.sent,
         delivered,
-        deliveryRate: emailTotals.sent > 0 ? (delivered / emailTotals.sent) * 100 : 0,
-        replied: emailTotals.replied,
-        replyRate: delivered > 0 ? (emailTotals.replied / delivered) * 100 : 0,
-        positiveReplies: emailTotals.positive,
-        positiveRate: delivered > 0 ? (emailTotals.positive / delivered) * 100 : 0,
-        bounced: emailTotals.bounced,
-        bounceRate: emailTotals.sent > 0 ? (emailTotals.bounced / emailTotals.sent) * 100 : 0,
+        deliveryRate: finalEmailTotals.sent > 0 ? (delivered / finalEmailTotals.sent) * 100 : 0,
+        replied: finalEmailTotals.replied,
+        replyRate: delivered > 0 ? (finalEmailTotals.replied / delivered) * 100 : 0,
+        positiveReplies: finalEmailTotals.positive,
+        positiveRate: delivered > 0 ? (finalEmailTotals.positive / delivered) * 100 : 0,
+        bounced: finalEmailTotals.bounced,
+        bounceRate: finalEmailTotals.sent > 0 ? (finalEmailTotals.bounced / finalEmailTotals.sent) * 100 : 0,
         unsubscribed: 0,
         meetings: 0,
       };
@@ -418,7 +446,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       // Build funnel
       const funnel: FunnelStage[] = [
         { name: 'Contacted', count: keyMetrics.companiesContacted, percentage: 100 },
-        { name: 'Engaged', count: emailTotals.replied + connections, percentage: keyMetrics.companiesContacted > 0 ? Math.round(((emailTotals.replied + connections) / keyMetrics.companiesContacted) * 100) : 0 },
+        { name: 'Engaged', count: finalEmailTotals.replied + connections, percentage: keyMetrics.companiesContacted > 0 ? Math.round(((finalEmailTotals.replied + connections) / keyMetrics.companiesContacted) * 100) : 0 },
         { name: 'Positive Response', count: keyMetrics.positiveResponses, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.positiveResponses / keyMetrics.companiesContacted) * 100) : 0 },
         { name: 'Meeting', count: meetingsBooked, percentage: keyMetrics.companiesContacted > 0 ? Math.round((meetingsBooked / keyMetrics.companiesContacted) * 100) : 0 },
         { name: 'Opportunity', count: 0, percentage: 0 },
@@ -428,7 +456,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       const channelComparison: ChannelComparison[] = [
         {
           channel: 'Email',
-          attempts: emailTotals.sent,
+          attempts: finalEmailTotals.sent,
           engagementRate: emailMetrics.replyRate, // Use reply rate instead of open rate
           responseRate: emailMetrics.replyRate,
           positiveRate: emailMetrics.positiveRate,
