@@ -165,6 +165,85 @@ export type Database = {
           },
         ]
       }
+      call_ai_scores: {
+        Row: {
+          call_id: string | null
+          closing_score: number | null
+          created_at: string
+          discovery_score: number | null
+          id: string
+          improvement_areas: string[] | null
+          key_moments: Json | null
+          objection_handling_score: number | null
+          opening_score: number | null
+          overall_score: number | null
+        }
+        Insert: {
+          call_id?: string | null
+          closing_score?: number | null
+          created_at?: string
+          discovery_score?: number | null
+          id?: string
+          improvement_areas?: string[] | null
+          key_moments?: Json | null
+          objection_handling_score?: number | null
+          opening_score?: number | null
+          overall_score?: number | null
+        }
+        Update: {
+          call_id?: string | null
+          closing_score?: number | null
+          created_at?: string
+          discovery_score?: number | null
+          id?: string
+          improvement_areas?: string[] | null
+          key_moments?: Json | null
+          objection_handling_score?: number | null
+          opening_score?: number | null
+          overall_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_ai_scores_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "call_activities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      call_transcripts: {
+        Row: {
+          call_id: string | null
+          created_at: string
+          id: string
+          transcript_json: Json | null
+          transcript_text: string | null
+        }
+        Insert: {
+          call_id?: string | null
+          created_at?: string
+          id?: string
+          transcript_json?: Json | null
+          transcript_text?: string | null
+        }
+        Update: {
+          call_id?: string | null
+          created_at?: string
+          id?: string
+          transcript_json?: Json | null
+          transcript_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_transcripts_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "call_activities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_email_accounts: {
         Row: {
           campaign_id: string | null
@@ -226,9 +305,13 @@ export type Database = {
           body_you_i_ratio: number | null
           created_at: string | null
           engagement_id: string | null
+          has_attachments: boolean | null
+          has_links: boolean | null
+          hook_type: string | null
           id: string
           opening_line_text: string | null
           opening_line_type: string | null
+          personalization_level: string | null
           subject_capitalization: string | null
           subject_first_word_type: string | null
           subject_format: string | null
@@ -244,6 +327,7 @@ export type Database = {
           tone: string | null
           updated_at: string | null
           variant_id: string
+          you_we_ratio: number | null
         }
         Insert: {
           analyzed_at?: string | null
@@ -266,9 +350,13 @@ export type Database = {
           body_you_i_ratio?: number | null
           created_at?: string | null
           engagement_id?: string | null
+          has_attachments?: boolean | null
+          has_links?: boolean | null
+          hook_type?: string | null
           id?: string
           opening_line_text?: string | null
           opening_line_type?: string | null
+          personalization_level?: string | null
           subject_capitalization?: string | null
           subject_first_word_type?: string | null
           subject_format?: string | null
@@ -284,6 +372,7 @@ export type Database = {
           tone?: string | null
           updated_at?: string | null
           variant_id: string
+          you_we_ratio?: number | null
         }
         Update: {
           analyzed_at?: string | null
@@ -306,9 +395,13 @@ export type Database = {
           body_you_i_ratio?: number | null
           created_at?: string | null
           engagement_id?: string | null
+          has_attachments?: boolean | null
+          has_links?: boolean | null
+          hook_type?: string | null
           id?: string
           opening_line_text?: string | null
           opening_line_type?: string | null
+          personalization_level?: string | null
           subject_capitalization?: string | null
           subject_first_word_type?: string | null
           subject_format?: string | null
@@ -324,6 +417,7 @@ export type Database = {
           tone?: string | null
           updated_at?: string | null
           variant_id?: string
+          you_we_ratio?: number | null
         }
         Relationships: [
           {
@@ -677,8 +771,11 @@ export type Database = {
       clients: {
         Row: {
           client_type: string
+          contact_email: string | null
           created_at: string | null
           id: string
+          industry: string | null
+          logo_url: string | null
           name: string
           primary_contact_email: string | null
           primary_contact_name: string | null
@@ -690,8 +787,11 @@ export type Database = {
         }
         Insert: {
           client_type?: string
+          contact_email?: string | null
           created_at?: string | null
           id?: string
+          industry?: string | null
+          logo_url?: string | null
           name: string
           primary_contact_email?: string | null
           primary_contact_name?: string | null
@@ -703,8 +803,11 @@ export type Database = {
         }
         Update: {
           client_type?: string
+          contact_email?: string | null
           created_at?: string | null
           id?: string
+          industry?: string | null
+          logo_url?: string | null
           name?: string
           primary_contact_email?: string | null
           primary_contact_name?: string | null
@@ -1966,6 +2069,7 @@ export type Database = {
           associate_id: string | null
           auto_created: boolean | null
           client_id: string
+          companies_goal: number | null
           created_at: string | null
           deal_lead_id: string | null
           deleted_at: string | null
@@ -1981,6 +2085,7 @@ export type Database = {
           portfolio_company: string | null
           research_lead_id: string | null
           research_mid_id: string | null
+          response_goal: number | null
           sponsor_name: string | null
           start_date: string | null
           status: string | null
@@ -1994,6 +2099,7 @@ export type Database = {
           associate_id?: string | null
           auto_created?: boolean | null
           client_id: string
+          companies_goal?: number | null
           created_at?: string | null
           deal_lead_id?: string | null
           deleted_at?: string | null
@@ -2009,6 +2115,7 @@ export type Database = {
           portfolio_company?: string | null
           research_lead_id?: string | null
           research_mid_id?: string | null
+          response_goal?: number | null
           sponsor_name?: string | null
           start_date?: string | null
           status?: string | null
@@ -2022,6 +2129,7 @@ export type Database = {
           associate_id?: string | null
           auto_created?: boolean | null
           client_id?: string
+          companies_goal?: number | null
           created_at?: string | null
           deal_lead_id?: string | null
           deleted_at?: string | null
@@ -2037,6 +2145,7 @@ export type Database = {
           portfolio_company?: string | null
           research_lead_id?: string | null
           research_mid_id?: string | null
+          response_goal?: number | null
           sponsor_name?: string | null
           start_date?: string | null
           status?: string | null
