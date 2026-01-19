@@ -724,13 +724,34 @@ serve(async (req) => {
                 
                 console.log(`  Fetched ${leads.length} leads (offset ${offset})`);
                 
+                // Debug: Log first lead structure to understand API response
+                if (leads.length > 0 && offset === 0) {
+                  const sampleLead = leads[0];
+                  console.log(`  DEBUG Lead sample keys: ${Object.keys(sampleLead).join(', ')}`);
+                  console.log(`  DEBUG Lead sample: email=${sampleLead.email}, id=${sampleLead.id}, lead_id=${(sampleLead as any).lead_id}`);
+                }
+                
                 // Process leads in batch
-                for (const lead of leads) {
+                for (const leadRaw of leads) {
                   try {
+                    // SmartLead API sometimes returns leads in different structures
+                    // Handle both flat and nested formats
+                    const lead = (leadRaw as any).lead || (leadRaw as any).lead_data || leadRaw;
+                    
+                    // Extract email - try multiple possible field names
+                    const leadEmail = lead.email || (leadRaw as any).email || (leadRaw as any).lead_email;
+                    const leadId = lead.id || (leadRaw as any).id || (leadRaw as any).lead_id;
+                    
+                    // Skip if no email (critical field)
+                    if (!leadEmail) {
+                      console.log(`  Skipping lead without email. Keys: ${Object.keys(leadRaw).slice(0, 10).join(', ')}`);
+                      continue;
+                    }
+                    
                     // First, create/upsert company if we have company info
                     let companyId: string | null = null;
-                    const domain = extractDomain(lead.email);
-                    const companyName = lead.company_name || domain || 'Unknown';
+                    const domain = extractDomain(leadEmail);
+                    const companyName = lead.company_name || (leadRaw as any).company_name || (leadRaw as any).company || domain || 'Unknown';
                     
                     // Try to find existing company first
                     if (domain) {
@@ -791,45 +812,57 @@ serve(async (req) => {
                     
                     if (!companyId) continue;
                     
-                    // Map category if available
-                    const categoryId = lead.category_id 
-                      ? categoryMap.get(String(lead.category_id)) 
+                    // Map category if available - use leadRaw for status fields
+                    const leadCategoryId = lead.category_id || (leadRaw as any).category_id;
+                    const categoryId = leadCategoryId 
+                      ? categoryMap.get(String(leadCategoryId)) 
                       : null;
                     
+                    // Extract other fields - try both lead and leadRaw
+                    const firstName = lead.first_name || (leadRaw as any).first_name || null;
+                    const lastName = lead.last_name || (leadRaw as any).last_name || null;
+                    const phoneNumber = lead.phone_number || (leadRaw as any).phone_number || (leadRaw as any).phone || null;
+                    const linkedinUrl = lead.linkedin_profile || (leadRaw as any).linkedin_profile || (leadRaw as any).linkedin || null;
+                    const title = lead.custom_fields?.title || lead.custom_fields?.job_title || (leadRaw as any).title || (leadRaw as any).job_title || null;
+                    const emailStatus = lead.email_status || (leadRaw as any).email_status || null;
+                    const leadStatus = lead.status || (leadRaw as any).status || lead.lead_status || (leadRaw as any).lead_status || null;
+                    
                     // Upsert contact with extended fields
-                    const enrolledAt = lead.created_at || null;
+                    const enrolledAt = lead.created_at || (leadRaw as any).created_at || null;
                     const { error: contactError } = await supabase
                       .from('contacts')
                       .upsert({
                         engagement_id: activeEngagementId,
                         company_id: companyId,
-                        email: lead.email,
-                        first_name: lead.first_name || null,
-                        last_name: lead.last_name || null,
-                        phone: lead.phone_number || null,
-                        linkedin_url: lead.linkedin_profile || null,
-                        title: lead.custom_fields?.title || lead.custom_fields?.job_title || null,
-                        email_status: lead.email_status || null,
+                        email: leadEmail,
+                        first_name: firstName,
+                        last_name: lastName,
+                        phone: phoneNumber,
+                        linkedin_url: linkedinUrl,
+                        title: title,
+                        email_status: emailStatus,
                         enrolled_at: enrolledAt,
                         source: 'smartlead',
                         // Extended fields
-                        external_lead_id: String(lead.id),
-                        sequence_status: lead.status || lead.lead_status || null,
-                        current_step: lead.last_email_sequence_sent || null,
-                        is_interested: lead.is_interested ?? null,
-                        is_unsubscribed: lead.is_unsubscribed ?? false,
+                        external_lead_id: leadId ? String(leadId) : null,
+                        sequence_status: leadStatus,
+                        current_step: lead.last_email_sequence_sent || (leadRaw as any).last_email_sequence_sent || null,
+                        is_interested: lead.is_interested ?? (leadRaw as any).is_interested ?? null,
+                        is_unsubscribed: lead.is_unsubscribed ?? (leadRaw as any).is_unsubscribed ?? false,
                         category_id: categoryId,
-                        open_count: lead.open_count || 0,
-                        click_count: lead.click_count || 0,
-                        reply_count: lead.reply_count || 0,
+                        open_count: lead.open_count || (leadRaw as any).open_count || 0,
+                        click_count: lead.click_count || (leadRaw as any).click_count || 0,
+                        reply_count: lead.reply_count || (leadRaw as any).reply_count || 0,
                       }, { onConflict: 'engagement_id,email' });
                     
                     if (!contactError) {
                       progress.leads_synced++;
+                    } else {
+                      console.error(`  Contact upsert error for ${leadEmail}:`, contactError.message);
                     }
                   } catch (leadError) {
                     // Silently continue on individual lead errors
-                    console.error(`  Error processing lead ${lead.email}:`, leadError);
+                    console.error(`  Error processing lead:`, leadError);
                   }
                 }
                 
