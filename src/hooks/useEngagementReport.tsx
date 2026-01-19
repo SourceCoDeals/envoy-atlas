@@ -157,6 +157,16 @@ interface DataAvailability {
   syncInProgress: boolean;
 }
 
+export interface LinkedCampaignWithStats {
+  id: string;
+  name: string;
+  platform: string;
+  status: string | null;
+  sent: number;
+  openRate: number;
+  replyRate: number;
+}
+
 interface EngagementReportData {
   engagement: EngagementDetails | null;
   keyMetrics: KeyMetrics;
@@ -170,6 +180,7 @@ interface EngagementReportData {
   callDispositions: CallDisposition[];
   callOutcomes: CallOutcome[];
   recentActivity: ActivityItem[];
+  linkedCampaignsWithStats: LinkedCampaignWithStats[];
   linkedCampaigns: { id: string; name: string; platform: string }[];
   dataAvailability: DataAvailability;
 }
@@ -205,16 +216,27 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       if (engError) throw engError;
       if (!engagement) throw new Error('Engagement not found');
 
-      // Fetch linked campaigns from unified campaigns table
+      // Fetch linked campaigns from unified campaigns table with stats
       const { data: campaigns } = await supabase
         .from('campaigns')
-        .select('id, name, campaign_type')
-        .eq('engagement_id', engagementId);
+        .select('id, name, campaign_type, status, total_sent, open_rate, reply_rate')
+        .eq('engagement_id', engagementId)
+        .order('total_sent', { ascending: false });
 
       const linkedCampaigns = (campaigns || []).map(c => ({ 
         id: c.id, 
         name: c.name, 
         platform: c.campaign_type 
+      }));
+
+      const linkedCampaignsWithStats: LinkedCampaignWithStats[] = (campaigns || []).map(c => ({
+        id: c.id,
+        name: c.name,
+        platform: c.campaign_type,
+        status: c.status,
+        sent: c.total_sent || 0,
+        openRate: c.open_rate || 0,
+        replyRate: c.reply_rate || 0,
       }));
 
       const campaignIds = linkedCampaigns.map(c => c.id);
@@ -461,6 +483,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         callDispositions,
         callOutcomes,
         recentActivity,
+        linkedCampaignsWithStats,
         linkedCampaigns,
         dataAvailability: {
           emailDailyMetrics: dailyMetrics.length > 0,
