@@ -5,7 +5,6 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { useSyncData } from '@/hooks/useSyncData';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { CreateWorkspace } from '@/components/onboarding/CreateWorkspace';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
 import { SystemHealthScore, calculateSystemHealth } from '@/components/dashboard/SystemHealthScore';
 import { DataHealthDashboard } from '@/components/dashboard/DataHealthDashboard';
@@ -45,7 +44,7 @@ import {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const { workspaces, currentWorkspace, loading: workspaceLoading } = useWorkspace();
+  const { loading: workspaceLoading } = useWorkspace();
   const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('last30');
   const dateRange = getDateRange(dateRangeOption);
   const { loading: dataLoading, hasData, stats, trendData, topCampaigns, timeData, refetch } = useDashboardData(dateRange);

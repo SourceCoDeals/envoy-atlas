@@ -3194,6 +3194,7 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      join_default_client: { Args: never; Returns: string }
     }
     Enums: {
       app_role: "admin" | "analyst" | "viewer" | "manager" | "rep"

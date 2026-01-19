@@ -24,7 +24,7 @@ interface WorkspaceContextType {
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
 
-// Auto-create SourceCo workspace for new users
+// Auto-join the default "SourceCo" client for new users
 async function ensureSourceCoWorkspace(userId: string): Promise<void> {
   // Check if user already has any workspace membership
   const { data: existingMemberships } = await supabase
@@ -37,41 +37,10 @@ async function ensureSourceCoWorkspace(userId: string): Promise<void> {
     return; // User already has workspace access
   }
 
-  // Check if SourceCo workspace exists
-  let { data: sourceCo } = await supabase
-    .from('clients')
-    .select('id')
-    .eq('slug', 'sourceco')
-    .single();
-
-  // Create SourceCo if it doesn't exist
-  if (!sourceCo) {
-    const { data: newClient, error: createError } = await supabase
-      .from('clients')
-      .insert({ 
-        name: 'SourceCo', 
-        slug: 'sourceco',
-        client_type: 'internal'
-      })
-      .select()
-      .single();
-
-    if (createError) {
-      console.error('Error creating SourceCo workspace:', createError);
-      return;
-    }
-    sourceCo = newClient;
-  }
-
-  // Add user as admin to SourceCo
-  if (sourceCo) {
-    await supabase
-      .from('client_members')
-      .insert({ 
-        client_id: sourceCo.id, 
-        user_id: userId, 
-        role: 'admin' 
-      });
+  // Use a SECURITY DEFINER RPC so we don't need broad client-side insert permissions.
+  const { error } = await supabase.rpc('join_default_client');
+  if (error) {
+    console.error('Error joining default workspace:', error);
   }
 }
 
