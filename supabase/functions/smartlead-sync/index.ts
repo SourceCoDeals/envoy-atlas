@@ -479,14 +479,16 @@ serve(async (req) => {
             console.log(`  Analytics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
 
             // Update campaign with totals
+            // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0
             await supabase.from('campaigns').update({
               total_sent: totalSent,
               total_opened: totalOpened,
               total_replied: totalReplied,
               total_bounced: totalBounced,
-              reply_rate: totalSent > 0 ? (totalReplied / totalSent) * 100 : null,
-              open_rate: totalSent > 0 ? (totalOpened / totalSent) * 100 : null,
-              bounce_rate: totalSent > 0 ? (totalBounced / totalSent) * 100 : null,
+              total_delivered: Math.max(0, totalSent - totalBounced),
+              reply_rate: totalSent > 0 ? Math.min(0.9999, totalReplied / totalSent) : null,
+              open_rate: totalSent > 0 ? Math.min(0.9999, totalOpened / totalSent) : null,
+              bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
             }).eq('id', campaignDbId);
 
             // Store daily metrics

@@ -564,23 +564,41 @@ Deno.serve(async (req) => {
               
               console.log(`  Metrics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
               
-              // Update campaign totals
-              await supabase.from('campaigns').update({
+              // Update campaign totals with proper error handling
+              // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0, not percentages
+              const { error: updateError } = await supabase.from('campaigns').update({
                 total_sent: totalSent,
                 total_opened: totalOpened,
                 total_replied: totalReplied,
                 total_bounced: totalBounced,
-                total_meetings: totalPositive,
-                open_rate: totalSent > 0 ? (totalOpened / totalSent) * 100 : null,
-                reply_rate: totalSent > 0 ? (totalReplied / totalSent) * 100 : null,
-                bounce_rate: totalSent > 0 ? (totalBounced / totalSent) * 100 : null,
+                total_delivered: Math.max(0, totalSent - totalBounced),
+                positive_replies: totalPositive,
+                open_rate: totalSent > 0 ? Math.min(0.9999, totalOpened / totalSent) : null,
+                reply_rate: totalSent > 0 ? Math.min(0.9999, totalReplied / totalSent) : null,
+                bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
+                positive_rate: totalReplied > 0 && totalPositive > 0 ? Math.min(0.9999, totalPositive / totalReplied) : null,
                 last_synced_at: new Date().toISOString(),
               }).eq('id', campaignId);
               
-              // Store daily metrics
+              if (updateError) {
+                console.error(`  Failed to update campaign totals:`, updateError.message);
+                progress.errors.push(`Campaign ${sequence.name} metrics update: ${updateError.message}`);
+              }
+              
+              // Get the campaign's ACTUAL engagement_id (may differ from sync trigger's engagement_id)
+              const { data: campaignRecord } = await supabase
+                .from('campaigns')
+                .select('engagement_id')
+                .eq('id', campaignId)
+                .single();
+              
+              const actualEngagementId = campaignRecord?.engagement_id || engagement_id;
+              
+              // Store daily metrics using the campaign's actual engagement_id
+              // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0
               if (totalSent > 0 || totalReplied > 0) {
                 const { error: metricsErr } = await supabase.from('daily_metrics').upsert({
-                  engagement_id,
+                  engagement_id: actualEngagementId, // Use campaign's engagement, NOT sync trigger's
                   campaign_id: campaignId,
                   data_source_id,
                   date: today,
@@ -590,12 +608,15 @@ Deno.serve(async (req) => {
                   emails_replied: totalReplied,
                   emails_bounced: totalBounced,
                   positive_replies: totalPositive,
-                  open_rate: totalSent > 0 ? (totalOpened / totalSent) * 100 : null,
-                  reply_rate: totalSent > 0 ? (totalReplied / totalSent) * 100 : null,
-                  bounce_rate: totalSent > 0 ? (totalBounced / totalSent) * 100 : null,
+                  open_rate: totalSent > 0 ? Math.min(0.9999, totalOpened / totalSent) : null,
+                  reply_rate: totalSent > 0 ? Math.min(0.9999, totalReplied / totalSent) : null,
+                  bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
+                  positive_rate: totalReplied > 0 && totalPositive > 0 ? Math.min(0.9999, totalPositive / totalReplied) : null,
                 }, { onConflict: 'engagement_id,campaign_id,date' });
 
-                if (!metricsErr) {
+                if (metricsErr) {
+                  console.error(`  Failed to insert daily_metrics:`, metricsErr.message);
+                } else {
                   progress.metrics_created++;
                 }
               }
