@@ -8,6 +8,7 @@ const corsHeaders = {
 interface LinkResult {
   campaignsLinked: number;
   dealsLinked: number;
+  contactsLinked: number;
   errors: string[];
 }
 
@@ -82,14 +83,24 @@ Deno.serve(async (req) => {
     const result: LinkResult = {
       campaignsLinked: 0,
       dealsLinked: 0,
+      contactsLinked: 0,
       errors: [],
     };
 
-    // Fetch all engagements
+    // Get client_id from workspace context - find engagements for the workspace's client
+    const { data: clientData } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('id', workspace_id)
+      .single();
+
+    const clientId = clientData?.id || workspace_id;
+
+    // Fetch all engagements for this client
     const { data: engagements, error: engErr } = await supabase
       .from('engagements')
-      .select('id, engagement_name, client_name, sponsor, industry_focus')
-      .eq('workspace_id', workspace_id);
+      .select('id, name, description')
+      .eq('client_id', clientId);
 
     if (engErr) {
       console.log('Error fetching engagements:', engErr.message);
@@ -104,20 +115,19 @@ Deno.serve(async (req) => {
       for (const eng of engagements) {
         engagementMatches.set(eng.id, { 
           id: eng.id, 
-          name: eng.engagement_name || eng.client_name || '' 
+          name: eng.name || '' 
         });
       }
 
-      // 1. Link SmartLead campaigns
-      const { data: slCampaigns } = await supabase
-        .from('smartlead_campaigns')
-        .select('id, name')
-        .eq('workspace_id', workspace_id)
+      // 1. Link unlinked campaigns (unified campaigns table)
+      const { data: unlinkedCampaigns } = await supabase
+        .from('campaigns')
+        .select('id, name, campaign_type')
         .is('engagement_id', null);
 
-      console.log(`Found ${slCampaigns?.length || 0} unlinked SmartLead campaigns`);
+      console.log(`Found ${unlinkedCampaigns?.length || 0} unlinked campaigns`);
 
-      for (const campaign of slCampaigns || []) {
+      for (const campaign of unlinkedCampaigns || []) {
         let bestMatch: { engId: string; engName: string; score: number } | null = null;
         
         for (const [engId, eng] of engagementMatches) {
@@ -128,55 +138,16 @@ Deno.serve(async (req) => {
         }
         
         if (bestMatch) {
-          console.log(`  SL Match: "${campaign.name}" -> "${bestMatch.engName}" (score: ${bestMatch.score})`);
+          console.log(`  Campaign Match: "${campaign.name}" (${campaign.campaign_type}) -> "${bestMatch.engName}" (score: ${bestMatch.score})`);
           
           if (!dry_run) {
             const { error } = await supabase
-              .from('smartlead_campaigns')
+              .from('campaigns')
               .update({ engagement_id: bestMatch.engId })
               .eq('id', campaign.id);
             
             if (error) {
-              result.errors.push(`SmartLead ${campaign.id}: ${error.message}`);
-            } else {
-              result.campaignsLinked++;
-            }
-          } else {
-            result.campaignsLinked++;
-          }
-        }
-      }
-
-      // 2. Link Reply.io campaigns
-      const { data: rioCampaigns } = await supabase
-        .from('replyio_campaigns')
-        .select('id, name')
-        .eq('workspace_id', workspace_id)
-        .is('engagement_id', null);
-
-      console.log(`Found ${rioCampaigns?.length || 0} unlinked Reply.io campaigns`);
-
-      for (const campaign of rioCampaigns || []) {
-        let bestMatch: { engId: string; engName: string; score: number } | null = null;
-        
-        for (const [engId, eng] of engagementMatches) {
-          const score = calculateMatchScore(campaign.name, eng.name);
-          if (score >= min_score && (!bestMatch || score > bestMatch.score)) {
-            bestMatch = { engId, engName: eng.name, score };
-          }
-        }
-        
-        if (bestMatch) {
-          console.log(`  RIO Match: "${campaign.name}" -> "${bestMatch.engName}" (score: ${bestMatch.score})`);
-          
-          if (!dry_run) {
-            const { error } = await supabase
-              .from('replyio_campaigns')
-              .update({ engagement_id: bestMatch.engId })
-              .eq('id', campaign.id);
-            
-            if (error) {
-              result.errors.push(`Reply.io ${campaign.id}: ${error.message}`);
+              result.errors.push(`Campaign ${campaign.id}: ${error.message}`);
             } else {
               result.campaignsLinked++;
             }
@@ -187,100 +158,102 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 3. Link calling_deals to leads
-    const { data: orphanedDeals } = await supabase
-      .from('calling_deals')
-      .select('id, company_name, contact_name, contact_email, contact_phone')
-      .eq('workspace_id', workspace_id)
-      .is('lead_id', null);
-
-    console.log(`Found ${orphanedDeals?.length || 0} unlinked calling_deals`);
-
-    if (orphanedDeals && orphanedDeals.length > 0) {
-      // Get all leads for matching
-      const { data: leads } = await supabase
-        .from('leads')
-        .select('id, email, first_name, last_name, company')
-        .eq('workspace_id', workspace_id);
-
-      const leadsByEmail = new Map(leads?.map(l => [l.email?.toLowerCase(), l]) || []);
-      const leadsByCompany = new Map(leads?.filter(l => l.company).map(l => [normalizeText(l.company), l]) || []);
-
-      for (const deal of orphanedDeals) {
-        let matchedLead: any = null;
-
-        // Try email match first
-        if (deal.contact_email && leadsByEmail.has(deal.contact_email.toLowerCase())) {
-          matchedLead = leadsByEmail.get(deal.contact_email.toLowerCase());
-        }
-        
-        // Try company name match
-        if (!matchedLead && deal.company_name) {
-          const normalizedCompany = normalizeText(deal.company_name);
-          if (leadsByCompany.has(normalizedCompany)) {
-            matchedLead = leadsByCompany.get(normalizedCompany);
-          }
-        }
-
-        if (matchedLead) {
-          console.log(`  Deal "${deal.company_name}" -> Lead ${matchedLead.id}`);
-          
-          if (!dry_run) {
-            const { error } = await supabase
-              .from('calling_deals')
-              .update({ lead_id: matchedLead.id })
-              .eq('id', deal.id);
-            
-            if (error) {
-              result.errors.push(`Deal ${deal.id}: ${error.message}`);
-            } else {
-              result.dealsLinked++;
-            }
-          } else {
-            result.dealsLinked++;
-          }
-        }
-      }
-    }
-
-    // 4. Link calling_deals to engagements
+    // 2. Link orphaned deals to engagements/contacts
     if (hasEngagements) {
-      const { data: dealsForEngagement } = await supabase
-        .from('calling_deals')
-        .select('id, company_name')
-        .eq('workspace_id', workspace_id)
+      const { data: orphanedDeals } = await supabase
+        .from('deals')
+        .select('id, project_name, client_name')
         .is('engagement_id', null);
 
-      if (dealsForEngagement && dealsForEngagement.length > 0) {
-        for (const deal of dealsForEngagement) {
+      console.log(`Found ${orphanedDeals?.length || 0} unlinked deals`);
+
+      if (orphanedDeals && orphanedDeals.length > 0) {
+        for (const deal of orphanedDeals) {
           let bestMatch: { engId: string; engName: string; score: number } | null = null;
           
+          // Try matching on project_name or client_name
+          const dealName = deal.project_name || deal.client_name || '';
+          
           for (const [engId, eng] of engagementMatches) {
-            const score = calculateMatchScore(deal.company_name, eng.name);
+            const score = calculateMatchScore(dealName, eng.name);
             if (score >= min_score && (!bestMatch || score > bestMatch.score)) {
               bestMatch = { engId, engName: eng.name, score };
             }
           }
           
           if (bestMatch) {
-            console.log(`  Deal "${deal.company_name}" -> Engagement "${bestMatch.engName}" (score: ${bestMatch.score})`);
+            console.log(`  Deal "${dealName}" -> Engagement "${bestMatch.engName}" (score: ${bestMatch.score})`);
             
             if (!dry_run) {
               const { error } = await supabase
-                .from('calling_deals')
+                .from('deals')
                 .update({ engagement_id: bestMatch.engId })
                 .eq('id', deal.id);
               
               if (!error) {
                 result.dealsLinked++;
               }
+            } else {
+              result.dealsLinked++;
             }
           }
         }
       }
     }
 
-    console.log(`=== Link complete: ${result.campaignsLinked} campaigns, ${result.dealsLinked} deals ===`);
+    // 3. Link orphaned contacts to companies
+    const { data: orphanedContacts } = await supabase
+      .from('contacts')
+      .select('id, email, first_name, last_name')
+      .is('company_id', null)
+      .limit(500);
+
+    console.log(`Found ${orphanedContacts?.length || 0} contacts without company_id`);
+
+    if (orphanedContacts && orphanedContacts.length > 0) {
+      // Get companies for matching
+      const { data: companies } = await supabase
+        .from('companies')
+        .select('id, domain, name');
+
+      const companiesByDomain = new Map(
+        companies?.filter(c => c.domain).map(c => [c.domain.toLowerCase(), c]) || []
+      );
+
+      for (const contact of orphanedContacts) {
+        if (!contact.email) continue;
+        
+        // Extract domain from email
+        const emailDomain = contact.email.split('@')[1]?.toLowerCase();
+        if (!emailDomain) continue;
+
+        // Skip common email providers
+        if (['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com'].includes(emailDomain)) {
+          continue;
+        }
+
+        const matchedCompany = companiesByDomain.get(emailDomain);
+        
+        if (matchedCompany) {
+          console.log(`  Contact "${contact.email}" -> Company "${matchedCompany.name}"`);
+          
+          if (!dry_run) {
+            const { error } = await supabase
+              .from('contacts')
+              .update({ company_id: matchedCompany.id })
+              .eq('id', contact.id);
+            
+            if (!error) {
+              result.contactsLinked++;
+            }
+          } else {
+            result.contactsLinked++;
+          }
+        }
+      }
+    }
+
+    console.log(`=== Link complete: ${result.campaignsLinked} campaigns, ${result.dealsLinked} deals, ${result.contactsLinked} contacts ===`);
 
     return new Response(JSON.stringify({
       success: true,
