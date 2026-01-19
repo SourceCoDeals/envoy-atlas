@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useEngagementReport } from '@/hooks/useEngagementReport';
+import { useCampaignLinking, UnlinkedCampaign } from '@/hooks/useCampaignLinking';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +15,8 @@ import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/component
 import { EmailReportTab } from '@/components/engagementReport/EmailReportTab';
 import { CallingReportTab } from '@/components/engagementReport/CallingReportTab';
 import { CampaignSummaryCard } from '@/components/engagementReport/CampaignSummaryCard';
-import { ArrowLeft, Share2, Mail, Phone, Target, Calendar, Building2, Briefcase, Building } from 'lucide-react';
+import { LinkCampaignsDialog, UnlinkedCampaign as DialogCampaign } from '@/components/engagements/LinkCampaignsDialog';
+import { ArrowLeft, Share2, Mail, Phone, Target, Calendar, Building2, Briefcase, Building, Link2, Plus } from 'lucide-react';
 
 export default function EngagementReport() {
   const navigate = useNavigate();
@@ -22,12 +24,36 @@ export default function EngagementReport() {
   const { user, loading: authLoading } = useAuth();
   const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('last30');
   const [activeTab, setActiveTab] = useState('email');
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [unlinkedCampaigns, setUnlinkedCampaigns] = useState<UnlinkedCampaign[]>([]);
   const dateRange = getDateRange(dateRangeOption);
   
-  const { data, loading, error } = useEngagementReport(engagementId || '', {
+  const { linkCampaignsToEngagement, fetchCampaignsNotInEngagement } = useCampaignLinking();
+  
+  const { data, loading, error, refetch } = useEngagementReport(engagementId || '', {
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
   });
+
+  // Fetch unlinked campaigns when opening dialog
+  const handleOpenLinkDialog = useCallback(async () => {
+    if (!engagementId) return;
+    const campaigns = await fetchCampaignsNotInEngagement(engagementId);
+    setUnlinkedCampaigns(campaigns);
+    setLinkDialogOpen(true);
+  }, [engagementId, fetchCampaignsNotInEngagement]);
+
+  // Handle linking campaigns
+  const handleLinkCampaigns = useCallback(async (
+    campaignIds: { id: string; platform: 'smartlead' | 'replyio' }[]
+  ) => {
+    if (!engagementId) return;
+    const ids = campaignIds.map(c => c.id);
+    const result = await linkCampaignsToEngagement(ids, engagementId);
+    if (result.success) {
+      refetch();
+    }
+  }, [engagementId, linkCampaignsToEngagement, refetch]);
 
   useEffect(() => {
     if (!authLoading && !user) navigate('/auth');
@@ -121,6 +147,10 @@ export default function EngagementReport() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" onClick={handleOpenLinkDialog}>
+              <Link2 className="mr-2 h-4 w-4" />
+              Link Campaigns
+            </Button>
             <DateRangeFilter value={dateRangeOption} onChange={setDateRangeOption} />
             <Button variant="outline" size="sm">
               <Share2 className="mr-2 h-4 w-4" />
@@ -336,6 +366,21 @@ export default function EngagementReport() {
             </CardContent>
           </Card>
         )}
+
+        {/* Link Campaigns Dialog */}
+        <LinkCampaignsDialog
+          open={linkDialogOpen}
+          onOpenChange={setLinkDialogOpen}
+          campaigns={unlinkedCampaigns.map(c => ({
+            id: c.id,
+            name: c.name,
+            platform: c.platform,
+            status: c.status,
+            totalSent: c.totalSent,
+          }))}
+          onLink={handleLinkCampaigns}
+          engagementName={engagement.name}
+        />
       </div>
     </DashboardLayout>
   );

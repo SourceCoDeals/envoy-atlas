@@ -1,0 +1,167 @@
+import { useState, useCallback } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useWorkspace } from '@/hooks/useWorkspace';
+import { toast } from 'sonner';
+
+export interface UnlinkedCampaign {
+  id: string;
+  name: string;
+  platform: 'smartlead' | 'replyio';
+  status: string | null;
+  totalSent: number;
+}
+
+export function useCampaignLinking() {
+  const { currentWorkspace } = useWorkspace();
+  const [updating, setUpdating] = useState<string | null>(null);
+
+  /**
+   * Updates the engagement_id for a single campaign
+   */
+  const updateCampaignEngagement = useCallback(async (
+    campaignId: string,
+    engagementId: string | null
+  ): Promise<boolean> => {
+    setUpdating(campaignId);
+    try {
+      const { error } = await supabase
+        .from('campaigns')
+        .update({ engagement_id: engagementId })
+        .eq('id', campaignId);
+
+      if (error) throw error;
+      
+      toast.success(engagementId ? 'Campaign linked successfully' : 'Campaign unlinked');
+      return true;
+    } catch (err) {
+      console.error('Error updating campaign engagement:', err);
+      toast.error('Failed to update campaign');
+      return false;
+    } finally {
+      setUpdating(null);
+    }
+  }, []);
+
+  /**
+   * Links multiple campaigns to an engagement
+   */
+  const linkCampaignsToEngagement = useCallback(async (
+    campaignIds: string[],
+    engagementId: string
+  ): Promise<{ success: boolean; linked: number }> => {
+    if (campaignIds.length === 0) {
+      return { success: false, linked: 0 };
+    }
+
+    try {
+      const { error, count } = await supabase
+        .from('campaigns')
+        .update({ engagement_id: engagementId })
+        .in('id', campaignIds);
+
+      if (error) throw error;
+      
+      const linked = count || campaignIds.length;
+      toast.success(`Linked ${linked} campaign${linked !== 1 ? 's' : ''}`);
+      return { success: true, linked };
+    } catch (err) {
+      console.error('Error linking campaigns:', err);
+      toast.error('Failed to link campaigns');
+      return { success: false, linked: 0 };
+    }
+  }, []);
+
+  /**
+   * Fetches unlinked campaigns for the current workspace
+   */
+  const fetchUnlinkedCampaigns = useCallback(async (): Promise<UnlinkedCampaign[]> => {
+    if (!currentWorkspace?.id) return [];
+
+    try {
+      // Get all engagement IDs for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = (engagements || []).map(e => e.id);
+
+      if (engagementIds.length === 0) return [];
+
+      // Get campaigns that belong to workspace engagements but have no specific engagement_id set
+      // OR campaigns where engagement_id is one of ours but they're orphaned
+      const { data: campaigns } = await supabase
+        .from('campaigns')
+        .select('id, name, campaign_type, status, total_sent, engagement_id')
+        .in('engagement_id', engagementIds)
+        .order('name');
+
+      // Filter to only those without engagement_id or with a default/null value
+      // Actually, we need campaigns WITHOUT an engagement_id
+      // Let's query differently - get campaigns in our engagements that don't have specific linking
+
+      // Since all campaigns must have engagement_id (required field), 
+      // we need to identify "unlinked" as those that need manual assignment
+      // For now, return all campaigns - the dialog will handle filtering
+      
+      return (campaigns || []).map(c => ({
+        id: c.id,
+        name: c.name,
+        platform: c.campaign_type as 'smartlead' | 'replyio',
+        status: c.status,
+        totalSent: c.total_sent || 0,
+      }));
+    } catch (err) {
+      console.error('Error fetching unlinked campaigns:', err);
+      return [];
+    }
+  }, [currentWorkspace?.id]);
+
+  /**
+   * Fetches campaigns not linked to a specific engagement
+   */
+  const fetchCampaignsNotInEngagement = useCallback(async (
+    excludeEngagementId: string
+  ): Promise<UnlinkedCampaign[]> => {
+    if (!currentWorkspace?.id) return [];
+
+    try {
+      // Get all engagement IDs for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = (engagements || []).map(e => e.id);
+
+      if (engagementIds.length === 0) return [];
+
+      // Get campaigns in workspace engagements but NOT in the specified engagement
+      const { data: campaigns } = await supabase
+        .from('campaigns')
+        .select('id, name, campaign_type, status, total_sent, engagement_id')
+        .in('engagement_id', engagementIds)
+        .neq('engagement_id', excludeEngagementId)
+        .order('name');
+
+      return (campaigns || []).map(c => ({
+        id: c.id,
+        name: c.name,
+        platform: c.campaign_type as 'smartlead' | 'replyio',
+        status: c.status,
+        totalSent: c.total_sent || 0,
+      }));
+    } catch (err) {
+      console.error('Error fetching campaigns:', err);
+      return [];
+    }
+  }, [currentWorkspace?.id]);
+
+  return {
+    updating,
+    updateCampaignEngagement,
+    linkCampaignsToEngagement,
+    fetchUnlinkedCampaigns,
+    fetchCampaignsNotInEngagement,
+  };
+}

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,8 @@ import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { CampaignWithMetrics, MetricsStatus } from '@/hooks/useCampaigns';
 import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
 import { useDataHealth } from '@/hooks/useDataHealth';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Briefcase } from 'lucide-react';
+import { useCampaignLinking } from '@/hooks/useCampaignLinking';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Briefcase, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface Engagement {
@@ -25,6 +26,7 @@ interface EnhancedCampaignTableProps {
   engagementFilter?: string;
   onEngagementFilterChange?: (id: string) => void;
   engagements?: Engagement[];
+  onCampaignUpdated?: () => void;
 }
 
 type SortField = 'name' | 'score' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
@@ -84,8 +86,10 @@ export function EnhancedCampaignTable({
   engagementFilter = 'all',
   onEngagementFilterChange,
   engagements = [],
+  onCampaignUpdated,
 }: EnhancedCampaignTableProps) {
   const { health: dataHealth } = useDataHealth();
+  const { updateCampaignEngagement, updating } = useCampaignLinking();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [localTierFilter, setLocalTierFilter] = useState<string>(tierFilter);
@@ -93,6 +97,17 @@ export function EnhancedCampaignTable({
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
+
+  // Handle engagement assignment change for a campaign row
+  const handleCampaignEngagementAssign = useCallback(async (campaignId: string, newEngagementId: string) => {
+    const success = await updateCampaignEngagement(
+      campaignId, 
+      newEngagementId === 'unlinked' ? null : newEngagementId
+    );
+    if (success && onCampaignUpdated) {
+      onCampaignUpdated();
+    }
+  }, [updateCampaignEngagement, onCampaignUpdated]);
 
   // Phase C: Check if metrics are broken
   const isMetricsBroken = dataHealth?.email.metrics.status === 'broken';
@@ -509,15 +524,42 @@ export function EnhancedCampaignTable({
                       </div>
                     </Link>
                   </TableCell>
-                  <TableCell>
-                    {campaign.engagement_name ? (
-                      <div className="flex items-center gap-1.5">
-                        <Briefcase className="h-3 w-3 text-muted-foreground" />
-                        <span className="truncate max-w-[120px] text-sm">{campaign.engagement_name}</span>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Select
+                      value={campaign.engagement_id || 'unlinked'}
+                      onValueChange={(value) => handleCampaignEngagementAssign(campaign.id, value)}
+                      disabled={updating === campaign.id}
+                    >
+                      <SelectTrigger className="h-8 w-[140px] text-xs">
+                        {updating === campaign.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <SelectValue>
+                            {campaign.engagement_name ? (
+                              <div className="flex items-center gap-1.5 truncate">
+                                <Briefcase className="h-3 w-3 text-muted-foreground shrink-0" />
+                                <span className="truncate">{campaign.engagement_name}</span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">Unlinked</span>
+                            )}
+                          </SelectValue>
+                        )}
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unlinked">
+                          <span className="text-muted-foreground">— Unlinked —</span>
+                        </SelectItem>
+                        {engagements.map(e => (
+                          <SelectItem key={e.id} value={e.id}>
+                            <div className="flex items-center gap-1.5">
+                              <Briefcase className="h-3 w-3 text-muted-foreground" />
+                              <span className="truncate max-w-[120px]">{e.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell className="text-center">
                     <TooltipProvider>

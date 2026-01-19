@@ -242,6 +242,7 @@ export default function Campaigns() {
               engagementFilter={engagementFilter}
               onEngagementFilterChange={setEngagementFilter}
               engagements={engagements.map(e => ({ id: e.id, name: e.engagement_name }))}
+              onCampaignUpdated={refetch}
             />
 
             {/* Auto-Link Modal */}
