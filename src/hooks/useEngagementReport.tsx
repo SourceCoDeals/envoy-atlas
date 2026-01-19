@@ -31,10 +31,6 @@ export interface EmailMetrics {
   sent: number;
   delivered: number;
   deliveryRate: number;
-  opened: number;
-  openRate: number;
-  clicked: number;
-  clickRate: number;
   replied: number;
   replyRate: number;
   positiveReplies: number;
@@ -91,7 +87,6 @@ export interface SequencePerformance {
   step: number;
   stepName: string;
   sent: number;
-  openRate: number;
   replyRate: number;
   positiveReplies: number;
 }
@@ -163,7 +158,6 @@ export interface LinkedCampaignWithStats {
   platform: string;
   status: string | null;
   sent: number;
-  openRate: number;
   replyRate: number;
 }
 
@@ -219,7 +213,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       // Fetch linked campaigns from unified campaigns table with stats
       const { data: campaigns } = await supabase
         .from('campaigns')
-        .select('id, name, campaign_type, status, total_sent, open_rate, reply_rate')
+        .select('id, name, campaign_type, status, total_sent, reply_rate')
         .eq('engagement_id', engagementId)
         .order('total_sent', { ascending: false });
 
@@ -235,7 +229,6 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         platform: c.campaign_type,
         status: c.status,
         sent: c.total_sent || 0,
-        openRate: c.open_rate || 0,
         replyRate: c.reply_rate || 0,
       }));
 
@@ -279,12 +272,10 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       const emailTotals = dailyMetrics.reduce((acc, m) => ({
         sent: acc.sent + (m.emails_sent || 0),
         delivered: acc.delivered + (m.emails_delivered || 0),
-        opened: acc.opened + (m.emails_opened || 0),
-        clicked: acc.clicked + (m.emails_clicked || 0),
         replied: acc.replied + (m.emails_replied || 0),
         bounced: acc.bounced + (m.emails_bounced || 0),
         positive: acc.positive + (m.positive_replies || 0),
-      }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
+      }), { sent: 0, delivered: 0, replied: 0, bounced: 0, positive: 0 });
 
       const delivered = emailTotals.delivered || (emailTotals.sent - emailTotals.bounced);
 
@@ -328,10 +319,6 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         sent: emailTotals.sent,
         delivered,
         deliveryRate: emailTotals.sent > 0 ? (delivered / emailTotals.sent) * 100 : 0,
-        opened: emailTotals.opened,
-        openRate: delivered > 0 ? (emailTotals.opened / delivered) * 100 : 0,
-        clicked: emailTotals.clicked,
-        clickRate: delivered > 0 ? (emailTotals.clicked / delivered) * 100 : 0,
         replied: emailTotals.replied,
         replyRate: delivered > 0 ? (emailTotals.replied / delivered) * 100 : 0,
         positiveReplies: emailTotals.positive,
@@ -361,7 +348,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       // Build funnel
       const funnel: FunnelStage[] = [
         { name: 'Contacted', count: keyMetrics.companiesContacted, percentage: 100 },
-        { name: 'Engaged', count: emailTotals.opened + connections, percentage: keyMetrics.companiesContacted > 0 ? Math.round(((emailTotals.opened + connections) / keyMetrics.companiesContacted) * 100) : 0 },
+        { name: 'Engaged', count: emailTotals.replied + connections, percentage: keyMetrics.companiesContacted > 0 ? Math.round(((emailTotals.replied + connections) / keyMetrics.companiesContacted) * 100) : 0 },
         { name: 'Positive Response', count: keyMetrics.positiveResponses, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.positiveResponses / keyMetrics.companiesContacted) * 100) : 0 },
         { name: 'Meeting', count: meetingsBooked, percentage: keyMetrics.companiesContacted > 0 ? Math.round((meetingsBooked / keyMetrics.companiesContacted) * 100) : 0 },
         { name: 'Opportunity', count: 0, percentage: 0 },
@@ -372,7 +359,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         {
           channel: 'Email',
           attempts: emailTotals.sent,
-          engagementRate: emailMetrics.openRate,
+          engagementRate: emailMetrics.replyRate, // Use reply rate instead of open rate
           responseRate: emailMetrics.replyRate,
           positiveRate: emailMetrics.positiveRate,
           meetings: 0,

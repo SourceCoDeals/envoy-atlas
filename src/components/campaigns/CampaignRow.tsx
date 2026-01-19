@@ -65,12 +65,6 @@ export function CampaignRow({ campaign }: CampaignRowProps) {
         {formatNumber(campaign.total_sent)}
       </TableCell>
       <TableCell className="text-right font-mono">
-        {formatPercent(campaign.open_rate)}
-      </TableCell>
-      <TableCell className="text-right font-mono">
-        {formatPercent(campaign.click_rate)}
-      </TableCell>
-      <TableCell className="text-right font-mono">
         <span className={campaign.reply_rate >= 5 ? 'text-green-600' : ''}>
           {formatPercent(campaign.reply_rate)}
         </span>

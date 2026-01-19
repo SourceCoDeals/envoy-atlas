@@ -16,14 +16,10 @@ export interface CampaignWithMetrics {
   created_at: string;
   updated_at: string | null;
   total_sent: number;
-  total_opened: number;
-  total_clicked: number;
   total_replied: number;
   total_bounced: number;
   total_leads: number;
   positive_replies: number;
-  open_rate: number;
-  click_rate: number;
   reply_rate: number;
   bounce_rate: number;
   positive_rate: number;
@@ -136,8 +132,6 @@ export function useCampaigns() {
         const hasDailyData = dailyAggregate && dailyAggregate.total_sent > 0;
 
         let total_sent = 0;
-        let total_opened = 0;
-        let total_clicked = 0;
         let total_replied = 0;
         let total_bounced = 0;
         let positive_replies = 0;
@@ -146,8 +140,6 @@ export function useCampaigns() {
 
         if (hasCumulativeData) {
           total_sent = campaign.total_sent || 0;
-          total_opened = campaign.total_opened || 0;
-          total_clicked = 0; // Not in campaign table
           total_replied = campaign.total_replied || 0;
           total_bounced = campaign.total_bounced || 0;
           positive_replies = (campaign as any).positive_replies || 0;
@@ -155,8 +147,6 @@ export function useCampaigns() {
           metricsSource = 'cumulative';
         } else if (hasDailyData) {
           total_sent = dailyAggregate!.total_sent;
-          total_opened = dailyAggregate!.total_opened;
-          total_clicked = dailyAggregate!.total_clicked;
           total_replied = dailyAggregate!.total_replied;
           total_bounced = dailyAggregate!.total_bounced;
           positive_replies = 0; // Not aggregated from daily yet
@@ -179,14 +169,10 @@ export function useCampaigns() {
           created_at: campaign.created_at || new Date().toISOString(),
           updated_at: campaign.updated_at,
           total_sent,
-          total_opened,
-          total_clicked,
           total_replied,
           total_bounced,
           positive_replies,
           total_leads: 0,
-          open_rate: total_sent > 0 ? (total_opened / total_sent) * 100 : 0,
-          click_rate: total_sent > 0 ? (total_clicked / total_sent) * 100 : 0,
           reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
           bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
           positive_rate,
