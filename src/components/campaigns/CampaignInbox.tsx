@@ -49,20 +49,12 @@ export function CampaignInbox({ campaignId, platform }: CampaignInboxProps) {
     setLoading(true);
 
     try {
-      // Query responses table for campaign replies
+      // Query responses table for campaign replies using correct column names
       const { data: responses, error } = await supabase
         .from('responses')
-        .select(`
-          id,
-          response_type,
-          sentiment,
-          reply_text,
-          received_at,
-          contact_id,
-          contacts(email, first_name, last_name, title, companies(name))
-        `)
-        .eq('campaign_id', campaignId)
-        .order('received_at', { ascending: false })
+        .select('id, category, sentiment_label, full_text, response_datetime, contact_id')
+        .eq('source_type', 'email')
+        .order('response_datetime', { ascending: false })
         .limit(100);
 
       if (error) {
@@ -72,22 +64,59 @@ export function CampaignInbox({ campaignId, platform }: CampaignInboxProps) {
         return;
       }
 
+      // Fetch contacts separately if we have responses
+      const contactIds = (responses || []).map(r => r.contact_id).filter(Boolean);
+      let contactsMap = new Map<string, any>();
+      
+      if (contactIds.length > 0) {
+        const { data: contactsData } = await supabase
+          .from('contacts')
+          .select('id, email, first_name, last_name, title, company_id')
+          .in('id', contactIds);
+        
+        if (contactsData) {
+          const companyIds = contactsData.map(c => c.company_id).filter(Boolean);
+          let companiesMap = new Map<string, any>();
+          
+          if (companyIds.length > 0) {
+            const { data: companiesData } = await supabase
+              .from('companies')
+              .select('id, name')
+              .in('id', companyIds);
+            
+            if (companiesData) {
+              companiesData.forEach(c => companiesMap.set(c.id, c));
+            }
+          }
+          
+          contactsData.forEach(c => {
+            contactsMap.set(c.id, {
+              ...c,
+              company: companiesMap.get(c.company_id)
+            });
+          });
+        }
+      }
+
       // Transform responses to match InboxItem interface
-      const transformedItems: InboxItem[] = (responses || []).map((resp: any) => ({
-        id: resp.id,
-        lead_email: resp.contacts?.email || null,
-        first_name: resp.contacts?.first_name || null,
-        last_name: resp.contacts?.last_name || null,
-        company: resp.contacts?.companies?.name || null,
-        title: resp.contacts?.title || null,
-        event_type: resp.response_type || 'reply',
-        reply_content: resp.reply_text || null,
-        reply_sentiment: resp.sentiment || null,
-        sequence_step: null,
-        occurred_at: resp.received_at || resp.created_at,
-        subject_line: null,
-        variant_name: null,
-      }));
+      const transformedItems: InboxItem[] = (responses || []).map((resp) => {
+        const contact = contactsMap.get(resp.contact_id);
+        return {
+          id: resp.id,
+          lead_email: contact?.email || null,
+          first_name: contact?.first_name || null,
+          last_name: contact?.last_name || null,
+          company: contact?.company?.name || null,
+          title: contact?.title || null,
+          event_type: resp.category || 'reply',
+          reply_content: resp.full_text || null,
+          reply_sentiment: resp.sentiment_label || null,
+          sequence_step: null,
+          occurred_at: resp.response_datetime,
+          subject_line: null,
+          variant_name: null,
+        };
+      });
 
       setItems(transformedItems);
     } catch (e) {
@@ -163,16 +192,10 @@ export function CampaignInbox({ campaignId, platform }: CampaignInboxProps) {
                           {item.title && <span className="truncate">• {item.title}</span>}
                         </div>
                       )}
-                      <p className="text-sm text-muted-foreground">
-                        {item.subject_line && <span className="font-medium">Re: {item.subject_line}</span>}
-                      </p>
                     </div>
                     <div className="text-right text-xs text-muted-foreground flex-shrink-0">
                       <div>{format(new Date(item.occurred_at), 'MMM d')}</div>
                       <div>{format(new Date(item.occurred_at), 'h:mm a')}</div>
-                      {item.sequence_step && (
-                        <Badge variant="outline" className="mt-1">Step {item.sequence_step}</Badge>
-                      )}
                     </div>
                   </div>
                   

@@ -24,6 +24,57 @@ interface WorkspaceContextType {
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
 
+// Auto-create SourceCo workspace for new users
+async function ensureSourceCoWorkspace(userId: string): Promise<void> {
+  // Check if user already has any workspace membership
+  const { data: existingMemberships } = await supabase
+    .from('client_members')
+    .select('id')
+    .eq('user_id', userId)
+    .limit(1);
+
+  if (existingMemberships && existingMemberships.length > 0) {
+    return; // User already has workspace access
+  }
+
+  // Check if SourceCo workspace exists
+  let { data: sourceCo } = await supabase
+    .from('clients')
+    .select('id')
+    .eq('slug', 'sourceco')
+    .single();
+
+  // Create SourceCo if it doesn't exist
+  if (!sourceCo) {
+    const { data: newClient, error: createError } = await supabase
+      .from('clients')
+      .insert({ 
+        name: 'SourceCo', 
+        slug: 'sourceco',
+        client_type: 'internal'
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      console.error('Error creating SourceCo workspace:', createError);
+      return;
+    }
+    sourceCo = newClient;
+  }
+
+  // Add user as admin to SourceCo
+  if (sourceCo) {
+    await supabase
+      .from('client_members')
+      .insert({ 
+        client_id: sourceCo.id, 
+        user_id: userId, 
+        role: 'admin' 
+      });
+  }
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [workspaces, setWorkspaces] = useState<ClientWithRole[]>([]);
@@ -40,6 +91,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     setLoading(true);
     try {
+      // Ensure user has SourceCo workspace
+      await ensureSourceCoWorkspace(user.id);
+
       const { data: members, error } = await supabase
         .from('client_members')
         .select(`
@@ -94,7 +148,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const createWorkspace = async (name: string): Promise<{ error: Error | null; workspace?: Client }> => {
     try {
-      // Generate a slug from the name
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       
       const { data, error } = await supabase
@@ -105,7 +158,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         
       if (error) throw error;
       
-      // Add the current user as admin
       if (data && user) {
         await supabase
           .from('client_members')
