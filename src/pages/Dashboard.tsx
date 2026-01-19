@@ -178,9 +178,8 @@ export default function Dashboard() {
 
   if (!user) return null;
 
-  if (workspaces.length === 0) {
-    return <CreateWorkspace />;
-  }
+  // Note: SourceCo workspace is auto-created, but if still loading or no workspaces yet, show loading
+  // Don't show CreateWorkspace screen as the workspace is auto-provisioned
 
 
   return (

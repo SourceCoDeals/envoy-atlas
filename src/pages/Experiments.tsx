@@ -4,61 +4,31 @@ import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, Plus, Lightbulb, Calculator } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Loader2, Beaker, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { ExperimentStatusOverview } from '@/components/experiments/ExperimentStatusOverview';
-import { ActiveExperimentCard, ActiveExperiment, ExperimentVariant } from '@/components/experiments/ActiveExperimentCard';
-import { ExperimentResultsCard } from '@/components/experiments/ExperimentResultsCard';
-import { ExperimentSuggestions, ExperimentSuggestion } from '@/components/experiments/ExperimentSuggestions';
-import { ExperimentProgramHealth } from '@/components/experiments/ExperimentProgramHealth';
-import { SampleSizeCalculator } from '@/components/experiments/SampleSizeCalculator';
-import { ExperimentBestPractices } from '@/components/experiments/ExperimentBestPractices';
-import { NoExperimentsState } from '@/components/experiments/NoExperimentsState';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 
-// Statistical functions
-function calculateZScore(p1: number, p2: number, n1: number, n2: number): number {
-  const p = (p1 * n1 + p2 * n2) / (n1 + n2);
-  const se = Math.sqrt(p * (1 - p) * (1/n1 + 1/n2));
-  if (se === 0) return 0;
-  return (p1 - p2) / se;
-}
-
-function zScoreToConfidence(z: number): number {
-  const absZ = Math.abs(z);
-  if (absZ >= 2.576) return 99;
-  if (absZ >= 1.96) return 95;
-  if (absZ >= 1.645) return 90;
-  if (absZ >= 1.28) return 80;
-  return Math.min(80, absZ * 35);
-}
-
-function zScoreToPValue(z: number): number {
-  const absZ = Math.abs(z);
-  if (absZ >= 3.29) return 0.001;
-  if (absZ >= 2.58) return 0.01;
-  if (absZ >= 1.96) return 0.05;
-  if (absZ >= 1.645) return 0.1;
-  return Math.min(1, 2 * (1 - (0.5 * (1 + Math.tanh(absZ * 0.7)))));
-}
-
-// Corrected sample size requirements - much higher than 100!
-const MIN_SAMPLE_SIZE = 500; // Realistic minimum for detecting 50% relative lift
-const CONFIDENCE_THRESHOLD = 95;
-
-// Unified campaign interface
-interface UnifiedCampaign {
+interface ExperimentData {
   id: string;
   name: string;
+  hypothesis: string | null;
+  variable_type: string | null;
   status: string | null;
-  created_at: string;
-  platform: string;
-  variants: Array<{
+  started_at: string | null;
+  completed_at: string | null;
+  min_sample_size: number | null;
+  actual_sample_size: number | null;
+  confidence_level: number | null;
+  winner_variant_id: string | null;
+  variants: {
     id: string;
     name: string;
-    subject_line: string | null;
     is_control: boolean | null;
-  }>;
+    total_sent: number | null;
+    reply_rate: number | null;
+  }[];
 }
 
 export default function Experiments() {
@@ -66,88 +36,14 @@ export default function Experiments() {
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
-  const [experiments, setExperiments] = useState<ActiveExperiment[]>([]);
-  const [activeTab, setActiveTab] = useState('overview');
-
-  // Generate suggestions based on actual experiment data
-  const suggestions: ExperimentSuggestion[] = useMemo(() => {
-    const generatedSuggestions: ExperimentSuggestion[] = [];
-    
-    // Only generate suggestions if we have some data to analyze
-    if (experiments.length === 0) {
-      return []; // No data = no suggestions
-    }
-    
-    // Analyze current experiments to find patterns
-    const avgReplyRate = experiments.reduce((sum, e) => {
-      const variantAvg = e.variants.reduce((s, v) => s + v.replyRate, 0) / e.variants.length;
-      return sum + variantAvg;
-    }, 0) / experiments.length;
-    
-    const lowConfidenceExperiments = experiments.filter(e => e.confidence < 80 && e.status !== 'completed');
-    const needsMoreDataExperiments = experiments.filter(e => e.status === 'needs_data');
-    
-    // Suggestion 1: If we have low-performing campaigns, suggest subject line testing
-    if (avgReplyRate < 3) {
-      generatedSuggestions.push({
-        id: 'suggestion-subject',
-        type: 'Subject Line',
-        priority: 'high',
-        hypothesis: 'Testing question-based subject lines may increase reply rates by 20-30%',
-        rationale: `Current average reply rate is ${avgReplyRate.toFixed(1)}%. Question patterns typically outperform statements in cold outreach.`,
-        expectedLift: 0.25,
-        requiredSample: 2000,
-        estimatedDurationDays: 14,
-        controlSuggestion: 'Current best performing subject line',
-        treatmentSuggestion: 'New subject using question pattern'
-      });
-    }
-    
-    // Suggestion 2: If many experiments lack statistical significance
-    if (lowConfidenceExperiments.length > 0) {
-      generatedSuggestions.push({
-        id: 'suggestion-sample',
-        type: 'Sample Size',
-        priority: 'high',
-        hypothesis: 'Increasing sample sizes will yield more statistically significant results',
-        rationale: `${lowConfidenceExperiments.length} experiments have confidence below 80%. Consider consolidating variants.`,
-        expectedLift: 0.15,
-        requiredSample: MIN_SAMPLE_SIZE * 2,
-        estimatedDurationDays: 21,
-        controlSuggestion: 'Current multi-variant approach',
-        treatmentSuggestion: 'Focused A/B test with higher volume per variant'
-      });
-    }
-    
-    // Suggestion 3: CTA optimization if we have data
-    if (experiments.length >= 2) {
-      generatedSuggestions.push({
-        id: 'suggestion-cta',
-        type: 'CTA',
-        priority: 'medium',
-        hypothesis: 'Choice-based CTAs may increase meeting conversion by reducing friction',
-        rationale: 'Based on industry benchmarks, offering specific time options typically improves conversion.',
-        expectedLift: 0.30,
-        requiredSample: 1500,
-        estimatedDurationDays: 12,
-        controlSuggestion: 'Soft CTA ("Would you be open to...")',
-        treatmentSuggestion: 'Choice CTA ("Tuesday or Thursday?")'
-      });
-    }
-    
-    return generatedSuggestions;
-  }, [experiments]);
+  const [experiments, setExperiments] = useState<ExperimentData[]>([]);
 
   useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
+    if (!authLoading && !user) navigate('/auth');
   }, [user, authLoading, navigate]);
 
   useEffect(() => {
-    if (currentWorkspace?.id) {
-      fetchExperiments();
-    }
+    if (currentWorkspace?.id) fetchExperiments();
   }, [currentWorkspace?.id]);
 
   const fetchExperiments = async () => {
@@ -155,193 +51,70 @@ export default function Experiments() {
     setLoading(true);
 
     try {
-      // Fetch campaigns from PLATFORM-SPECIFIC tables
-      const [smartleadRes, replyioRes] = await Promise.all([
-        supabase.from('smartlead_campaigns').select(`
+      // Get engagement IDs for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = (engagements || []).map(e => e.id);
+
+      if (engagementIds.length === 0) {
+        setExperiments([]);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch experiments from the experiments table
+      const { data: experimentsData, error } = await supabase
+        .from('experiments')
+        .select(`
           id,
           name,
+          hypothesis,
+          variable_type,
           status,
-          created_at,
-          smartlead_variants (
+          started_at,
+          completed_at,
+          min_sample_size,
+          actual_sample_size,
+          confidence_level,
+          winner_variant_id,
+          experiment_variants (
             id,
             name,
-            subject_line,
-            is_control
+            is_control,
+            total_sent,
+            reply_rate
           )
-        `).eq('workspace_id', currentWorkspace.id),
-        
-        supabase.from('replyio_campaigns').select(`
-          id,
-          name,
-          status,
-          created_at,
-          replyio_variants (
-            id,
-            name,
-            subject_line,
-            is_control
-          )
-        `).eq('workspace_id', currentWorkspace.id)
-      ]);
+        `)
+        .in('engagement_id', engagementIds)
+        .order('created_at', { ascending: false });
 
-      // Unify campaigns from both platforms
-      const campaigns: UnifiedCampaign[] = [
-        ...(smartleadRes.data || []).map(c => ({
-          id: c.id,
-          name: c.name,
-          status: c.status,
-          created_at: c.created_at,
-          platform: 'smartlead',
-          variants: (c.smartlead_variants || []).map((v: any) => ({
-            id: v.id,
-            name: v.name,
-            subject_line: v.subject_line,
-            is_control: v.is_control,
-          })),
+      if (error) throw error;
+
+      const formattedExperiments: ExperimentData[] = (experimentsData || []).map((exp: any) => ({
+        id: exp.id,
+        name: exp.name,
+        hypothesis: exp.hypothesis,
+        variable_type: exp.variable_type,
+        status: exp.status,
+        started_at: exp.started_at,
+        completed_at: exp.completed_at,
+        min_sample_size: exp.min_sample_size,
+        actual_sample_size: exp.actual_sample_size,
+        confidence_level: exp.confidence_level,
+        winner_variant_id: exp.winner_variant_id,
+        variants: (exp.experiment_variants || []).map((v: any) => ({
+          id: v.id,
+          name: v.name,
+          is_control: v.is_control,
+          total_sent: v.total_sent,
+          reply_rate: v.reply_rate,
         })),
-        ...(replyioRes.data || []).map(c => ({
-          id: c.id,
-          name: c.name,
-          status: c.status,
-          created_at: c.created_at,
-          platform: 'replyio',
-          variants: (c.replyio_variants || []).map((v: any) => ({
-            id: v.id,
-            name: v.name,
-            subject_line: v.subject_line,
-            is_control: v.is_control,
-          })),
-        })),
-      ];
+      }));
 
-      console.log(`[Experiments] Loaded ${smartleadRes.data?.length || 0} Smartlead + ${replyioRes.data?.length || 0} Reply.io campaigns`);
-
-      // Get all campaign IDs
-      const smartleadCampaignIds = (smartleadRes.data || []).map(c => c.id);
-      const replyioCampaignIds = (replyioRes.data || []).map(c => c.id);
-
-      // Fetch metrics from platform-specific tables
-      const [smartleadMetrics, replyioMetrics] = await Promise.all([
-        smartleadCampaignIds.length > 0
-          ? supabase.from('smartlead_daily_metrics')
-              .select('campaign_id, sent_count, replied_count, positive_reply_count')
-              .eq('workspace_id', currentWorkspace.id)
-          : Promise.resolve({ data: [], error: null }),
-        replyioCampaignIds.length > 0
-          ? supabase.from('replyio_daily_metrics')
-              .select('campaign_id, sent_count, replied_count, positive_reply_count')
-              .eq('workspace_id', currentWorkspace.id)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-
-      // Aggregate campaign-level metrics
-      const campaignMetrics = new Map<string, { sent: number; replied: number; positive: number }>();
-      
-      [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])].forEach(m => {
-        if (!m.campaign_id) return;
-        if (!campaignMetrics.has(m.campaign_id)) {
-          campaignMetrics.set(m.campaign_id, { sent: 0, replied: 0, positive: 0 });
-        }
-        const stats = campaignMetrics.get(m.campaign_id)!;
-        stats.sent += m.sent_count || 0;
-        stats.replied += m.replied_count || 0;
-        stats.positive += m.positive_reply_count || 0;
-      });
-
-      const experimentsData: ActiveExperiment[] = campaigns
-        .filter(c => c.variants && c.variants.length >= 2)
-        .map(campaign => {
-          // Get campaign-level metrics and distribute to variants
-          const stats = campaignMetrics.get(campaign.id) || { sent: 0, replied: 0, positive: 0 };
-          const variantCount = campaign.variants.length;
-          
-          const variants: ExperimentVariant[] = campaign.variants.map((v) => {
-            // Distribute campaign metrics evenly across variants (approximation)
-            const variantSent = Math.round(stats.sent / variantCount);
-            const variantReplied = Math.round(stats.replied / variantCount);
-            const variantPositive = Math.round(stats.positive / variantCount);
-            
-            return {
-              id: v.id,
-              name: v.name,
-              subjectLine: v.subject_line,
-              isControl: v.is_control || false,
-              sentCount: variantSent,
-              replyCount: variantReplied,
-              replyRate: variantSent > 0 ? (variantReplied / variantSent) * 100 : 0,
-              positiveRate: variantReplied > 0 ? (variantPositive / variantReplied) * 100 : 0,
-            };
-          });
-
-          const totalSent = variants.reduce((sum, v) => sum + v.sentCount, 0);
-          const hasEnoughData = variants.every(v => v.sentCount >= MIN_SAMPLE_SIZE);
-          const control = variants.find(v => v.isControl) || variants[0];
-          const treatments = variants.filter(v => v.id !== control?.id);
-
-          let winner: ExperimentVariant | null = null;
-          let confidence = 0;
-          let pValue: number | null = null;
-          let hasSignificance = false;
-
-          if (variants.length >= 2 && hasEnoughData && control) {
-            const sorted = [...variants].sort((a, b) => b.replyRate - a.replyRate);
-            const best = sorted[0];
-            const second = sorted[1];
-
-            const zScore = calculateZScore(
-              best.replyRate / 100,
-              second.replyRate / 100,
-              best.sentCount,
-              second.sentCount
-            );
-            confidence = zScoreToConfidence(zScore);
-            pValue = zScoreToPValue(zScore);
-            hasSignificance = confidence >= CONFIDENCE_THRESHOLD;
-
-            if (hasSignificance) {
-              winner = best;
-            }
-          }
-
-          const status: 'running' | 'completed' | 'needs_data' | 'draft' = 
-            !hasEnoughData ? 'needs_data' : hasSignificance ? 'completed' : 'running';
-
-          const daysSinceCreation = Math.floor(
-            (Date.now() - new Date(campaign.created_at).getTime()) / (1000 * 60 * 60 * 24)
-          );
-
-          const currentSampleControl = control?.sentCount || 0;
-          const currentSampleTreatment = treatments.reduce((sum, t) => sum + t.sentCount, 0);
-          const requiredSample = MIN_SAMPLE_SIZE;
-          const progress = (currentSampleControl + currentSampleTreatment) / (requiredSample * 2);
-          const estimatedDaysRemaining = progress > 0 ? Math.ceil((1 - progress) / progress * daysSinceCreation) : null;
-
-          return {
-            id: campaign.id,
-            name: campaign.name,
-            hypothesis: `Testing ${variants.length} variants to optimize reply rate`,
-            primaryMetric: 'Reply Rate',
-            status,
-            dayNumber: daysSinceCreation,
-            totalDays: 14,
-            variants,
-            requiredSamplePerVariant: requiredSample,
-            currentSampleControl,
-            currentSampleTreatment,
-            winner,
-            confidence,
-            pValue,
-            lift: winner && control ? ((winner.replyRate - control.replyRate) / control.replyRate) * 100 : null,
-            estimatedDaysRemaining
-          };
-        })
-        .filter(e => e.variants.length >= 2)
-        .sort((a, b) => {
-          const statusOrder = { completed: 0, running: 1, needs_data: 2, draft: 3 };
-          return statusOrder[a.status] - statusOrder[b.status];
-        });
-
-      setExperiments(experimentsData);
+      setExperiments(formattedExperiments);
     } catch (err) {
       console.error('Error fetching experiments:', err);
     } finally {
@@ -349,33 +122,14 @@ export default function Experiments() {
     }
   };
 
-  const completedExperiments = experiments.filter(e => e.status === 'completed');
-  const runningExperiments = experiments.filter(e => e.status === 'running');
-  const needsDataExperiments = experiments.filter(e => e.status === 'needs_data');
+  const stats = useMemo(() => {
+    const active = experiments.filter(e => e.status === 'running').length;
+    const completed = experiments.filter(e => e.status === 'completed').length;
+    const withWinner = experiments.filter(e => e.winner_variant_id).length;
+    return { total: experiments.length, active, completed, withWinner };
+  }, [experiments]);
 
-  // Calculate program health metrics
-  const programHealth = useMemo(() => {
-    const completed = completedExperiments.length + needsDataExperiments.length;
-    const allExperiments = [...completedExperiments, ...needsDataExperiments, ...runningExperiments];
-    
-    const avgSampleSize = allExperiments.length > 0
-      ? allExperiments.reduce((sum, e) => sum + (e.currentSampleControl + e.currentSampleTreatment) / 2, 0) / allExperiments.length
-      : 0;
-    
-    const avgDurationDays = allExperiments.length > 0
-      ? allExperiments.reduce((sum, e) => sum + e.dayNumber, 0) / allExperiments.length
-      : 0;
-
-    return {
-      totalTests: completed,
-      winnersFound: completedExperiments.length,
-      noDiffFound: needsDataExperiments.length,
-      avgSampleSize: Math.round(avgSampleSize),
-      avgDurationDays
-    };
-  }, [completedExperiments, needsDataExperiments, runningExperiments]);
-
-  if (authLoading || !user) {
+  if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -383,8 +137,7 @@ export default function Experiments() {
     );
   }
 
-  const hasExperiments = experiments.length > 0;
-  const hasRunningExperiments = runningExperiments.length > 0;
+  if (!user) return null;
 
   return (
     <DashboardLayout>
@@ -392,142 +145,163 @@ export default function Experiments() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Experiments</h1>
-            <p className="text-muted-foreground">
-              Scientific A/B testing with statistical rigor
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setActiveTab('calculator')}>
-              <Calculator className="h-4 w-4 mr-2" />
-              Power Calculator
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setActiveTab('suggestions')}>
-              <Lightbulb className="h-4 w-4 mr-2" />
-              Suggestions ({suggestions.length})
-            </Button>
-            <Button size="sm" disabled>
-              <Plus className="h-4 w-4 mr-2" />
-              New Experiment
-            </Button>
+            <p className="text-muted-foreground">Track A/B tests and experiment results</p>
           </div>
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : !hasExperiments ? (
-          <NoExperimentsState suggestions={suggestions} />
-        ) : (
-          <div className="space-y-6">
-            {/* Status Overview */}
-            <ExperimentStatusOverview 
-              running={runningExperiments.length}
-              winners={completedExperiments.length}
-              noDiff={needsDataExperiments.length}
-              draft={0}
-            />
+        {/* Stats Cards */}
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Experiments</CardTitle>
+              <Beaker className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.total}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Active</CardTitle>
+              <AlertCircle className="h-4 w-4 text-warning" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.active}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Completed</CardTitle>
+              <CheckCircle className="h-4 w-4 text-success" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.completed}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">With Winner</CardTitle>
+              <TrendingUp className="h-4 w-4 text-chart-1" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.withWinner}</div>
+            </CardContent>
+          </Card>
+        </div>
 
-            {/* Program Health Alert - Show prominently if there are issues */}
-            {programHealth.totalTests > 0 && (
-              <ExperimentProgramHealth {...programHealth} />
-            )}
-
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="running">Running ({runningExperiments.length})</TabsTrigger>
-                <TabsTrigger value="completed">Completed ({completedExperiments.length})</TabsTrigger>
-                <TabsTrigger value="suggestions">
-                  Suggestions ({suggestions.length})
-                </TabsTrigger>
-                <TabsTrigger value="calculator">Power Calculator</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="overview" className="space-y-6">
-                {/* Show suggestions prominently if no running experiments */}
-                {!hasRunningExperiments && suggestions.length > 0 && (
-                  <div className="p-4 rounded-lg border border-primary/30 bg-primary/5">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Lightbulb className="h-5 w-5 text-warning" />
-                      <h3 className="font-semibold">No Running Experiments</h3>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      We found {suggestions.length} high-potential experiments based on your data. 
-                      Start testing to discover what works best.
-                    </p>
-                    <Button onClick={() => setActiveTab('suggestions')}>
-                      View Suggestions
-                    </Button>
-                  </div>
-                )}
-
-                {/* Running Experiments Summary */}
-                {runningExperiments.length > 0 && (
-                  <div className="space-y-4">
-                    <h3 className="font-semibold">Currently Running</h3>
-                    {runningExperiments.slice(0, 2).map(experiment => (
-                      <ActiveExperimentCard key={experiment.id} experiment={experiment} />
-                    ))}
-                    {runningExperiments.length > 2 && (
-                      <Button variant="outline" onClick={() => setActiveTab('running')}>
-                        View all {runningExperiments.length} running experiments
-                      </Button>
-                    )}
-                  </div>
-                )}
-
-                {/* Best Practices - Collapsed by default */}
-                <ExperimentBestPractices />
-              </TabsContent>
-
-              <TabsContent value="running" className="space-y-4">
-                {runningExperiments.length === 0 ? (
-                  <div className="p-8 text-center text-muted-foreground border rounded-lg border-dashed">
-                    <p>No running experiments</p>
-                    <Button 
-                      variant="link" 
-                      className="mt-2"
-                      onClick={() => setActiveTab('suggestions')}
+        {/* Experiments List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Experiments</CardTitle>
+            <CardDescription>View and manage your A/B test experiments</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : experiments.length === 0 ? (
+              <div className="text-center py-12">
+                <Beaker className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No experiments yet</h3>
+                <p className="text-muted-foreground max-w-md mx-auto">
+                  Experiments are automatically detected from campaigns with multiple variants.
+                  Create campaigns with A/B tests to see them here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {experiments.map((experiment) => {
+                  const progress = experiment.min_sample_size && experiment.actual_sample_size
+                    ? Math.min(100, (experiment.actual_sample_size / experiment.min_sample_size) * 100)
+                    : 0;
+                  
+                  return (
+                    <div
+                      key={experiment.id}
+                      className="p-4 rounded-lg border bg-card"
                     >
-                      View suggested experiments
-                    </Button>
-                  </div>
-                ) : (
-                  runningExperiments.map(experiment => (
-                    <ActiveExperimentCard key={experiment.id} experiment={experiment} />
-                  ))
-                )}
-              </TabsContent>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="font-semibold">{experiment.name}</h3>
+                            <Badge variant={
+                              experiment.status === 'running' ? 'default' :
+                              experiment.status === 'completed' ? 'secondary' :
+                              'outline'
+                            }>
+                              {experiment.status || 'draft'}
+                            </Badge>
+                            {experiment.variable_type && (
+                              <Badge variant="outline">{experiment.variable_type}</Badge>
+                            )}
+                          </div>
+                          {experiment.hypothesis && (
+                            <p className="text-sm text-muted-foreground mb-3">{experiment.hypothesis}</p>
+                          )}
+                          
+                          {/* Progress bar for sample size */}
+                          {experiment.min_sample_size && (
+                            <div className="space-y-1 mb-4">
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>Sample Progress</span>
+                                <span>{experiment.actual_sample_size || 0} / {experiment.min_sample_size}</span>
+                              </div>
+                              <Progress value={progress} className="h-2" />
+                            </div>
+                          )}
 
-              <TabsContent value="completed" className="space-y-4">
-                {completedExperiments.length === 0 ? (
-                  <div className="p-8 text-center text-muted-foreground border rounded-lg border-dashed">
-                    <p>No completed experiments with clear winners yet</p>
-                    <p className="text-sm mt-2">
-                      Experiments need {MIN_SAMPLE_SIZE.toLocaleString()}+ sends per variant and 95%+ confidence
-                    </p>
-                  </div>
-                ) : (
-                  completedExperiments.map(experiment => (
-                    <ExperimentResultsCard key={experiment.id} experiment={experiment} />
-                  ))
-                )}
-              </TabsContent>
-
-              <TabsContent value="suggestions" className="space-y-4">
-                <ExperimentSuggestions suggestions={suggestions} />
-              </TabsContent>
-
-              <TabsContent value="calculator" className="space-y-4">
-                <SampleSizeCalculator 
-                  dailySendCapacity={500}
-                  baselineReplyRate={0.03}
-                />
-              </TabsContent>
-            </Tabs>
-          </div>
-        )}
+                          {/* Variants */}
+                          {experiment.variants.length > 0 && (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              {experiment.variants.map(variant => (
+                                <div
+                                  key={variant.id}
+                                  className={`p-3 rounded-md border ${
+                                    experiment.winner_variant_id === variant.id
+                                      ? 'border-success bg-success/10'
+                                      : variant.is_control
+                                      ? 'border-muted'
+                                      : 'border-chart-1/30 bg-chart-1/5'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-sm font-medium truncate">{variant.name}</span>
+                                    {variant.is_control && (
+                                      <Badge variant="outline" className="text-xs">Control</Badge>
+                                    )}
+                                    {experiment.winner_variant_id === variant.id && (
+                                      <Badge className="text-xs bg-success">Winner</Badge>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Sent: {variant.total_sent?.toLocaleString() || 0}
+                                  </div>
+                                  <div className="text-lg font-bold">
+                                    {variant.reply_rate?.toFixed(2) || 0}%
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {experiment.confidence_level && (
+                          <div className="text-right">
+                            <div className="text-sm text-muted-foreground">Confidence</div>
+                            <div className="text-xl font-bold">
+                              {experiment.confidence_level}%
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </DashboardLayout>
   );

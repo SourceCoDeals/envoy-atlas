@@ -146,18 +146,31 @@ export default function DealHub() {
     setSaving(true);
     try {
       await createDeal({
-        workspace_id: currentWorkspace.id,
         project_name: formData.project_name,
         business_description: formData.business_description || null,
-        client_id: null,
         client_name: formData.client_name || null,
         geography: formData.geography || null,
         industry: formData.industry || null,
+        sub_industry: null,
         revenue: formData.revenue ? parseFloat(formData.revenue) * 1000000 : null,
+        revenue_display: null,
         ebitda: formData.ebitda ? parseFloat(formData.ebitda) * 1000000 : null,
+        ebitda_display: null,
+        asking_price: null,
+        asking_price_display: null,
+        revenue_multiple: null,
+        ebitda_multiple: null,
         stage: formData.stage,
         teaser_url: formData.teaser_url || null,
-        created_by: user.id,
+        cim_url: null,
+        notes: null,
+        pass_reason: null,
+        source_type: null,
+        assigned_to: null,
+        received_at: null,
+        nda_signed_date: null,
+        engagement_id: null,
+        deal_client_id: null,
       });
 
       toast.success('Deal created successfully');

@@ -1,61 +1,40 @@
-import { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useEngagementReport } from '@/hooks/useEngagementReport';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
-import { 
-  ArrowLeft, Share2, 
-  BarChart3, Mail, Phone, Target, Clock, Users
-} from 'lucide-react';
-import { DateRangeFilter, DateRangeOption, getDateRange } from '@/components/dashboard/DateRangeFilter';
-import { ExecutiveSummaryTab } from '@/components/engagementReport/ExecutiveSummaryTab';
-import { EmailReportTab } from '@/components/engagementReport/EmailReportTab';
-import { CallingReportTab } from '@/components/engagementReport/CallingReportTab';
-import { PipelineMeetingsTab } from '@/components/engagementReport/PipelineMeetingsTab';
-import { ActivityTimelineTab } from '@/components/engagementReport/ActivityTimelineTab';
-import { TargetsListsTab } from '@/components/engagementReport/TargetsListsTab';
-import { ExportReportButton } from '@/components/engagementReport/ExportReportButton';
+import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/components/dashboard/DateRangeFilter';
+import { Loader2, ArrowLeft, Share2, Mail, Phone, Target, Calendar } from 'lucide-react';
 
 export default function EngagementReport() {
-  const { engagementId } = useParams<{ engagementId: string }>();
   const navigate = useNavigate();
+  const { engagementId } = useParams<{ engagementId: string }>();
   const { user, loading: authLoading } = useAuth();
   const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('last30');
-  const [activeTab, setActiveTab] = useState('executive');
-
-  const dateRange = useMemo(() => {
-    const { startDate, endDate } = getDateRange(dateRangeOption);
-    return { startDate, endDate };
-  }, [dateRangeOption]);
-
-  const { data, loading, error } = useEngagementReport(engagementId || '', dateRange);
+  const dateRange = getDateRange(dateRangeOption);
+  
+  const { data, loading, error } = useEngagementReport(engagementId || '', {
+    startDate: dateRange.startDate,
+    endDate: dateRange.endDate,
+  });
 
   useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
+    if (!authLoading && !user) navigate('/auth');
   }, [user, authLoading, navigate]);
 
   if (authLoading || loading) {
     return (
       <DashboardLayout>
-        <div className="space-y-6 p-6">
-          <div className="flex items-center gap-4">
-            <Skeleton className="h-10 w-10" />
-            <div className="space-y-2">
-              <Skeleton className="h-6 w-64" />
-              <Skeleton className="h-4 w-48" />
-            </div>
-          </div>
-          <Skeleton className="h-12 w-full" />
-          <div className="grid grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map(i => (
-              <Skeleton key={i} className="h-32" />
+        <div className="space-y-6">
+          <Skeleton className="h-12 w-1/3" />
+          <div className="grid gap-4 md:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-24" />
             ))}
           </div>
         </div>
@@ -63,12 +42,17 @@ export default function EngagementReport() {
     );
   }
 
-  if (error || !data?.engagement) {
+  if (!user) return null;
+  
+  if (error || !data || !data.engagement) {
     return (
       <DashboardLayout>
-        <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
-          <p className="text-muted-foreground">{error || 'Engagement not found'}</p>
-          <Button onClick={() => navigate('/engagements')} variant="outline">
+        <div className="text-center py-12">
+          <h2 className="text-xl font-semibold mb-2">Engagement Not Found</h2>
+          <p className="text-muted-foreground mb-4">
+            {error || 'Unable to load engagement report data'}
+          </p>
+          <Button onClick={() => navigate('/engagements')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Engagements
           </Button>
@@ -77,11 +61,11 @@ export default function EngagementReport() {
     );
   }
 
-  const { engagement } = data;
+  const { engagement, keyMetrics, emailMetrics, callingMetrics, linkedCampaigns } = data;
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 p-6">
+      <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
@@ -91,19 +75,19 @@ export default function EngagementReport() {
             <div className="flex items-center gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-2xl font-bold">{engagement.client_name}</h1>
+                  <h1 className="text-2xl font-bold">{engagement.name}</h1>
                   <Badge variant={engagement.status === 'active' ? 'default' : 'secondary'}>
                     {engagement.status}
                   </Badge>
                 </div>
-                <p className="text-muted-foreground">{engagement.engagement_name}</p>
+                <p className="text-muted-foreground">{engagement.description || 'No description'}</p>
               </div>
               <DataHealthIndicator 
-                status={data.linkedCampaigns.length > 0 ? (data.emailMetrics.sent > 0 ? 'healthy' : 'degraded') : 'empty'} 
-                tooltip={data.linkedCampaigns.length > 0 
-                  ? (data.emailMetrics.sent > 0 
-                    ? `${data.linkedCampaigns.length} campaigns, ${data.emailMetrics.sent.toLocaleString()} sent` 
-                    : `${data.linkedCampaigns.length} campaigns linked but 0 sent emails`) 
+                status={linkedCampaigns.length > 0 ? (emailMetrics.sent > 0 ? 'healthy' : 'degraded') : 'empty'} 
+                tooltip={linkedCampaigns.length > 0 
+                  ? (emailMetrics.sent > 0 
+                    ? `${linkedCampaigns.length} campaigns, ${emailMetrics.sent.toLocaleString()} sent` 
+                    : `${linkedCampaigns.length} campaigns linked but 0 sent emails`) 
                   : 'No campaigns linked to this engagement'}
               />
             </div>
@@ -114,94 +98,189 @@ export default function EngagementReport() {
               <Share2 className="mr-2 h-4 w-4" />
               Share
             </Button>
-            <ExportReportButton data={data} />
           </div>
         </div>
 
         {/* Engagement Overview */}
         <div className="rounded-lg border bg-card p-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <p className="text-muted-foreground">Start Date</p>
-              <p className="font-medium">{new Date(engagement.start_date).toLocaleDateString()}</p>
+              <p className="font-medium">
+                {engagement.start_date ? new Date(engagement.start_date).toLocaleDateString() : '—'}
+              </p>
             </div>
             <div>
-              <p className="text-muted-foreground">Industry Focus</p>
-              <p className="font-medium">{engagement.industry_focus || '—'}</p>
+              <p className="text-muted-foreground">End Date</p>
+              <p className="font-medium">
+                {engagement.end_date ? new Date(engagement.end_date).toLocaleDateString() : 'Ongoing'}
+              </p>
             </div>
             <div>
-              <p className="text-muted-foreground">Geography</p>
-              <p className="font-medium">{engagement.geography || '—'}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Deal Lead</p>
-              <p className="font-medium">{engagement.deal_lead || '—'}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Sponsor</p>
-              <p className="font-medium">{engagement.sponsor || '—'}</p>
+              <p className="text-muted-foreground">Meeting Goal</p>
+              <p className="font-medium">{engagement.meeting_goal || '—'}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Linked Campaigns</p>
-              <p className="font-medium">{data.linkedCampaigns.length}</p>
+              <p className="font-medium">{linkedCampaigns.length}</p>
             </div>
           </div>
         </div>
 
-        {/* Report Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
-            <TabsTrigger value="executive" className="gap-2">
-              <BarChart3 className="h-4 w-4" />
-              <span className="hidden sm:inline">Executive Summary</span>
-              <span className="sm:hidden">Summary</span>
-            </TabsTrigger>
-            <TabsTrigger value="email" className="gap-2">
-              <Mail className="h-4 w-4" />
-              <span className="hidden sm:inline">Email Report</span>
-              <span className="sm:hidden">Email</span>
-            </TabsTrigger>
-            <TabsTrigger value="calling" className="gap-2">
-              <Phone className="h-4 w-4" />
-              <span className="hidden sm:inline">Calling Report</span>
-              <span className="sm:hidden">Calling</span>
-            </TabsTrigger>
-            <TabsTrigger value="pipeline" className="gap-2">
-              <Target className="h-4 w-4" />
-              <span className="hidden sm:inline">Pipeline & Meetings</span>
-              <span className="sm:hidden">Pipeline</span>
-            </TabsTrigger>
-            <TabsTrigger value="activity" className="gap-2">
-              <Clock className="h-4 w-4" />
-              <span className="hidden sm:inline">Activity Timeline</span>
-              <span className="sm:hidden">Activity</span>
-            </TabsTrigger>
-            <TabsTrigger value="targets" className="gap-2">
-              <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Targets & Lists</span>
-              <span className="sm:hidden">Targets</span>
-            </TabsTrigger>
-          </TabsList>
+        {/* Key Metrics */}
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Touchpoints</CardTitle>
+              <Target className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{keyMetrics.totalTouchpoints.toLocaleString()}</div>
+              <p className="text-xs text-muted-foreground">
+                {keyMetrics.emailTouchpoints.toLocaleString()} emails + {keyMetrics.callTouchpoints.toLocaleString()} calls
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Positive Responses</CardTitle>
+              <Mail className="h-4 w-4 text-success" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-success">{keyMetrics.positiveResponses}</div>
+              <p className="text-xs text-muted-foreground">
+                {keyMetrics.responseRate.toFixed(1)}% response rate
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Meetings Scheduled</CardTitle>
+              <Calendar className="h-4 w-4 text-chart-1" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-chart-1">{keyMetrics.meetingsScheduled}</div>
+              <p className="text-xs text-muted-foreground">
+                {keyMetrics.meetingRate.toFixed(2)}% meeting rate
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Companies Contacted</CardTitle>
+              <Phone className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{keyMetrics.companiesContacted}</div>
+              <p className="text-xs text-muted-foreground">
+                {keyMetrics.contactsReached} contacts reached
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
-          <TabsContent value="executive">
-            <ExecutiveSummaryTab data={data} />
-          </TabsContent>
-          <TabsContent value="email">
-            <EmailReportTab data={data} />
-          </TabsContent>
-          <TabsContent value="calling">
-            <CallingReportTab data={data} />
-          </TabsContent>
-          <TabsContent value="pipeline">
-            <PipelineMeetingsTab data={data} />
-          </TabsContent>
-          <TabsContent value="activity">
-            <ActivityTimelineTab data={data} />
-          </TabsContent>
-          <TabsContent value="targets">
-            <TargetsListsTab data={data} />
-          </TabsContent>
-        </Tabs>
+        {/* Email & Calling Metrics Side by Side */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Email Metrics */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5" />
+                Email Performance
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Sent</p>
+                  <p className="text-xl font-bold">{emailMetrics.sent.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Delivered</p>
+                  <p className="text-xl font-bold">{emailMetrics.deliveryRate.toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Opened</p>
+                  <p className="text-xl font-bold">{emailMetrics.openRate.toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Replied</p>
+                  <p className="text-xl font-bold">{emailMetrics.replyRate.toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Positive</p>
+                  <p className="text-xl font-bold text-success">{emailMetrics.positiveReplies}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Bounce Rate</p>
+                  <p className="text-xl font-bold text-destructive">{emailMetrics.bounceRate.toFixed(1)}%</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Calling Metrics */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5" />
+                Calling Performance
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Calls</p>
+                  <p className="text-xl font-bold">{callingMetrics.totalCalls.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Connections</p>
+                  <p className="text-xl font-bold">{callingMetrics.connections}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Connect Rate</p>
+                  <p className="text-xl font-bold">{callingMetrics.connectRate.toFixed(1)}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Conversations</p>
+                  <p className="text-xl font-bold">{callingMetrics.conversations}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Meetings</p>
+                  <p className="text-xl font-bold text-success">{callingMetrics.meetings}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Avg Duration</p>
+                  <p className="text-xl font-bold">{Math.round(callingMetrics.avgDuration / 60)}m</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Linked Campaigns */}
+        {linkedCampaigns.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Linked Campaigns</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2">
+                {linkedCampaigns.map(campaign => (
+                  <div key={campaign.id} className="flex items-center justify-between p-3 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <Badge variant="outline">{campaign.platform}</Badge>
+                      <span className="font-medium">{campaign.name}</span>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => navigate(`/campaigns/${campaign.id}`)}>
+                      View
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </DashboardLayout>
   );
