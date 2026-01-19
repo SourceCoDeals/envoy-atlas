@@ -74,8 +74,13 @@ export function SyncStatusDashboard() {
   const triggerSync = async (platform: string) => {
     if (!currentWorkspace?.id) return;
     try {
+      // Note: This is a simplified trigger - for full functionality use ConnectionsSection
       const { error } = await supabase.functions.invoke(`${platform}-sync`, {
-        body: { workspace_id: currentWorkspace.id, reset: false },
+        body: { 
+          client_id: currentWorkspace.id,
+          reset: false,
+          auto_continue: true,
+        },
       });
       if (error) throw error;
       toast.success(`${PLATFORM_CONFIG[platform]?.displayName || platform} sync started`);
@@ -86,10 +91,9 @@ export function SyncStatusDashboard() {
   };
 
   const triggerRecovery = async () => {
-    if (!currentWorkspace?.id) return;
     try {
       const { data, error } = await supabase.functions.invoke('sync-recovery', {
-        body: { action: 'auto', workspace_id: currentWorkspace.id },
+        body: { action: 'auto' },
       });
       if (error) throw error;
       const results = data?.results || [];
