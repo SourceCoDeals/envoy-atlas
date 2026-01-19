@@ -150,27 +150,45 @@ async function getOrCreateContact(
     return { contactId: contact.id, companyId: contact.company_id };
   }
 
-  // Create company first
+  // Create company first - use select-then-insert pattern for NULL domain handling
   const domain = email.split('@')[1]?.toLowerCase();
-  const { data: company } = await supabase
-    .from('companies')
-    .upsert({
-      engagement_id: engagementId,
-      name: domain || 'Unknown',
-      domain,
-      source: 'webhook',
-    }, { onConflict: 'engagement_id,domain' })
-    .select('id')
-    .single();
+  let companyId: string | null = null;
+  
+  if (domain) {
+    const { data: existingCompany } = await supabase
+      .from('companies')
+      .select('id')
+      .eq('engagement_id', engagementId)
+      .eq('domain', domain)
+      .maybeSingle();
+    
+    if (existingCompany) {
+      companyId = existingCompany.id;
+    }
+  }
+  
+  if (!companyId) {
+    const { data: newCompany } = await supabase
+      .from('companies')
+      .insert({
+        engagement_id: engagementId,
+        name: domain || 'Unknown',
+        domain,
+        source: 'webhook',
+      })
+      .select('id')
+      .single();
+    companyId = newCompany?.id;
+  }
 
-  if (!company) return null;
+  if (!companyId) return null;
 
   // Create contact
   const { data: newContact } = await supabase
     .from('contacts')
     .upsert({
       engagement_id: engagementId,
-      company_id: company.id,
+      company_id: companyId,
       email,
       source: 'webhook',
     }, { onConflict: 'engagement_id,email' })
@@ -179,6 +197,49 @@ async function getOrCreateContact(
 
   if (!newContact) return null;
   return { contactId: newContact.id, companyId: newContact.company_id };
+}
+
+// Helper for atomic hourly metrics increment
+async function incrementHourlyMetric(
+  supabase: any,
+  engagementId: string,
+  campaignId: string,
+  eventTimestamp: string | undefined,
+  metricField: 'emails_sent' | 'emails_opened' | 'emails_clicked' | 'emails_replied' | 'emails_bounced'
+) {
+  const now = new Date(eventTimestamp || Date.now());
+  const hourOfDay = now.getUTCHours();
+  const dayOfWeek = now.getUTCDay();
+  const metricDate = now.toISOString().split('T')[0];
+  
+  // Try to find existing record
+  const { data: existing } = await supabase
+    .from('hourly_metrics')
+    .select(`id, ${metricField}`)
+    .eq('engagement_id', engagementId)
+    .eq('campaign_id', campaignId)
+    .eq('hour_of_day', hourOfDay)
+    .eq('day_of_week', dayOfWeek)
+    .eq('metric_date', metricDate)
+    .maybeSingle();
+  
+  if (existing) {
+    const updateData: Record<string, number> = {};
+    updateData[metricField] = ((existing as any)[metricField] || 0) + 1;
+    await supabase.from('hourly_metrics')
+      .update(updateData)
+      .eq('id', existing.id);
+  } else {
+    const insertData: Record<string, any> = {
+      engagement_id: engagementId,
+      campaign_id: campaignId,
+      hour_of_day: hourOfDay,
+      day_of_week: dayOfWeek,
+      metric_date: metricDate,
+    };
+    insertData[metricField] = 1;
+    await supabase.from('hourly_metrics').insert(insertData);
+  }
 }
 
 async function processEmailSent(
@@ -203,19 +264,37 @@ async function processEmailSent(
     step_number: event.sequence_number || 1,
   }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
 
-  // Update hourly metrics
+  // Update hourly metrics - use RPC for atomic increment
   const now = new Date(event.event_timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
+  const hourKey = {
     engagement_id: engagementId,
     campaign_id: campaignId,
     hour_of_day: now.getUTCHours(),
     day_of_week: now.getUTCDay(),
     metric_date: now.toISOString().split('T')[0],
-    emails_sent: 1,
-  }, { 
-    onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date',
-    count: 'exact'
-  });
+  };
+  
+  // Try to increment, otherwise insert
+  const { data: existing } = await supabase
+    .from('hourly_metrics')
+    .select('id, emails_sent')
+    .eq('engagement_id', engagementId)
+    .eq('campaign_id', campaignId)
+    .eq('hour_of_day', hourKey.hour_of_day)
+    .eq('day_of_week', hourKey.day_of_week)
+    .eq('metric_date', hourKey.metric_date)
+    .single();
+  
+  if (existing) {
+    await supabase.from('hourly_metrics')
+      .update({ emails_sent: (existing.emails_sent || 0) + 1 })
+      .eq('id', existing.id);
+  } else {
+    await supabase.from('hourly_metrics').insert({
+      ...hourKey,
+      emails_sent: 1,
+    });
+  }
 
   console.log('Processed EMAIL_SENT for', event.email);
 }
@@ -242,16 +321,8 @@ async function processEmailOpen(
     .eq('contact_id', contactInfo.contactId)
     .eq('step_number', event.sequence_number || 1);
 
-  // Update hourly metrics
-  const now = new Date(event.event_timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_opened: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // Update hourly metrics with atomic increment
+  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_opened');
 
   console.log('Processed EMAIL_OPEN for', event.email);
 }
@@ -300,16 +371,8 @@ async function processEmailClick(
     });
   }
 
-  // Update hourly metrics
-  const now = new Date(event.event_timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_clicked: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // Update hourly metrics with atomic increment
+  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_clicked');
 
   console.log('Processed EMAIL_CLICK for', event.email);
 }
@@ -352,16 +415,8 @@ async function processEmailReply(
     });
   }
 
-  // Update hourly metrics
-  const now = new Date(event.event_timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_replied: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // Update hourly metrics with atomic increment
+  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_replied');
 
   // Trigger reply classification
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -415,16 +470,8 @@ async function processEmailBounce(
     })
     .eq('id', contactInfo.contactId);
 
-  // Update hourly metrics
-  const now = new Date(event.event_timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_bounced: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // Update hourly metrics with atomic increment
+  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_bounced');
 
   console.log('Processed EMAIL_BOUNCE for', event.email);
 }

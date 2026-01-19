@@ -1005,6 +1005,39 @@ Deno.serve(async (req) => {
                     if (!activityError) {
                       progress.email_activities_synced++;
                       
+                      // Aggregate hourly metrics from timestamps
+                      const addToHourlyMetrics = async (timestamp: string | null, metricType: 'sent' | 'opened' | 'clicked' | 'replied' | 'bounced') => {
+                        if (!timestamp) return;
+                        try {
+                          const date = new Date(timestamp);
+                          const hour = date.getUTCHours();
+                          const dayOfWeek = date.getUTCDay();
+                          const metricDate = date.toISOString().split('T')[0];
+                          
+                          const metricData: Record<string, any> = {
+                            engagement_id,
+                            campaign_id: campaignId,
+                            hour_of_day: hour,
+                            day_of_week: dayOfWeek,
+                            metric_date: metricDate,
+                          };
+                          metricData[`emails_${metricType}`] = 1;
+                          
+                          await supabase.from('hourly_metrics').upsert(metricData, { 
+                            onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' 
+                          });
+                        } catch (e) {
+                          // Continue on hourly metrics error
+                        }
+                      };
+                      
+                      // Add metrics from this event
+                      if (event.sentAt || event.sent_at) await addToHourlyMetrics(event.sentAt || event.sent_at, 'sent');
+                      if (event.openedAt || event.opened_at) await addToHourlyMetrics(event.openedAt || event.opened_at, 'opened');
+                      if (event.clickedAt || event.clicked_at) await addToHourlyMetrics(event.clickedAt || event.clicked_at, 'clicked');
+                      if (event.repliedAt || event.replied_at) await addToHourlyMetrics(event.repliedAt || event.replied_at, 'replied');
+                      if (event.bouncedAt || event.bounced_at) await addToHourlyMetrics(event.bouncedAt || event.bounced_at, 'bounced');
+                      
                       // If this is a reply with content, also store in message_threads
                       if (event.replyText || event.reply || event.replyBody) {
                         const replyContent = event.replyText || event.reply || event.replyBody;

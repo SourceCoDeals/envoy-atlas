@@ -1061,6 +1061,48 @@ serve(async (req) => {
                     
                     if (!activityError) {
                       progress.email_activities_synced++;
+                      
+                      // Aggregate hourly metrics from timestamps
+                      const hourlyBuckets: Map<string, { sent: number; opened: number; clicked: number; replied: number; bounced: number }> = new Map();
+                      
+                      const addToHourlyBucket = (timestamp: string | null, metricType: 'sent' | 'opened' | 'clicked' | 'replied' | 'bounced') => {
+                        if (!timestamp) return;
+                        const date = new Date(timestamp);
+                        const hour = date.getUTCHours();
+                        const dayOfWeek = date.getUTCDay();
+                        const metricDate = date.toISOString().split('T')[0];
+                        const key = `${hour}-${dayOfWeek}-${metricDate}`;
+                        
+                        if (!hourlyBuckets.has(key)) {
+                          hourlyBuckets.set(key, { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
+                        }
+                        const bucket = hourlyBuckets.get(key)!;
+                        bucket[metricType]++;
+                      };
+                      
+                      // Add metrics from this stat
+                      if (stat.sent_time) addToHourlyBucket(stat.sent_time, 'sent');
+                      if (stat.open_time) addToHourlyBucket(stat.open_time, 'opened');
+                      if (stat.click_time) addToHourlyBucket(stat.click_time, 'clicked');
+                      if (stat.reply_time) addToHourlyBucket(stat.reply_time, 'replied');
+                      if (stat.is_bounced && stat.sent_time) addToHourlyBucket(stat.sent_time, 'bounced');
+                      
+                      // Upsert hourly metrics
+                      for (const [key, metrics] of hourlyBuckets) {
+                        const [hour, dayOfWeek, metricDate] = key.split('-');
+                        await supabase.from('hourly_metrics').upsert({
+                          engagement_id: activeEngagementId,
+                          campaign_id: campaignDbId,
+                          hour_of_day: parseInt(hour),
+                          day_of_week: parseInt(dayOfWeek),
+                          metric_date: metricDate,
+                          emails_sent: metrics.sent,
+                          emails_opened: metrics.opened,
+                          emails_clicked: metrics.clicked,
+                          emails_replied: metrics.replied,
+                          emails_bounced: metrics.bounced,
+                        }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+                      }
                     }
                   } catch (e) {
                     // Continue on individual stat errors
