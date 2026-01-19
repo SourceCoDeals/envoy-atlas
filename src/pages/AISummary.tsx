@@ -1,6 +1,3 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
 import { useAISummary } from '@/hooks/useAISummary';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -37,27 +34,11 @@ import {
   RefreshCw,
   ExternalLink,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export default function AISummary() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
   const { data, loading, error, refetch } = useAISummary();
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
-
-  if (authLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

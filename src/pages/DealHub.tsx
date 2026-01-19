@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useDeals, type Deal } from '@/hooks/useDeals';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -90,7 +89,6 @@ function getStageColor(stage: string): string {
 }
 
 export default function DealHub() {
-  const { user } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { deals, clients, stats, loading, createDeal, createClient } = useDeals();
 
@@ -141,7 +139,7 @@ export default function DealHub() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentWorkspace?.id || !user?.id) return;
+    if (!currentWorkspace?.id) return;
 
     setSaving(true);
     try {

@@ -136,9 +136,6 @@ export default function Connections() {
     }
   };
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate("/auth");
-  }, [authLoading, user, navigate]);
 
   // Handle OAuth callback results from query params
   useEffect(() => {

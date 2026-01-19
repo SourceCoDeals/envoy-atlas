@@ -1,6 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
 import { useEngagementReport } from '@/hooks/useEngagementReport';
 import { useCampaignLinking, UnlinkedCampaign } from '@/hooks/useCampaignLinking';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -23,7 +22,6 @@ import { toast } from 'sonner';
 export default function EngagementReport() {
   const navigate = useNavigate();
   const { engagementId } = useParams<{ engagementId: string }>();
-  const { user, loading: authLoading } = useAuth();
   const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('last30');
   const [activeTab, setActiveTab] = useState('email');
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -80,11 +78,7 @@ export default function EngagementReport() {
     }
   }, [engagementId, refetch]);
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate('/auth');
-  }, [user, authLoading, navigate]);
-
-  if (authLoading || loading) {
+  if (loading) {
     return (
       <DashboardLayout>
         <div className="space-y-6">
@@ -98,8 +92,6 @@ export default function EngagementReport() {
       </DashboardLayout>
     );
   }
-
-  if (!user) return null;
   
   if (error || !data || !data.engagement) {
     return (
