@@ -158,7 +158,7 @@ export function EnhancedCampaignTable({
       // Meetings are not tracked from email campaigns - requires calendar integration
       const actualMeetings = 0;
       // Check if campaign has any actual metrics data
-      const hasMetrics = campaign.total_sent > 0 || campaign.total_opened > 0 || campaign.total_replied > 0;
+      const hasMetrics = campaign.total_sent > 0 || campaign.total_replied > 0;
       return { ...campaign, tier, estimatedPositiveRate: actualPositiveRate, estimatedMeetings: actualMeetings, hasMetrics };
     });
   }, [campaigns]);

@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router-dom';
-import { Mail, TrendingUp, MessageSquare } from 'lucide-react';
+import { Mail, MessageSquare } from 'lucide-react';
 
 interface CampaignSummaryCardProps {
   campaign: {
@@ -10,7 +10,6 @@ interface CampaignSummaryCardProps {
     platform: string;
     status?: string | null;
     sent?: number;
-    openRate?: number;
     replyRate?: number;
   };
 }
@@ -52,20 +51,13 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
         </div>
       </div>
       
-      <div className="grid grid-cols-3 gap-2 text-center">
+      <div className="grid grid-cols-2 gap-2 text-center">
         <div className="p-2 rounded bg-muted/50">
           <div className="flex items-center justify-center gap-1 mb-1">
             <Mail className="h-3 w-3 text-muted-foreground" />
           </div>
           <p className="text-xs font-bold">{(campaign.sent || 0).toLocaleString()}</p>
           <p className="text-[10px] text-muted-foreground">Sent</p>
-        </div>
-        <div className="p-2 rounded bg-muted/50">
-          <div className="flex items-center justify-center gap-1 mb-1">
-            <TrendingUp className="h-3 w-3 text-muted-foreground" />
-          </div>
-          <p className="text-xs font-bold">{(campaign.openRate || 0).toFixed(1)}%</p>
-          <p className="text-[10px] text-muted-foreground">Open</p>
         </div>
         <div className="p-2 rounded bg-muted/50">
           <div className="flex items-center justify-center gap-1 mb-1">

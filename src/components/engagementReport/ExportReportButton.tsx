@@ -63,9 +63,9 @@ export function ExportReportButton({ data }: ExportReportButtonProps) {
     sections.push('Metric,Value,Rate');
     sections.push(`Sent,${emailMetrics.sent},`);
     sections.push(`Delivered,${emailMetrics.delivered},${emailMetrics.deliveryRate.toFixed(2)}%`);
-    sections.push(`Opened,${emailMetrics.opened},${emailMetrics.openRate.toFixed(2)}%`);
-    sections.push(`Clicked,${emailMetrics.clicked},${emailMetrics.clickRate.toFixed(2)}%`);
     sections.push(`Replied,${emailMetrics.replied},${emailMetrics.replyRate.toFixed(2)}%`);
+    sections.push(`Positive Replies,${emailMetrics.positiveReplies},${emailMetrics.positiveRate.toFixed(2)}%`);
+    sections.push(`Bounced,${emailMetrics.bounced},${emailMetrics.bounceRate.toFixed(2)}%`);
     sections.push(`Positive Replies,${emailMetrics.positiveReplies},${emailMetrics.positiveRate.toFixed(2)}%`);
     sections.push(`Bounced,${emailMetrics.bounced},${emailMetrics.bounceRate.toFixed(2)}%`);
     sections.push(`Meetings from Email,${emailMetrics.meetings},`);

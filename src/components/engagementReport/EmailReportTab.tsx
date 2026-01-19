@@ -3,7 +3,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { 
-  Send, CheckCircle, Eye, MousePointer, MessageSquare, 
+  Send, CheckCircle, MessageSquare, 
   ThumbsUp, AlertTriangle, Mail, Globe, Inbox, Activity,
   ChevronDown, ChevronUp, Shield, ShieldCheck, ShieldX,
   Flame, Gauge
@@ -28,10 +28,6 @@ interface EmailReportTabProps {
       sent: number;
       delivered: number;
       deliveryRate: number;
-      opened: number;
-      openRate: number;
-      clicked: number;
-      clickRate: number;
       replied: number;
       replyRate: number;
       positiveReplies: number;
@@ -97,23 +93,6 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
       isActual: true,
     },
     { 
-      label: 'Opened', 
-      value: emailMetrics.opened, 
-      rate: emailMetrics.openRate,
-      icon: Eye,
-      benchmark: 27.7,
-      subtitle: 'open rate',
-      isActual: true,
-    },
-    { 
-      label: 'Clicked', 
-      value: emailMetrics.clicked, 
-      rate: emailMetrics.clickRate,
-      icon: MousePointer,
-      subtitle: 'click rate',
-      isActual: true,
-    },
-    { 
       label: 'Replied', 
       value: emailMetrics.replied, 
       rate: emailMetrics.replyRate,
@@ -129,7 +108,8 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
       icon: ThumbsUp,
       subtitle: 'positive rate',
       highlight: true,
-      isActual: true,
+      isActual: emailMetrics.positiveReplies > 0, // Only marked as actual if we have data
+      tooltip: emailMetrics.positiveReplies === 0 ? 'Not classified - requires reply text sync' : undefined,
     },
     { 
       label: 'Bounced', 
@@ -341,7 +321,7 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {metrics.map((metric) => {
               const Icon = metric.icon;
               const benchmarkStatus = metric.benchmark 
@@ -359,7 +339,7 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
                       {metric.label}
                     </span>
                     {!metric.isActual && (
-                      <DataErrorFlag type="estimated" size="sm" tooltip={metric.tooltip} />
+                      <DataErrorFlag type="not-tracked" size="sm" tooltip={metric.tooltip} />
                     )}
                   </div>
                   <p className={`text-2xl font-bold ${metric.highlight ? 'text-primary' : ''}`}>
@@ -394,10 +374,19 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
           <SentimentAnalysisNotAvailable />
           
           <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="p-4 bg-green-500/10 border-green-500/20">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Positive Replies</p>
-              <p className="text-3xl font-bold text-green-600 mt-1">{emailMetrics.positiveReplies}</p>
-              <p className="text-xs text-green-600 mt-1">✓ Tracked</p>
+            <Card className={`p-4 ${emailMetrics.positiveReplies > 0 ? 'bg-green-500/10 border-green-500/20' : 'border-dashed'}`}>
+              <div className="flex items-center gap-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Positive Replies</p>
+                {emailMetrics.positiveReplies === 0 && (
+                  <DataErrorFlag type="not-tracked" size="sm" tooltip="Not classified - requires reply text sync" />
+                )}
+              </div>
+              <p className={`text-3xl font-bold mt-1 ${emailMetrics.positiveReplies > 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                {emailMetrics.positiveReplies > 0 ? emailMetrics.positiveReplies : '—'}
+              </p>
+              <p className={`text-xs mt-1 ${emailMetrics.positiveReplies > 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                {emailMetrics.positiveReplies > 0 ? '✓ Tracked' : 'Not classified'}
+              </p>
             </Card>
             
             <Card className="p-4 border-dashed">
@@ -424,27 +413,21 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
               <span className="text-sm font-medium">Total Replies</span>
               <span className="text-lg font-bold">{emailMetrics.replied}</span>
             </div>
-            <div className="flex justify-between items-center mt-2 text-sm text-muted-foreground">
-              <span>Positive Rate (of replies)</span>
-              <span>{emailMetrics.replied > 0 ? ((emailMetrics.positiveReplies / emailMetrics.replied) * 100).toFixed(1) : 0}%</span>
-            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Unsubscribes - Not tracked */}
-      <Card className="border-dashed border-muted-foreground/30">
+      {/* Unsubscribes - marked as not tracked */}
+      <Card>
         <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2 text-muted-foreground">
-            <AlertTriangle className="h-5 w-5" />
-            Data Not Being Tracked
+          <CardTitle className="text-lg flex items-center gap-2">
+            Unsubscribes
+            <DataErrorFlag type="not-tracked" size="sm" tooltip="Not tracked - Smartlead/Reply.io data" />
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between p-3 rounded bg-muted/30">
-            <span>Unsubscribes</span>
-            <DataErrorFlag type="not-tracked" tooltip="Unsubscribe tracking not configured" />
-          </div>
+          <p className="text-3xl font-bold text-muted-foreground">—</p>
+          <p className="text-xs text-muted-foreground mt-1">Requires platform integration</p>
         </CardContent>
       </Card>
     </div>
