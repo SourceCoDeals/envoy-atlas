@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router-dom';
-import { Users, Mail, MessageSquare, ThumbsUp } from 'lucide-react';
+import { Mail, MessageSquare, ThumbsUp, Reply } from 'lucide-react';
 
 interface CampaignSummaryCardProps {
   campaign: {
@@ -9,7 +9,6 @@ interface CampaignSummaryCardProps {
     name: string;
     platform: string;
     status?: string | null;
-    enrolled?: number;
     sent?: number;
     replied?: number;
     replyRate?: number;
@@ -62,13 +61,6 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
       <div className="grid grid-cols-4 gap-2 text-center">
         <div className="p-2 rounded bg-muted/50">
           <div className="flex items-center justify-center gap-1 mb-1">
-            <Users className="h-3 w-3 text-muted-foreground" />
-          </div>
-          <p className="text-xs font-bold">{(campaign.enrolled || 0).toLocaleString()}</p>
-          <p className="text-[10px] text-muted-foreground">Enrolled</p>
-        </div>
-        <div className="p-2 rounded bg-muted/50">
-          <div className="flex items-center justify-center gap-1 mb-1">
             <Mail className="h-3 w-3 text-muted-foreground" />
           </div>
           <p className="text-xs font-bold">{(campaign.sent || 0).toLocaleString()}</p>
@@ -76,17 +68,24 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
         </div>
         <div className="p-2 rounded bg-muted/50">
           <div className="flex items-center justify-center gap-1 mb-1">
+            <Reply className="h-3 w-3 text-muted-foreground" />
+          </div>
+          <p className="text-xs font-bold">{(campaign.replied || 0).toLocaleString()}</p>
+          <p className="text-[10px] text-muted-foreground">Replied</p>
+        </div>
+        <div className="p-2 rounded bg-muted/50">
+          <div className="flex items-center justify-center gap-1 mb-1">
             <MessageSquare className="h-3 w-3 text-muted-foreground" />
           </div>
           <p className="text-xs font-bold">{replyRateDisplay}%</p>
-          <p className="text-[10px] text-muted-foreground">Reply</p>
+          <p className="text-[10px] text-muted-foreground">Reply %</p>
         </div>
         <div className="p-2 rounded bg-muted/50">
           <div className="flex items-center justify-center gap-1 mb-1">
             <ThumbsUp className="h-3 w-3 text-muted-foreground" />
           </div>
           <p className="text-xs font-bold">{positiveRateDisplay}%</p>
-          <p className="text-[10px] text-muted-foreground">Positive</p>
+          <p className="text-[10px] text-muted-foreground">Positive %</p>
         </div>
       </div>
     </Card>
