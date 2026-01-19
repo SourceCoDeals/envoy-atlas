@@ -165,8 +165,293 @@ export type Database = {
           },
         ]
       }
+      campaign_variant_features: {
+        Row: {
+          analyzed_at: string | null
+          body_bullet_count: number | null
+          body_cta_position: string | null
+          body_cta_strength: string | null
+          body_cta_type: string | null
+          body_has_bullets: boolean | null
+          body_has_calendar_link: boolean | null
+          body_has_personalization: boolean | null
+          body_length: number | null
+          body_link_count: number | null
+          body_paragraph_count: number | null
+          body_personalization_count: number | null
+          body_question_count: number | null
+          body_reading_grade: number | null
+          body_sentence_count: number | null
+          body_value_proposition_count: number | null
+          body_word_count: number | null
+          body_you_i_ratio: number | null
+          created_at: string | null
+          engagement_id: string | null
+          id: string
+          opening_line_text: string | null
+          opening_line_type: string | null
+          subject_capitalization: string | null
+          subject_first_word_type: string | null
+          subject_format: string | null
+          subject_has_emoji: boolean | null
+          subject_has_number: boolean | null
+          subject_has_personalization: boolean | null
+          subject_length: number | null
+          subject_personalization_type: string | null
+          subject_punctuation: string | null
+          subject_spam_word_count: number | null
+          subject_urgency_score: number | null
+          subject_word_count: number | null
+          tone: string | null
+          updated_at: string | null
+          variant_id: string
+        }
+        Insert: {
+          analyzed_at?: string | null
+          body_bullet_count?: number | null
+          body_cta_position?: string | null
+          body_cta_strength?: string | null
+          body_cta_type?: string | null
+          body_has_bullets?: boolean | null
+          body_has_calendar_link?: boolean | null
+          body_has_personalization?: boolean | null
+          body_length?: number | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_count?: number | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_value_proposition_count?: number | null
+          body_word_count?: number | null
+          body_you_i_ratio?: number | null
+          created_at?: string | null
+          engagement_id?: string | null
+          id?: string
+          opening_line_text?: string | null
+          opening_line_type?: string | null
+          subject_capitalization?: string | null
+          subject_first_word_type?: string | null
+          subject_format?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_has_personalization?: boolean | null
+          subject_length?: number | null
+          subject_personalization_type?: string | null
+          subject_punctuation?: string | null
+          subject_spam_word_count?: number | null
+          subject_urgency_score?: number | null
+          subject_word_count?: number | null
+          tone?: string | null
+          updated_at?: string | null
+          variant_id: string
+        }
+        Update: {
+          analyzed_at?: string | null
+          body_bullet_count?: number | null
+          body_cta_position?: string | null
+          body_cta_strength?: string | null
+          body_cta_type?: string | null
+          body_has_bullets?: boolean | null
+          body_has_calendar_link?: boolean | null
+          body_has_personalization?: boolean | null
+          body_length?: number | null
+          body_link_count?: number | null
+          body_paragraph_count?: number | null
+          body_personalization_count?: number | null
+          body_question_count?: number | null
+          body_reading_grade?: number | null
+          body_sentence_count?: number | null
+          body_value_proposition_count?: number | null
+          body_word_count?: number | null
+          body_you_i_ratio?: number | null
+          created_at?: string | null
+          engagement_id?: string | null
+          id?: string
+          opening_line_text?: string | null
+          opening_line_type?: string | null
+          subject_capitalization?: string | null
+          subject_first_word_type?: string | null
+          subject_format?: string | null
+          subject_has_emoji?: boolean | null
+          subject_has_number?: boolean | null
+          subject_has_personalization?: boolean | null
+          subject_length?: number | null
+          subject_personalization_type?: string | null
+          subject_punctuation?: string | null
+          subject_spam_word_count?: number | null
+          subject_urgency_score?: number | null
+          subject_word_count?: number | null
+          tone?: string | null
+          updated_at?: string | null
+          variant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_variant_features_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_variant_features_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_variant_features_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: true
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+        ]
+      }
+      campaign_variants: {
+        Row: {
+          body_html: string | null
+          body_plain: string | null
+          body_preview: string | null
+          bounce_rate: number | null
+          campaign_id: string
+          click_rate: number | null
+          confidence_level: string | null
+          created_at: string | null
+          data_source_id: string | null
+          delivery_rate: number | null
+          external_id: string | null
+          first_sent_at: string | null
+          id: string
+          is_control: boolean | null
+          last_sent_at: string | null
+          margin_of_error: number | null
+          not_interested_replies: number | null
+          open_rate: number | null
+          personalization_vars: Json | null
+          positive_replies: number | null
+          positive_reply_rate: number | null
+          reply_rate: number | null
+          sample_size_sufficient: boolean | null
+          sequence_id: string | null
+          status: string | null
+          step_number: number | null
+          subject_line: string
+          timing_replies: number | null
+          total_bounced: number | null
+          total_clicked: number | null
+          total_delivered: number | null
+          total_opened: number | null
+          total_replied: number | null
+          total_sent: number | null
+          total_unsubscribed: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          body_html?: string | null
+          body_plain?: string | null
+          body_preview?: string | null
+          bounce_rate?: number | null
+          campaign_id: string
+          click_rate?: number | null
+          confidence_level?: string | null
+          created_at?: string | null
+          data_source_id?: string | null
+          delivery_rate?: number | null
+          external_id?: string | null
+          first_sent_at?: string | null
+          id?: string
+          is_control?: boolean | null
+          last_sent_at?: string | null
+          margin_of_error?: number | null
+          not_interested_replies?: number | null
+          open_rate?: number | null
+          personalization_vars?: Json | null
+          positive_replies?: number | null
+          positive_reply_rate?: number | null
+          reply_rate?: number | null
+          sample_size_sufficient?: boolean | null
+          sequence_id?: string | null
+          status?: string | null
+          step_number?: number | null
+          subject_line: string
+          timing_replies?: number | null
+          total_bounced?: number | null
+          total_clicked?: number | null
+          total_delivered?: number | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          total_unsubscribed?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          body_html?: string | null
+          body_plain?: string | null
+          body_preview?: string | null
+          bounce_rate?: number | null
+          campaign_id?: string
+          click_rate?: number | null
+          confidence_level?: string | null
+          created_at?: string | null
+          data_source_id?: string | null
+          delivery_rate?: number | null
+          external_id?: string | null
+          first_sent_at?: string | null
+          id?: string
+          is_control?: boolean | null
+          last_sent_at?: string | null
+          margin_of_error?: number | null
+          not_interested_replies?: number | null
+          open_rate?: number | null
+          personalization_vars?: Json | null
+          positive_replies?: number | null
+          positive_reply_rate?: number | null
+          reply_rate?: number | null
+          sample_size_sufficient?: boolean | null
+          sequence_id?: string | null
+          status?: string | null
+          step_number?: number | null
+          subject_line?: string
+          timing_replies?: number | null
+          total_bounced?: number | null
+          total_clicked?: number | null
+          total_delivered?: number | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          total_unsubscribed?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_variants_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_variants_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_variants_sequence_id_fkey"
+            columns: ["sequence_id"]
+            isOneToOne: false
+            referencedRelation: "sequences"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
+          bounce_rate: number | null
           campaign_type: string
           completed_at: string | null
           created_at: string | null
@@ -177,12 +462,23 @@ export type Database = {
           id: string
           last_synced_at: string | null
           name: string
+          open_rate: number | null
+          quality_score: number | null
+          quality_tier: string | null
+          reply_rate: number | null
           settings: Json | null
           started_at: string | null
           status: string | null
+          total_bounced: number | null
+          total_delivered: number | null
+          total_meetings: number | null
+          total_opened: number | null
+          total_replied: number | null
+          total_sent: number | null
           updated_at: string | null
         }
         Insert: {
+          bounce_rate?: number | null
           campaign_type: string
           completed_at?: string | null
           created_at?: string | null
@@ -193,12 +489,23 @@ export type Database = {
           id?: string
           last_synced_at?: string | null
           name: string
+          open_rate?: number | null
+          quality_score?: number | null
+          quality_tier?: string | null
+          reply_rate?: number | null
           settings?: Json | null
           started_at?: string | null
           status?: string | null
+          total_bounced?: number | null
+          total_delivered?: number | null
+          total_meetings?: number | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
           updated_at?: string | null
         }
         Update: {
+          bounce_rate?: number | null
           campaign_type?: string
           completed_at?: string | null
           created_at?: string | null
@@ -209,9 +516,19 @@ export type Database = {
           id?: string
           last_synced_at?: string | null
           name?: string
+          open_rate?: number | null
+          quality_score?: number | null
+          quality_tier?: string | null
+          reply_rate?: number | null
           settings?: Json | null
           started_at?: string | null
           status?: string | null
+          total_bounced?: number | null
+          total_delivered?: number | null
+          total_meetings?: number | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
           updated_at?: string | null
         }
         Relationships: [
@@ -424,38 +741,61 @@ export type Database = {
       }
       contact_notes: {
         Row: {
-          created_at: string
-          created_by: string
+          contact_id: string
+          created_at: string | null
+          created_by: string | null
+          engagement_id: string
           id: string
-          lead_id: string
           note_text: string
-          note_type: string
-          workspace_id: string
+          note_type: string | null
         }
         Insert: {
-          created_at?: string
-          created_by: string
+          contact_id: string
+          created_at?: string | null
+          created_by?: string | null
+          engagement_id: string
           id?: string
-          lead_id: string
           note_text: string
-          note_type?: string
-          workspace_id: string
+          note_type?: string | null
         }
         Update: {
-          created_at?: string
-          created_by?: string
+          contact_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          engagement_id?: string
           id?: string
-          lead_id?: string
           note_text?: string
-          note_type?: string
-          workspace_id?: string
+          note_type?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "contact_notes_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_notes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_notes_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       contacts: {
         Row: {
           best_time_to_call: string | null
           company_id: string
+          company_size_category: string | null
           created_at: string | null
           deleted_at: string | null
           department: string | null
@@ -476,6 +816,7 @@ export type Database = {
           mobile: string | null
           phone: string | null
           phone_status: string | null
+          seniority_level: string | null
           source: string | null
           timezone: string | null
           title: string | null
@@ -490,6 +831,7 @@ export type Database = {
         Insert: {
           best_time_to_call?: string | null
           company_id: string
+          company_size_category?: string | null
           created_at?: string | null
           deleted_at?: string | null
           department?: string | null
@@ -510,6 +852,7 @@ export type Database = {
           mobile?: string | null
           phone?: string | null
           phone_status?: string | null
+          seniority_level?: string | null
           source?: string | null
           timezone?: string | null
           title?: string | null
@@ -524,6 +867,7 @@ export type Database = {
         Update: {
           best_time_to_call?: string | null
           company_id?: string
+          company_size_category?: string | null
           created_at?: string | null
           deleted_at?: string | null
           department?: string | null
@@ -544,6 +888,7 @@ export type Database = {
           mobile?: string | null
           phone?: string | null
           phone_status?: string | null
+          seniority_level?: string | null
           source?: string | null
           timezone?: string | null
           title?: string | null
@@ -572,146 +917,303 @@ export type Database = {
           },
         ]
       }
-      copy_generation_sessions: {
+      copy_library: {
         Row: {
-          channel: string
-          company_context: string | null
-          created_at: string
-          created_by: string
-          generated_variations: Json | null
+          body_html: string | null
+          body_plain: string | null
+          category: string | null
+          created_at: string | null
+          created_by: string | null
+          engagement_id: string | null
           id: string
-          selected_variation_index: number | null
-          sequence_step: string
-          specific_instructions: string | null
-          target_industry: string | null
-          target_persona: string | null
-          tone: string | null
-          trigger_event: string | null
-          workspace_id: string
+          is_template: boolean | null
+          notes: string | null
+          performance_snapshot: Json | null
+          positive_rate: number | null
+          reply_rate: number | null
+          subject_line: string
+          tags: string[] | null
+          title: string
+          total_replied: number | null
+          total_sent: number | null
+          updated_at: string | null
+          variant_id: string | null
         }
         Insert: {
-          channel: string
-          company_context?: string | null
-          created_at?: string
-          created_by: string
-          generated_variations?: Json | null
+          body_html?: string | null
+          body_plain?: string | null
+          category?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          engagement_id?: string | null
           id?: string
-          selected_variation_index?: number | null
-          sequence_step: string
-          specific_instructions?: string | null
-          target_industry?: string | null
-          target_persona?: string | null
-          tone?: string | null
-          trigger_event?: string | null
-          workspace_id: string
+          is_template?: boolean | null
+          notes?: string | null
+          performance_snapshot?: Json | null
+          positive_rate?: number | null
+          reply_rate?: number | null
+          subject_line: string
+          tags?: string[] | null
+          title: string
+          total_replied?: number | null
+          total_sent?: number | null
+          updated_at?: string | null
+          variant_id?: string | null
         }
         Update: {
-          channel?: string
-          company_context?: string | null
-          created_at?: string
-          created_by?: string
-          generated_variations?: Json | null
+          body_html?: string | null
+          body_plain?: string | null
+          category?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          engagement_id?: string | null
           id?: string
-          selected_variation_index?: number | null
-          sequence_step?: string
-          specific_instructions?: string | null
-          target_industry?: string | null
-          target_persona?: string | null
-          tone?: string | null
-          trigger_event?: string | null
-          workspace_id?: string
+          is_template?: boolean | null
+          notes?: string | null
+          performance_snapshot?: Json | null
+          positive_rate?: number | null
+          reply_rate?: number | null
+          subject_line?: string
+          tags?: string[] | null
+          title?: string
+          total_replied?: number | null
+          total_sent?: number | null
+          updated_at?: string | null
+          variant_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "copy_library_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "copy_library_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "copy_library_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "copy_library_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+        ]
       }
       copy_patterns: {
         Row: {
-          confidence_interval_lower: number | null
-          confidence_interval_upper: number | null
-          confidence_level: string | null
+          avg_reply_rate: number | null
+          baseline_reply_rate: number | null
+          computed_at: string | null
           created_at: string | null
+          engagement_id: string | null
           id: string
-          interaction_effects: Json | null
-          is_validated: boolean | null
-          last_computed: string | null
-          meeting_rate: number | null
-          meeting_rate_lift: number | null
-          open_rate: number | null
-          open_rate_lift: number | null
+          is_significant: boolean | null
+          lift_vs_baseline: number | null
           p_value: number | null
-          pattern_criteria: Json
-          pattern_description: string | null
-          pattern_name: string
           pattern_type: string
-          positive_rate: number | null
-          positive_rate_lift: number | null
-          reply_rate: number | null
-          reply_rate_lift: number | null
-          sample_size: number
-          segment_effects: Json | null
-          step_effects: Json | null
-          updated_at: string | null
-          validated_at: string | null
-          workspace_id: string
+          pattern_value: string
+          reply_rate_ci_lower: number | null
+          reply_rate_ci_upper: number | null
+          total_replied: number | null
+          total_sent: number | null
+          total_variants: number | null
         }
         Insert: {
-          confidence_interval_lower?: number | null
-          confidence_interval_upper?: number | null
-          confidence_level?: string | null
+          avg_reply_rate?: number | null
+          baseline_reply_rate?: number | null
+          computed_at?: string | null
           created_at?: string | null
+          engagement_id?: string | null
           id?: string
-          interaction_effects?: Json | null
-          is_validated?: boolean | null
-          last_computed?: string | null
-          meeting_rate?: number | null
-          meeting_rate_lift?: number | null
-          open_rate?: number | null
-          open_rate_lift?: number | null
+          is_significant?: boolean | null
+          lift_vs_baseline?: number | null
           p_value?: number | null
-          pattern_criteria: Json
-          pattern_description?: string | null
-          pattern_name: string
           pattern_type: string
-          positive_rate?: number | null
-          positive_rate_lift?: number | null
-          reply_rate?: number | null
-          reply_rate_lift?: number | null
-          sample_size?: number
-          segment_effects?: Json | null
-          step_effects?: Json | null
-          updated_at?: string | null
-          validated_at?: string | null
-          workspace_id: string
+          pattern_value: string
+          reply_rate_ci_lower?: number | null
+          reply_rate_ci_upper?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          total_variants?: number | null
         }
         Update: {
-          confidence_interval_lower?: number | null
-          confidence_interval_upper?: number | null
-          confidence_level?: string | null
+          avg_reply_rate?: number | null
+          baseline_reply_rate?: number | null
+          computed_at?: string | null
           created_at?: string | null
+          engagement_id?: string | null
           id?: string
-          interaction_effects?: Json | null
-          is_validated?: boolean | null
-          last_computed?: string | null
-          meeting_rate?: number | null
-          meeting_rate_lift?: number | null
-          open_rate?: number | null
-          open_rate_lift?: number | null
+          is_significant?: boolean | null
+          lift_vs_baseline?: number | null
           p_value?: number | null
-          pattern_criteria?: Json
-          pattern_description?: string | null
-          pattern_name?: string
           pattern_type?: string
-          positive_rate?: number | null
-          positive_rate_lift?: number | null
-          reply_rate?: number | null
-          reply_rate_lift?: number | null
-          sample_size?: number
-          segment_effects?: Json | null
-          step_effects?: Json | null
-          updated_at?: string | null
-          validated_at?: string | null
-          workspace_id?: string
+          pattern_value?: string
+          reply_rate_ci_lower?: number | null
+          reply_rate_ci_upper?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
+          total_variants?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "copy_patterns_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_metrics: {
+        Row: {
+          auto_replies: number | null
+          bounce_rate: number | null
+          calls_connected: number | null
+          calls_made: number | null
+          campaign_id: string | null
+          created_at: string | null
+          data_source_id: string | null
+          date: string
+          dm_conversations: number | null
+          emails_bounced: number | null
+          emails_clicked: number | null
+          emails_delivered: number | null
+          emails_opened: number | null
+          emails_replied: number | null
+          emails_sent: number | null
+          emails_unsubscribed: number | null
+          engagement_id: string | null
+          hard_bounces: number | null
+          id: string
+          meetings_booked: number | null
+          not_interested_replies: number | null
+          open_rate: number | null
+          positive_rate: number | null
+          positive_replies: number | null
+          reply_rate: number | null
+          soft_bounces: number | null
+          timing_replies: number | null
+          unique_opens: number | null
+          updated_at: string | null
+          variant_id: string | null
+          voicemails_left: number | null
+        }
+        Insert: {
+          auto_replies?: number | null
+          bounce_rate?: number | null
+          calls_connected?: number | null
+          calls_made?: number | null
+          campaign_id?: string | null
+          created_at?: string | null
+          data_source_id?: string | null
+          date: string
+          dm_conversations?: number | null
+          emails_bounced?: number | null
+          emails_clicked?: number | null
+          emails_delivered?: number | null
+          emails_opened?: number | null
+          emails_replied?: number | null
+          emails_sent?: number | null
+          emails_unsubscribed?: number | null
+          engagement_id?: string | null
+          hard_bounces?: number | null
+          id?: string
+          meetings_booked?: number | null
+          not_interested_replies?: number | null
+          open_rate?: number | null
+          positive_rate?: number | null
+          positive_replies?: number | null
+          reply_rate?: number | null
+          soft_bounces?: number | null
+          timing_replies?: number | null
+          unique_opens?: number | null
+          updated_at?: string | null
+          variant_id?: string | null
+          voicemails_left?: number | null
+        }
+        Update: {
+          auto_replies?: number | null
+          bounce_rate?: number | null
+          calls_connected?: number | null
+          calls_made?: number | null
+          campaign_id?: string | null
+          created_at?: string | null
+          data_source_id?: string | null
+          date?: string
+          dm_conversations?: number | null
+          emails_bounced?: number | null
+          emails_clicked?: number | null
+          emails_delivered?: number | null
+          emails_opened?: number | null
+          emails_replied?: number | null
+          emails_sent?: number | null
+          emails_unsubscribed?: number | null
+          engagement_id?: string | null
+          hard_bounces?: number | null
+          id?: string
+          meetings_booked?: number | null
+          not_interested_replies?: number | null
+          open_rate?: number | null
+          positive_rate?: number | null
+          positive_replies?: number | null
+          reply_rate?: number | null
+          soft_bounces?: number | null
+          timing_replies?: number | null
+          unique_opens?: number | null
+          updated_at?: string | null
+          variant_id?: string | null
+          voicemails_left?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_metrics_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_metrics_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_metrics_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_metrics_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+        ]
       }
       data_sources: {
         Row: {
@@ -719,10 +1221,13 @@ export type Database = {
           additional_config: Json | null
           api_key_encrypted: string | null
           api_secret_encrypted: string | null
+          avg_sync_duration_ms: number | null
           created_at: string | null
+          failed_syncs: number | null
           id: string
           last_sync_at: string | null
           last_sync_error: string | null
+          last_sync_records_processed: number | null
           last_sync_status: string | null
           name: string
           refresh_token: string | null
@@ -731,6 +1236,7 @@ export type Database = {
           sync_enabled: boolean | null
           sync_frequency: string | null
           token_expires_at: string | null
+          total_syncs: number | null
           updated_at: string | null
           webhook_secret: string | null
         }
@@ -739,10 +1245,13 @@ export type Database = {
           additional_config?: Json | null
           api_key_encrypted?: string | null
           api_secret_encrypted?: string | null
+          avg_sync_duration_ms?: number | null
           created_at?: string | null
+          failed_syncs?: number | null
           id?: string
           last_sync_at?: string | null
           last_sync_error?: string | null
+          last_sync_records_processed?: number | null
           last_sync_status?: string | null
           name: string
           refresh_token?: string | null
@@ -751,6 +1260,7 @@ export type Database = {
           sync_enabled?: boolean | null
           sync_frequency?: string | null
           token_expires_at?: string | null
+          total_syncs?: number | null
           updated_at?: string | null
           webhook_secret?: string | null
         }
@@ -759,10 +1269,13 @@ export type Database = {
           additional_config?: Json | null
           api_key_encrypted?: string | null
           api_secret_encrypted?: string | null
+          avg_sync_duration_ms?: number | null
           created_at?: string | null
+          failed_syncs?: number | null
           id?: string
           last_sync_at?: string | null
           last_sync_error?: string | null
+          last_sync_records_processed?: number | null
           last_sync_status?: string | null
           name?: string
           refresh_token?: string | null
@@ -771,6 +1284,7 @@ export type Database = {
           sync_enabled?: boolean | null
           sync_frequency?: string | null
           token_expires_at?: string | null
+          total_syncs?: number | null
           updated_at?: string | null
           webhook_secret?: string | null
         }
@@ -778,86 +1292,189 @@ export type Database = {
       }
       deal_clients: {
         Row: {
+          client_type: string | null
           contact_email: string | null
-          created_at: string
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string | null
+          engagement_id: string | null
           id: string
           name: string
-          workspace_id: string
+          updated_at: string | null
         }
         Insert: {
+          client_type?: string | null
           contact_email?: string | null
-          created_at?: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          engagement_id?: string | null
           id?: string
           name: string
-          workspace_id: string
+          updated_at?: string | null
         }
         Update: {
+          client_type?: string | null
           contact_email?: string | null
-          created_at?: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          engagement_id?: string | null
           id?: string
           name?: string
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      deals: {
-        Row: {
-          business_description: string | null
-          client_id: string | null
-          client_name: string | null
-          created_at: string
-          created_by: string
-          ebitda: number | null
-          geography: string | null
-          id: string
-          industry: string | null
-          project_name: string
-          revenue: number | null
-          stage: string
-          teaser_url: string | null
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          business_description?: string | null
-          client_id?: string | null
-          client_name?: string | null
-          created_at?: string
-          created_by: string
-          ebitda?: number | null
-          geography?: string | null
-          id?: string
-          industry?: string | null
-          project_name: string
-          revenue?: number | null
-          stage?: string
-          teaser_url?: string | null
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          business_description?: string | null
-          client_id?: string | null
-          client_name?: string | null
-          created_at?: string
-          created_by?: string
-          ebitda?: number | null
-          geography?: string | null
-          id?: string
-          industry?: string | null
-          project_name?: string
-          revenue?: number | null
-          stage?: string
-          teaser_url?: string | null
-          updated_at?: string
-          workspace_id?: string
+          updated_at?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "deals_client_id_fkey"
-            columns: ["client_id"]
+            foreignKeyName: "deal_clients_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deals: {
+        Row: {
+          asking_price: number | null
+          asking_price_display: string | null
+          assigned_to: string | null
+          business_description: string | null
+          cim_url: string | null
+          client_name: string | null
+          created_at: string | null
+          deal_client_id: string | null
+          ebitda: number | null
+          ebitda_display: string | null
+          ebitda_multiple: number | null
+          engagement_id: string | null
+          geography: string | null
+          id: string
+          industry: string | null
+          nda_signed_date: string | null
+          notes: string | null
+          pass_reason: string | null
+          project_name: string
+          received_at: string | null
+          revenue: number | null
+          revenue_display: string | null
+          revenue_multiple: number | null
+          source_company_id: string | null
+          source_contact_id: string | null
+          source_meeting_id: string | null
+          source_type: string | null
+          stage: string
+          sub_industry: string | null
+          teaser_url: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          asking_price?: number | null
+          asking_price_display?: string | null
+          assigned_to?: string | null
+          business_description?: string | null
+          cim_url?: string | null
+          client_name?: string | null
+          created_at?: string | null
+          deal_client_id?: string | null
+          ebitda?: number | null
+          ebitda_display?: string | null
+          ebitda_multiple?: number | null
+          engagement_id?: string | null
+          geography?: string | null
+          id?: string
+          industry?: string | null
+          nda_signed_date?: string | null
+          notes?: string | null
+          pass_reason?: string | null
+          project_name: string
+          received_at?: string | null
+          revenue?: number | null
+          revenue_display?: string | null
+          revenue_multiple?: number | null
+          source_company_id?: string | null
+          source_contact_id?: string | null
+          source_meeting_id?: string | null
+          source_type?: string | null
+          stage?: string
+          sub_industry?: string | null
+          teaser_url?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          asking_price?: number | null
+          asking_price_display?: string | null
+          assigned_to?: string | null
+          business_description?: string | null
+          cim_url?: string | null
+          client_name?: string | null
+          created_at?: string | null
+          deal_client_id?: string | null
+          ebitda?: number | null
+          ebitda_display?: string | null
+          ebitda_multiple?: number | null
+          engagement_id?: string | null
+          geography?: string | null
+          id?: string
+          industry?: string | null
+          nda_signed_date?: string | null
+          notes?: string | null
+          pass_reason?: string | null
+          project_name?: string
+          received_at?: string | null
+          revenue?: number | null
+          revenue_display?: string | null
+          revenue_multiple?: number | null
+          source_company_id?: string | null
+          source_contact_id?: string | null
+          source_meeting_id?: string | null
+          source_type?: string | null
+          stage?: string
+          sub_industry?: string | null
+          teaser_url?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deals_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_deal_client_id_fkey"
+            columns: ["deal_client_id"]
             isOneToOne: false
             referencedRelation: "deal_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_source_company_id_fkey"
+            columns: ["source_company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_source_contact_id_fkey"
+            columns: ["source_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_source_meeting_id_fkey"
+            columns: ["source_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
             referencedColumns: ["id"]
           },
         ]
@@ -893,6 +1510,7 @@ export type Database = {
           raw_data: Json | null
           replied: boolean | null
           replied_at: string | null
+          reply_category: string | null
           reply_sentiment: string | null
           reply_text: string | null
           scheduled_at: string | null
@@ -906,6 +1524,7 @@ export type Database = {
           unsubscribed: boolean | null
           unsubscribed_at: string | null
           updated_at: string | null
+          variant_id: string | null
         }
         Insert: {
           body_preview?: string | null
@@ -937,6 +1556,7 @@ export type Database = {
           raw_data?: Json | null
           replied?: boolean | null
           replied_at?: string | null
+          reply_category?: string | null
           reply_sentiment?: string | null
           reply_text?: string | null
           scheduled_at?: string | null
@@ -950,6 +1570,7 @@ export type Database = {
           unsubscribed?: boolean | null
           unsubscribed_at?: string | null
           updated_at?: string | null
+          variant_id?: string | null
         }
         Update: {
           body_preview?: string | null
@@ -981,6 +1602,7 @@ export type Database = {
           raw_data?: Json | null
           replied?: boolean | null
           replied_at?: string | null
+          reply_category?: string | null
           reply_sentiment?: string | null
           reply_text?: string | null
           scheduled_at?: string | null
@@ -994,6 +1616,7 @@ export type Database = {
           unsubscribed?: boolean | null
           unsubscribed_at?: string | null
           updated_at?: string | null
+          variant_id?: string | null
         }
         Relationships: [
           {
@@ -1038,73 +1661,21 @@ export type Database = {
             referencedRelation: "sequences"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "email_activities_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_activities_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
         ]
-      }
-      engagement_daily_metrics: {
-        Row: {
-          avg_ai_score: number | null
-          connects: number | null
-          conversations: number | null
-          created_at: string | null
-          date: string
-          dials: number | null
-          engagement_id: string
-          id: string
-          meetings_set: number | null
-          rep_profile_id: string | null
-          talk_time_seconds: number | null
-          voicemails: number | null
-        }
-        Insert: {
-          avg_ai_score?: number | null
-          connects?: number | null
-          conversations?: number | null
-          created_at?: string | null
-          date: string
-          dials?: number | null
-          engagement_id: string
-          id?: string
-          meetings_set?: number | null
-          rep_profile_id?: string | null
-          talk_time_seconds?: number | null
-          voicemails?: number | null
-        }
-        Update: {
-          avg_ai_score?: number | null
-          connects?: number | null
-          conversations?: number | null
-          created_at?: string | null
-          date?: string
-          dials?: number | null
-          engagement_id?: string
-          id?: string
-          meetings_set?: number | null
-          rep_profile_id?: string | null
-          talk_time_seconds?: number | null
-          voicemails?: number | null
-        }
-        Relationships: []
-      }
-      engagement_reps: {
-        Row: {
-          assigned_at: string | null
-          engagement_id: string
-          id: string
-          rep_profile_id: string
-        }
-        Insert: {
-          assigned_at?: string | null
-          engagement_id: string
-          id?: string
-          rep_profile_id: string
-        }
-        Update: {
-          assigned_at?: string | null
-          engagement_id?: string
-          id?: string
-          rep_profile_id?: string
-        }
-        Relationships: []
       }
       engagements: {
         Row: {
@@ -1162,158 +1733,156 @@ export type Database = {
           },
         ]
       }
-      hourly_metrics: {
+      experiment_variants: {
         Row: {
-          campaign_id: string | null
-          clicked_count: number | null
-          created_at: string
-          date: string
-          day_of_week: number
-          hour: number
-          id: string
-          opened_count: number | null
-          positive_reply_count: number | null
-          replied_count: number | null
-          sent_count: number | null
-          workspace_id: string
-        }
-        Insert: {
-          campaign_id?: string | null
-          clicked_count?: number | null
-          created_at?: string
-          date: string
-          day_of_week: number
-          hour: number
-          id?: string
-          opened_count?: number | null
-          positive_reply_count?: number | null
-          replied_count?: number | null
-          sent_count?: number | null
-          workspace_id: string
-        }
-        Update: {
-          campaign_id?: string | null
-          clicked_count?: number | null
-          created_at?: string
-          date?: string
-          day_of_week?: number
-          hour?: number
-          id?: string
-          opened_count?: number | null
-          positive_reply_count?: number | null
-          replied_count?: number | null
-          sent_count?: number | null
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      industry_intelligence: {
-        Row: {
-          content: string
-          context: string | null
-          created_at: string
-          created_by: string | null
-          id: string
-          industry: string
-          intel_type: string
-          is_global: boolean | null
-          source_document: string | null
-          updated_at: string
-          workspace_id: string | null
-        }
-        Insert: {
-          content: string
-          context?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          industry: string
-          intel_type: string
-          is_global?: boolean | null
-          source_document?: string | null
-          updated_at?: string
-          workspace_id?: string | null
-        }
-        Update: {
-          content?: string
-          context?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          industry?: string
-          intel_type?: string
-          is_global?: boolean | null
-          source_document?: string | null
-          updated_at?: string
-          workspace_id?: string | null
-        }
-        Relationships: []
-      }
-      lead_call_attempts: {
-        Row: {
-          attempt_count: number
-          first_attempt_at: string
-          id: string
-          last_attempt_at: string
-          lead_id: string
-          outcome: string | null
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          attempt_count?: number
-          first_attempt_at?: string
-          id?: string
-          last_attempt_at?: string
-          lead_id: string
-          outcome?: string | null
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          attempt_count?: number
-          first_attempt_at?: string
-          id?: string
-          last_attempt_at?: string
-          lead_id?: string
-          outcome?: string | null
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      mandatory_questions: {
-        Row: {
-          category: string | null
+          campaign_variant_id: string | null
+          ci_lower: number | null
+          ci_upper: number | null
+          content_diff: Json | null
           created_at: string | null
-          display_order: number | null
+          experiment_id: string
           id: string
-          is_active: boolean | null
-          question_number: number
-          question_text: string
-          workspace_id: string
+          is_control: boolean | null
+          margin_of_error: number | null
+          name: string
+          reply_rate: number | null
+          status: string | null
+          total_replied: number | null
+          total_sent: number | null
+          updated_at: string | null
         }
         Insert: {
-          category?: string | null
+          campaign_variant_id?: string | null
+          ci_lower?: number | null
+          ci_upper?: number | null
+          content_diff?: Json | null
           created_at?: string | null
-          display_order?: number | null
+          experiment_id: string
           id?: string
-          is_active?: boolean | null
-          question_number: number
-          question_text: string
-          workspace_id: string
+          is_control?: boolean | null
+          margin_of_error?: number | null
+          name: string
+          reply_rate?: number | null
+          status?: string | null
+          total_replied?: number | null
+          total_sent?: number | null
+          updated_at?: string | null
         }
         Update: {
-          category?: string | null
+          campaign_variant_id?: string | null
+          ci_lower?: number | null
+          ci_upper?: number | null
+          content_diff?: Json | null
           created_at?: string | null
-          display_order?: number | null
+          experiment_id?: string
           id?: string
-          is_active?: boolean | null
-          question_number?: number
-          question_text?: string
-          workspace_id?: string
+          is_control?: boolean | null
+          margin_of_error?: number | null
+          name?: string
+          reply_rate?: number | null
+          status?: string | null
+          total_replied?: number | null
+          total_sent?: number | null
+          updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "experiment_variants_campaign_variant_id_fkey"
+            columns: ["campaign_variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "experiment_variants_campaign_variant_id_fkey"
+            columns: ["campaign_variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+          {
+            foreignKeyName: "experiment_variants_experiment_id_fkey"
+            columns: ["experiment_id"]
+            isOneToOne: false
+            referencedRelation: "experiments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      experiments: {
+        Row: {
+          actual_sample_size: number | null
+          campaign_id: string | null
+          completed_at: string | null
+          confidence_level: number | null
+          created_at: string | null
+          engagement_id: string
+          hypothesis: string | null
+          id: string
+          name: string
+          p_value: number | null
+          result: string | null
+          started_at: string | null
+          status: string | null
+          target_sample_size: number | null
+          test_variable: string
+          updated_at: string | null
+          winning_variant_id: string | null
+        }
+        Insert: {
+          actual_sample_size?: number | null
+          campaign_id?: string | null
+          completed_at?: string | null
+          confidence_level?: number | null
+          created_at?: string | null
+          engagement_id: string
+          hypothesis?: string | null
+          id?: string
+          name: string
+          p_value?: number | null
+          result?: string | null
+          started_at?: string | null
+          status?: string | null
+          target_sample_size?: number | null
+          test_variable: string
+          updated_at?: string | null
+          winning_variant_id?: string | null
+        }
+        Update: {
+          actual_sample_size?: number | null
+          campaign_id?: string | null
+          completed_at?: string | null
+          confidence_level?: number | null
+          created_at?: string | null
+          engagement_id?: string
+          hypothesis?: string | null
+          id?: string
+          name?: string
+          p_value?: number | null
+          result?: string | null
+          started_at?: string | null
+          status?: string | null
+          target_sample_size?: number | null
+          test_variable?: string
+          updated_at?: string | null
+          winning_variant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "experiments_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "experiments_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       meetings: {
         Row: {
@@ -1344,6 +1913,7 @@ export type Database = {
           scheduled_datetime: string | null
           source_campaign_id: string | null
           source_channel: string | null
+          source_variant_id: string | null
           status: string | null
           target_attendees: Json | null
           timezone: string | null
@@ -1379,6 +1949,7 @@ export type Database = {
           scheduled_datetime?: string | null
           source_campaign_id?: string | null
           source_channel?: string | null
+          source_variant_id?: string | null
           status?: string | null
           target_attendees?: Json | null
           timezone?: string | null
@@ -1414,6 +1985,7 @@ export type Database = {
           scheduled_datetime?: string | null
           source_campaign_id?: string | null
           source_channel?: string | null
+          source_variant_id?: string | null
           status?: string | null
           target_attendees?: Json | null
           timezone?: string | null
@@ -1457,238 +2029,98 @@ export type Database = {
             referencedRelation: "campaigns"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "meetings_source_variant_id_fkey"
+            columns: ["source_variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meetings_source_variant_id_fkey"
+            columns: ["source_variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
         ]
-      }
-      phoneburner_contacts: {
-        Row: {
-          category_id: string | null
-          company: string | null
-          created_at: string
-          date_added: string | null
-          email: string | null
-          external_contact_id: string
-          first_name: string | null
-          id: string
-          last_name: string | null
-          phone: string | null
-          tags: string[] | null
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          category_id?: string | null
-          company?: string | null
-          created_at?: string
-          date_added?: string | null
-          email?: string | null
-          external_contact_id: string
-          first_name?: string | null
-          id?: string
-          last_name?: string | null
-          phone?: string | null
-          tags?: string[] | null
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          category_id?: string | null
-          company?: string | null
-          created_at?: string
-          date_added?: string | null
-          email?: string | null
-          external_contact_id?: string
-          first_name?: string | null
-          id?: string
-          last_name?: string | null
-          phone?: string | null
-          tags?: string[] | null
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      phoneburner_daily_metrics: {
-        Row: {
-          calls_connected: number | null
-          created_at: string
-          date: string
-          decision_maker_connects: number | null
-          emails_sent: number | null
-          id: string
-          interested_count: number | null
-          meaningful_conversations: number | null
-          meetings_booked: number | null
-          member_id: string | null
-          member_name: string | null
-          not_interested_count: number | null
-          qualified_opportunities: number | null
-          total_calls: number | null
-          total_sessions: number | null
-          total_talk_time_seconds: number | null
-          updated_at: string
-          voicemails_left: number | null
-          workspace_id: string
-        }
-        Insert: {
-          calls_connected?: number | null
-          created_at?: string
-          date: string
-          decision_maker_connects?: number | null
-          emails_sent?: number | null
-          id?: string
-          interested_count?: number | null
-          meaningful_conversations?: number | null
-          meetings_booked?: number | null
-          member_id?: string | null
-          member_name?: string | null
-          not_interested_count?: number | null
-          qualified_opportunities?: number | null
-          total_calls?: number | null
-          total_sessions?: number | null
-          total_talk_time_seconds?: number | null
-          updated_at?: string
-          voicemails_left?: number | null
-          workspace_id: string
-        }
-        Update: {
-          calls_connected?: number | null
-          created_at?: string
-          date?: string
-          decision_maker_connects?: number | null
-          emails_sent?: number | null
-          id?: string
-          interested_count?: number | null
-          meaningful_conversations?: number | null
-          meetings_booked?: number | null
-          member_id?: string | null
-          member_name?: string | null
-          not_interested_count?: number | null
-          qualified_opportunities?: number | null
-          total_calls?: number | null
-          total_sessions?: number | null
-          total_talk_time_seconds?: number | null
-          updated_at?: string
-          voicemails_left?: number | null
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      phoneburner_dial_sessions: {
-        Row: {
-          call_count: number | null
-          caller_id: string | null
-          created_at: string
-          end_at: string | null
-          external_session_id: string
-          id: string
-          member_id: string | null
-          member_name: string | null
-          start_at: string | null
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          call_count?: number | null
-          caller_id?: string | null
-          created_at?: string
-          end_at?: string | null
-          external_session_id: string
-          id?: string
-          member_id?: string | null
-          member_name?: string | null
-          start_at?: string | null
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          call_count?: number | null
-          caller_id?: string | null
-          created_at?: string
-          end_at?: string | null
-          external_session_id?: string
-          id?: string
-          member_id?: string | null
-          member_name?: string | null
-          start_at?: string | null
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      phoneburner_members: {
-        Row: {
-          created_at: string
-          email: string | null
-          external_member_id: string
-          id: string
-          name: string | null
-          role: string | null
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          created_at?: string
-          email?: string | null
-          external_member_id: string
-          id?: string
-          name?: string | null
-          role?: string | null
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          created_at?: string
-          email?: string | null
-          external_member_id?: string
-          id?: string
-          name?: string | null
-          role?: string | null
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: []
       }
       playbook_entries: {
         Row: {
           context: string | null
-          created_at: string
-          created_by: string
+          copy_library_id: string | null
+          created_at: string | null
+          created_by: string | null
+          engagement_id: string | null
           experiment_id: string | null
           id: string
           metrics: Json | null
           tags: string[] | null
           test_type: string
           title: string
+          updated_at: string | null
           winning_pattern: string
-          workspace_id: string
         }
         Insert: {
           context?: string | null
-          created_at?: string
-          created_by: string
+          copy_library_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          engagement_id?: string | null
           experiment_id?: string | null
           id?: string
           metrics?: Json | null
           tags?: string[] | null
           test_type: string
           title: string
+          updated_at?: string | null
           winning_pattern: string
-          workspace_id: string
         }
         Update: {
           context?: string | null
-          created_at?: string
-          created_by?: string
+          copy_library_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          engagement_id?: string | null
           experiment_id?: string | null
           id?: string
           metrics?: Json | null
           tags?: string[] | null
           test_type?: string
           title?: string
+          updated_at?: string | null
           winning_pattern?: string
-          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "playbook_entries_copy_library_id_fkey"
+            columns: ["copy_library_id"]
+            isOneToOne: false
+            referencedRelation: "copy_library"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playbook_entries_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playbook_entries_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playbook_entries_experiment_id_fkey"
+            columns: ["experiment_id"]
+            isOneToOne: false
+            referencedRelation: "experiments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -1716,193 +2148,6 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
-      }
-      rep_goals: {
-        Row: {
-          created_at: string | null
-          effective_from: string | null
-          effective_to: string | null
-          engagement_id: string | null
-          goal_type: string
-          id: string
-          period: string | null
-          rep_profile_id: string
-          target_value: number
-        }
-        Insert: {
-          created_at?: string | null
-          effective_from?: string | null
-          effective_to?: string | null
-          engagement_id?: string | null
-          goal_type: string
-          id?: string
-          period?: string | null
-          rep_profile_id: string
-          target_value: number
-        }
-        Update: {
-          created_at?: string | null
-          effective_from?: string | null
-          effective_to?: string | null
-          engagement_id?: string | null
-          goal_type?: string
-          id?: string
-          period?: string | null
-          rep_profile_id?: string
-          target_value?: number
-        }
-        Relationships: []
-      }
-      replyio_campaign_cumulative: {
-        Row: {
-          campaign_id: string
-          created_at: string | null
-          id: string
-          last_synced_at: string | null
-          total_bounced: number | null
-          total_clicked: number | null
-          total_interested: number | null
-          total_opened: number | null
-          total_replied: number | null
-          total_sent: number | null
-          workspace_id: string
-        }
-        Insert: {
-          campaign_id: string
-          created_at?: string | null
-          id?: string
-          last_synced_at?: string | null
-          total_bounced?: number | null
-          total_clicked?: number | null
-          total_interested?: number | null
-          total_opened?: number | null
-          total_replied?: number | null
-          total_sent?: number | null
-          workspace_id: string
-        }
-        Update: {
-          campaign_id?: string
-          created_at?: string | null
-          id?: string
-          last_synced_at?: string | null
-          total_bounced?: number | null
-          total_clicked?: number | null
-          total_interested?: number | null
-          total_opened?: number | null
-          total_replied?: number | null
-          total_sent?: number | null
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      replyio_daily_metrics: {
-        Row: {
-          bounced_count: number | null
-          campaign_id: string
-          clicked_count: number | null
-          created_at: string
-          id: string
-          metric_date: string
-          negative_reply_count: number | null
-          opened_count: number | null
-          positive_reply_count: number | null
-          replied_count: number | null
-          sent_count: number | null
-          updated_at: string
-          variant_id: string | null
-          workspace_id: string
-        }
-        Insert: {
-          bounced_count?: number | null
-          campaign_id: string
-          clicked_count?: number | null
-          created_at?: string
-          id?: string
-          metric_date: string
-          negative_reply_count?: number | null
-          opened_count?: number | null
-          positive_reply_count?: number | null
-          replied_count?: number | null
-          sent_count?: number | null
-          updated_at?: string
-          variant_id?: string | null
-          workspace_id: string
-        }
-        Update: {
-          bounced_count?: number | null
-          campaign_id?: string
-          clicked_count?: number | null
-          created_at?: string
-          id?: string
-          metric_date?: string
-          negative_reply_count?: number | null
-          opened_count?: number | null
-          positive_reply_count?: number | null
-          replied_count?: number | null
-          sent_count?: number | null
-          updated_at?: string
-          variant_id?: string | null
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "replyio_daily_metrics_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: false
-            referencedRelation: "replyio_variants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      replyio_message_events: {
-        Row: {
-          campaign_id: string
-          created_at: string
-          event_timestamp: string | null
-          event_type: string
-          id: string
-          lead_id: string | null
-          message_id: string | null
-          reply_sentiment: string | null
-          reply_text: string | null
-          variant_id: string | null
-          workspace_id: string
-        }
-        Insert: {
-          campaign_id: string
-          created_at?: string
-          event_timestamp?: string | null
-          event_type: string
-          id?: string
-          lead_id?: string | null
-          message_id?: string | null
-          reply_sentiment?: string | null
-          reply_text?: string | null
-          variant_id?: string | null
-          workspace_id: string
-        }
-        Update: {
-          campaign_id?: string
-          created_at?: string
-          event_timestamp?: string | null
-          event_type?: string
-          id?: string
-          lead_id?: string | null
-          message_id?: string | null
-          reply_sentiment?: string | null
-          reply_text?: string | null
-          variant_id?: string | null
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "replyio_message_events_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: false
-            referencedRelation: "replyio_variants"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       replyio_sequence_steps: {
         Row: {
@@ -1932,15 +2177,7 @@ export type Database = {
           step_type?: string | null
           variant_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "replyio_sequence_steps_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: false
-            referencedRelation: "replyio_variants"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       replyio_variant_features: {
         Row: {
@@ -2050,62 +2287,6 @@ export type Database = {
           updated_at?: string | null
           variant_id?: string
           workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "replyio_variant_features_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: true
-            referencedRelation: "replyio_variants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      replyio_variants: {
-        Row: {
-          body_preview: string | null
-          campaign_id: string
-          created_at: string
-          email_body: string | null
-          id: string
-          is_control: boolean | null
-          name: string
-          personalization_vars: Json | null
-          platform_variant_id: string | null
-          subject_line: string | null
-          updated_at: string | null
-          variant_type: string
-          word_count: number | null
-        }
-        Insert: {
-          body_preview?: string | null
-          campaign_id: string
-          created_at?: string
-          email_body?: string | null
-          id?: string
-          is_control?: boolean | null
-          name: string
-          personalization_vars?: Json | null
-          platform_variant_id?: string | null
-          subject_line?: string | null
-          updated_at?: string | null
-          variant_type?: string
-          word_count?: number | null
-        }
-        Update: {
-          body_preview?: string | null
-          campaign_id?: string
-          created_at?: string
-          email_body?: string | null
-          id?: string
-          is_control?: boolean | null
-          name?: string
-          personalization_vars?: Json | null
-          platform_variant_id?: string | null
-          subject_line?: string | null
-          updated_at?: string | null
-          variant_type?: string
-          word_count?: number | null
         }
         Relationships: []
       }
@@ -2320,6 +2501,8 @@ export type Database = {
       }
       sequences: {
         Row: {
+          body_html: string | null
+          body_plain: string | null
           body_template: string | null
           campaign_id: string
           created_at: string | null
@@ -2327,6 +2510,8 @@ export type Database = {
           delay_hours: number | null
           external_id: string | null
           id: string
+          open_rate: number | null
+          reply_rate: number | null
           send_days: string[] | null
           send_window_end: string | null
           send_window_start: string | null
@@ -2334,9 +2519,14 @@ export type Database = {
           step_name: string | null
           step_number: number
           subject_line: string | null
+          total_opened: number | null
+          total_replied: number | null
+          total_sent: number | null
           updated_at: string | null
         }
         Insert: {
+          body_html?: string | null
+          body_plain?: string | null
           body_template?: string | null
           campaign_id: string
           created_at?: string | null
@@ -2344,6 +2534,8 @@ export type Database = {
           delay_hours?: number | null
           external_id?: string | null
           id?: string
+          open_rate?: number | null
+          reply_rate?: number | null
           send_days?: string[] | null
           send_window_end?: string | null
           send_window_start?: string | null
@@ -2351,9 +2543,14 @@ export type Database = {
           step_name?: string | null
           step_number: number
           subject_line?: string | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
           updated_at?: string | null
         }
         Update: {
+          body_html?: string | null
+          body_plain?: string | null
           body_template?: string | null
           campaign_id?: string
           created_at?: string | null
@@ -2361,6 +2558,8 @@ export type Database = {
           delay_hours?: number | null
           external_id?: string | null
           id?: string
+          open_rate?: number | null
+          reply_rate?: number | null
           send_days?: string[] | null
           send_window_end?: string | null
           send_window_start?: string | null
@@ -2368,6 +2567,9 @@ export type Database = {
           step_name?: string | null
           step_number?: number
           subject_line?: string | null
+          total_opened?: number | null
+          total_replied?: number | null
+          total_sent?: number | null
           updated_at?: string | null
         }
         Relationships: [
@@ -2376,107 +2578,6 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "campaigns"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      smartlead_campaign_cumulative: {
-        Row: {
-          campaign_id: string
-          created_at: string | null
-          id: string
-          last_synced_at: string | null
-          total_bounced: number | null
-          total_clicked: number | null
-          total_interested: number | null
-          total_opened: number | null
-          total_replied: number | null
-          total_sent: number | null
-          workspace_id: string
-        }
-        Insert: {
-          campaign_id: string
-          created_at?: string | null
-          id?: string
-          last_synced_at?: string | null
-          total_bounced?: number | null
-          total_clicked?: number | null
-          total_interested?: number | null
-          total_opened?: number | null
-          total_replied?: number | null
-          total_sent?: number | null
-          workspace_id: string
-        }
-        Update: {
-          campaign_id?: string
-          created_at?: string | null
-          id?: string
-          last_synced_at?: string | null
-          total_bounced?: number | null
-          total_clicked?: number | null
-          total_interested?: number | null
-          total_opened?: number | null
-          total_replied?: number | null
-          total_sent?: number | null
-          workspace_id?: string
-        }
-        Relationships: []
-      }
-      smartlead_daily_metrics: {
-        Row: {
-          bounced_count: number | null
-          campaign_id: string
-          clicked_count: number | null
-          created_at: string
-          id: string
-          metric_date: string
-          negative_reply_count: number | null
-          opened_count: number | null
-          positive_reply_count: number | null
-          replied_count: number | null
-          sent_count: number | null
-          updated_at: string
-          variant_id: string | null
-          workspace_id: string
-        }
-        Insert: {
-          bounced_count?: number | null
-          campaign_id: string
-          clicked_count?: number | null
-          created_at?: string
-          id?: string
-          metric_date: string
-          negative_reply_count?: number | null
-          opened_count?: number | null
-          positive_reply_count?: number | null
-          replied_count?: number | null
-          sent_count?: number | null
-          updated_at?: string
-          variant_id?: string | null
-          workspace_id: string
-        }
-        Update: {
-          bounced_count?: number | null
-          campaign_id?: string
-          clicked_count?: number | null
-          created_at?: string
-          id?: string
-          metric_date?: string
-          negative_reply_count?: number | null
-          opened_count?: number | null
-          positive_reply_count?: number | null
-          replied_count?: number | null
-          sent_count?: number | null
-          updated_at?: string
-          variant_id?: string | null
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "smartlead_daily_metrics_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: false
-            referencedRelation: "smartlead_variants"
             referencedColumns: ["id"]
           },
         ]
@@ -2521,15 +2622,7 @@ export type Database = {
           variant_id?: string | null
           workspace_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "smartlead_message_events_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: false
-            referencedRelation: "smartlead_variants"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       smartlead_sequence_steps: {
         Row: {
@@ -2559,15 +2652,7 @@ export type Database = {
           step_type?: string | null
           variant_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "smartlead_sequence_steps_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: false
-            referencedRelation: "smartlead_variants"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       smartlead_variant_features: {
         Row: {
@@ -2677,62 +2762,6 @@ export type Database = {
           updated_at?: string | null
           variant_id?: string
           workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "smartlead_variant_features_variant_id_fkey"
-            columns: ["variant_id"]
-            isOneToOne: true
-            referencedRelation: "smartlead_variants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      smartlead_variants: {
-        Row: {
-          body_preview: string | null
-          campaign_id: string
-          created_at: string
-          email_body: string | null
-          id: string
-          is_control: boolean | null
-          name: string
-          personalization_vars: Json | null
-          platform_variant_id: string | null
-          subject_line: string | null
-          updated_at: string | null
-          variant_type: string
-          word_count: number | null
-        }
-        Insert: {
-          body_preview?: string | null
-          campaign_id: string
-          created_at?: string
-          email_body?: string | null
-          id?: string
-          is_control?: boolean | null
-          name: string
-          personalization_vars?: Json | null
-          platform_variant_id?: string | null
-          subject_line?: string | null
-          updated_at?: string | null
-          variant_type?: string
-          word_count?: number | null
-        }
-        Update: {
-          body_preview?: string | null
-          campaign_id?: string
-          created_at?: string
-          email_body?: string | null
-          id?: string
-          is_control?: boolean | null
-          name?: string
-          personalization_vars?: Json | null
-          platform_variant_id?: string | null
-          subject_line?: string | null
-          updated_at?: string | null
-          variant_type?: string
-          word_count?: number | null
         }
         Relationships: []
       }
@@ -2895,96 +2924,98 @@ export type Database = {
       }
       user_roles: {
         Row: {
-          created_at: string
+          created_at: string | null
           id: string
           role: Database["public"]["Enums"]["app_role"]
           user_id: string
-          workspace_id: string | null
         }
         Insert: {
-          created_at?: string
+          created_at?: string | null
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          role: Database["public"]["Enums"]["app_role"]
           user_id: string
-          workspace_id?: string | null
         }
         Update: {
-          created_at?: string
+          created_at?: string | null
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
-          workspace_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_roles_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       variant_decay_tracking: {
         Row: {
           created_at: string | null
-          current_positive_rate: number | null
-          current_reply_rate: number | null
-          current_sample_size: number | null
-          decay_detected_at: string | null
-          decay_diagnosis: string | null
-          decay_percentage: number | null
+          cumulative_replies: number | null
+          cumulative_reply_rate: number | null
+          cumulative_sends: number | null
+          decay_from_peak: number | null
           decay_severity: string | null
           id: string
-          initial_positive_rate: number | null
-          initial_reply_rate: number | null
-          initial_sample_size: number | null
-          is_decaying: boolean | null
-          is_statistically_significant: boolean | null
-          last_computed: string | null
-          p_value: number | null
-          total_sends: number | null
-          updated_at: string | null
+          replies_this_week: number | null
+          reply_rate_this_week: number | null
+          sends_this_week: number | null
           variant_id: string
-          workspace_id: string
+          week_end: string
+          week_number: number
+          week_start: string
         }
         Insert: {
           created_at?: string | null
-          current_positive_rate?: number | null
-          current_reply_rate?: number | null
-          current_sample_size?: number | null
-          decay_detected_at?: string | null
-          decay_diagnosis?: string | null
-          decay_percentage?: number | null
+          cumulative_replies?: number | null
+          cumulative_reply_rate?: number | null
+          cumulative_sends?: number | null
+          decay_from_peak?: number | null
           decay_severity?: string | null
           id?: string
-          initial_positive_rate?: number | null
-          initial_reply_rate?: number | null
-          initial_sample_size?: number | null
-          is_decaying?: boolean | null
-          is_statistically_significant?: boolean | null
-          last_computed?: string | null
-          p_value?: number | null
-          total_sends?: number | null
-          updated_at?: string | null
+          replies_this_week?: number | null
+          reply_rate_this_week?: number | null
+          sends_this_week?: number | null
           variant_id: string
-          workspace_id: string
+          week_end: string
+          week_number: number
+          week_start: string
         }
         Update: {
           created_at?: string | null
-          current_positive_rate?: number | null
-          current_reply_rate?: number | null
-          current_sample_size?: number | null
-          decay_detected_at?: string | null
-          decay_diagnosis?: string | null
-          decay_percentage?: number | null
+          cumulative_replies?: number | null
+          cumulative_reply_rate?: number | null
+          cumulative_sends?: number | null
+          decay_from_peak?: number | null
           decay_severity?: string | null
           id?: string
-          initial_positive_rate?: number | null
-          initial_reply_rate?: number | null
-          initial_sample_size?: number | null
-          is_decaying?: boolean | null
-          is_statistically_significant?: boolean | null
-          last_computed?: string | null
-          p_value?: number | null
-          total_sends?: number | null
-          updated_at?: string | null
+          replies_this_week?: number | null
+          reply_rate_this_week?: number | null
+          sends_this_week?: number | null
           variant_id?: string
-          workspace_id?: string
+          week_end?: string
+          week_number?: number
+          week_start?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "variant_decay_tracking_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "variant_decay_tracking_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
+          },
+        ]
       }
       webhook_events: {
         Row: {
@@ -3041,24 +3072,93 @@ export type Database = {
       }
     }
     Views: {
-      time_performance: {
+      activity_timeline: {
         Row: {
-          day_of_week: number | null
-          hour: number | null
-          open_rate: number | null
-          reply_rate: number | null
-          total_opened: number | null
-          total_positive: number | null
-          total_replied: number | null
-          total_sent: number | null
-          workspace_id: string | null
+          activity_datetime: string | null
+          activity_id: string | null
+          activity_subtype: string | null
+          activity_summary: string | null
+          activity_type: string | null
+          company_id: string | null
+          contact_id: string | null
+          engagement_id: string | null
         }
         Relationships: []
       }
+      copy_performance: {
+        Row: {
+          body_bullet_count: number | null
+          body_cta_type: string | null
+          body_preview: string | null
+          body_word_count: number | null
+          campaign_id: string | null
+          campaign_name: string | null
+          confidence_level: string | null
+          engagement_id: string | null
+          margin_of_error: number | null
+          opening_line_type: string | null
+          positive_replies: number | null
+          reply_rate: number | null
+          step_number: number | null
+          subject_format: string | null
+          subject_length: number | null
+          subject_line: string | null
+          tone: string | null
+          total_replied: number | null
+          total_sent: number | null
+          variant_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_variants_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaigns_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      segment_performance: {
+        Row: {
+          company_size_category: string | null
+          contact_count: number | null
+          department: string | null
+          emails_replied: number | null
+          emails_sent: number | null
+          engagement_id: string | null
+          positive_replies: number | null
+          reply_rate: number | null
+          seniority_level: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
+      calc_margin_of_error: {
+        Args: { confidence?: number; successes: number; total: number }
+        Returns: number
+      }
       decrypt_api_key: { Args: { encrypted_value: string }; Returns: string }
       encrypt_api_key: { Args: { key_value: string }; Returns: string }
+      get_client_id_from_engagement: {
+        Args: { _engagement_id: string }
+        Returns: string
+      }
       get_decrypted_api_key: {
         Args: { connection_id: string }
         Returns: string
