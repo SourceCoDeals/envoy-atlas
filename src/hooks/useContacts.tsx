@@ -6,32 +6,41 @@ export type ContactStatus = 'new' | 'contacted' | 'interested' | 'meeting_set' |
 
 export interface Contact {
   id: string;
-  workspace_id: string;
-  email: string;
+  engagement_id: string;
+  company_id: string;
+  email: string | null;
   first_name: string | null;
   last_name: string | null;
-  company: string | null;
   title: string | null;
+  phone: string | null;
+  phone_number: string | null; // Backward compat alias
+  mobile: string | null;
+  linkedin_url: string | null;
+  seniority_level: string | null;
+  department: string | null;
+  company: string | null; // Denormalized for display
   industry: string | null;
-  phone_number: string | null;
   location: string | null;
   contact_status: ContactStatus;
   seller_interest_score: number | null;
   seller_interest_summary: string | null;
-  assigned_to: string | null;
   tags: string[];
-  last_contact_at: string | null;
-  last_email_at: string | null;
-  last_call_at: string | null;
-  next_action_date: string | null;
-  next_action_type: string | null;
   do_not_call: boolean;
   do_not_email: boolean;
+  do_not_contact: boolean;
+  last_contacted_at: string | null;
+  last_contact_at: string | null; // Alias
+  last_responded_at: string | null;
+  total_emails_sent: number;
+  total_emails_opened: number;
+  total_emails_replied: number;
+  total_calls: number;
+  total_conversations: number;
   created_at: string;
 }
 
 export interface ContactEngagement {
-  lead_id: string;
+  contact_id: string;
   emails_sent: number;
   emails_opened: number;
   emails_clicked: number;
@@ -41,15 +50,14 @@ export interface ContactEngagement {
   calls_connected: number;
   voicemails_left: number;
   total_talk_time_seconds: number;
-  avg_ai_score: number;
   first_contact_date: string | null;
   last_contact_date: string | null;
 }
 
 export interface ContactNote {
   id: string;
-  lead_id: string;
-  created_by: string;
+  contact_id: string;
+  created_by: string | null;
   note_text: string;
   note_type: 'manual' | 'system' | 'ai_generated';
   created_at: string;
@@ -57,11 +65,9 @@ export interface ContactNote {
 
 export interface ContactFilters {
   search?: string;
-  status?: ContactStatus | 'all';
   hasPhone?: boolean;
   hasEmailActivity?: boolean;
   hasCallActivity?: boolean;
-  tags?: string[];
 }
 
 export function useContacts(filters: ContactFilters = {}) {
@@ -76,22 +82,33 @@ export function useContacts(filters: ContactFilters = {}) {
     
     setLoading(true);
     try {
-      let query = supabase
-        .from('leads')
-        .select('*', { count: 'exact' })
-        .eq('workspace_id', currentWorkspace.id)
-        .order('last_contact_at', { ascending: false, nullsFirst: false });
+      // Get engagement IDs for this client
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
 
-      if (filters.search) {
-        query = query.or(`email.ilike.%${filters.search}%,first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,company.ilike.%${filters.search}%`);
+      const engagementIds = (engagements || []).map(e => e.id);
+
+      if (engagementIds.length === 0) {
+        setContacts([]);
+        setTotalCount(0);
+        setLoading(false);
+        return;
       }
 
-      if (filters.status && filters.status !== 'all') {
-        query = query.eq('contact_status', filters.status);
+      let query = supabase
+        .from('contacts')
+        .select('*', { count: 'exact' })
+        .in('engagement_id', engagementIds)
+        .order('last_contacted_at', { ascending: false, nullsFirst: false });
+
+      if (filters.search) {
+        query = query.or(`email.ilike.%${filters.search}%,first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%`);
       }
 
       if (filters.hasPhone) {
-        query = query.not('phone_number', 'is', null);
+        query = query.not('phone', 'is', null);
       }
 
       const { data, error: fetchError, count } = await query.limit(100);
@@ -100,10 +117,23 @@ export function useContacts(filters: ContactFilters = {}) {
 
       setContacts((data || []).map(d => ({
         ...d,
-        contact_status: (d.contact_status || 'new') as ContactStatus,
-        tags: d.tags || [],
+        phone_number: d.phone,
+        company: null, // Would need join to companies table
+        industry: null,
+        location: null,
+        contact_status: 'new' as ContactStatus,
+        seller_interest_score: null,
+        seller_interest_summary: null,
+        tags: [],
+        last_contact_at: d.last_contacted_at,
         do_not_call: d.do_not_call || false,
         do_not_email: d.do_not_email || false,
+        do_not_contact: d.do_not_contact || false,
+        total_emails_sent: d.total_emails_sent || 0,
+        total_emails_opened: d.total_emails_opened || 0,
+        total_emails_replied: d.total_emails_replied || 0,
+        total_calls: d.total_calls || 0,
+        total_conversations: d.total_conversations || 0,
       })));
       setTotalCount(count || 0);
     } catch (err) {
@@ -111,7 +141,7 @@ export function useContacts(filters: ContactFilters = {}) {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspace?.id, filters.search, filters.status, filters.hasPhone]);
+  }, [currentWorkspace?.id, filters.search, filters.hasPhone]);
 
   useEffect(() => {
     fetchContacts();
@@ -119,28 +149,12 @@ export function useContacts(filters: ContactFilters = {}) {
 
   const updateContact = async (id: string, updates: Partial<Contact>) => {
     const { error } = await supabase
-      .from('leads')
+      .from('contacts')
       .update(updates)
       .eq('id', id);
 
     if (error) throw error;
     await fetchContacts();
-  };
-
-  const addTag = async (id: string, tag: string) => {
-    const contact = contacts.find(c => c.id === id);
-    if (!contact) return;
-    
-    const newTags = [...(contact.tags || []), tag];
-    await updateContact(id, { tags: newTags });
-  };
-
-  const removeTag = async (id: string, tag: string) => {
-    const contact = contacts.find(c => c.id === id);
-    if (!contact) return;
-    
-    const newTags = (contact.tags || []).filter(t => t !== tag);
-    await updateContact(id, { tags: newTags });
   };
 
   return {
@@ -150,8 +164,6 @@ export function useContacts(filters: ContactFilters = {}) {
     totalCount,
     refetch: fetchContacts,
     updateContact,
-    addTag,
-    removeTag,
   };
 }
 
@@ -173,7 +185,7 @@ export function useContactDetail(contactId: string | null) {
     try {
       // Fetch contact details
       const { data: contactData, error: contactError } = await supabase
-        .from('leads')
+        .from('contacts')
         .select('*')
         .eq('id', contactId)
         .single();
@@ -182,42 +194,51 @@ export function useContactDetail(contactId: string | null) {
 
       setContact({
         ...contactData,
-        contact_status: (contactData.contact_status || 'new') as ContactStatus,
-        tags: contactData.tags || [],
         do_not_call: contactData.do_not_call || false,
         do_not_email: contactData.do_not_email || false,
+        do_not_contact: contactData.do_not_contact || false,
+        total_emails_sent: contactData.total_emails_sent || 0,
+        total_emails_opened: contactData.total_emails_opened || 0,
+        total_emails_replied: contactData.total_emails_replied || 0,
+        total_calls: contactData.total_calls || 0,
+        total_conversations: contactData.total_conversations || 0,
       });
 
-      // Fetch engagement summary from view
-      const { data: engagementData } = await supabase
-        .from('contact_engagement_summary')
-        .select('*')
-        .eq('lead_id', contactId)
-        .single();
+      // Calculate engagement from email_activities and call_activities
+      const [emailsResult, callsResult] = await Promise.all([
+        supabase
+          .from('email_activities')
+          .select('sent, opened, clicked, replied, bounced')
+          .eq('contact_id', contactId),
+        supabase
+          .from('call_activities')
+          .select('duration_seconds, disposition')
+          .eq('contact_id', contactId),
+      ]);
 
-      if (engagementData) {
-        setEngagement({
-          lead_id: engagementData.lead_id,
-          emails_sent: Number(engagementData.emails_sent) || 0,
-          emails_opened: Number(engagementData.emails_opened) || 0,
-          emails_clicked: Number(engagementData.emails_clicked) || 0,
-          emails_replied: Number(engagementData.emails_replied) || 0,
-          emails_bounced: Number(engagementData.emails_bounced) || 0,
-          total_calls: Number(engagementData.total_calls) || 0,
-          calls_connected: Number(engagementData.calls_connected) || 0,
-          voicemails_left: Number(engagementData.voicemails_left) || 0,
-          total_talk_time_seconds: Number(engagementData.total_talk_time_seconds) || 0,
-          avg_ai_score: Number(engagementData.avg_ai_score) || 0,
-          first_contact_date: engagementData.first_contact_date,
-          last_contact_date: engagementData.last_contact_date,
-        });
-      }
+      const emails = emailsResult.data || [];
+      const calls = callsResult.data || [];
+
+      setEngagement({
+        contact_id: contactId,
+        emails_sent: emails.filter(e => e.sent).length,
+        emails_opened: emails.filter(e => e.opened).length,
+        emails_clicked: emails.filter(e => e.clicked).length,
+        emails_replied: emails.filter(e => e.replied).length,
+        emails_bounced: emails.filter(e => e.bounced).length,
+        total_calls: calls.length,
+        calls_connected: calls.filter(c => c.disposition === 'connected' || c.disposition === 'conversation').length,
+        voicemails_left: calls.filter(c => c.disposition === 'voicemail').length,
+        total_talk_time_seconds: calls.reduce((sum, c) => sum + (c.duration_seconds || 0), 0),
+        first_contact_date: null,
+        last_contact_date: null,
+      });
 
       // Fetch notes
       const { data: notesData } = await supabase
         .from('contact_notes')
         .select('*')
-        .eq('lead_id', contactId)
+        .eq('contact_id', contactId)
         .order('created_at', { ascending: false });
 
       setNotes((notesData || []) as ContactNote[]);
@@ -238,11 +259,20 @@ export function useContactDetail(contactId: string | null) {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return;
 
+    // Get engagement_id from contact
+    const { data: contactData } = await supabase
+      .from('contacts')
+      .select('engagement_id')
+      .eq('id', contactId)
+      .single();
+
+    if (!contactData) return;
+
     const { error } = await supabase
       .from('contact_notes')
       .insert({
-        workspace_id: currentWorkspace.id,
-        lead_id: contactId,
+        engagement_id: contactData.engagement_id,
+        contact_id: contactId,
         created_by: userData.user.id,
         note_text: noteText,
         note_type: noteType,
@@ -293,47 +323,32 @@ export function useContactTimeline(contactId: string | null) {
 
       setLoading(true);
       try {
-        // Fetch email events
+        // Fetch email activities
         const { data: emailEvents } = await supabase
-          .from('message_events')
+          .from('email_activities')
           .select('*')
-          .eq('lead_id', contactId)
-          .order('occurred_at', { ascending: false });
+          .eq('contact_id', contactId)
+          .order('sent_at', { ascending: false });
 
-        // Get lead info to find matching calls
-        const { data: lead } = await supabase
-          .from('leads')
-          .select('first_name, last_name, company')
-          .eq('id', contactId)
-          .single();
-
-        // Fetch call events from external_calls based on contact name match
-        let callEvents: any[] = [];
-        if (lead) {
-          const fullName = [lead.first_name, lead.last_name].filter(Boolean).join(' ');
-          if (fullName) {
-            const { data: calls } = await supabase
-              .from('external_calls')
-              .select('*')
-              .eq('workspace_id', currentWorkspace.id)
-              .ilike('contact_name', `%${fullName}%`)
-              .order('date_time', { ascending: false });
-            callEvents = calls || [];
-          }
-        }
+        // Fetch call activities
+        const { data: callEvents } = await supabase
+          .from('call_activities')
+          .select('*')
+          .eq('contact_id', contactId)
+          .order('started_at', { ascending: false });
 
         // Combine and sort
         const combined = [
           ...(emailEvents || []).map(e => ({
             type: 'email' as const,
             id: e.id,
-            timestamp: e.occurred_at,
+            timestamp: e.sent_at || e.created_at,
             data: e as Record<string, unknown>,
           })),
-          ...callEvents.map(c => ({
+          ...(callEvents || []).map(c => ({
             type: 'call' as const,
             id: c.id,
-            timestamp: c.date_time || c.created_at,
+            timestamp: c.started_at || c.created_at,
             data: c as Record<string, unknown>,
           })),
         ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());

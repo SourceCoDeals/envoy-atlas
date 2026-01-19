@@ -1,16 +1,14 @@
-import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
-import { Database } from '@/integrations/supabase/types';
 
-type AppRole = Database['public']['Enums']['app_role'];
+type MemberRole = 'admin' | 'analyst' | 'viewer';
 
 interface WorkspaceMember {
   id: string;
   user_id: string;
-  role: AppRole;
+  role: MemberRole;
   created_at: string;
   profile: {
     email: string | null;
@@ -24,21 +22,21 @@ export function useWorkspaceSettings() {
 
   // Fetch workspace members with their profiles
   const { data: members, isLoading: loadingMembers } = useQuery({
-    queryKey: ['workspace-members', currentWorkspace?.id],
+    queryKey: ['client-members', currentWorkspace?.id],
     queryFn: async () => {
       if (!currentWorkspace?.id) return [];
 
       // Fetch members first
       const { data: membersData, error: membersError } = await supabase
-        .from('workspace_members')
+        .from('client_members')
         .select('id, user_id, role, created_at')
-        .eq('workspace_id', currentWorkspace.id)
+        .eq('client_id', currentWorkspace.id)
         .order('created_at', { ascending: true });
 
       if (membersError) throw membersError;
       if (!membersData || membersData.length === 0) return [];
 
-      // Fetch profiles separately (no FK relationship)
+      // Fetch profiles separately
       const userIds = membersData.map(m => m.user_id);
       const { data: profiles } = await supabase
         .from('profiles')
@@ -49,6 +47,7 @@ export function useWorkspaceSettings() {
 
       return membersData.map(m => ({
         ...m,
+        role: (m.role || 'viewer') as MemberRole,
         profile: profileMap.get(m.user_id) || null
       })) as WorkspaceMember[];
     },
@@ -61,7 +60,7 @@ export function useWorkspaceSettings() {
       if (!currentWorkspace?.id) throw new Error('No workspace selected');
 
       const { error } = await supabase
-        .from('workspaces')
+        .from('clients')
         .update({ name: newName, updated_at: new Date().toISOString() })
         .eq('id', currentWorkspace.id);
 
@@ -80,7 +79,7 @@ export function useWorkspaceSettings() {
 
   // Invite team member by email
   const inviteTeamMember = useMutation({
-    mutationFn: async ({ email, role }: { email: string; role: AppRole }) => {
+    mutationFn: async ({ email, role }: { email: string; role: MemberRole }) => {
       if (!currentWorkspace?.id) throw new Error('No workspace selected');
 
       // First, find the user by email in profiles
@@ -98,9 +97,9 @@ export function useWorkspaceSettings() {
 
       // Check if already a member
       const { data: existing } = await supabase
-        .from('workspace_members')
+        .from('client_members')
         .select('id')
-        .eq('workspace_id', currentWorkspace.id)
+        .eq('client_id', currentWorkspace.id)
         .eq('user_id', profile.id)
         .maybeSingle();
 
@@ -110,9 +109,9 @@ export function useWorkspaceSettings() {
 
       // Add as workspace member
       const { error: insertError } = await supabase
-        .from('workspace_members')
+        .from('client_members')
         .insert({
-          workspace_id: currentWorkspace.id,
+          client_id: currentWorkspace.id,
           user_id: profile.id,
           role,
         });
@@ -123,7 +122,7 @@ export function useWorkspaceSettings() {
     },
     onSuccess: ({ email, role }) => {
       toast.success(`Invited ${email} as ${role}`);
-      queryClient.invalidateQueries({ queryKey: ['workspace-members', currentWorkspace?.id] });
+      queryClient.invalidateQueries({ queryKey: ['client-members', currentWorkspace?.id] });
     },
     onError: (error) => {
       toast.error('Failed to invite team member', {
@@ -134,9 +133,9 @@ export function useWorkspaceSettings() {
 
   // Update member role
   const updateMemberRole = useMutation({
-    mutationFn: async ({ memberId, newRole }: { memberId: string; newRole: AppRole }) => {
+    mutationFn: async ({ memberId, newRole }: { memberId: string; newRole: MemberRole }) => {
       const { error } = await supabase
-        .from('workspace_members')
+        .from('client_members')
         .update({ role: newRole })
         .eq('id', memberId);
 
@@ -144,7 +143,7 @@ export function useWorkspaceSettings() {
     },
     onSuccess: () => {
       toast.success('Member role updated');
-      queryClient.invalidateQueries({ queryKey: ['workspace-members', currentWorkspace?.id] });
+      queryClient.invalidateQueries({ queryKey: ['client-members', currentWorkspace?.id] });
     },
     onError: (error) => {
       toast.error('Failed to update role', {
@@ -157,7 +156,7 @@ export function useWorkspaceSettings() {
   const removeMember = useMutation({
     mutationFn: async (memberId: string) => {
       const { error } = await supabase
-        .from('workspace_members')
+        .from('client_members')
         .delete()
         .eq('id', memberId);
 
@@ -165,7 +164,7 @@ export function useWorkspaceSettings() {
     },
     onSuccess: () => {
       toast.success('Member removed from workspace');
-      queryClient.invalidateQueries({ queryKey: ['workspace-members', currentWorkspace?.id] });
+      queryClient.invalidateQueries({ queryKey: ['client-members', currentWorkspace?.id] });
     },
     onError: (error) => {
       toast.error('Failed to remove member', {
