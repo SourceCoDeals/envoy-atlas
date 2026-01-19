@@ -2611,45 +2611,39 @@ export type Database = {
       link_click_tracking: {
         Row: {
           campaign_id: string | null
-          click_timestamp: string | null
-          clicked_url: string
+          click_count: number | null
+          clicked_at: string
           contact_id: string | null
           created_at: string | null
-          device_type: string | null
-          email_activity_id: string | null
           engagement_id: string | null
           id: string
-          ip_address: string | null
           link_text: string | null
-          user_agent: string | null
+          link_url: string
+          variant_id: string | null
         }
         Insert: {
           campaign_id?: string | null
-          click_timestamp?: string | null
-          clicked_url: string
+          click_count?: number | null
+          clicked_at: string
           contact_id?: string | null
           created_at?: string | null
-          device_type?: string | null
-          email_activity_id?: string | null
           engagement_id?: string | null
           id?: string
-          ip_address?: string | null
           link_text?: string | null
-          user_agent?: string | null
+          link_url: string
+          variant_id?: string | null
         }
         Update: {
           campaign_id?: string | null
-          click_timestamp?: string | null
-          clicked_url?: string
+          click_count?: number | null
+          clicked_at?: string
           contact_id?: string | null
           created_at?: string | null
-          device_type?: string | null
-          email_activity_id?: string | null
           engagement_id?: string | null
           id?: string
-          ip_address?: string | null
           link_text?: string | null
-          user_agent?: string | null
+          link_url?: string
+          variant_id?: string | null
         }
         Relationships: [
           {
@@ -2667,18 +2661,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "link_click_tracking_email_activity_id_fkey"
-            columns: ["email_activity_id"]
-            isOneToOne: false
-            referencedRelation: "email_activities"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "link_click_tracking_engagement_id_fkey"
             columns: ["engagement_id"]
             isOneToOne: false
             referencedRelation: "engagements"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "link_click_tracking_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_variants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "link_click_tracking_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "copy_performance"
+            referencedColumns: ["variant_id"]
           },
         ]
       }
@@ -3566,78 +3567,71 @@ export type Database = {
       }
       variant_decay_tracking: {
         Row: {
-          bounce_rate: number | null
-          created_at: string | null
-          cumulative_replies: number | null
+          campaign_id: string | null
+          computed_at: string | null
+          cumulative_replied: number | null
           cumulative_reply_rate: number | null
-          cumulative_sends: number | null
-          decay_from_peak: number | null
-          decay_severity: string | null
-          decline_severity: string | null
+          cumulative_sent: number | null
+          decay_rate: number | null
+          engagement_id: string | null
           id: string
-          is_declining: boolean | null
-          open_rate: number | null
-          open_rate_change: number | null
-          positive_rate: number | null
-          positive_rate_change: number | null
-          replies_this_week: number | null
-          reply_rate_change: number | null
-          reply_rate_this_week: number | null
-          sends_this_week: number | null
-          variant_id: string
-          week_end: string
+          period_end: string | null
+          period_replied: number | null
+          period_reply_rate: number | null
+          period_sent: number | null
+          period_start: string | null
+          variant_id: string | null
           week_number: number
-          week_start: string
         }
         Insert: {
-          bounce_rate?: number | null
-          created_at?: string | null
-          cumulative_replies?: number | null
+          campaign_id?: string | null
+          computed_at?: string | null
+          cumulative_replied?: number | null
           cumulative_reply_rate?: number | null
-          cumulative_sends?: number | null
-          decay_from_peak?: number | null
-          decay_severity?: string | null
-          decline_severity?: string | null
+          cumulative_sent?: number | null
+          decay_rate?: number | null
+          engagement_id?: string | null
           id?: string
-          is_declining?: boolean | null
-          open_rate?: number | null
-          open_rate_change?: number | null
-          positive_rate?: number | null
-          positive_rate_change?: number | null
-          replies_this_week?: number | null
-          reply_rate_change?: number | null
-          reply_rate_this_week?: number | null
-          sends_this_week?: number | null
-          variant_id: string
-          week_end: string
+          period_end?: string | null
+          period_replied?: number | null
+          period_reply_rate?: number | null
+          period_sent?: number | null
+          period_start?: string | null
+          variant_id?: string | null
           week_number: number
-          week_start: string
         }
         Update: {
-          bounce_rate?: number | null
-          created_at?: string | null
-          cumulative_replies?: number | null
+          campaign_id?: string | null
+          computed_at?: string | null
+          cumulative_replied?: number | null
           cumulative_reply_rate?: number | null
-          cumulative_sends?: number | null
-          decay_from_peak?: number | null
-          decay_severity?: string | null
-          decline_severity?: string | null
+          cumulative_sent?: number | null
+          decay_rate?: number | null
+          engagement_id?: string | null
           id?: string
-          is_declining?: boolean | null
-          open_rate?: number | null
-          open_rate_change?: number | null
-          positive_rate?: number | null
-          positive_rate_change?: number | null
-          replies_this_week?: number | null
-          reply_rate_change?: number | null
-          reply_rate_this_week?: number | null
-          sends_this_week?: number | null
-          variant_id?: string
-          week_end?: string
+          period_end?: string | null
+          period_replied?: number | null
+          period_reply_rate?: number | null
+          period_sent?: number | null
+          period_start?: string | null
+          variant_id?: string | null
           week_number?: number
-          week_start?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "variant_decay_tracking_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "variant_decay_tracking_engagement_fk"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "variant_decay_tracking_variant_id_fkey"
             columns: ["variant_id"]
@@ -3656,45 +3650,42 @@ export type Database = {
       }
       webhook_events: {
         Row: {
+          created_at: string | null
           data_source_id: string | null
-          event_id: string | null
+          engagement_id: string | null
+          error_message: string | null
           event_type: string
-          headers: Json | null
+          external_id: string | null
           id: string
-          payload: Json
+          payload: Json | null
           processed: boolean | null
           processed_at: string | null
-          processing_error: string | null
-          received_at: string | null
-          retry_count: number | null
           source_type: string
         }
         Insert: {
+          created_at?: string | null
           data_source_id?: string | null
-          event_id?: string | null
+          engagement_id?: string | null
+          error_message?: string | null
           event_type: string
-          headers?: Json | null
+          external_id?: string | null
           id?: string
-          payload: Json
+          payload?: Json | null
           processed?: boolean | null
           processed_at?: string | null
-          processing_error?: string | null
-          received_at?: string | null
-          retry_count?: number | null
           source_type: string
         }
         Update: {
+          created_at?: string | null
           data_source_id?: string | null
-          event_id?: string | null
+          engagement_id?: string | null
+          error_message?: string | null
           event_type?: string
-          headers?: Json | null
+          external_id?: string | null
           id?: string
-          payload?: Json
+          payload?: Json | null
           processed?: boolean | null
           processed_at?: string | null
-          processing_error?: string | null
-          received_at?: string | null
-          retry_count?: number | null
           source_type?: string
         }
         Relationships: [
@@ -3703,6 +3694,13 @@ export type Database = {
             columns: ["data_source_id"]
             isOneToOne: false
             referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "webhook_events_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
             referencedColumns: ["id"]
           },
         ]
