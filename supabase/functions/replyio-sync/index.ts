@@ -218,6 +218,15 @@ async function triggerAnalysis(
   }
 }
 
+// Strip HTML and return plain text
+function stripHtml(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 Deno.serve(async (req) => {
   console.log('replyio-sync: Request received', { method: req.method });
 
@@ -240,9 +249,10 @@ Deno.serve(async (req) => {
       auto_continue = false,
       internal_continuation = false,
       current_phase = 'sequences',
-      sync_people = true, // Enable people sync for contacts
-      sync_email_activities = true, // Enable email activities sync
-      classify_replies = true, // Trigger AI reply classification after sync
+      sync_people = true,
+      sync_email_activities = true,
+      sync_email_accounts = true,  // NEW: Sync email accounts
+      classify_replies = true,
     } = body;
 
     // Auth check for initial requests (skip for internal continuations)
@@ -318,7 +328,10 @@ Deno.serve(async (req) => {
       await supabase.from('campaign_variants').delete().eq('data_source_id', data_source_id);
       await supabase.from('sequences').delete().eq('data_source_id', data_source_id);
       await supabase.from('email_activities').delete().eq('data_source_id', data_source_id);
+      await supabase.from('message_threads').delete().eq('data_source_id', data_source_id);
+      await supabase.from('campaign_email_accounts').delete().eq('data_source_id', data_source_id);
       await supabase.from('campaigns').delete().eq('data_source_id', data_source_id);
+      await supabase.from('email_accounts').delete().eq('engagement_id', engagement_id).eq('data_source_id', data_source_id);
       
       console.log('Reset complete');
     }
@@ -335,12 +348,69 @@ Deno.serve(async (req) => {
       variants_synced: 0,
       people_synced: 0,
       companies_synced: 0,
+      email_accounts_synced: 0,
       email_activities_synced: 0,
+      message_threads_synced: 0,
       errors: [] as string[],
     };
 
     const startTime = Date.now();
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
+
+    // ============================================
+    // PHASE 0: Fetch Email Accounts (once per sync)
+    // ============================================
+    if (sync_email_accounts && batch_number === 1 && current_phase === 'sequences') {
+      console.log('=== Fetching email accounts ===');
+      try {
+        // Reply.io uses /emailAccounts endpoint for v3 API
+        const emailAccountsRaw = await replyioRequest('/emailAccounts', apiKey, { 
+          delayMs: RATE_LIMIT_DELAY_LIST,
+          allow404: true 
+        });
+        
+        const emailAccounts = Array.isArray(emailAccountsRaw) 
+          ? emailAccountsRaw 
+          : (emailAccountsRaw?.emailAccounts || emailAccountsRaw?.accounts || []);
+        
+        if (emailAccounts.length > 0) {
+          console.log(`Found ${emailAccounts.length} email accounts`);
+          
+          for (const account of emailAccounts) {
+            const { data: emailAccountData, error: eaError } = await supabase
+              .from('email_accounts')
+              .upsert({
+                engagement_id,
+                data_source_id,
+                external_id: String(account.id || account.emailAccountId),
+                from_email: account.email || account.fromEmail,
+                from_name: account.name || account.fromName || null,
+                smtp_host: account.smtpHost || null,
+                smtp_port: account.smtpPort || null,
+                is_smtp_success: account.isSmtpConnected ?? account.smtpStatus === 'connected',
+                imap_host: account.imapHost || null,
+                imap_port: account.imapPort || null,
+                is_imap_success: account.isImapConnected ?? account.imapStatus === 'connected',
+                message_per_day: account.dailyLimit || account.maxEmailsPerDay || null,
+                daily_sent_count: account.sentToday || account.dailySentCount || 0,
+                warmup_enabled: account.warmupEnabled ?? false,
+                warmup_status: account.warmupStatus || null,
+                account_type: account.type || account.provider || 'smtp',
+                is_active: account.isActive ?? account.status === 'active',
+                last_synced_at: new Date().toISOString(),
+              }, { onConflict: 'engagement_id,from_email' })
+              .select('id')
+              .single();
+            
+            if (!eaError && emailAccountData) {
+              progress.email_accounts_synced++;
+            }
+          }
+        }
+      } catch (e) {
+        console.log('Email accounts not available:', (e as Error).message);
+      }
+    }
 
     // ============================================
     // PHASE 1: Sync Sequences/Campaigns
@@ -373,11 +443,18 @@ Deno.serve(async (req) => {
         
         console.log(`Found ${allSequences.length} total sequences`);
         
-        // Cache sequences in data source config
+        // Cache sequences in data source config with extended fields
         await supabase.from('data_sources').update({
           additional_config: { 
             ...existingConfig,
-            cached_sequences: allSequences.map((s: any) => ({ id: s.id, name: s.name, status: s.status })),
+            cached_sequences: allSequences.map((s: any) => ({ 
+              id: s.id, 
+              name: s.name, 
+              status: s.status,
+              ownerId: s.ownerId,
+              teamId: s.teamId,
+              isArchived: s.isArchived,
+            })),
             sequence_index: 0,
             total_sequences: allSequences.length,
             batch_number: batch_number,
@@ -444,7 +521,7 @@ Deno.serve(async (req) => {
         console.log(`[${i + 1}/${allSequences.length}] Processing: ${sequence.name} (${sequence.status})`);
 
         try {
-          // 1. Upsert campaign (using unified 'campaigns' table)
+          // 1. Upsert campaign with extended fields
           const { data: campaign, error: campError } = await supabase
             .from('campaigns')
             .upsert({
@@ -454,6 +531,10 @@ Deno.serve(async (req) => {
               name: sequence.name,
               status: mapSequenceStatus(sequence.status),
               campaign_type: 'email',
+              // Extended fields
+              owner_id: sequence.ownerId ? String(sequence.ownerId) : null,
+              team_id: sequence.teamId ? String(sequence.teamId) : null,
+              is_archived: sequence.isArchived ?? false,
             }, { onConflict: 'engagement_id,data_source_id,external_id' })
             .select('id')
             .single();
@@ -477,7 +558,7 @@ Deno.serve(async (req) => {
             step_count: sequence.stepsCount || sequence.steps?.length || 0,
           }, { onConflict: 'campaign_id,external_id' });
 
-          // 3. Fetch and store variants (email templates)
+          // 3. Fetch and store variants (email templates) with extended fields
           const extractSteps = (resp: any): any[] => {
             if (!resp) return [];
             if (Array.isArray(resp)) return resp;
@@ -522,6 +603,9 @@ Deno.serve(async (req) => {
                 const vars = extractPersonalizationVars(`${subject} ${bodyContent}`);
                 const templateId = tpl.id || tpl.templateId;
                 const externalId = templateId ? `tpl-${templateId}` : `step-${stepIdx + 1}-tpl-${tplIdx + 1}`;
+                
+                // Extract delay info if available
+                const delayDays = step.delay || step.delayDays || step.waitDays || null;
 
                 const { error: varErr } = await supabase
                   .from('campaign_variants')
@@ -532,9 +616,15 @@ Deno.serve(async (req) => {
                     subject_line: String(subject).substring(0, 500),
                     body_preview: String(bodyContent).substring(0, 500),
                     body_plain: String(bodyContent),
+                    body_html: tpl.bodyHtml || tpl.htmlBody || bodyContent,
                     step_number: stepIdx + 1,
                     is_control: tplIdx === 0,
                     personalization_vars: vars,
+                    // Extended fields
+                    variant_label: tpl.label || tpl.variantName || null,
+                    delay_days: delayDays,
+                    delay_config: step.delayConfig || (delayDays ? { delay_in_days: delayDays } : null),
+                    send_as_reply: step.sendAsReply ?? (stepIdx > 0),
                   }, { onConflict: 'campaign_id,external_id' });
 
                 if (!varErr) {
@@ -596,13 +686,12 @@ Deno.serve(async (req) => {
                 completed: finishedPeople,
                 blocked: 0,
                 paused: 0,
-                unsubscribed: 0,
+                unsubscribed: Number(seqDetails.optOutsCount ?? stats.optOuts ?? 0),
               };
               
               console.log(`  Metrics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}, leads=${totalPeople}`);
               
               // Update campaign totals with proper error handling
-              // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0, not percentages
               const { error: updateError } = await supabase.from('campaigns').update({
                 total_sent: totalSent,
                 total_opened: totalOpened,
@@ -620,7 +709,6 @@ Deno.serve(async (req) => {
               
               // Store enrollment snapshot for tracking trends
               if (enrollmentSettings.total_leads > 0 || enrollmentSettings.not_started > 0) {
-                // Get actual engagement_id for the campaign
                 const { data: campaignRecord } = await supabase
                   .from('campaigns')
                   .select('engagement_id')
@@ -638,7 +726,7 @@ Deno.serve(async (req) => {
                   completed: enrollmentSettings.completed,
                   blocked: 0,
                   paused: 0,
-                  unsubscribed: 0,
+                  unsubscribed: enrollmentSettings.unsubscribed,
                 }, { onConflict: 'campaign_id,date' });
                 console.log(`  Enrollment snapshot: total=${enrollmentSettings.total_leads}, backlog=${enrollmentSettings.not_started}`);
               }
@@ -648,7 +736,7 @@ Deno.serve(async (req) => {
                 progress.errors.push(`Campaign ${sequence.name} metrics update: ${updateError.message}`);
               }
               
-              // Get the campaign's ACTUAL engagement_id (may differ from sync trigger's engagement_id)
+              // Get the campaign's ACTUAL engagement_id
               const { data: campaignRecord } = await supabase
                 .from('campaigns')
                 .select('engagement_id')
@@ -658,10 +746,9 @@ Deno.serve(async (req) => {
               const actualEngagementId = campaignRecord?.engagement_id || engagement_id;
               
               // Store daily metrics using the campaign's actual engagement_id
-              // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0
               if (totalSent > 0 || totalReplied > 0) {
                 const { error: metricsErr } = await supabase.from('daily_metrics').upsert({
-                  engagement_id: actualEngagementId, // Use campaign's engagement, NOT sync trigger's
+                  engagement_id: actualEngagementId,
                   campaign_id: campaignId,
                   data_source_id,
                   date: today,
@@ -689,7 +776,7 @@ Deno.serve(async (req) => {
           }
 
           // ============================================
-          // NEW: Fetch People for this sequence
+          // Fetch People with Extended Data
           // ============================================
           if (sync_people) {
             try {
@@ -756,8 +843,18 @@ Deno.serve(async (req) => {
                     
                     if (!companyId) continue;
                     
-                    // Upsert contact with enrolled_at date
+                    // Extract extended person data
                     const enrolledAt = person.addedAt || person.createdAt || person.created || person.added_at || null;
+                    const sequenceStatus = person.status || person.contactStatus || null;
+                    const currentStep = person.currentStep || person.step || null;
+                    const finishReason = person.finishReason || person.endReason || null;
+                    const isInterested = person.isInterested ?? person.interested ?? null;
+                    const openCount = person.openedCount || person.opensCount || person.opens || 0;
+                    const clickCount = person.clickedCount || person.clicksCount || person.clicks || 0;
+                    const replyCount = person.repliedCount || person.repliesCount || person.replies || 0;
+                    const lastActivityAt = person.lastActivityAt || person.lastActivity || null;
+                    
+                    // Upsert contact with extended fields
                     const { error: contactError } = await supabase
                       .from('contacts')
                       .upsert({
@@ -771,6 +868,18 @@ Deno.serve(async (req) => {
                         title: person.title || person.jobTitle || person.job_title || null,
                         enrolled_at: enrolledAt,
                         source: 'replyio',
+                        // Extended fields
+                        external_lead_id: person.id ? String(person.id) : null,
+                        sequence_status: sequenceStatus,
+                        current_step: currentStep,
+                        finish_reason: finishReason,
+                        is_interested: isInterested,
+                        open_count: openCount,
+                        click_count: clickCount,
+                        reply_count: replyCount,
+                        last_activity_at: lastActivityAt ? new Date(lastActivityAt).toISOString() : null,
+                        is_unsubscribed: person.isOptedOut ?? person.unsubscribed ?? false,
+                        unsubscribed_at: person.optOutAt || person.unsubscribedAt || null,
                       }, { onConflict: 'engagement_id,email' });
                     
                     if (!contactError) {
@@ -790,7 +899,7 @@ Deno.serve(async (req) => {
           }
 
           // ============================================
-          // NEW: Fetch Email Activities for this sequence
+          // Fetch Email Activities with Extended Data
           // ============================================
           if (sync_email_activities) {
             try {
@@ -823,6 +932,11 @@ Deno.serve(async (req) => {
                     
                     if (!contact) continue;
                     
+                    // Extract bounce details
+                    const bounceType = event.bounceType || event.bounce_type || 
+                      (event.isHardBounce ? 'hard' : event.isSoftBounce ? 'soft' : null);
+                    const bounceReason = event.bounceReason || event.bounce_reason || event.errorMessage || null;
+                    
                     const { error: activityError } = await supabase
                       .from('email_activities')
                       .upsert({
@@ -833,25 +947,60 @@ Deno.serve(async (req) => {
                         company_id: contact.company_id,
                         external_id: event.id ? String(event.id) : null,
                         to_email: email,
+                        from_email: event.fromEmail || event.from || null,
                         subject: event.subject || null,
                         sent: event.sent ?? event.eventType === 'sent',
                         sent_at: event.sentAt || event.sent_at ? new Date(event.sentAt || event.sent_at).toISOString() : null,
                         delivered: event.delivered ?? null,
+                        delivered_at: event.deliveredAt ? new Date(event.deliveredAt).toISOString() : null,
                         opened: event.opened ?? event.eventType === 'opened',
                         first_opened_at: event.openedAt || event.opened_at ? new Date(event.openedAt || event.opened_at).toISOString() : null,
+                        open_count: event.openCount || event.opensCount || 0,
                         clicked: event.clicked ?? event.eventType === 'clicked',
+                        first_clicked_at: event.clickedAt || event.clicked_at ? new Date(event.clickedAt || event.clicked_at).toISOString() : null,
+                        click_count: event.clickCount || event.clicksCount || 0,
                         replied: event.replied ?? event.eventType === 'replied',
                         replied_at: event.repliedAt || event.replied_at ? new Date(event.repliedAt || event.replied_at).toISOString() : null,
-                        reply_text: event.replyText || event.reply || null,
-                        reply_sentiment: event.sentiment || null,
+                        reply_text: event.replyText || event.reply || event.replyBody || null,
+                        reply_sentiment: event.sentiment || event.replySentiment || null,
+                        is_interested: event.isInterested ?? event.interested ?? null,
                         bounced: event.bounced ?? event.eventType === 'bounced',
                         bounced_at: event.bouncedAt || event.bounced_at ? new Date(event.bouncedAt || event.bounced_at).toISOString() : null,
+                        bounce_type: bounceType,
+                        bounce_reason: bounceReason,
                         unsubscribed: event.unsubscribed ?? event.eventType === 'unsubscribed',
-                        step_number: event.stepNumber || event.step_number || null,
+                        unsubscribed_at: event.unsubscribedAt ? new Date(event.unsubscribedAt).toISOString() : null,
+                        marked_spam: event.markedSpam ?? event.isSpam ?? false,
+                        spam_reported_at: event.spamReportedAt ? new Date(event.spamReportedAt).toISOString() : null,
+                        step_number: event.stepNumber || event.step_number || event.step || null,
+                        link_clicks: event.clickedLinks || event.links || null,
+                        open_timestamps: event.openTimestamps || null,
                       }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
                     
                     if (!activityError) {
                       progress.email_activities_synced++;
+                      
+                      // If this is a reply with content, also store in message_threads
+                      if (event.replyText || event.reply || event.replyBody) {
+                        const replyContent = event.replyText || event.reply || event.replyBody;
+                        await supabase.from('message_threads').upsert({
+                          contact_id: contact.id,
+                          campaign_id: campaignId,
+                          engagement_id,
+                          external_stats_id: event.id ? String(event.id) : null,
+                          message_type: 'reply',
+                          subject: event.subject || null,
+                          body_html: replyContent,
+                          body_plain: stripHtml(replyContent),
+                          body_preview: stripHtml(replyContent).substring(0, 200),
+                          sent_at: event.repliedAt ? new Date(event.repliedAt).toISOString() : new Date().toISOString(),
+                          from_email: email,
+                          to_email: event.fromEmail || null,
+                          sequence_number: event.stepNumber || null,
+                          is_automated: false,
+                        }, { onConflict: 'engagement_id,external_stats_id,message_type' });
+                        progress.message_threads_synced++;
+                      }
                     }
                   } catch (e) {
                     // Continue on individual event errors
@@ -874,7 +1023,7 @@ Deno.serve(async (req) => {
     // Sync Complete
     // ============================================
     console.log('=== Reply.io sync complete ===');
-    console.log(`Final: ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants, ${progress.people_synced} people, ${progress.companies_synced} companies`);
+    console.log(`Final: ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants, ${progress.people_synced} people, ${progress.companies_synced} companies, ${progress.email_accounts_synced} email accounts, ${progress.email_activities_synced} email activities, ${progress.message_threads_synced} message threads`);
     
     await supabase.from('data_sources').update({
       last_sync_status: 'success',
@@ -889,7 +1038,9 @@ Deno.serve(async (req) => {
         variants_synced: progress.variants_synced,
         people_synced: progress.people_synced,
         companies_synced: progress.companies_synced,
+        email_accounts_synced: progress.email_accounts_synced,
         email_activities_synced: progress.email_activities_synced,
+        message_threads_synced: progress.message_threads_synced,
       },
       updated_at: new Date().toISOString(),
     }).eq('id', data_source_id);
@@ -901,7 +1052,7 @@ Deno.serve(async (req) => {
       success: true,
       complete: true,
       progress,
-      message: `Synced ${progress.sequences_synced} sequences, ${progress.variants_synced} variants, ${progress.people_synced} contacts, ${progress.companies_synced} companies, ${progress.email_activities_synced} email activities`,
+      message: `Synced ${progress.sequences_synced} sequences, ${progress.variants_synced} variants, ${progress.people_synced} contacts, ${progress.companies_synced} companies, ${progress.email_accounts_synced} email accounts, ${progress.email_activities_synced} email activities, ${progress.message_threads_synced} message threads`,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {

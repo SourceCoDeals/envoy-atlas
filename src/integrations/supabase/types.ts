@@ -165,6 +165,45 @@ export type Database = {
           },
         ]
       }
+      campaign_email_accounts: {
+        Row: {
+          campaign_id: string | null
+          created_at: string | null
+          email_account_id: string | null
+          id: string
+          is_active: boolean | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          created_at?: string | null
+          email_account_id?: string | null
+          id?: string
+          is_active?: boolean | null
+        }
+        Update: {
+          campaign_id?: string | null
+          created_at?: string | null
+          email_account_id?: string | null
+          id?: string
+          is_active?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_email_accounts_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_email_accounts_email_account_id_fkey"
+            columns: ["email_account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_variant_features: {
         Row: {
           analyzed_at: string | null
@@ -321,6 +360,8 @@ export type Database = {
           confidence_level: string | null
           created_at: string | null
           data_source_id: string | null
+          delay_config: Json | null
+          delay_days: number | null
           delivery_rate: number | null
           external_id: string | null
           first_sent_at: string | null
@@ -335,6 +376,7 @@ export type Database = {
           positive_reply_rate: number | null
           reply_rate: number | null
           sample_size_sufficient: boolean | null
+          send_as_reply: boolean | null
           sequence_id: string | null
           status: string | null
           step_number: number | null
@@ -348,6 +390,7 @@ export type Database = {
           total_sent: number | null
           total_unsubscribed: number | null
           updated_at: string | null
+          variant_label: string | null
         }
         Insert: {
           body_html?: string | null
@@ -359,6 +402,8 @@ export type Database = {
           confidence_level?: string | null
           created_at?: string | null
           data_source_id?: string | null
+          delay_config?: Json | null
+          delay_days?: number | null
           delivery_rate?: number | null
           external_id?: string | null
           first_sent_at?: string | null
@@ -373,6 +418,7 @@ export type Database = {
           positive_reply_rate?: number | null
           reply_rate?: number | null
           sample_size_sufficient?: boolean | null
+          send_as_reply?: boolean | null
           sequence_id?: string | null
           status?: string | null
           step_number?: number | null
@@ -386,6 +432,7 @@ export type Database = {
           total_sent?: number | null
           total_unsubscribed?: number | null
           updated_at?: string | null
+          variant_label?: string | null
         }
         Update: {
           body_html?: string | null
@@ -397,6 +444,8 @@ export type Database = {
           confidence_level?: string | null
           created_at?: string | null
           data_source_id?: string | null
+          delay_config?: Json | null
+          delay_days?: number | null
           delivery_rate?: number | null
           external_id?: string | null
           first_sent_at?: string | null
@@ -411,6 +460,7 @@ export type Database = {
           positive_reply_rate?: number | null
           reply_rate?: number | null
           sample_size_sufficient?: boolean | null
+          send_as_reply?: boolean | null
           sequence_id?: string | null
           status?: string | null
           step_number?: number | null
@@ -424,6 +474,7 @@ export type Database = {
           total_sent?: number | null
           total_unsubscribed?: number | null
           updated_at?: string | null
+          variant_label?: string | null
         }
         Relationships: [
           {
@@ -460,23 +511,33 @@ export type Database = {
           external_id: string | null
           external_url: string | null
           id: string
+          is_archived: boolean | null
           last_synced_at: string | null
+          max_leads_per_day: number | null
+          min_time_between_emails: number | null
           name: string
           open_rate: number | null
+          owner_id: string | null
           positive_rate: number | null
           positive_replies: number | null
           quality_score: number | null
           quality_tier: string | null
           reply_rate: number | null
+          schedule_config: Json | null
+          sending_limits: Json | null
           settings: Json | null
           started_at: string | null
           status: string | null
+          stop_lead_settings: Json | null
+          team_id: string | null
+          timezone: string | null
           total_bounced: number | null
           total_delivered: number | null
           total_meetings: number | null
           total_opened: number | null
           total_replied: number | null
           total_sent: number | null
+          track_settings: Json | null
           updated_at: string | null
         }
         Insert: {
@@ -489,23 +550,33 @@ export type Database = {
           external_id?: string | null
           external_url?: string | null
           id?: string
+          is_archived?: boolean | null
           last_synced_at?: string | null
+          max_leads_per_day?: number | null
+          min_time_between_emails?: number | null
           name: string
           open_rate?: number | null
+          owner_id?: string | null
           positive_rate?: number | null
           positive_replies?: number | null
           quality_score?: number | null
           quality_tier?: string | null
           reply_rate?: number | null
+          schedule_config?: Json | null
+          sending_limits?: Json | null
           settings?: Json | null
           started_at?: string | null
           status?: string | null
+          stop_lead_settings?: Json | null
+          team_id?: string | null
+          timezone?: string | null
           total_bounced?: number | null
           total_delivered?: number | null
           total_meetings?: number | null
           total_opened?: number | null
           total_replied?: number | null
           total_sent?: number | null
+          track_settings?: Json | null
           updated_at?: string | null
         }
         Update: {
@@ -518,23 +589,33 @@ export type Database = {
           external_id?: string | null
           external_url?: string | null
           id?: string
+          is_archived?: boolean | null
           last_synced_at?: string | null
+          max_leads_per_day?: number | null
+          min_time_between_emails?: number | null
           name?: string
           open_rate?: number | null
+          owner_id?: string | null
           positive_rate?: number | null
           positive_replies?: number | null
           quality_score?: number | null
           quality_tier?: string | null
           reply_rate?: number | null
+          schedule_config?: Json | null
+          sending_limits?: Json | null
           settings?: Json | null
           started_at?: string | null
           status?: string | null
+          stop_lead_settings?: Json | null
+          team_id?: string | null
+          timezone?: string | null
           total_bounced?: number | null
           total_delivered?: number | null
           total_meetings?: number | null
           total_opened?: number | null
           total_replied?: number | null
           total_sent?: number | null
+          track_settings?: Json | null
           updated_at?: string | null
         }
         Relationships: [
@@ -800,9 +881,15 @@ export type Database = {
       contacts: {
         Row: {
           best_time_to_call: string | null
+          bounce_type: string | null
+          bounced_at: string | null
+          campaign_lead_map_id: string | null
+          category_id: string | null
+          click_count: number | null
           company_id: string
           company_size_category: string | null
           created_at: string | null
+          current_step: number | null
           deleted_at: string | null
           department: string | null
           do_not_call: boolean | null
@@ -812,18 +899,26 @@ export type Database = {
           email_status: string | null
           engagement_id: string
           enrolled_at: string | null
+          external_lead_id: string | null
+          finish_reason: string | null
           first_name: string | null
           id: string
           is_decision_maker: boolean | null
+          is_interested: boolean | null
           is_primary: boolean | null
+          is_unsubscribed: boolean | null
+          last_activity_at: string | null
           last_contacted_at: string | null
           last_name: string | null
           last_responded_at: string | null
           linkedin_url: string | null
           mobile: string | null
+          open_count: number | null
           phone: string | null
           phone_status: string | null
+          reply_count: number | null
           seniority_level: string | null
+          sequence_status: string | null
           source: string | null
           timezone: string | null
           title: string | null
@@ -833,13 +928,20 @@ export type Database = {
           total_emails_opened: number | null
           total_emails_replied: number | null
           total_emails_sent: number | null
+          unsubscribed_at: string | null
           updated_at: string | null
         }
         Insert: {
           best_time_to_call?: string | null
+          bounce_type?: string | null
+          bounced_at?: string | null
+          campaign_lead_map_id?: string | null
+          category_id?: string | null
+          click_count?: number | null
           company_id: string
           company_size_category?: string | null
           created_at?: string | null
+          current_step?: number | null
           deleted_at?: string | null
           department?: string | null
           do_not_call?: boolean | null
@@ -849,18 +951,26 @@ export type Database = {
           email_status?: string | null
           engagement_id: string
           enrolled_at?: string | null
+          external_lead_id?: string | null
+          finish_reason?: string | null
           first_name?: string | null
           id?: string
           is_decision_maker?: boolean | null
+          is_interested?: boolean | null
           is_primary?: boolean | null
+          is_unsubscribed?: boolean | null
+          last_activity_at?: string | null
           last_contacted_at?: string | null
           last_name?: string | null
           last_responded_at?: string | null
           linkedin_url?: string | null
           mobile?: string | null
+          open_count?: number | null
           phone?: string | null
           phone_status?: string | null
+          reply_count?: number | null
           seniority_level?: string | null
+          sequence_status?: string | null
           source?: string | null
           timezone?: string | null
           title?: string | null
@@ -870,13 +980,20 @@ export type Database = {
           total_emails_opened?: number | null
           total_emails_replied?: number | null
           total_emails_sent?: number | null
+          unsubscribed_at?: string | null
           updated_at?: string | null
         }
         Update: {
           best_time_to_call?: string | null
+          bounce_type?: string | null
+          bounced_at?: string | null
+          campaign_lead_map_id?: string | null
+          category_id?: string | null
+          click_count?: number | null
           company_id?: string
           company_size_category?: string | null
           created_at?: string | null
+          current_step?: number | null
           deleted_at?: string | null
           department?: string | null
           do_not_call?: boolean | null
@@ -886,18 +1003,26 @@ export type Database = {
           email_status?: string | null
           engagement_id?: string
           enrolled_at?: string | null
+          external_lead_id?: string | null
+          finish_reason?: string | null
           first_name?: string | null
           id?: string
           is_decision_maker?: boolean | null
+          is_interested?: boolean | null
           is_primary?: boolean | null
+          is_unsubscribed?: boolean | null
+          last_activity_at?: string | null
           last_contacted_at?: string | null
           last_name?: string | null
           last_responded_at?: string | null
           linkedin_url?: string | null
           mobile?: string | null
+          open_count?: number | null
           phone?: string | null
           phone_status?: string | null
+          reply_count?: number | null
           seniority_level?: string | null
+          sequence_status?: string | null
           source?: string | null
           timezone?: string | null
           title?: string | null
@@ -907,9 +1032,17 @@ export type Database = {
           total_emails_opened?: number | null
           total_emails_replied?: number | null
           total_emails_sent?: number | null
+          unsubscribed_at?: string | null
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "contacts_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "lead_categories"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "contacts_company_id_fkey"
             columns: ["company_id"]
@@ -1488,6 +1621,111 @@ export type Database = {
           },
         ]
       }
+      email_accounts: {
+        Row: {
+          account_type: string | null
+          created_at: string | null
+          custom_tracking_domain: string | null
+          daily_sent_count: number | null
+          data_source_id: string | null
+          engagement_id: string | null
+          external_id: string | null
+          from_email: string
+          from_name: string | null
+          id: string
+          imap_failure_error: string | null
+          imap_host: string | null
+          imap_port: number | null
+          is_active: boolean | null
+          is_imap_success: boolean | null
+          is_smtp_success: boolean | null
+          last_synced_at: string | null
+          message_per_day: number | null
+          smtp_failure_error: string | null
+          smtp_host: string | null
+          smtp_port: number | null
+          updated_at: string | null
+          warmup_enabled: boolean | null
+          warmup_reputation: number | null
+          warmup_sent_count: number | null
+          warmup_spam_count: number | null
+          warmup_status: string | null
+        }
+        Insert: {
+          account_type?: string | null
+          created_at?: string | null
+          custom_tracking_domain?: string | null
+          daily_sent_count?: number | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          external_id?: string | null
+          from_email: string
+          from_name?: string | null
+          id?: string
+          imap_failure_error?: string | null
+          imap_host?: string | null
+          imap_port?: number | null
+          is_active?: boolean | null
+          is_imap_success?: boolean | null
+          is_smtp_success?: boolean | null
+          last_synced_at?: string | null
+          message_per_day?: number | null
+          smtp_failure_error?: string | null
+          smtp_host?: string | null
+          smtp_port?: number | null
+          updated_at?: string | null
+          warmup_enabled?: boolean | null
+          warmup_reputation?: number | null
+          warmup_sent_count?: number | null
+          warmup_spam_count?: number | null
+          warmup_status?: string | null
+        }
+        Update: {
+          account_type?: string | null
+          created_at?: string | null
+          custom_tracking_domain?: string | null
+          daily_sent_count?: number | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          external_id?: string | null
+          from_email?: string
+          from_name?: string | null
+          id?: string
+          imap_failure_error?: string | null
+          imap_host?: string | null
+          imap_port?: number | null
+          is_active?: boolean | null
+          is_imap_success?: boolean | null
+          is_smtp_success?: boolean | null
+          last_synced_at?: string | null
+          message_per_day?: number | null
+          smtp_failure_error?: string | null
+          smtp_host?: string | null
+          smtp_port?: number | null
+          updated_at?: string | null
+          warmup_enabled?: boolean | null
+          warmup_reputation?: number | null
+          warmup_sent_count?: number | null
+          warmup_spam_count?: number | null
+          warmup_status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_accounts_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_accounts_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_activities: {
         Row: {
           body_preview: string | null
@@ -1496,6 +1734,7 @@ export type Database = {
           bounced: boolean | null
           bounced_at: string | null
           campaign_id: string | null
+          category_id: string | null
           click_count: number | null
           clicked: boolean | null
           company_id: string
@@ -1504,6 +1743,7 @@ export type Database = {
           data_source_id: string | null
           delivered: boolean | null
           delivered_at: string | null
+          email_account_id: string | null
           engagement_id: string
           external_id: string | null
           external_message_id: string | null
@@ -1512,9 +1752,13 @@ export type Database = {
           from_email: string | null
           from_name: string | null
           id: string
+          is_interested: boolean | null
           last_opened_at: string | null
+          lead_category: string | null
+          link_clicks: Json | null
           marked_spam: boolean | null
           open_count: number | null
+          open_timestamps: Json | null
           opened: boolean | null
           raw_data: Json | null
           replied: boolean | null
@@ -1526,6 +1770,7 @@ export type Database = {
           sent: boolean | null
           sent_at: string | null
           sequence_id: string | null
+          spam_reported_at: string | null
           step_number: number | null
           subject: string | null
           synced_at: string | null
@@ -1542,6 +1787,7 @@ export type Database = {
           bounced?: boolean | null
           bounced_at?: string | null
           campaign_id?: string | null
+          category_id?: string | null
           click_count?: number | null
           clicked?: boolean | null
           company_id: string
@@ -1550,6 +1796,7 @@ export type Database = {
           data_source_id?: string | null
           delivered?: boolean | null
           delivered_at?: string | null
+          email_account_id?: string | null
           engagement_id: string
           external_id?: string | null
           external_message_id?: string | null
@@ -1558,9 +1805,13 @@ export type Database = {
           from_email?: string | null
           from_name?: string | null
           id?: string
+          is_interested?: boolean | null
           last_opened_at?: string | null
+          lead_category?: string | null
+          link_clicks?: Json | null
           marked_spam?: boolean | null
           open_count?: number | null
+          open_timestamps?: Json | null
           opened?: boolean | null
           raw_data?: Json | null
           replied?: boolean | null
@@ -1572,6 +1823,7 @@ export type Database = {
           sent?: boolean | null
           sent_at?: string | null
           sequence_id?: string | null
+          spam_reported_at?: string | null
           step_number?: number | null
           subject?: string | null
           synced_at?: string | null
@@ -1588,6 +1840,7 @@ export type Database = {
           bounced?: boolean | null
           bounced_at?: string | null
           campaign_id?: string | null
+          category_id?: string | null
           click_count?: number | null
           clicked?: boolean | null
           company_id?: string
@@ -1596,6 +1849,7 @@ export type Database = {
           data_source_id?: string | null
           delivered?: boolean | null
           delivered_at?: string | null
+          email_account_id?: string | null
           engagement_id?: string
           external_id?: string | null
           external_message_id?: string | null
@@ -1604,9 +1858,13 @@ export type Database = {
           from_email?: string | null
           from_name?: string | null
           id?: string
+          is_interested?: boolean | null
           last_opened_at?: string | null
+          lead_category?: string | null
+          link_clicks?: Json | null
           marked_spam?: boolean | null
           open_count?: number | null
+          open_timestamps?: Json | null
           opened?: boolean | null
           raw_data?: Json | null
           replied?: boolean | null
@@ -1618,6 +1876,7 @@ export type Database = {
           sent?: boolean | null
           sent_at?: string | null
           sequence_id?: string | null
+          spam_reported_at?: string | null
           step_number?: number | null
           subject?: string | null
           synced_at?: string | null
@@ -1633,6 +1892,13 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_activities_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "lead_categories"
             referencedColumns: ["id"]
           },
           {
@@ -1654,6 +1920,13 @@ export type Database = {
             columns: ["data_source_id"]
             isOneToOne: false
             referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_activities_email_account_id_fkey"
+            columns: ["email_account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
             referencedColumns: ["id"]
           },
           {
@@ -2034,6 +2307,66 @@ export type Database = {
           },
         ]
       }
+      lead_categories: {
+        Row: {
+          color: string | null
+          created_at: string | null
+          data_source_id: string | null
+          engagement_id: string | null
+          external_id: string | null
+          id: string
+          is_meeting: boolean | null
+          is_ooo: boolean | null
+          is_positive: boolean | null
+          name: string
+          sort_order: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          external_id?: string | null
+          id?: string
+          is_meeting?: boolean | null
+          is_ooo?: boolean | null
+          is_positive?: boolean | null
+          name: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          color?: string | null
+          created_at?: string | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          external_id?: string | null
+          id?: string
+          is_meeting?: boolean | null
+          is_ooo?: boolean | null
+          is_positive?: boolean | null
+          name?: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_categories_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_categories_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meetings: {
         Row: {
           booked_at: string | null
@@ -2192,6 +2525,107 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "copy_performance"
             referencedColumns: ["variant_id"]
+          },
+        ]
+      }
+      message_threads: {
+        Row: {
+          body_html: string | null
+          body_plain: string | null
+          body_preview: string | null
+          campaign_id: string | null
+          contact_id: string | null
+          created_at: string | null
+          email_activity_id: string | null
+          engagement_id: string | null
+          external_stats_id: string | null
+          from_email: string | null
+          from_name: string | null
+          id: string
+          in_reply_to: string | null
+          is_automated: boolean | null
+          message_id: string | null
+          message_type: string
+          sent_at: string | null
+          sequence_number: number | null
+          subject: string | null
+          to_email: string | null
+          to_name: string | null
+        }
+        Insert: {
+          body_html?: string | null
+          body_plain?: string | null
+          body_preview?: string | null
+          campaign_id?: string | null
+          contact_id?: string | null
+          created_at?: string | null
+          email_activity_id?: string | null
+          engagement_id?: string | null
+          external_stats_id?: string | null
+          from_email?: string | null
+          from_name?: string | null
+          id?: string
+          in_reply_to?: string | null
+          is_automated?: boolean | null
+          message_id?: string | null
+          message_type: string
+          sent_at?: string | null
+          sequence_number?: number | null
+          subject?: string | null
+          to_email?: string | null
+          to_name?: string | null
+        }
+        Update: {
+          body_html?: string | null
+          body_plain?: string | null
+          body_preview?: string | null
+          campaign_id?: string | null
+          contact_id?: string | null
+          created_at?: string | null
+          email_activity_id?: string | null
+          engagement_id?: string | null
+          external_stats_id?: string | null
+          from_email?: string | null
+          from_name?: string | null
+          id?: string
+          in_reply_to?: string | null
+          is_automated?: boolean | null
+          message_id?: string | null
+          message_type?: string
+          sent_at?: string | null
+          sequence_number?: number | null
+          subject?: string | null
+          to_email?: string | null
+          to_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_threads_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_threads_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_threads_email_activity_id_fkey"
+            columns: ["email_activity_id"]
+            isOneToOne: false
+            referencedRelation: "email_activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_threads_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
           },
         ]
       }
