@@ -248,7 +248,10 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
 
       {/* Week-by-Week Performance Breakdown */}
       {weeklyPerformance && weeklyPerformance.length > 0 && (
-        <WeeklyPerformanceBreakdown weeklyData={weeklyPerformance} />
+        <WeeklyPerformanceBreakdown 
+          weeklyData={weeklyPerformance} 
+          enrollmentTrend={weeklyEnrollmentTrend}
+        />
       )}
 
       {/* Data Availability Warning */}
