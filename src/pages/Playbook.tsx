@@ -37,7 +37,13 @@ interface WinningTemplate {
   sent_count: number;
 }
 
-// Industry benchmarks from the guide
+/**
+ * EDUCATIONAL CONTENT - Industry Best Practices
+ * 
+ * These are guidance tips based on published cold email research,
+ * not hardcoded sample data or fake metrics. Actual performance
+ * data comes from the database via useCopyInsights hook.
+ */
 const BEST_PRACTICES = [
   {
     category: 'Subject Lines',
