@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { subDays, startOfDay, parseISO, format, getHours, eachDayOfInterval, addDays } from 'date-fns';
+import { subDays, startOfDay, parseISO, format, getHours, eachDayOfInterval } from 'date-fns';
 
 export type DateRangeOption = '7d' | '14d' | '30d' | 'all';
 
@@ -14,17 +14,15 @@ export interface PhoneBurnerFilters {
   dateRange: DateRangeOption;
 }
 
-export interface ColdCall {
+export interface CallData {
   id: string;
   analyst: string | null;
   category: string | null;
   primary_opportunity: string | null;
-  call_duration_sec: number | null;
-  called_date: string | null;
-  called_date_time: string | null;
-  nocodb_created_at: string | null;
-  to_company: string | null;
-  to_name: string | null;
+  duration_seconds: number | null;
+  called_at: string | null;
+  contact_company: string | null;
+  contact_name: string | null;
   composite_score: number | null;
   seller_interest_score: number | null;
 }
@@ -60,7 +58,6 @@ function normalizeCategory(category: string | null): string {
     return 'Disconnected';
   }
   if (lower.includes('gatekeeper') || lower.includes('receptionist') || lower.includes('assistant')) {
-    // Check if it's a voicemail variant
     if (lower.includes('voicemail') || lower.includes('vm')) {
       return 'Gatekeeper Voicemail';
     }
@@ -82,7 +79,6 @@ function normalizeCategory(category: string | null): string {
     return 'Not Interested';
   }
   
-  // Return the cleaned-up category if no pattern matched
   return normalized || 'Unknown';
 }
 
@@ -97,28 +93,27 @@ export function usePhoneBurnerData() {
     dateRange: '30d',
   });
 
-  // Fetch all cold calls
+  // Fetch all calls from unified calls table
   const { data: allCalls = [], isLoading } = useQuery({
-    queryKey: ['cold-calls', currentWorkspace?.id],
+    queryKey: ['calls', currentWorkspace?.id],
     queryFn: async () => {
       if (!currentWorkspace?.id) return [];
 
-      let allData: ColdCall[] = [];
+      let allData: CallData[] = [];
       let offset = 0;
       const limit = 1000;
       
       while (true) {
         const { data, error } = await supabase
-          .from('cold_calls')
-          .select('id, analyst, category, primary_opportunity, call_duration_sec, called_date, called_date_time, nocodb_created_at, to_company, to_name, composite_score, seller_interest_score')
+          .from('calls')
+          .select('id, analyst, category, primary_opportunity, duration_seconds, called_at, contact_company, contact_name, composite_score, seller_interest_score')
           .eq('workspace_id', currentWorkspace.id)
           .range(offset, offset + limit - 1);
 
         if (error) throw error;
         if (!data || data.length === 0) break;
         
-        // Cast to ColdCall[] since we know the shape
-        allData = [...allData, ...(data as unknown as ColdCall[])];
+        allData = [...allData, ...(data as unknown as CallData[])];
         if (data.length < limit) break;
         offset += limit;
       }
@@ -132,26 +127,23 @@ export function usePhoneBurnerData() {
   // Get unique filter options (using normalized categories for the dropdown)
   const filterOptions = useMemo(() => {
     const analysts = [...new Set(allCalls.map(c => c.analyst).filter(Boolean))].sort();
-    // Use normalized categories for the filter dropdown
     const categories = [...new Set(allCalls.map(c => normalizeCategory(c.category)))].filter(c => c !== 'Unknown').sort();
     const opportunities = [...new Set(allCalls.map(c => c.primary_opportunity).filter(Boolean))].sort();
     
     return { analysts, categories, opportunities };
   }, [allCalls]);
 
-  // Apply filters (using called_date_time for all date-based filtering)
+  // Apply filters (using called_at for all date-based filtering)
   const filteredCalls = useMemo(() => {
     let result = allCalls;
 
-    // Date filter - use called_date_time for accurate filtering
+    // Date filter
     if (filters.dateRange !== 'all') {
       const daysMap = { '7d': 7, '14d': 14, '30d': 30 };
       const cutoffDate = startOfDay(subDays(new Date(), daysMap[filters.dateRange]));
       result = result.filter(call => {
-        // Prefer called_date_time, fallback to called_date
-        const dateStr = call.called_date_time || call.called_date;
-        if (!dateStr) return false;
-        return parseISO(dateStr) >= cutoffDate;
+        if (!call.called_at) return false;
+        return parseISO(call.called_at) >= cutoffDate;
       });
     }
 
@@ -173,7 +165,7 @@ export function usePhoneBurnerData() {
     // Duration range filter
     if (filters.durationRange !== 'all') {
       result = result.filter(call => {
-        const duration = call.call_duration_sec || 0;
+        const duration = call.duration_seconds || 0;
         switch (filters.durationRange) {
           case '0-30': return duration <= 30;
           case '30-60': return duration > 30 && duration <= 60;
@@ -190,11 +182,11 @@ export function usePhoneBurnerData() {
   // Calculate summary metrics
   const summary = useMemo(() => {
     const totalCalls = filteredCalls.length;
-    const callsWithDuration = filteredCalls.filter(c => c.call_duration_sec != null);
+    const callsWithDuration = filteredCalls.filter(c => c.duration_seconds != null);
     const avgDuration = callsWithDuration.length > 0
-      ? callsWithDuration.reduce((sum, c) => sum + (c.call_duration_sec || 0), 0) / callsWithDuration.length
+      ? callsWithDuration.reduce((sum, c) => sum + (c.duration_seconds || 0), 0) / callsWithDuration.length
       : 0;
-    const totalDuration = callsWithDuration.reduce((sum, c) => sum + (c.call_duration_sec || 0), 0);
+    const totalDuration = callsWithDuration.reduce((sum, c) => sum + (c.duration_seconds || 0), 0);
 
     return { totalCalls, avgDuration, totalDuration };
   }, [filteredCalls]);
@@ -211,13 +203,12 @@ export function usePhoneBurnerData() {
       .sort((a, b) => b.value - a.value);
   }, [filteredCalls]);
 
-  // Get the date range for charts (all days in range, using called_date_time)
+  // Get the date range for charts
   const dateRangeForCharts = useMemo(() => {
     if (filters.dateRange === 'all') {
-      // For "all time", use actual data range from called_date_time
       const dates = filteredCalls
-        .filter(c => c.called_date_time || c.called_date)
-        .map(c => parseISO((c.called_date_time || c.called_date)!));
+        .filter(c => c.called_at)
+        .map(c => parseISO(c.called_at!));
       if (dates.length === 0) return [];
       const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
       const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
@@ -231,23 +222,19 @@ export function usePhoneBurnerData() {
     return eachDayOfInterval({ start: startOfDay(startDate), end: startOfDay(endDate) });
   }, [filters.dateRange, filteredCalls]);
 
-  // Calls by analyst over time (includes all days in range, using called_date_time)
+  // Calls by analyst over time
   const callsByAnalystOverTime = useMemo(() => {
     const dataMap: Record<string, Record<string, number>> = {};
-    
-    // Get all unique analysts first
     const analysts = [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
 
     filteredCalls.forEach(call => {
-      const dateStr = call.called_date_time || call.called_date;
-      if (!dateStr || !call.analyst) return;
-      const date = format(parseISO(dateStr), 'yyyy-MM-dd');
+      if (!call.called_at || !call.analyst) return;
+      const date = format(parseISO(call.called_at), 'yyyy-MM-dd');
       
       if (!dataMap[call.analyst]) dataMap[call.analyst] = {};
       dataMap[call.analyst][date] = (dataMap[call.analyst][date] || 0) + 1;
     });
 
-    // Use all dates in range, not just dates with data
     return dateRangeForCharts.map(dateObj => {
       const date = format(dateObj, 'yyyy-MM-dd');
       const entry: Record<string, any> = { date };
@@ -262,9 +249,9 @@ export function usePhoneBurnerData() {
   const uniqueAnalysts = useMemo(() => {
     return [...new Set(filteredCalls.map(c => c.analyst).filter(Boolean))] as string[];
   }, [filteredCalls]);
-  // Scatter plot data: time of day vs date (using nocodb_created_at with IST to EST conversion)
+
+  // Scatter plot data: time of day vs date
   const scatterData = useMemo(() => {
-    // Calculate the date cutoff for filtering (same logic as filteredCalls)
     let dateCutoff: Date | null = null;
     if (filters.dateRange !== 'all') {
       const daysMap = { '7d': 7, '14d': 14, '30d': 30 };
@@ -272,41 +259,23 @@ export function usePhoneBurnerData() {
     }
 
     return filteredCalls
-      .filter(call => call.nocodb_created_at)
+      .filter(call => call.called_at)
       .map(call => {
-        const dateObj = parseISO(call.nocodb_created_at!);
-        // Convert IST (UTC+5:30) to EST (UTC-5): subtract 10.5 hours
-        const istHour = getHours(dateObj);
-        const istMinutes = dateObj.getMinutes();
-        const totalMinutesIST = istHour * 60 + istMinutes;
-        const totalMinutesEST = totalMinutesIST - 630; // 10.5 hours = 630 minutes
-        
-        // Handle day wrap-around
-        let adjustedMinutes = totalMinutesEST;
-        let dayOffset = 0;
-        if (adjustedMinutes < 0) {
-          adjustedMinutes += 1440; // Add 24 hours in minutes
-          dayOffset = -1;
-        }
-        
-        const adjustedHour = Math.floor(adjustedMinutes / 60);
-        
-        // Adjust the date if we crossed midnight
-        let adjustedDate = new Date(dateObj.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+        const dateObj = parseISO(call.called_at!);
+        const hour = getHours(dateObj);
         
         return {
-          date: format(adjustedDate, 'yyyy-MM-dd'),
-          hour: adjustedHour,
+          date: format(dateObj, 'yyyy-MM-dd'),
+          hour,
           analyst: call.analyst || 'Unknown',
-          adjustedDate, // Keep for filtering
+          adjustedDate: dateObj,
         };
       })
       .filter(item => {
-        // Apply date filter based on EST-adjusted date
         if (!dateCutoff) return true;
         return item.adjustedDate >= dateCutoff;
       })
-      .map(({ date, hour, analyst }) => ({ date, hour, analyst })); // Remove adjustedDate from final output
+      .map(({ date, hour, analyst }) => ({ date, hour, analyst }));
   }, [filteredCalls, filters.dateRange]);
 
   // Calls by primary opportunity
@@ -319,7 +288,7 @@ export function usePhoneBurnerData() {
     return Object.entries(breakdown)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
-      .slice(0, 15); // Top 15
+      .slice(0, 15);
   }, [filteredCalls]);
 
   // Duration distribution for pie chart
@@ -335,35 +304,33 @@ export function usePhoneBurnerData() {
     return ranges.map(range => ({
       name: range.name,
       value: filteredCalls.filter(c => {
-        const d = c.call_duration_sec || 0;
+        const d = c.duration_seconds || 0;
         return d > range.min && d <= range.max;
       }).length,
     })).filter(r => r.value > 0);
   }, [filteredCalls]);
 
-  // Daily duration trends (includes all days in range, using called_date_time)
+  // Daily duration trends
   const durationTrends = useMemo(() => {
     const dataMap: Record<string, { total: number; count: number }> = {};
 
     filteredCalls.forEach(call => {
-      const dateStr = call.called_date_time || call.called_date;
-      if (!dateStr) return;
-      const date = format(parseISO(dateStr), 'yyyy-MM-dd');
+      if (!call.called_at) return;
+      const date = format(parseISO(call.called_at), 'yyyy-MM-dd');
       
       if (!dataMap[date]) dataMap[date] = { total: 0, count: 0 };
-      if (call.call_duration_sec != null) {
-        dataMap[date].total += call.call_duration_sec;
+      if (call.duration_seconds != null) {
+        dataMap[date].total += call.duration_seconds;
         dataMap[date].count += 1;
       }
     });
 
-    // Use all dates in range, not just dates with data
     return dateRangeForCharts.map(dateObj => {
       const date = format(dateObj, 'yyyy-MM-dd');
       const data = dataMap[date] || { total: 0, count: 0 };
       return {
         date,
-        totalDuration: Math.round(data.total / 60), // Convert to minutes
+        totalDuration: Math.round(data.total / 60),
         avgDuration: data.count > 0 ? Math.round(data.total / data.count) : 0,
         callCount: data.count,
       };

@@ -177,15 +177,15 @@ export function DataHealthDashboard() {
             title="Email Platforms"
             description="Campaign and metrics data"
             icon={<Mail className="h-4 w-4 text-muted-foreground" />}
-            sources={[health.email.smartlead, health.email.replyio]}
-            overallStatus={getSectionStatus([health.email.smartlead, health.email.replyio])}
+            sources={[health.email.campaigns, health.email.metrics]}
+            overallStatus={getSectionStatus([health.email.campaigns, health.email.metrics])}
           />
           <SectionCard
             title="Calling Data"
             description="Call logs and recordings"
             icon={<Phone className="h-4 w-4 text-muted-foreground" />}
-            sources={[health.calling.phoneburner, health.calling.coldCalls]}
-            overallStatus={getSectionStatus([health.calling.phoneburner, health.calling.coldCalls])}
+            sources={[health.calling.calls]}
+            overallStatus={getSectionStatus([health.calling.calls])}
           />
           <SectionCard
             title="Copy Insights"
