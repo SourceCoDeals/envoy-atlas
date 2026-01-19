@@ -8,6 +8,8 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
 import { SystemHealthScore, calculateSystemHealth } from '@/components/dashboard/SystemHealthScore';
 import { DataHealthDashboard } from '@/components/dashboard/DataHealthDashboard';
+import { SyncStatusIndicator } from '@/components/dashboard/SyncStatusIndicator';
+import { BenchmarkBadge } from '@/components/dashboard/BenchmarkIndicator';
 // FailureModeClassification and WhatChangedAnalysis removed - were using simulated comparison data
 import { ActionQueue, generateActionItems } from '@/components/dashboard/ActionQueue';
 import { KPICard, getKPIStatus } from '@/components/dashboard/KPICard';
