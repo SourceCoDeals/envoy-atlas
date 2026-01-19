@@ -201,8 +201,8 @@ Deno.serve(async (req) => {
       auto_continue = false,
       internal_continuation = false,
       current_phase = 'sequences',
-      sync_people = true, // New: enable people/contacts sync
-      sync_email_activities = true, // New: enable email activity sync
+      sync_people = false, // DISABLED: Reply.io rate limits are too strict (10s/call)
+      sync_email_activities = false, // DISABLED: Reply.io rate limits are too strict
     } = body;
 
     // Auth check for initial requests (skip for internal continuations)
