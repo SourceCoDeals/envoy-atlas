@@ -36,14 +36,12 @@ import { DataCoverageIndicator } from "@/components/connections/DataCoverageIndi
 
 type SyncProgress = Record<string, any> | null;
 
-type ApiConnection = {
+type DataSource = {
   id: string;
-  platform: string;
-  is_active: boolean;
+  source_type: string;
+  status: string | null;
   last_sync_at: string | null;
-  last_full_sync_at: string | null;
-  sync_status: string | null;
-  sync_progress: SyncProgress;
+  last_sync_status: string | null;
   created_at: string;
 };
 
@@ -63,7 +61,7 @@ export default function Connections() {
   const { channel } = useChannel();
   const { toast } = useToast();
 
-  const [connections, setConnections] = useState<ApiConnection[]>([]);
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [smartleadApiKey, setSmartleadApiKey] = useState("");
@@ -102,20 +100,20 @@ export default function Connections() {
   const hasPendingWork = nocodbStats && (nocodbStats.pending > 0 || nocodbStats.transcriptFetched > 0);
 
   const smartleadConnection = useMemo(
-    () => connections.find((c) => c.platform === "smartlead"),
-    [connections]
+    () => dataSources.find((c) => c.source_type === "smartlead"),
+    [dataSources]
   );
   const replyioConnection = useMemo(
-    () => connections.find((c) => c.platform === "replyio"),
-    [connections]
+    () => dataSources.find((c) => c.source_type === "replyio"),
+    [dataSources]
   );
   const phoneburnerConnection = useMemo(
-    () => connections.find((c) => c.platform === "phoneburner"),
-    [connections]
+    () => dataSources.find((c) => c.source_type === "phoneburner"),
+    [dataSources]
   );
   const nocodbConnection = useMemo(
-    () => connections.find((c) => c.platform === "nocodb"),
-    [connections]
+    () => dataSources.find((c) => c.source_type === "nocodb"),
+    [dataSources]
   );
 
   const fetchConnections = async () => {
@@ -129,16 +127,7 @@ export default function Connections() {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setConnections((data || []).map((d: any) => ({
-        id: d.id,
-        platform: d.source_type,
-        is_active: d.status === 'active',
-        last_sync_at: d.last_sync_at,
-        last_full_sync_at: d.last_sync_at,
-        sync_status: d.last_sync_status,
-        sync_progress: 100,
-        created_at: d.created_at,
-      })));
+      setDataSources((data || []) as DataSource[]);
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Failed to load connections");
@@ -178,8 +167,8 @@ export default function Connections() {
 
   // Memoize syncing status for stable dependency
   const anySyncing = useMemo(
-    () => connections.some((c) => c.sync_status === "syncing"),
-    [connections]
+    () => dataSources.some((c) => c.last_sync_status === "syncing"),
+    [dataSources]
   );
 
   // Light polling when any sync is running - with timeout safety
@@ -197,7 +186,7 @@ export default function Connections() {
         return;
       }
       void fetchConnections();
-    }, 5000); // Increased from 2s to 5s to reduce load
+    }, 5000);
 
     return () => window.clearInterval(t);
   }, [anySyncing, currentWorkspace?.id]);
@@ -224,16 +213,16 @@ export default function Connections() {
     setIsConnecting((s) => ({ ...s, [platform]: true }));
 
     try {
-      const { error } = await supabase.from("api_connections").upsert(
+      // Insert into data_sources table
+      const { error } = await supabase.from("data_sources").upsert(
         {
-          workspace_id: currentWorkspace.id,
-          platform,
+          name: platform,
+          source_type: platform,
           api_key_encrypted: apiKey,
-          is_active: true,
-          sync_status: "pending",
-          created_by: user.id,
+          status: 'active',
+          last_sync_status: "pending",
         },
-        { onConflict: "workspace_id,platform" }
+        { onConflict: "source_type" }
       );
 
       if (error) throw error;
@@ -470,10 +459,9 @@ export default function Connections() {
 
     try {
       const { error } = await supabase
-        .from("api_connections")
-        .update({ sync_status: "stopped" })
-        .eq("workspace_id", currentWorkspace.id)
-        .eq("platform", "phoneburner");
+        .from("data_sources")
+        .update({ last_sync_status: "stopped" })
+        .eq("source_type", "phoneburner");
 
       if (error) throw error;
       setSuccess("PhoneBurner sync stopped.");
@@ -498,7 +486,13 @@ export default function Connections() {
         workspace_id: currentWorkspace.id,
         diagnostic: true,
       });
+
       setDiagnosticResult(data);
+      if (data?.status === "ok") {
+        setSuccess("PhoneBurner connection is healthy!");
+      } else {
+        setError(data?.message || "Diagnostic found issues");
+      }
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Failed to run diagnostics");
@@ -507,69 +501,12 @@ export default function Connections() {
     }
   };
 
-  const fetchNocodbStats = async () => {
+  const handleNocoDBSync = async (action: "sync" | "fetch_transcripts" | "score" | "process_pending") => {
     if (!currentWorkspace) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from("external_calls")
-        .select("import_status")
-        .eq("workspace_id", currentWorkspace.id);
-      
-      if (error) throw error;
-      
-      const stats = {
-        totalCalls: data?.length || 0,
-        pending: data?.filter(c => c.import_status === "pending").length || 0,
-        transcriptFetched: data?.filter(c => c.import_status === "transcript_fetched").length || 0,
-        scored: data?.filter(c => c.import_status === "scored").length || 0,
-        errors: data?.filter(c => c.import_status === "error").length || 0,
-      };
-      
-      setNocodbStats(stats);
-    } catch (e) {
-      console.error("Error fetching NocoDB stats:", e);
-    }
-  };
-
-  const handleRefreshStats = async () => {
-    setIsSyncing((s) => ({ ...s, nocodb_stats: true }));
-    await fetchNocodbStats();
-    setIsSyncing((s) => ({ ...s, nocodb_stats: false }));
-  };
-
-  const handleNocoDBSync = async (action: "sync" | "full_sync") => {
-    if (!currentWorkspace) return;
-
     setError(null);
     setSuccess(null);
     setIsSyncing((s) => ({ ...s, nocodb: true }));
-    setSyncProgress({ phase: "starting", current: 0, total: 0, percent: 0, message: "Starting sync..." });
-
-    // Poll for progress updates while sync is running
-    const pollInterval = setInterval(async () => {
-      try {
-        const { data } = await supabase
-          .from("api_connections")
-          .select("sync_progress, sync_status")
-          .eq("workspace_id", currentWorkspace.id)
-          .eq("platform", "nocodb")
-          .single();
-        
-        if (data?.sync_progress && data.sync_status === "syncing") {
-          const progress = data.sync_progress as any;
-          setSyncProgress({
-            phase: progress.phase || "syncing",
-            current: progress.current || 0,
-            total: progress.total || 0,
-            percent: progress.percent || 0,
-            message: progress.message || "Syncing...",
-          });
-        }
-      } catch (e) {
-        // Ignore polling errors
-      }
-    }, 1000);
+    setSyncProgress(null);
 
     try {
       const token = await getAccessToken();
@@ -585,1053 +522,566 @@ export default function Connections() {
 
       const data = res.data;
       if (data.success) {
-        const stats = data.stats;
-        setSyncProgress({ phase: "complete", current: stats.inserted, total: stats.fetched, percent: 100, message: "Complete!" });
+        const actionMessages: Record<string, string> = {
+          sync: `NocoDB sync complete! Imported ${data.imported || 0} new calls.`,
+          fetch_transcripts: `Transcripts fetched for ${data.processed || 0} calls.`,
+          score: `Scored ${data.processed || 0} calls.`,
+          process_pending: `Processed ${data.processed || 0} pending calls.`,
+        };
+        setSuccess(actionMessages[action] || "Operation complete!");
         
-        const syncMessage = action === "full_sync"
-          ? `Full sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`
-          : `Sync complete! Synced ${stats.inserted} calls, created ${stats.leads_created} contacts.`;
-        
-        setSuccess(syncMessage);
-        
-        // Show toast notification
-        toast({
-          title: "✅ NocoDB Sync Complete",
-          description: `Imported ${stats.inserted} of ${stats.fetched} records${stats.errors > 0 ? ` (${stats.errors} errors)` : ""}. Created ${stats.leads_created} contacts.`,
-          duration: 6000,
-        });
-      } else {
-        throw new Error(data.error || "Sync failed");
+        // Refresh stats
+        fetchNocoDBStats();
       }
 
       await fetchConnections();
-      await fetchNocodbStats();
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Failed to sync NocoDB");
-      setSyncProgress(null);
-      
-      toast({
-        title: "❌ Sync Failed",
-        description: e?.message || "Failed to sync NocoDB",
-        variant: "destructive",
-        duration: 5000,
-      });
     } finally {
-      clearInterval(pollInterval);
       setIsSyncing((s) => ({ ...s, nocodb: false }));
-      // Clear progress after a short delay
-      setTimeout(() => setSyncProgress(null), 3000);
     }
   };
 
-  const handleFetchTranscripts = async () => {
-    if (!currentWorkspace) return;
-
-    setError(null);
-    setSuccess(null);
-    setIsSyncing((s) => ({ ...s, transcripts: true }));
+  const fetchNocoDBStats = async () => {
+    if (!currentWorkspace?.id) return;
 
     try {
-      const token = await getAccessToken();
-      const res = await supabase.functions.invoke("fetch-transcripts", {
-        body: {
-          workspace_id: currentWorkspace.id,
-          limit: 20,
-        },
-        headers: { Authorization: `Bearer ${token}` },
+      // Get engagements for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = (engagements || []).map(e => e.id);
+      if (engagementIds.length === 0) {
+        setNocodbStats({ totalCalls: 0, pending: 0, transcriptFetched: 0, scored: 0, errors: 0 });
+        return;
+      }
+
+      // Get call statistics from call_activities
+      const { data: calls, count } = await supabase
+        .from('call_activities')
+        .select('id, disposition, transcription', { count: 'exact' })
+        .in('engagement_id', engagementIds)
+        .limit(1000);
+
+      const totalCalls = count || 0;
+      const callsList = calls || [];
+      
+      // Simple categorization
+      const withTranscript = callsList.filter(c => c.transcription).length;
+      const pending = callsList.filter(c => !c.transcription).length;
+
+      setNocodbStats({
+        totalCalls,
+        pending,
+        transcriptFetched: withTranscript,
+        scored: withTranscript, // Approximate
+        errors: 0,
       });
-
-      if (res.error) throw new Error(res.error.message || "Fetch failed");
-
-      const data = res.data;
-      setSuccess(`Processed ${data.processed} transcripts (${data.errors} errors).`);
-      await fetchNocodbStats();
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message || "Failed to fetch transcripts");
-    } finally {
-      setIsSyncing((s) => ({ ...s, transcripts: false }));
+    } catch (e) {
+      console.error('Error fetching NocoDB stats:', e);
     }
   };
 
-  const handleScoreExternalCalls = async () => {
-    if (!currentWorkspace) return;
-
-    setError(null);
-    setSuccess(null);
-    setIsSyncing((s) => ({ ...s, scoring: true }));
-
-    try {
-      const token = await getAccessToken();
-      const res = await supabase.functions.invoke("score-external-calls", {
-        body: {
-          workspace_id: currentWorkspace.id,
-          limit: 10,
-        },
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.error) throw new Error(res.error.message || "Scoring failed");
-
-      const data = res.data;
-      setSuccess(`Scored ${data.scored} calls (${data.errors} errors).`);
-      await fetchNocodbStats();
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message || "Failed to score calls");
-    } finally {
-      setIsSyncing((s) => ({ ...s, scoring: false }));
+  useEffect(() => {
+    if (nocodbConnection && currentWorkspace?.id) {
+      fetchNocoDBStats();
     }
-  };
+  }, [nocodbConnection, currentWorkspace?.id]);
 
-  // Background processing for transcripts and scoring
-  const startBackgroundProcessing = async () => {
-    if (!currentWorkspace || isProcessingBackground) return;
+  const handleProcessBackground = async () => {
+    if (!currentWorkspace || !hasPendingWork) return;
     
     setIsProcessingBackground(true);
-    console.log("[Background] Starting background processing...");
+    setError(null);
     
-    const processLoop = async () => {
-      try {
-        const token = await getAccessToken();
-        let hasMoreWork = true;
-        
-        while (hasMoreWork) {
-          await fetchNocodbStats();
-          
-          const { data: pendingCalls } = await supabase
-            .from("external_calls")
-            .select("id")
-            .eq("workspace_id", currentWorkspace.id)
-            .eq("import_status", "pending")
-            .not("fireflies_url", "is", null)
-            .limit(1);
-          
-          if (pendingCalls && pendingCalls.length > 0) {
-            console.log("[Background] Fetching transcripts...");
-            await supabase.functions.invoke("fetch-transcripts", {
-              body: { workspace_id: currentWorkspace.id, limit: 10 },
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            continue;
-          }
-          
-          const { data: unscoredCalls } = await supabase
-            .from("external_calls")
-            .select("id")
-            .eq("workspace_id", currentWorkspace.id)
-            .eq("import_status", "transcript_fetched")
-            .limit(1);
-          
-          if (unscoredCalls && unscoredCalls.length > 0) {
-            console.log("[Background] Scoring calls...");
-            await supabase.functions.invoke("score-external-calls", {
-              body: { workspace_id: currentWorkspace.id, limit: 5 },
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            continue;
-          }
-          
-          hasMoreWork = false;
-        }
-        
-        console.log("[Background] Processing complete");
-        await fetchNocodbStats();
-      } catch (e) {
-        console.error("[Background] Error:", e);
-      } finally {
-        setIsProcessingBackground(false);
+    try {
+      const token = await getAccessToken();
+      
+      // Process in stages
+      if (nocodbStats && nocodbStats.pending > 0) {
+        toast({ title: "Fetching transcripts...", description: `Processing ${nocodbStats.pending} calls` });
+        await supabase.functions.invoke("fetch-transcripts", {
+          body: { workspace_id: currentWorkspace.id, batch_size: 50 },
+          headers: { Authorization: `Bearer ${token}` },
+        });
       }
-    };
-    
-    processLoop();
+      
+      if (nocodbStats && nocodbStats.transcriptFetched > 0) {
+        toast({ title: "Scoring calls...", description: `Processing ${nocodbStats.transcriptFetched} calls` });
+        await supabase.functions.invoke("score-external-calls", {
+          body: { workspace_id: currentWorkspace.id, batch_size: 20 },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+      
+      setSuccess("Background processing complete!");
+      fetchNocoDBStats();
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Background processing failed");
+    } finally {
+      setIsProcessingBackground(false);
+    }
   };
 
-  // Fetch NocoDB stats on mount and auto-refresh during background processing
-  useEffect(() => {
-    if (currentWorkspace?.id && channel === "calling") {
-      fetchNocodbStats();
-    }
-  }, [currentWorkspace?.id, channel]);
-
-  // Auto-refresh stats while background processing is active
-  useEffect(() => {
-    if (!isProcessingBackground || !currentWorkspace?.id) return;
-    
-    const interval = setInterval(() => {
-      fetchNocodbStats();
-    }, 5000);
-    
-    return () => clearInterval(interval);
-  }, [isProcessingBackground, currentWorkspace?.id]);
-
-  const phoneburnerProgress = (phoneburnerConnection?.sync_progress as any) || null;
-  const pbPhase = phoneburnerProgress?.phase;
-  const pbCalls = phoneburnerProgress?.calls_synced || 0;
-  const pbContacts = phoneburnerProgress?.contacts_synced || 0;
-  const pbSessions = phoneburnerProgress?.sessions_synced || 0;
-
-  const pbProgressPercent = useMemo(() => {
-    if (!phoneburnerConnection || phoneburnerConnection.sync_status !== "syncing") return 0;
-    if (!pbPhase) return 5;
-    if (pbPhase === "dialsessions") return 35;
-    if (pbPhase === "contacts") return 65;
-    if (pbPhase === "metrics") return 85;
-    if (pbPhase === "linking") return 95;
-    return 10;
-  }, [phoneburnerConnection, pbPhase]);
-
-  if (authLoading || !user) {
+  if (authLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+      <DashboardLayout>
+        <div className="flex h-[60vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
     );
   }
+
+  if (!user) return null;
+
+  const renderSyncStatus = (source: DataSource | undefined) => {
+    if (!source) return null;
+
+    const status = source.last_sync_status;
+    const isActive = source.status === 'active';
+
+    return (
+      <div className="flex items-center gap-2">
+        {status === "syncing" ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            <span className="text-sm text-muted-foreground">Syncing...</span>
+          </>
+        ) : status === "complete" || status === "success" ? (
+          <>
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <span className="text-sm text-muted-foreground">
+              Last sync: {source.last_sync_at ? new Date(source.last_sync_at).toLocaleString() : 'Never'}
+            </span>
+          </>
+        ) : status === "error" || status === "failed" ? (
+          <>
+            <XCircle className="h-4 w-4 text-destructive" />
+            <span className="text-sm text-destructive">Sync failed</span>
+          </>
+        ) : status === "stopped" ? (
+          <>
+            <Clock className="h-4 w-4 text-yellow-500" />
+            <span className="text-sm text-yellow-600">Stopped</span>
+          </>
+        ) : (
+          <>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {isActive ? 'Ready to sync' : 'Not connected'}
+            </span>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {/* Header */}
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{channel === "email" ? "Email Connections" : "Calling Connections"}</h1>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Plug className="h-6 w-6" />
+            Connections
+          </h1>
           <p className="text-muted-foreground">
-            {channel === "email"
-              ? "Connect your email outreach platforms to import campaign data"
-              : "Connect your cold calling platforms to import dial session data"}
+            Connect your sales tools to import campaigns and calling data
           </p>
         </div>
 
+        {/* Alerts */}
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-
         {success && (
-          <Alert>
-            <CheckCircle2 className="h-4 w-4" />
-            <AlertDescription>{success}</AlertDescription>
+          <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <AlertDescription className="text-green-700 dark:text-green-300">{success}</AlertDescription>
           </Alert>
         )}
 
-        {loading ? (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading connections...
-          </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {channel === "email" && (
-              <>
-                {/* Smartlead */}
-                <Card className={smartleadConnection ? "border-success/30" : ""}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                          <Plug className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-lg">Smartlead</CardTitle>
-                          <CardDescription>Primary outreach platform</CardDescription>
-                        </div>
-                      </div>
-                      {smartleadConnection && (
-                        <Badge variant="outline" className="border-success text-success">
-                          Connected
-                        </Badge>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {!smartleadConnection ? (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="smartlead-key">API Key</Label>
-                          <Input
-                            id="smartlead-key"
-                            value={smartleadApiKey}
-                            onChange={(e) => setSmartleadApiKey(e.target.value)}
-                            placeholder="Paste Smartlead API key"
-                          />
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button onClick={() => handleConnect("smartlead")} disabled={!!isConnecting.smartlead} className="flex-1">
-                            {isConnecting.smartlead ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Connecting...
-                              </>
-                            ) : (
-                              "Connect Smartlead"
-                            )}
-                          </Button>
-                        </div>
-                      </>
-                    ) : smartleadConnection.sync_status === "syncing" ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          <span className="text-sm font-medium">Syncing...</span>
-                        </div>
-                        {(smartleadConnection.sync_progress as any)?.historical_days && (
-                          <div className="text-xs text-muted-foreground">
-                            Historical days: {(smartleadConnection.sync_progress as any).historical_days}
-                          </div>
-                        )}
-                        {(smartleadConnection.sync_progress as any)?.campaign_index !== undefined && (
-                          <div className="space-y-1">
-                            <Progress
-                              value={
-                                ((smartleadConnection.sync_progress as any).campaign_index /
-                                  ((smartleadConnection.sync_progress as any).total_campaigns || 1)) *
-                                100
-                              }
-                            />
-                            <div className="text-xs text-muted-foreground">
-                              {(smartleadConnection.sync_progress as any).campaign_index} /{" "}
-                              {(smartleadConnection.sync_progress as any).total_campaigns} campaigns
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="space-y-2 text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Status</span>
-                            <span className="capitalize">{smartleadConnection.sync_status || "active"}</span>
-                          </div>
-                          {smartleadConnection.last_sync_at && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Last Sync</span>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {new Date(smartleadConnection.last_sync_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                          {smartleadConnection.last_full_sync_at && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Last Full Sync</span>
-                              <span className="flex items-center gap-1">
-                                <Download className="h-3 w-3" />
-                                {new Date(smartleadConnection.last_full_sync_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2 pt-2 border-t">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSyncSmartlead()}
-                            disabled={!!isSyncing.smartlead}
-                          >
-                            {isSyncing.smartlead ? (
-                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="mr-2 h-3 w-3" />
-                            )}
-                            Sync
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSyncSmartlead({ fullBackfill: true })}
-                            disabled={!!isSyncing.smartlead}
-                            title="Fetch ALL historical data (up to 2 years)"
-                          >
-                            {isSyncing.smartlead ? (
-                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                            ) : (
-                              <Database className="mr-2 h-3 w-3" />
-                            )}
-                            Full Backfill
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSyncSmartleadReplies()}
-                            disabled={!!isSyncing.smartlead_replies}
-                            title="Fetch inbox replies and message events"
-                          >
-                            {isSyncing.smartlead_replies ? (
-                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                            ) : (
-                              <Inbox className="mr-2 h-3 w-3" />
-                            )}
-                            Sync Inbox
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleSyncSmartlead({ reset: true })}
-                            disabled={!!isSyncing.smartlead}
-                          >
-                            Reset & Sync
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+        {/* Data Coverage */}
+        <DataCoverageIndicator />
 
-                {/* Reply.io */}
-                <Card className={replyioConnection ? "border-success/30" : ""}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                          <Plug className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-lg">Reply.io</CardTitle>
-                          <CardDescription>Email sequences & engagement</CardDescription>
-                        </div>
-                      </div>
-                      {replyioConnection && (
-                        <Badge variant="outline" className="border-success text-success">
-                          Connected
-                        </Badge>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {!replyioConnection ? (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="replyio-key">API Key</Label>
-                          <Input
-                            id="replyio-key"
-                            value={replyioApiKey}
-                            onChange={(e) => setReplyioApiKey(e.target.value)}
-                            placeholder="Paste Reply.io API key"
-                          />
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button onClick={() => handleConnect("replyio")} disabled={!!isConnecting.replyio} className="flex-1">
-                            {isConnecting.replyio ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Connecting...
-                              </>
-                            ) : (
-                              "Connect Reply.io"
-                            )}
-                          </Button>
-                          <Button variant="link" size="sm" asChild>
-                            <a href="https://app.reply.io/settings/apikey" target="_blank" rel="noopener noreferrer">
-                              Get API Key
-                              <ExternalLink className="ml-1 h-3 w-3" />
-                            </a>
-                          </Button>
-                        </div>
-                      </>
-                    ) : replyioConnection.sync_status === "syncing" ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          <span className="text-sm font-medium">Syncing...</span>
-                        </div>
-                        {(replyioConnection.sync_progress as any)?.sequences_synced !== undefined && (
-                          <div className="space-y-1">
-                            <Progress
-                              value={
-                                ((replyioConnection.sync_progress as any).sequences_synced /
-                                  ((replyioConnection.sync_progress as any).total_sequences || 100)) *
-                                100
-                              }
-                            />
-                            <div className="text-xs text-muted-foreground">
-                              {(replyioConnection.sync_progress as any).sequences_synced} /{" "}
-                              {(replyioConnection.sync_progress as any).total_sequences || "?"} sequences
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="space-y-2 text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Status</span>
-                            <span className="capitalize">{replyioConnection.sync_status || "active"}</span>
-                          </div>
-                          {replyioConnection.last_sync_at && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Last Sync</span>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {new Date(replyioConnection.last_sync_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                          {replyioConnection.last_full_sync_at && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Last Full Sync</span>
-                              <span className="flex items-center gap-1">
-                                <Download className="h-3 w-3" />
-                                {new Date(replyioConnection.last_full_sync_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2 pt-2 border-t">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSyncReplyio()}
-                            disabled={!!isSyncing.replyio}
-                          >
-                            {isSyncing.replyio ? (
-                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="mr-2 h-3 w-3" />
-                            )}
-                            Sync
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSyncReplyio({ fullBackfill: true })}
-                            disabled={!!isSyncing.replyio}
-                            title="Fetch ALL sequences and historical data"
-                          >
-                            {isSyncing.replyio ? (
-                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                            ) : (
-                              <Database className="mr-2 h-3 w-3" />
-                            )}
-                            Full Backfill
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleSyncReplyio({ reset: true })}
-                            disabled={!!isSyncing.replyio}
-                          >
-                            Reset & Sync
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Data Coverage Indicator */}
-                {currentWorkspace && (smartleadConnection || replyioConnection) && (
-                  <DataCoverageIndicator workspaceId={currentWorkspace.id} />
+        {/* Connection Cards */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* SmartLead */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                    <Inbox className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">SmartLead</CardTitle>
+                    <CardDescription>Email outreach campaigns</CardDescription>
+                  </div>
+                </div>
+                {smartleadConnection && (
+                  <Badge variant={smartleadConnection.status === 'active' ? "default" : "secondary"}>
+                    {smartleadConnection.status === 'active' ? "Connected" : "Inactive"}
+                  </Badge>
                 )}
-              </>
-            )}
-
-            {channel === "calling" && (
-              <>
-                {/* PhoneBurner */}
-                <Card className={phoneburnerConnection ? "border-success/30" : ""}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                          <Phone className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-lg">PhoneBurner</CardTitle>
-                          <CardDescription>Power dialer & call tracking</CardDescription>
-                        </div>
-                      </div>
-                      {phoneburnerConnection && (
-                        <Badge variant="outline" className="border-success text-success">
-                          Connected
-                        </Badge>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {!phoneburnerConnection ? (
-                      <>
-                        <Button
-                          onClick={handlePhoneBurnerOAuth}
-                          disabled={!!isConnecting.phoneburner_oauth}
-                          className="w-full"
-                        >
-                          {isConnecting.phoneburner_oauth ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Connecting...
-                            </>
-                          ) : (
-                            <>
-                              <ExternalLink className="mr-2 h-4 w-4" />
-                              Connect with PhoneBurner
-                            </>
-                          )}
-                        </Button>
-
-                        <div className="relative">
-                          <div className="absolute inset-0 flex items-center">
-                            <span className="w-full border-t" />
-                          </div>
-                          <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-card px-2 text-muted-foreground">or</span>
-                          </div>
-                        </div>
-
-                        {showPATInput ? (
-                          <div className="space-y-2">
-                            <Label htmlFor="pb-token">Personal Access Token</Label>
-                            <Input
-                              id="pb-token"
-                              value={phoneburnerToken}
-                              onChange={(e) => setPhoneburnerToken(e.target.value)}
-                              placeholder="Paste PhoneBurner PAT"
-                            />
-                            <div className="flex gap-2">
-                              <Button
-                                onClick={() => handleConnect("phoneburner")}
-                                disabled={!!isConnecting.phoneburner}
-                                variant="outline"
-                                className="flex-1"
-                              >
-                                {isConnecting.phoneburner ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Connecting...
-                                  </>
-                                ) : (
-                                  "Connect with PAT"
-                                )}
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => setShowPATInput(false)}>
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="w-full text-muted-foreground"
-                            onClick={() => setShowPATInput(true)}
-                          >
-                            <KeyRound className="mr-2 h-4 w-4" />
-                            Use Personal Access Token instead
-                          </Button>
-                        )}
-                      </>
-                    ) : phoneburnerConnection.sync_status === "auth_expired" ? (
-                      <>
-                        <Alert variant="destructive" className="mb-2">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertDescription>
-                            PhoneBurner authorization has expired. Please reconnect.
-                          </AlertDescription>
-                        </Alert>
-                        <Button
-                          onClick={handlePhoneBurnerOAuth}
-                          disabled={!!isConnecting.phoneburner_oauth}
-                          className="w-full"
-                        >
-                          {isConnecting.phoneburner_oauth ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Reconnecting...
-                            </>
-                          ) : (
-                            <>
-                              <ExternalLink className="mr-2 h-4 w-4" />
-                              Reconnect PhoneBurner
-                            </>
-                          )}
-                        </Button>
-                      </>
-                    ) : phoneburnerConnection.sync_status === "syncing" ? (
-                      <>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="capitalize font-medium">
-                              {pbPhase === "dialsessions"
-                                ? "Syncing dial sessions..."
-                                : pbPhase === "contacts"
-                                  ? "Syncing contacts..."
-                                  : pbPhase === "metrics"
-                                    ? "Calculating metrics..."
-                                    : pbPhase === "linking"
-                                      ? "Linking contacts..."
-                                      : "Starting sync..."}
-                            </span>
-                            <span className="text-muted-foreground">{pbProgressPercent}%</span>
-                          </div>
-                          <Progress value={pbProgressPercent} />
-                          <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                            <span>{pbSessions} sessions</span>
-                            <span>{pbContacts} contacts</span>
-                            <span>{pbCalls} calls</span>
-                          </div>
-                        </div>
-
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="w-full"
-                          onClick={handleStopPhoneburnerSync}
-                          disabled={!!isSyncing.phoneburner_stop}
-                        >
-                          {isSyncing.phoneburner_stop ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Stopping...
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="mr-2 h-4 w-4" />
-                              Stop Sync
-                            </>
-                          )}
-                        </Button>
-                      </>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {renderSyncStatus(smartleadConnection)}
+              
+              {!smartleadConnection ? (
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="smartlead-key">API Key</Label>
+                    <Input
+                      id="smartlead-key"
+                      type="password"
+                      placeholder="Enter your SmartLead API key"
+                      value={smartleadApiKey}
+                      onChange={(e) => setSmartleadApiKey(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={() => handleConnect("smartlead")}
+                    disabled={isConnecting.smartlead || !smartleadApiKey.trim()}
+                  >
+                    {isConnecting.smartlead ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Connecting...</>
                     ) : (
-                      <>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Status</span>
-                            <span className="capitalize">{phoneburnerConnection.sync_status || "active"}</span>
-                          </div>
-                          {phoneburnerConnection.last_sync_at && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Last Sync</span>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {new Date(phoneburnerConnection.last_sync_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                          {phoneburnerProgress && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Records</span>
-                              <span className="text-xs">
-                                {pbSessions} sessions, {pbContacts} contacts, {pbCalls} calls
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            className="flex-1"
-                            onClick={() => handleSyncPhoneburner(false)}
-                            disabled={!!isSyncing.phoneburner}
-                          >
-                            {isSyncing.phoneburner ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (
-                              <>
-                                <RefreshCw className="mr-2 h-4 w-4" />
-                                Sync
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleSyncPhoneburner(true)}
-                            disabled={!!isSyncing.phoneburner}
-                          >
-                            Full Reset
-                          </Button>
-                        </div>
-
-                        <Button
-                          variant="outline"
-                          className="w-full"
-                          onClick={handlePhoneBurnerOAuth}
-                          disabled={!!isConnecting.phoneburner_oauth}
-                        >
-                          {isConnecting.phoneburner_oauth ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Authorizing...
-                            </>
-                          ) : (
-                            <>
-                              <ExternalLink className="mr-2 h-4 w-4" />
-                              Authorize for Individual Calls
-                            </>
-                          )}
-                        </Button>
-                        <p className="text-xs text-muted-foreground text-center">
-                          OAuth authorization enables individual call records & recordings
-                        </p>
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="w-full text-muted-foreground"
-                          onClick={handleDiagnosePhoneburner}
-                          disabled={!!isSyncing.phoneburner_diagnose}
-                        >
-                          {isSyncing.phoneburner_diagnose ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Running Diagnostics...
-                            </>
-                          ) : (
-                            <>
-                              <AlertCircle className="mr-2 h-4 w-4" />
-                              Run Diagnostics
-                            </>
-                          )}
-                        </Button>
-
-                        {diagnosticResult && (
-                          <div className="mt-2 space-y-2 rounded-lg bg-accent/30 p-3 text-xs">
-                            <p className="font-semibold">Diagnostic Results:</p>
-                            {diagnosticResult.tests?.members && (
-                              <div className="flex justify-between">
-                                <span>Members:</span>
-                                <span className={diagnosticResult.tests.members.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.members.success ? `${diagnosticResult.tests.members.count} found` : "Failed"}
-                                </span>
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.contacts && (
-                              <div className="flex justify-between">
-                                <span>Contacts:</span>
-                                <span className={diagnosticResult.tests.contacts.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.contacts.success ? `${diagnosticResult.tests.contacts.total_contacts} total` : "Failed"}
-                                </span>
-                              </div>
-                            )}
-                            {diagnosticResult.tests?.dial_sessions && (
-                              <div className="flex justify-between">
-                                <span>Dial Sessions:</span>
-                                <span className={diagnosticResult.tests.dial_sessions.success ? "text-green-500" : "text-red-500"}>
-                                  {diagnosticResult.tests.dial_sessions.success
-                                    ? `${diagnosticResult.tests.dial_sessions.total_results} found`
-                                    : "Failed"}
-                                </span>
-                              </div>
-                            )}
-                            {diagnosticResult.recommendation && (
-                              <p className="mt-2 text-muted-foreground italic">{diagnosticResult.recommendation}</p>
-                            )}
-                          </div>
-                        )}
-                      </>
+                      <><KeyRound className="h-4 w-4 mr-2" /> Connect</>
                     )}
-                  </CardContent>
-                </Card>
-
-                {/* NocoDB Connection */}
-                <Card className={nocodbConnection ? "border-success/30" : ""}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center">
-                          <Database className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-lg">NocoDB</CardTitle>
-                          <CardDescription>Call data from Fireflies.ai</CardDescription>
-                        </div>
-                      </div>
-                      {nocodbConnection && (
-                        <Badge variant="outline" className="border-success text-success">
-                          <CheckCircle2 className="mr-1 h-3 w-3" />
-                          Connected
-                        </Badge>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {!nocodbConnection ? (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="nocodb-token">API Token</Label>
-                          <Input
-                            id="nocodb-token"
-                            type="password"
-                            value={nocodbApiToken}
-                            onChange={(e) => setNocodbApiToken(e.target.value)}
-                            placeholder="Paste NocoDB API Token"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Get your API token from NocoDB Settings → API Tokens
-                          </p>
-                        </div>
-                        <Button
-                          onClick={() => handleConnect("nocodb")}
-                          disabled={!!isConnecting.nocodb}
-                          className="w-full"
-                        >
-                          {isConnecting.nocodb ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Connecting...
-                            </>
-                          ) : (
-                            <>
-                              <Database className="mr-2 h-4 w-4" />
-                              Connect NocoDB
-                            </>
-                          )}
-                        </Button>
-                      </>
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => handleSyncSmartlead()}
+                    disabled={isSyncing.smartlead}
+                  >
+                    {isSyncing.smartlead ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Syncing...</>
                     ) : (
-                      <>
-                        {/* Status and Last Sync */}
-                        <div className="space-y-2 text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Status</span>
-                            <span className="capitalize">{nocodbConnection.sync_status || "active"}</span>
-                          </div>
-                          {nocodbConnection.last_sync_at && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Last Sync</span>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {new Date(nocodbConnection.last_sync_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Stats Display */}
-                        {nocodbStats && (
-                          <div className="space-y-2 rounded-lg bg-accent/20 p-3 text-sm">
-                            <div className="flex items-center justify-between mb-2">
-                              <p className="font-medium">Processing Status</p>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleRefreshStats}
-                                disabled={!!isSyncing.nocodb_stats}
-                              >
-                                {isSyncing.nocodb_stats ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div className="flex items-center gap-2">
-                                <div className="h-2 w-2 rounded-full bg-amber-500" />
-                                <span className="text-muted-foreground">Pending:</span>
-                                <span className="font-medium">{nocodbStats.pending}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="h-2 w-2 rounded-full bg-blue-500" />
-                                <span className="text-muted-foreground">Transcripts:</span>
-                                <span className="font-medium">{nocodbStats.transcriptFetched}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="h-2 w-2 rounded-full bg-green-500" />
-                                <span className="text-muted-foreground">Scored:</span>
-                                <span className="font-medium">{nocodbStats.scored}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="h-2 w-2 rounded-full bg-red-500" />
-                                <span className="text-muted-foreground">Errors:</span>
-                                <span className="font-medium">{nocodbStats.errors}</span>
-                              </div>
-                            </div>
-                            <div className="mt-2 pt-2 border-t border-border/50">
-                              <div className="flex items-center justify-between text-muted-foreground">
-                                <span>Total Calls:</span>
-                                <span className="font-medium text-foreground">{nocodbStats.totalCalls}</span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Progress Bar during Sync */}
-                        {syncProgress && isSyncing.nocodb && (
-                          <div className="space-y-2 rounded-lg bg-primary/5 border border-primary/20 p-3">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium text-primary">{syncProgress.message}</span>
-                              <span className="text-muted-foreground">{syncProgress.percent}%</span>
-                            </div>
-                            <Progress value={syncProgress.percent} className="h-2" />
-                            {syncProgress.total > 0 && (
-                              <p className="text-xs text-muted-foreground">
-                                {syncProgress.current} / {syncProgress.total} records
-                              </p>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Sync Buttons */}
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            className="flex-1"
-                            onClick={() => handleNocoDBSync("sync")}
-                            disabled={!!isSyncing.nocodb}
-                          >
-                            {isSyncing.nocodb ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (
-                              <>
-                                <RefreshCw className="mr-2 h-4 w-4" />
-                                Sync Now
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleNocoDBSync("full_sync")}
-                            disabled={!!isSyncing.nocodb}
-                          >
-                            Full Re-sync
-                          </Button>
-                        </div>
-
-                        {/* Process Pending Button */}
-                        {hasPendingWork && (
-                          <Button
-                            variant="outline"
-                            className="w-full"
-                            onClick={startBackgroundProcessing}
-                            disabled={isProcessingBackground}
-                          >
-                            {isProcessingBackground ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Processing... ({nocodbStats?.pending || 0} pending, {nocodbStats?.transcriptFetched || 0} to score)
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="mr-2 h-4 w-4" />
-                                Process {(nocodbStats?.pending || 0) + (nocodbStats?.transcriptFetched || 0)} Pending
-                              </>
-                            )}
-                          </Button>
-                        )}
-
-                        <p className="text-xs text-muted-foreground text-center">
-                          {isProcessingBackground 
-                            ? "Background processing in progress. Stats refresh every 5s." 
-                            : "Sync to fetch latest data from NocoDB."}
-                        </p>
-                      </>
+                      <><RefreshCw className="h-4 w-4 mr-2" /> Sync</>
                     )}
-                  </CardContent>
-                </Card>
-              </>
-            )}
-          </div>
-        )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSyncSmartlead({ fullBackfill: true })}
+                    disabled={isSyncing.smartlead}
+                  >
+                    <Download className="h-4 w-4 mr-2" /> Full Backfill
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Reply.io */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
+                    <Inbox className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Reply.io</CardTitle>
+                    <CardDescription>Email sequences & automation</CardDescription>
+                  </div>
+                </div>
+                {replyioConnection && (
+                  <Badge variant={replyioConnection.status === 'active' ? "default" : "secondary"}>
+                    {replyioConnection.status === 'active' ? "Connected" : "Inactive"}
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {renderSyncStatus(replyioConnection)}
+              
+              {!replyioConnection ? (
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="replyio-key">API Key</Label>
+                    <Input
+                      id="replyio-key"
+                      type="password"
+                      placeholder="Enter your Reply.io API key"
+                      value={replyioApiKey}
+                      onChange={(e) => setReplyioApiKey(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={() => handleConnect("replyio")}
+                    disabled={isConnecting.replyio || !replyioApiKey.trim()}
+                  >
+                    {isConnecting.replyio ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Connecting...</>
+                    ) : (
+                      <><KeyRound className="h-4 w-4 mr-2" /> Connect</>
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => handleSyncReplyio()}
+                    disabled={isSyncing.replyio}
+                  >
+                    {isSyncing.replyio ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Syncing...</>
+                    ) : (
+                      <><RefreshCw className="h-4 w-4 mr-2" /> Sync</>
+                    )}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* PhoneBurner */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900 flex items-center justify-center">
+                    <Phone className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">PhoneBurner</CardTitle>
+                    <CardDescription>Power dialer & call tracking</CardDescription>
+                  </div>
+                </div>
+                {phoneburnerConnection && (
+                  <Badge variant={phoneburnerConnection.status === 'active' ? "default" : "secondary"}>
+                    {phoneburnerConnection.status === 'active' ? "Connected" : "Inactive"}
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {renderSyncStatus(phoneburnerConnection)}
+              
+              {!phoneburnerConnection ? (
+                <div className="space-y-3">
+                  <Button
+                    className="w-full"
+                    onClick={handlePhoneBurnerOAuth}
+                    disabled={isConnecting.phoneburner_oauth}
+                  >
+                    {isConnecting.phoneburner_oauth ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Connecting...</>
+                    ) : (
+                      <><ExternalLink className="h-4 w-4 mr-2" /> Connect with OAuth</>
+                    )}
+                  </Button>
+                  
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">Or</span>
+                    </div>
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setShowPATInput(!showPATInput)}
+                  >
+                    <KeyRound className="h-4 w-4 mr-2" /> Use Personal Access Token
+                  </Button>
+                  
+                  {showPATInput && (
+                    <div className="space-y-2">
+                      <Input
+                        type="password"
+                        placeholder="Enter your PhoneBurner PAT"
+                        value={phoneburnerToken}
+                        onChange={(e) => setPhoneburnerToken(e.target.value)}
+                      />
+                      <Button
+                        className="w-full"
+                        onClick={() => handleConnect("phoneburner")}
+                        disabled={isConnecting.phoneburner || !phoneburnerToken.trim()}
+                      >
+                        Connect
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => handleSyncPhoneburner()}
+                      disabled={isSyncing.phoneburner}
+                    >
+                      {isSyncing.phoneburner ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Syncing...</>
+                      ) : (
+                        <><RefreshCw className="h-4 w-4 mr-2" /> Sync</>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleDiagnosePhoneburner}
+                      disabled={isSyncing.phoneburner_diagnose}
+                    >
+                      {isSyncing.phoneburner_diagnose ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  {phoneburnerConnection.last_sync_status === "syncing" && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="w-full"
+                      onClick={handleStopPhoneburnerSync}
+                      disabled={isSyncing.phoneburner_stop}
+                    >
+                      Stop Sync
+                    </Button>
+                  )}
+                </div>
+              )}
+              
+              {diagnosticResult && (
+                <div className="mt-4 p-3 rounded-lg bg-muted text-sm">
+                  <pre className="whitespace-pre-wrap text-xs">
+                    {JSON.stringify(diagnosticResult, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* NocoDB */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-green-100 dark:bg-green-900 flex items-center justify-center">
+                    <Database className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">NocoDB</CardTitle>
+                    <CardDescription>External call recordings</CardDescription>
+                  </div>
+                </div>
+                {nocodbConnection && (
+                  <Badge variant={nocodbConnection.status === 'active' ? "default" : "secondary"}>
+                    {nocodbConnection.status === 'active' ? "Connected" : "Inactive"}
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {renderSyncStatus(nocodbConnection)}
+              
+              {!nocodbConnection ? (
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="nocodb-token">API Token</Label>
+                    <Input
+                      id="nocodb-token"
+                      type="password"
+                      placeholder="Enter your NocoDB API token"
+                      value={nocodbApiToken}
+                      onChange={(e) => setNocodbApiToken(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={() => handleConnect("nocodb")}
+                    disabled={isConnecting.nocodb || !nocodbApiToken.trim()}
+                  >
+                    {isConnecting.nocodb ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Connecting...</>
+                    ) : (
+                      <><KeyRound className="h-4 w-4 mr-2" /> Connect</>
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {nocodbStats && (
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="p-2 rounded bg-muted">
+                        <div className="font-medium">{nocodbStats.totalCalls}</div>
+                        <div className="text-xs text-muted-foreground">Total Calls</div>
+                      </div>
+                      <div className="p-2 rounded bg-muted">
+                        <div className="font-medium">{nocodbStats.transcriptFetched}</div>
+                        <div className="text-xs text-muted-foreground">Transcribed</div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {syncProgress && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>{syncProgress.phase}</span>
+                        <span>{syncProgress.percent}%</span>
+                      </div>
+                      <Progress value={syncProgress.percent} />
+                      <p className="text-xs text-muted-foreground">{syncProgress.message}</p>
+                    </div>
+                  )}
+                  
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => handleNocoDBSync("sync")}
+                      disabled={isSyncing.nocodb}
+                    >
+                      {isSyncing.nocodb ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Syncing...</>
+                      ) : (
+                        <><RefreshCw className="h-4 w-4 mr-2" /> Sync</>
+                      )}
+                    </Button>
+                  </div>
+                  
+                  {hasPendingWork && (
+                    <Button
+                      className="w-full"
+                      onClick={handleProcessBackground}
+                      disabled={isProcessingBackground}
+                    >
+                      {isProcessingBackground ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Processing...</>
+                      ) : (
+                        <><Sparkles className="h-4 w-4 mr-2" /> Process Pending ({nocodbStats?.pending || 0})</>
+                      )}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </DashboardLayout>
   );

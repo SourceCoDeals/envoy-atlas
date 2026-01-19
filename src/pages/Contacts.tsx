@@ -36,7 +36,7 @@ export default function Contacts() {
 
   const { contacts, loading, totalCount } = useContacts({
     search,
-    status: statusFilter,
+    // Note: status filtering would need to be implemented in useContacts if needed
   });
 
   return (

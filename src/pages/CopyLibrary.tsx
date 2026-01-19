@@ -44,20 +44,13 @@ export default function CopyLibrary() {
 
   // Filter entries based on current filters
   const filteredEntries = useMemo(() => {
-    let status: string | undefined;
     let isTemplate: boolean | undefined;
 
     if (activeTab === 'templates') {
       isTemplate = true;
-      status = 'active';
-    } else if (activeTab === 'archived') {
-      status = 'archived';
-    } else {
-      status = 'active';
     }
 
     return searchEntries(searchQuery, {
-      status,
       category: selectedCategory !== 'all' ? selectedCategory : undefined,
       isTemplate,
       tags: selectedTags.length > 0 ? selectedTags : undefined,
@@ -95,9 +88,9 @@ export default function CopyLibrary() {
   }
 
   const counts = {
-    all: entries.filter(e => e.status === 'active').length,
-    templates: entries.filter(e => e.is_template && e.status === 'active').length,
-    archived: entries.filter(e => e.status === 'archived').length,
+    all: entries.length,
+    templates: entries.filter(e => e.is_template).length,
+    archived: 0, // No status field in the new schema
   };
 
   return (
@@ -154,13 +147,6 @@ export default function CopyLibrary() {
               Templates
               <Badge variant="secondary" className="text-xs h-5 px-1.5">
                 {counts.templates}
-              </Badge>
-            </TabsTrigger>
-            <TabsTrigger value="archived" className="gap-2">
-              <Archive className="h-4 w-4" />
-              Archived
-              <Badge variant="secondary" className="text-xs h-5 px-1.5">
-                {counts.archived}
               </Badge>
             </TabsTrigger>
           </TabsList>
