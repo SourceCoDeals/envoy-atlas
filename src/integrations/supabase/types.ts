@@ -463,6 +463,8 @@ export type Database = {
           last_synced_at: string | null
           name: string
           open_rate: number | null
+          positive_rate: number | null
+          positive_replies: number | null
           quality_score: number | null
           quality_tier: string | null
           reply_rate: number | null
@@ -490,6 +492,8 @@ export type Database = {
           last_synced_at?: string | null
           name: string
           open_rate?: number | null
+          positive_rate?: number | null
+          positive_replies?: number | null
           quality_score?: number | null
           quality_tier?: string | null
           reply_rate?: number | null
@@ -517,6 +521,8 @@ export type Database = {
           last_synced_at?: string | null
           name?: string
           open_rate?: number | null
+          positive_rate?: number | null
+          positive_replies?: number | null
           quality_score?: number | null
           quality_tier?: string | null
           reply_rate?: number | null

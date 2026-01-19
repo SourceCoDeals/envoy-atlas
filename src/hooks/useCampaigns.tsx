@@ -21,10 +21,12 @@ export interface CampaignWithMetrics {
   total_replied: number;
   total_bounced: number;
   total_leads: number;
+  positive_replies: number;
   open_rate: number;
   click_rate: number;
   reply_rate: number;
   bounce_rate: number;
+  positive_rate: number;
   engagement_id: string | null;
   engagement_name?: string | null;
   metricsStatus: MetricsStatus;
@@ -138,6 +140,7 @@ export function useCampaigns() {
         let total_clicked = 0;
         let total_replied = 0;
         let total_bounced = 0;
+        let positive_replies = 0;
         let metricsStatus: MetricsStatus;
         let metricsSource: MetricsSource;
 
@@ -147,6 +150,7 @@ export function useCampaigns() {
           total_clicked = 0; // Not in campaign table
           total_replied = campaign.total_replied || 0;
           total_bounced = campaign.total_bounced || 0;
+          positive_replies = (campaign as any).positive_replies || 0;
           metricsStatus = 'verified';
           metricsSource = 'cumulative';
         } else if (hasDailyData) {
@@ -155,12 +159,15 @@ export function useCampaigns() {
           total_clicked = dailyAggregate!.total_clicked;
           total_replied = dailyAggregate!.total_replied;
           total_bounced = dailyAggregate!.total_bounced;
+          positive_replies = 0; // Not aggregated from daily yet
           metricsStatus = 'partial';
           metricsSource = 'daily';
         } else {
           metricsStatus = 'missing';
           metricsSource = 'none';
         }
+
+        const positive_rate = total_replied > 0 ? (positive_replies / total_replied) * 100 : 0;
 
         return {
           id: campaign.id,
@@ -176,11 +183,13 @@ export function useCampaigns() {
           total_clicked,
           total_replied,
           total_bounced,
+          positive_replies,
           total_leads: 0,
           open_rate: total_sent > 0 ? (total_opened / total_sent) * 100 : 0,
           click_rate: total_sent > 0 ? (total_clicked / total_sent) * 100 : 0,
           reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
           bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
+          positive_rate,
           engagement_id: campaign.engagement_id || null,
           engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
           metricsStatus,
