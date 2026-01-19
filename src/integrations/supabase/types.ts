@@ -2307,6 +2307,69 @@ export type Database = {
           },
         ]
       }
+      hourly_metrics: {
+        Row: {
+          campaign_id: string | null
+          created_at: string | null
+          day_of_week: number
+          emails_bounced: number | null
+          emails_clicked: number | null
+          emails_opened: number | null
+          emails_replied: number | null
+          emails_sent: number | null
+          engagement_id: string | null
+          hour_of_day: number
+          id: string
+          metric_date: string
+          updated_at: string | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          created_at?: string | null
+          day_of_week: number
+          emails_bounced?: number | null
+          emails_clicked?: number | null
+          emails_opened?: number | null
+          emails_replied?: number | null
+          emails_sent?: number | null
+          engagement_id?: string | null
+          hour_of_day: number
+          id?: string
+          metric_date: string
+          updated_at?: string | null
+        }
+        Update: {
+          campaign_id?: string | null
+          created_at?: string | null
+          day_of_week?: number
+          emails_bounced?: number | null
+          emails_clicked?: number | null
+          emails_opened?: number | null
+          emails_replied?: number | null
+          emails_sent?: number | null
+          engagement_id?: string | null
+          hour_of_day?: number
+          id?: string
+          metric_date?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hourly_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hourly_metrics_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_categories: {
         Row: {
           color: string | null
@@ -2360,6 +2423,80 @@ export type Database = {
           },
           {
             foreignKeyName: "lead_categories_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      link_click_tracking: {
+        Row: {
+          campaign_id: string | null
+          click_timestamp: string | null
+          clicked_url: string
+          contact_id: string | null
+          created_at: string | null
+          device_type: string | null
+          email_activity_id: string | null
+          engagement_id: string | null
+          id: string
+          ip_address: string | null
+          link_text: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          click_timestamp?: string | null
+          clicked_url: string
+          contact_id?: string | null
+          created_at?: string | null
+          device_type?: string | null
+          email_activity_id?: string | null
+          engagement_id?: string | null
+          id?: string
+          ip_address?: string | null
+          link_text?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          campaign_id?: string | null
+          click_timestamp?: string | null
+          clicked_url?: string
+          contact_id?: string | null
+          created_at?: string | null
+          device_type?: string | null
+          email_activity_id?: string | null
+          engagement_id?: string | null
+          id?: string
+          ip_address?: string | null
+          link_text?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "link_click_tracking_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "link_click_tracking_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "link_click_tracking_email_activity_id_fkey"
+            columns: ["email_activity_id"]
+            isOneToOne: false
+            referencedRelation: "email_activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "link_click_tracking_engagement_id_fkey"
             columns: ["engagement_id"]
             isOneToOne: false
             referencedRelation: "engagements"

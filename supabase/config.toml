@@ -89,3 +89,9 @@ verify_jwt = false
 
 [functions.backfill-enrollment]
 verify_jwt = false
+
+[functions.smartlead-webhook]
+verify_jwt = false
+
+[functions.replyio-webhook]
+verify_jwt = false
