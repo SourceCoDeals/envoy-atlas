@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Copy, Archive, Trash2, Star, MoreVertical, Eye } from 'lucide-react';
+import { Copy, Trash2, Star, MoreVertical, Eye } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,16 +45,15 @@ const categoryLabels: Record<string, string> = {
 export function LibraryCard({ entry, onView, onUpdate, onDelete }: LibraryCardProps) {
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const emailBody = entry.body_html || entry.body_plain;
+  const bodyPreview = emailBody ? emailBody.substring(0, 200) : null;
+
   const copyToClipboard = () => {
-    const text = entry.email_body 
-      ? `Subject: ${entry.subject_line}\n\n${entry.email_body}`
+    const text = emailBody 
+      ? `Subject: ${entry.subject_line}\n\n${emailBody}`
       : entry.subject_line;
     navigator.clipboard.writeText(text);
     toast.success('Copied to clipboard');
-  };
-
-  const handleArchive = async () => {
-    await onUpdate(entry.id, { status: entry.status === 'archived' ? 'active' : 'archived' });
   };
 
   const handleToggleTemplate = async () => {
@@ -68,16 +67,16 @@ export function LibraryCard({ entry, onView, onUpdate, onDelete }: LibraryCardPr
   };
 
   const replyRate = entry.performance_snapshot?.reply_rate;
-  const allTags = [...entry.ai_tags, ...entry.manual_tags].slice(0, 4);
+  const allTags = entry.tags.slice(0, 4);
 
   return (
-    <Card className={`group transition-all hover:shadow-md ${entry.status === 'archived' ? 'opacity-60' : ''}`}>
+    <Card className="group transition-all hover:shadow-md">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <Badge variant="outline" className={categoryColors[entry.category] || categoryColors.custom}>
-                {categoryLabels[entry.category] || entry.category}
+              <Badge variant="outline" className={categoryColors[entry.category || 'custom'] || categoryColors.custom}>
+                {categoryLabels[entry.category || 'custom'] || entry.category}
               </Badge>
               {entry.is_template && (
                 <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
@@ -113,10 +112,6 @@ export function LibraryCard({ entry, onView, onUpdate, onDelete }: LibraryCardPr
                 {entry.is_template ? 'Remove from Templates' : 'Mark as Template'}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleArchive}>
-                <Archive className="h-4 w-4 mr-2" />
-                {entry.status === 'archived' ? 'Restore' : 'Archive'}
-              </DropdownMenuItem>
               <DropdownMenuItem 
                 onClick={handleDelete} 
                 disabled={isDeleting}
@@ -131,9 +126,9 @@ export function LibraryCard({ entry, onView, onUpdate, onDelete }: LibraryCardPr
       </CardHeader>
       
       <CardContent className="pt-0">
-        {entry.body_preview && (
+        {bodyPreview && (
           <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-            {entry.body_preview}
+            {bodyPreview}
           </p>
         )}
         
@@ -144,9 +139,9 @@ export function LibraryCard({ entry, onView, onUpdate, onDelete }: LibraryCardPr
                 {tag}
               </Badge>
             ))}
-            {(entry.ai_tags.length + entry.manual_tags.length) > 4 && (
+            {entry.tags.length > 4 && (
               <Badge variant="outline" className="text-xs px-1.5 py-0">
-                +{entry.ai_tags.length + entry.manual_tags.length - 4}
+                +{entry.tags.length - 4}
               </Badge>
             )}
           </div>

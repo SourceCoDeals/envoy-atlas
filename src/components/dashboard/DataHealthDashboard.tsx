@@ -196,10 +196,10 @@ export function DataHealthDashboard() {
           />
           <SectionCard
             title="Pipeline"
-            description="Leads, deals, and engagements"
+            description="Contacts, deals, and engagements"
             icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            sources={[health.pipeline.leads, health.pipeline.deals, health.pipeline.engagements]}
-            overallStatus={getSectionStatus([health.pipeline.leads, health.pipeline.deals, health.pipeline.engagements])}
+            sources={[health.pipeline.contacts, health.pipeline.deals, health.pipeline.engagements]}
+            overallStatus={getSectionStatus([health.pipeline.contacts, health.pipeline.deals, health.pipeline.engagements])}
           />
         </div>
       </CardContent>

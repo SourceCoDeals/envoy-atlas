@@ -37,256 +37,115 @@ export function useCopyInsights() {
       setError(null);
 
       try {
-        // Fetch variants from both platform-specific tables
-        const [smartleadVariants, replyioVariants] = await Promise.all([
-          supabase.from('smartlead_variants').select(`
-            id,
-            name,
-            subject_line,
-            body_preview,
-            email_body,
-            campaign_id,
-            word_count,
-            personalization_vars,
-            smartlead_campaigns!inner (
-              id,
-              name,
-              workspace_id
-            )
-          `).eq('smartlead_campaigns.workspace_id', currentWorkspace.id),
-          supabase.from('replyio_variants').select(`
-            id,
-            name,
-            subject_line,
-            body_preview,
-            email_body,
-            campaign_id,
-            word_count,
-            personalization_vars,
-            replyio_campaigns!inner (
-              id,
-              name,
-              workspace_id
-            )
-          `).eq('replyio_campaigns.workspace_id', currentWorkspace.id)
-        ]);
+        // Get engagements for this client
+        const { data: engagements, error: engError } = await supabase
+          .from('engagements')
+          .select('id')
+          .eq('client_id', currentWorkspace.id);
 
-        // Define a unified variant type for processing
-        interface UnifiedVariant {
-          id: string;
-          name: string;
-          subject_line: string | null;
-          body_preview: string | null;
-          email_body: string | null;
-          campaign_id: string;
-          word_count: number | null;
-          personalization_vars: any;
-          platform: string;
-          campaigns: { id: string; name: string };
-        }
-
-        let variants: UnifiedVariant[] = [
-          ...(smartleadVariants.data || []).map(v => ({ 
-            id: v.id,
-            name: v.name,
-            subject_line: v.subject_line,
-            body_preview: v.body_preview,
-            email_body: v.email_body,
-            campaign_id: v.campaign_id,
-            word_count: v.word_count,
-            personalization_vars: v.personalization_vars,
-            platform: 'smartlead', 
-            campaigns: v.smartlead_campaigns 
-          })),
-          ...(replyioVariants.data || []).map(v => ({ 
-            id: v.id,
-            name: v.name,
-            subject_line: v.subject_line,
-            body_preview: v.body_preview,
-            email_body: v.email_body,
-            campaign_id: v.campaign_id,
-            word_count: v.word_count,
-            personalization_vars: v.personalization_vars,
-            platform: 'replyio', 
-            campaigns: v.replyio_campaigns 
-          }))
-        ];
-
-        // If no variants in new platform tables, fall back to legacy campaign_variants
-        if (variants.length === 0) {
-          console.log('No variants in platform tables, falling back to legacy campaign_variants...');
-          
-          const { data: legacyVariants, error: legacyError } = await supabase
-            .from('campaign_variants')
-            .select(`
-              id,
-              name,
-              subject_line,
-              body_preview,
-              email_body,
-              campaign_id,
-              word_count,
-              personalization_vars,
-              campaigns!inner (
-                id,
-                name,
-                platform,
-                workspace_id
-              )
-            `)
-            .eq('campaigns.workspace_id', currentWorkspace.id);
-          
-          if (!legacyError && legacyVariants && legacyVariants.length > 0) {
-            console.log(`Found ${legacyVariants.length} legacy variants`);
-            variants = legacyVariants.map(v => {
-              const camp = v.campaigns as unknown as { id: string; name: string; platform: string };
-              return {
-                id: v.id,
-                name: v.name,
-                subject_line: v.subject_line,
-                body_preview: v.body_preview,
-                email_body: v.email_body,
-                campaign_id: v.campaign_id,
-                word_count: v.word_count,
-                personalization_vars: v.personalization_vars,
-                platform: camp.platform || 'unknown',
-                campaigns: { id: camp.id, name: camp.name },
-              };
-            });
-          }
-        }
-
-        // Get variant IDs by platform
-        const smartleadVariantIds = (smartleadVariants.data || []).map(v => v.id);
-        const replyioVariantIds = (replyioVariants.data || []).map(v => v.id);
-
-        // Fetch daily metrics for variants from both tables
-        // NOTE: variant_id may be null in most records - also fetch campaign-level for fallback
-        const [smartleadMetrics, replyioMetrics] = await Promise.all([
-          smartleadVariantIds.length > 0
-            ? supabase.from('smartlead_daily_metrics').select('variant_id, campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
-                .eq('workspace_id', currentWorkspace.id)
-            : Promise.resolve({ data: [], error: null }),
-          replyioVariantIds.length > 0
-            ? supabase.from('replyio_daily_metrics').select('variant_id, campaign_id, sent_count, opened_count, clicked_count, replied_count, positive_reply_count')
-                .eq('workspace_id', currentWorkspace.id)
-            : Promise.resolve({ data: [], error: null })
-        ]);
-
-        const allMetrics = [
-          ...(smartleadMetrics.data || []),
-          ...(replyioMetrics.data || [])
-        ];
-
-        // Get campaign IDs from all variants
-        const allCampaignIds = [...new Set(variants.map(v => v.campaign_id))];
-        const smartleadCampIds = [...new Set((smartleadVariants.data || []).map(v => v.campaign_id))];
-        const replyioCampIds = [...new Set((replyioVariants.data || []).map(v => v.campaign_id))];
-
-        // Campaign-level metrics are already fetched above - filter for those without variant_id
-        const smartleadCampMetrics = { data: (smartleadMetrics.data || []).filter(m => !m.variant_id), error: null };
-        const replyioCampMetrics = { data: (replyioMetrics.data || []).filter(m => !m.variant_id), error: null };
+        if (engError) throw engError;
         
-        // Filter variant-level metrics
-        const smartleadVariantMetrics = (smartleadMetrics.data || []).filter(m => m.variant_id);
-        const replyioVariantMetrics = (replyioMetrics.data || []).filter(m => m.variant_id);
+        const engagementIds = (engagements || []).map(e => e.id);
+        
+        if (engagementIds.length === 0) {
+          setData([]);
+          setLoading(false);
+          return;
+        }
 
-        const allCampaignMetrics = [
-          ...(smartleadCampMetrics.data || []),
-          ...(replyioCampMetrics.data || [])
-        ];
+        // Fetch campaigns for these engagements
+        const { data: campaigns, error: campError } = await supabase
+          .from('campaigns')
+          .select('id, name, campaign_type, engagement_id')
+          .in('engagement_id', engagementIds);
 
-        const allVariantMetrics = [
-          ...smartleadVariantMetrics,
-          ...replyioVariantMetrics
-        ];
+        if (campError) throw campError;
 
-        // Aggregate metrics by variant
-        const variantMetrics: Record<string, {
-          sent: number;
-          opened: number;
-          clicked: number;
-          replied: number;
-          positive: number;
-        }> = {};
+        const campaignIds = (campaigns || []).map(c => c.id);
+        const campaignMap = new Map((campaigns || []).map(c => [c.id, c]));
 
-        allVariantMetrics.forEach(m => {
-          if (!m.variant_id) return;
-          if (!variantMetrics[m.variant_id]) {
-            variantMetrics[m.variant_id] = { sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 };
-          }
-          variantMetrics[m.variant_id].sent += m.sent_count || 0;
-          variantMetrics[m.variant_id].opened += m.opened_count || 0;
-          variantMetrics[m.variant_id].clicked += m.clicked_count || 0;
-          variantMetrics[m.variant_id].replied += m.replied_count || 0;
-          variantMetrics[m.variant_id].positive += m.positive_reply_count || 0;
-        });
+        if (campaignIds.length === 0) {
+          setData([]);
+          setLoading(false);
+          return;
+        }
 
-        // Aggregate campaign-level metrics
-        const campaignAggMetrics: Record<string, {
-          sent: number;
-          opened: number;
-          clicked: number;
-          replied: number;
-          positive: number;
-        }> = {};
+        // Fetch variants for these campaigns
+        const { data: variants, error: varError } = await supabase
+          .from('campaign_variants')
+          .select(`
+            id,
+            subject_line,
+            body_preview,
+            body_plain,
+            body_html,
+            campaign_id,
+            step_number,
+            personalization_vars,
+            total_sent,
+            total_opened,
+            total_clicked,
+            total_replied,
+            positive_replies,
+            open_rate,
+            click_rate,
+            reply_rate,
+            positive_reply_rate
+          `)
+          .in('campaign_id', campaignIds);
 
-        allCampaignMetrics.forEach(m => {
-          if (!m.campaign_id) return;
-          if (!campaignAggMetrics[m.campaign_id]) {
-            campaignAggMetrics[m.campaign_id] = { sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 };
-          }
-          campaignAggMetrics[m.campaign_id].sent += m.sent_count || 0;
-          campaignAggMetrics[m.campaign_id].opened += m.opened_count || 0;
-          campaignAggMetrics[m.campaign_id].clicked += m.clicked_count || 0;
-          campaignAggMetrics[m.campaign_id].replied += m.replied_count || 0;
-          campaignAggMetrics[m.campaign_id].positive += m.positive_reply_count || 0;
-        });
+        if (varError) throw varError;
+
+        // Fetch variant features for word count etc.
+        const variantIds = (variants || []).map(v => v.id);
+        
+        let features: any[] = [];
+        if (variantIds.length > 0) {
+          const { data: featData } = await supabase
+            .from('campaign_variant_features')
+            .select('variant_id, body_word_count, tone, opening_line_type')
+            .in('variant_id', variantIds);
+          features = featData || [];
+        }
+
+        const featureMap = new Map(features.map(f => [f.variant_id, f]));
 
         // Build performance data
         const performanceData: CopyPerformance[] = (variants || [])
           .filter(v => v.subject_line)
           .map(v => {
-            const campaign = v.campaigns as unknown as { id: string; name: string };
+            const campaign = campaignMap.get(v.campaign_id);
+            const feature = featureMap.get(v.id);
             
-            // Try variant-level metrics first
-            let vMetrics = variantMetrics[v.id];
+            const sent = v.total_sent || 0;
+            const body = v.body_preview || v.body_plain || v.body_html || '';
+            const wordCount = feature?.body_word_count || body.split(/\s+/).filter(Boolean).length;
             
-            // Fallback to campaign-level metrics if no variant metrics
-            if (!vMetrics || vMetrics.sent === 0) {
-              vMetrics = campaignAggMetrics[v.campaign_id] || { 
-                sent: 0, opened: 0, clicked: 0, replied: 0, positive: 0 
-              };
-            }
-
-            const sent = vMetrics.sent;
-            const body = v.body_preview || v.email_body || '';
-            const wordCount = v.word_count || body.split(/\s+/).filter(Boolean).length;
-            const persVars = Array.isArray(v.personalization_vars) 
-              ? v.personalization_vars 
+            const persVars = Array.isArray(v.personalization_vars)
+              ? v.personalization_vars
               : (typeof v.personalization_vars === 'object' && v.personalization_vars !== null)
                 ? Object.values(v.personalization_vars)
                 : [];
 
             return {
               subject_line: v.subject_line || '',
-              body_preview: v.body_preview || v.email_body?.substring(0, 500) || null,
-              variant_name: v.name,
-              campaign_name: campaign.name,
+              body_preview: v.body_preview || (v.body_plain || v.body_html || '').substring(0, 500) || null,
+              variant_name: `Step ${v.step_number || 1}`,
+              campaign_name: campaign?.name || 'Unknown Campaign',
               campaign_id: v.campaign_id,
               variant_id: v.id,
               sent_count: sent,
-              opened_count: vMetrics.opened,
-              clicked_count: vMetrics.clicked,
-              replied_count: vMetrics.replied,
-              positive_reply_count: vMetrics.positive,
-              open_rate: sent > 0 ? (vMetrics.opened / sent) * 100 : 0,
-              click_rate: sent > 0 ? (vMetrics.clicked / sent) * 100 : 0,
-              reply_rate: sent > 0 ? (vMetrics.replied / sent) * 100 : 0,
-              positive_rate: sent > 0 ? (vMetrics.positive / sent) * 100 : 0,
+              opened_count: v.total_opened || 0,
+              clicked_count: v.total_clicked || 0,
+              replied_count: v.total_replied || 0,
+              positive_reply_count: v.positive_replies || 0,
+              open_rate: v.open_rate || (sent > 0 ? ((v.total_opened || 0) / sent) * 100 : 0),
+              click_rate: v.click_rate || (sent > 0 ? ((v.total_clicked || 0) / sent) * 100 : 0),
+              reply_rate: v.reply_rate || (sent > 0 ? ((v.total_replied || 0) / sent) * 100 : 0),
+              positive_rate: v.positive_reply_rate || (sent > 0 ? ((v.positive_replies || 0) / sent) * 100 : 0),
               word_count: wordCount,
               personalization_vars: persVars as string[],
-              platform: v.platform,
+              platform: campaign?.campaign_type || 'email',
             };
           })
           .sort((a, b) => b.reply_rate - a.reply_rate);
