@@ -3070,6 +3070,87 @@ export type Database = {
           },
         ]
       }
+      sending_domains: {
+        Row: {
+          bounce_rate: number | null
+          created_at: string
+          data_source_id: string | null
+          dkim_record: string | null
+          dkim_status: string | null
+          dmarc_record: string | null
+          dmarc_status: string | null
+          domain: string
+          engagement_id: string
+          health_score: number | null
+          id: string
+          is_primary: boolean | null
+          last_verified_at: string | null
+          spam_complaint_rate: number | null
+          spf_record: string | null
+          spf_status: string | null
+          total_bounced: number | null
+          total_sent: number | null
+          updated_at: string
+        }
+        Insert: {
+          bounce_rate?: number | null
+          created_at?: string
+          data_source_id?: string | null
+          dkim_record?: string | null
+          dkim_status?: string | null
+          dmarc_record?: string | null
+          dmarc_status?: string | null
+          domain: string
+          engagement_id: string
+          health_score?: number | null
+          id?: string
+          is_primary?: boolean | null
+          last_verified_at?: string | null
+          spam_complaint_rate?: number | null
+          spf_record?: string | null
+          spf_status?: string | null
+          total_bounced?: number | null
+          total_sent?: number | null
+          updated_at?: string
+        }
+        Update: {
+          bounce_rate?: number | null
+          created_at?: string
+          data_source_id?: string | null
+          dkim_record?: string | null
+          dkim_status?: string | null
+          dmarc_record?: string | null
+          dmarc_status?: string | null
+          domain?: string
+          engagement_id?: string
+          health_score?: number | null
+          id?: string
+          is_primary?: boolean | null
+          last_verified_at?: string | null
+          spam_complaint_rate?: number | null
+          spf_record?: string | null
+          spf_status?: string | null
+          total_bounced?: number | null
+          total_sent?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sending_domains_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sending_domains_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sequence_steps: {
         Row: {
           body_preview: string | null
