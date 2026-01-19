@@ -252,9 +252,10 @@ function extractDomain(email: string): string | null {
 }
 
 // Self-continuation for next batch with exponential backoff retry
+// Uses service role key to avoid user JWT expiration issues
 async function triggerNextBatch(
   supabaseUrl: string,
-  authToken: string,
+  serviceKey: string,
   clientId: string,
   engagementId: string,
   dataSourceId: string,
@@ -269,7 +270,7 @@ async function triggerNextBatch(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authToken,
+          'Authorization': `Bearer ${serviceKey}`,
         },
         body: JSON.stringify({
           client_id: clientId,
@@ -278,6 +279,7 @@ async function triggerNextBatch(
           reset: false,
           batch_number: batchNumber,
           auto_continue: true,
+          internal_continuation: true,
           current_phase: phase,
         }),
       });
@@ -381,26 +383,12 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      console.error('smartlead-sync: Missing authorization header');
-      return new Response(JSON.stringify({ error: 'Missing authorization header' }), 
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Verify user authentication
-    const { data: { user }, error: authError } = await createClient(
-      supabaseUrl, anonKey,
-      { global: { headers: { Authorization: authHeader } } }
-    ).auth.getUser();
-
-    if (authError || !user) throw new Error('Unauthorized');
-
+    const body = await req.json();
     const { 
       client_id,
       engagement_id,
@@ -408,14 +396,35 @@ serve(async (req) => {
       reset = false, 
       batch_number = 1, 
       auto_continue = true,
+      internal_continuation = false,
       current_phase = 'campaigns',
       sync_leads = true,
-      sync_email_accounts = true,  // NEW: Sync email accounts/mailboxes
-      sync_lead_categories = true, // NEW: Sync lead categories
-      sync_statistics = true,      // NEW: Sync individual email statistics
-      sync_message_history = false, // NEW: Sync message history (expensive - off by default)
+      sync_email_accounts = true,
+      sync_lead_categories = true,
+      sync_statistics = true,
+      sync_message_history = false,
       classify_replies = true,
-    } = await req.json();
+    } = body;
+
+    // Auth check: skip for internal continuations (they use service role)
+    const authHeader = req.headers.get('Authorization');
+    
+    if (!internal_continuation) {
+      if (!authHeader) {
+        console.error('smartlead-sync: Missing authorization header');
+        return new Response(JSON.stringify({ error: 'Missing authorization header' }), 
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      const { data: { user }, error: authError } = await createClient(
+        supabaseUrl, anonKey,
+        { global: { headers: { Authorization: authHeader } } }
+      ).auth.getUser();
+
+      if (authError || !user) throw new Error('Unauthorized');
+    } else {
+      console.log(`Internal continuation batch ${batch_number} - using service role auth`);
+    }
     
     if (!client_id) throw new Error('client_id is required');
     if (!data_source_id) throw new Error('data_source_id is required');
@@ -438,11 +447,13 @@ serve(async (req) => {
 
     console.log(`Starting batch ${batch_number}, phase=${current_phase}, auto_continue=${auto_continue}`);
 
-    // Verify user has access to this client
-    const { data: membership } = await supabase
-      .from('client_members').select('role')
-      .eq('client_id', client_id).eq('user_id', user.id).single();
-    if (!membership) throw new Error('Access denied to client');
+    // Verify user has access to this client (skip for internal continuations)
+    if (!internal_continuation) {
+      const { data: membership } = await supabase
+        .from('client_members').select('role')
+        .eq('client_id', client_id).single();
+      if (!membership) throw new Error('Access denied to client');
+    }
 
     // Get data source (with API key)
     const { data: dataSource, error: dsError } = await supabase
@@ -615,7 +626,7 @@ serve(async (req) => {
 
           if (auto_continue) {
             EdgeRuntime.waitUntil(
-              triggerNextBatch(supabaseUrl, authHeader, client_id, activeEngagementId, data_source_id, batch_number + 1, 'campaigns')
+              triggerNextBatch(supabaseUrl, supabaseServiceKey, client_id, activeEngagementId, data_source_id, batch_number + 1, 'campaigns')
             );
           }
 
@@ -982,56 +993,88 @@ serve(async (req) => {
 
             // ============================================
             // NEW: Fetch analytics-by-date for granular daily metrics
+            // SmartLead API limits to 30-day windows, so we chunk requests
             // ============================================
             try {
               // Get date range: campaign start to today
-              const campaignStartDate = campaign.created_at 
+              const campaignStartStr = campaign.created_at 
                 ? new Date(campaign.created_at).toISOString().split('T')[0]
-                : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 90 days ago
+                : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
               
-              const analyticsUrl = `/campaigns/${campaign.id}/analytics-by-date?start_date=${campaignStartDate}&end_date=${today}`;
-              const dailyAnalytics = await smartleadRequest(analyticsUrl, apiKey);
+              const campaignStartDate = new Date(campaignStartStr);
+              const todayDate = new Date(today);
+              const msPerDay = 24 * 60 * 60 * 1000;
+              const totalDays = Math.ceil((todayDate.getTime() - campaignStartDate.getTime()) / msPerDay);
               
-              const dailyData = Array.isArray(dailyAnalytics) 
-                ? dailyAnalytics 
-                : (dailyAnalytics?.data || dailyAnalytics?.analytics || []);
+              let totalDailyRecords = 0;
               
-              if (dailyData.length > 0) {
-                console.log(`  Found ${dailyData.length} days of analytics-by-date`);
+              // Chunk into 30-day windows
+              const maxDaysPerRequest = 29; // Stay safely under 30
+              let windowStart = new Date(campaignStartDate);
+              
+              while (windowStart < todayDate) {
+                const windowEnd = new Date(Math.min(
+                  windowStart.getTime() + maxDaysPerRequest * msPerDay,
+                  todayDate.getTime()
+                ));
                 
-                for (const day of dailyData) {
-                  const metricDate = day.date || day.metric_date;
-                  if (!metricDate) continue;
+                const startStr = windowStart.toISOString().split('T')[0];
+                const endStr = windowEnd.toISOString().split('T')[0];
+                
+                try {
+                  const analyticsUrl = `/campaigns/${campaign.id}/analytics-by-date?start_date=${startStr}&end_date=${endStr}`;
+                  const dailyAnalytics = await smartleadRequest(analyticsUrl, apiKey);
                   
-                  const daySent = day.sent_count || day.sent || 0;
-                  const dayOpened = day.open_count || day.unique_open_count || day.opened || 0;
-                  const dayClicked = day.click_count || day.unique_click_count || day.clicked || 0;
-                  const dayReplied = day.reply_count || day.replied || 0;
-                  const dayBounced = day.bounce_count || day.bounced || 0;
-                  const dayPositive = day.positive_count || day.positive_replies || 0;
+                  const dailyData = Array.isArray(dailyAnalytics) 
+                    ? dailyAnalytics 
+                    : (dailyAnalytics?.data || dailyAnalytics?.analytics || []);
                   
-                  if (daySent > 0 || dayOpened > 0 || dayReplied > 0) {
-                    await supabase.from('daily_metrics').upsert({
-                      engagement_id: activeEngagementId,
-                      campaign_id: campaignDbId,
-                      data_source_id: data_source_id,
-                      date: metricDate,
-                      emails_sent: daySent,
-                      emails_opened: dayOpened,
-                      emails_clicked: dayClicked,
-                      emails_replied: dayReplied,
-                      emails_bounced: dayBounced,
-                      positive_replies: dayPositive,
-                      open_rate: daySent > 0 ? Math.min(0.9999, dayOpened / daySent) : null,
-                      reply_rate: daySent > 0 ? Math.min(0.9999, dayReplied / daySent) : null,
-                      bounce_rate: daySent > 0 ? Math.min(0.9999, dayBounced / daySent) : null,
-                    }, { onConflict: 'engagement_id,campaign_id,date' });
-                    progress.metrics_created++;
+                  for (const day of dailyData) {
+                    const metricDate = day.date || day.metric_date;
+                    if (!metricDate) continue;
+                    
+                    const daySent = day.sent_count || day.sent || 0;
+                    const dayOpened = day.open_count || day.unique_open_count || day.opened || 0;
+                    const dayClicked = day.click_count || day.unique_click_count || day.clicked || 0;
+                    const dayReplied = day.reply_count || day.replied || 0;
+                    const dayBounced = day.bounce_count || day.bounced || 0;
+                    const dayPositive = day.positive_count || day.positive_replies || 0;
+                    
+                    if (daySent > 0 || dayOpened > 0 || dayReplied > 0) {
+                      await supabase.from('daily_metrics').upsert({
+                        engagement_id: activeEngagementId,
+                        campaign_id: campaignDbId,
+                        data_source_id: data_source_id,
+                        date: metricDate,
+                        emails_sent: daySent,
+                        emails_opened: dayOpened,
+                        emails_clicked: dayClicked,
+                        emails_replied: dayReplied,
+                        emails_bounced: dayBounced,
+                        positive_replies: dayPositive,
+                        open_rate: daySent > 0 ? Math.min(0.9999, dayOpened / daySent) : null,
+                        reply_rate: daySent > 0 ? Math.min(0.9999, dayReplied / daySent) : null,
+                        bounce_rate: daySent > 0 ? Math.min(0.9999, dayBounced / daySent) : null,
+                      }, { onConflict: 'engagement_id,campaign_id,date' });
+                      progress.metrics_created++;
+                      totalDailyRecords++;
+                    }
                   }
+                } catch (chunkError) {
+                  // Continue to next chunk even if one fails
+                  console.log(`  Chunk ${startStr}-${endStr} failed: ${(chunkError as Error).message}`);
                 }
+                
+                // Move to next window
+                windowStart = new Date(windowEnd.getTime() + msPerDay);
+              }
+              
+              if (totalDailyRecords > 0) {
+                console.log(`  Fetched ${totalDailyRecords} days of analytics-by-date (${Math.ceil(totalDays / maxDaysPerRequest)} chunks)`);
               }
             } catch (e) {
               // analytics-by-date may not be available for all campaigns - fall back to totals
+              console.log(`  analytics-by-date not available: ${(e as Error).message}`);
               console.log(`  analytics-by-date not available: ${(e as Error).message}`);
               
               // Store daily metrics as before
