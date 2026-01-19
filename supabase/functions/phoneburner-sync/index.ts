@@ -1259,12 +1259,34 @@ serve(async (req) => {
       await persistProgress({ phase });
     }
 
-    // ================== PHASE 4: LINKING ==================
+    // ================== PHASE 4: LINKING & UNIFIED SYNC ==================
     if (phase === "linking" && Date.now() - startedAt < TIME_BUDGET_MS) {
       try {
+        // First, get the engagement for this workspace (if it exists)
+        const { data: workspaceData } = await supabaseAdmin
+          .from("workspaces")
+          .select("id, client_id")
+          .eq("id", workspaceId)
+          .single();
+        
+        let engagementId: string | null = null;
+        
+        if (workspaceData?.client_id) {
+          const { data: engagement } = await supabaseAdmin
+            .from("engagements")
+            .select("id")
+            .eq("client_id", workspaceData.client_id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+          
+          engagementId = engagement?.id || null;
+        }
+
+        // Link PhoneBurner contacts to leads by email
         const { data: pbContacts } = await supabaseAdmin
           .from("phoneburner_contacts")
-          .select("external_contact_id, email")
+          .select("external_contact_id, email, first_name, last_name, phone, company")
           .eq("workspace_id", workspaceId)
           .not("email", "is", null);
 
@@ -1278,8 +1300,112 @@ serve(async (req) => {
               .eq("email", pb.email);
           }
         }
+
+        // Sync PhoneBurner calls to unified call_activities table
+        if (engagementId) {
+          console.log(`Syncing PhoneBurner calls to unified call_activities for engagement ${engagementId}`);
+          
+          const { data: pbCalls } = await supabaseAdmin
+            .from("phoneburner_calls")
+            .select(`
+              id, external_call_id, external_contact_id, phone_number, 
+              start_at, end_at, duration_seconds, disposition, 
+              is_connected, is_voicemail, notes, recording_url
+            `)
+            .eq("workspace_id", workspaceId);
+          
+          if (pbCalls?.length) {
+            console.log(`Found ${pbCalls.length} PhoneBurner calls to sync to unified schema`);
+            
+            for (const call of pbCalls) {
+              try {
+                // Try to find matching contact in unified schema
+                let contactId: string | null = null;
+                let companyId: string | null = null;
+                
+                // First try to find by phone number
+                if (call.phone_number) {
+                  const { data: contact } = await supabaseAdmin
+                    .from("contacts")
+                    .select("id, company_id")
+                    .eq("engagement_id", engagementId)
+                    .or(`phone.eq.${call.phone_number},mobile.eq.${call.phone_number}`)
+                    .limit(1)
+                    .single();
+                  
+                  if (contact) {
+                    contactId = contact.id;
+                    companyId = contact.company_id;
+                  }
+                }
+                
+                // If no contact found, try to find by PhoneBurner contact email
+                if (!contactId && call.external_contact_id) {
+                  const { data: pbContact } = await supabaseAdmin
+                    .from("phoneburner_contacts")
+                    .select("email")
+                    .eq("workspace_id", workspaceId)
+                    .eq("external_contact_id", call.external_contact_id)
+                    .single();
+                  
+                  if (pbContact?.email) {
+                    const { data: contact } = await supabaseAdmin
+                      .from("contacts")
+                      .select("id, company_id")
+                      .eq("engagement_id", engagementId)
+                      .eq("email", pbContact.email)
+                      .single();
+                    
+                    if (contact) {
+                      contactId = contact.id;
+                      companyId = contact.company_id;
+                    }
+                  }
+                }
+                
+                // Skip if we can't find matching contact/company
+                if (!contactId || !companyId) continue;
+                
+                // Map disposition to conversation outcome
+                const dispositionLower = (call.disposition || "").toLowerCase();
+                let conversationOutcome = "no_answer";
+                if (call.is_connected) {
+                  conversationOutcome = "connected";
+                } else if (call.is_voicemail) {
+                  conversationOutcome = "voicemail";
+                } else if (dispositionLower.includes("busy")) {
+                  conversationOutcome = "busy";
+                } else if (dispositionLower.includes("wrong")) {
+                  conversationOutcome = "wrong_number";
+                }
+                
+                // Upsert to unified call_activities
+                await supabaseAdmin.from("call_activities").upsert({
+                  engagement_id: engagementId,
+                  contact_id: contactId,
+                  company_id: companyId,
+                  external_id: `phoneburner_${call.external_call_id}`,
+                  to_phone: call.phone_number || "",
+                  disposition: call.disposition || "unknown",
+                  conversation_outcome: conversationOutcome,
+                  started_at: call.start_at,
+                  ended_at: call.end_at,
+                  duration_seconds: call.duration_seconds,
+                  talk_duration: call.is_connected ? call.duration_seconds : null,
+                  notes: call.notes,
+                  recording_url: call.recording_url,
+                  voicemail_left: call.is_voicemail,
+                  synced_at: new Date().toISOString(),
+                }, { onConflict: "engagement_id,external_id" });
+                
+              } catch (e) {
+                // Continue on individual call errors
+              }
+            }
+          }
+        }
       } catch (e) {
-        console.error("Linking failed", e);
+        console.error("Linking/Unified sync failed", e);
       }
 
       phase = "complete";

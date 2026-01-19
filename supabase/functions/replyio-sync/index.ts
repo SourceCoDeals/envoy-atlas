@@ -146,7 +146,8 @@ async function triggerNextBatch(
 async function triggerAnalysis(
   supabaseUrl: string,
   serviceKey: string,
-  engagementId: string
+  engagementId: string,
+  classifyReplies: boolean = true
 ) {
   console.log('Sync complete - triggering analysis functions...');
   
@@ -177,6 +178,23 @@ async function triggerAnalysis(
   } catch (error) {
     console.error('Failed to trigger compute-patterns:', error);
   }
+  
+  // Trigger AI reply classification
+  if (classifyReplies) {
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/classify-replies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({ engagement_id: engagementId, batch_size: 100 }),
+      });
+      console.log(`classify-replies triggered, status: ${response.status}`);
+    } catch (error) {
+      console.error('Failed to trigger classify-replies:', error);
+    }
+  }
 }
 
 Deno.serve(async (req) => {
@@ -201,8 +219,9 @@ Deno.serve(async (req) => {
       auto_continue = false,
       internal_continuation = false,
       current_phase = 'sequences',
-      sync_people = false, // DISABLED: Reply.io rate limits are too strict (10s/call)
-      sync_email_activities = false, // DISABLED: Reply.io rate limits are too strict
+      sync_people = true, // Enable people sync for contacts
+      sync_email_activities = true, // Enable email activities sync
+      classify_replies = true, // Trigger AI reply classification after sync
     } = body;
 
     // Auth check for initial requests (skip for internal continuations)

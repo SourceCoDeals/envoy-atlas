@@ -83,3 +83,6 @@ verify_jwt = false
 
 [functions.contact-search]
 verify_jwt = false
+
+[functions.classify-replies]
+verify_jwt = false

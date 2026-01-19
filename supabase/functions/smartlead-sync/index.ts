@@ -179,7 +179,8 @@ async function triggerNextBatch(
 async function triggerAnalysis(
   supabaseUrl: string,
   serviceKey: string,
-  engagementId: string
+  engagementId: string,
+  classifyReplies: boolean = true
 ) {
   console.log('Sync complete - triggering analysis functions...');
   
@@ -209,6 +210,23 @@ async function triggerAnalysis(
     console.log('compute-patterns triggered');
   } catch (e) {
     console.error('Failed to trigger compute-patterns:', e);
+  }
+  
+  // Trigger AI reply classification
+  if (classifyReplies) {
+    try {
+      await fetch(`${supabaseUrl}/functions/v1/classify-replies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({ engagement_id: engagementId, batch_size: 100 }),
+      });
+      console.log('classify-replies triggered');
+    } catch (e) {
+      console.error('Failed to trigger classify-replies:', e);
+    }
   }
 }
 
@@ -250,6 +268,7 @@ serve(async (req) => {
       current_phase = 'campaigns',
       sync_leads = true, // Enable leads sync by default
       sync_email_activities = false, // DISABLED: SmartLead API doesn't support /email-sent endpoint
+      classify_replies = true, // Trigger AI reply classification after sync
     } = await req.json();
     
     if (!client_id) throw new Error('client_id is required');
