@@ -467,7 +467,7 @@ Deno.serve(async (req) => {
       console.log(`[${i + 1}/${allSequences.length}] Processing: ${sequence.name} (${sequence.status})`);
 
       try {
-        // Upsert sequence as campaign
+        // Upsert sequence as campaign (old table)
         const { data: campaign, error: campError } = await supabase
           .from('replyio_campaigns')
           .upsert({
@@ -486,6 +486,29 @@ Deno.serve(async (req) => {
         }
 
         const campaignId = campaign.id;
+        
+        // ==========================================================
+        // DUAL-WRITE: Also upsert to 'unified_campaigns' table
+        // This table is referenced by campaign_cumulative and campaign_metrics
+        // ==========================================================
+        const { data: unifiedCampaign, error: unifiedCampError } = await supabase
+          .from('unified_campaigns')
+          .upsert({
+            workspace_id,
+            platform_id: String(sequence.id),
+            platform: 'replyio',
+            name: sequence.name,
+            status: mapSequenceStatus(sequence.status),
+          }, { onConflict: 'workspace_id,platform,platform_id' })
+          .select('id')
+          .single();
+        
+        if (unifiedCampError) {
+          console.error(`Failed to upsert unified campaign ${sequence.name}:`, unifiedCampError.message);
+        }
+        
+        const unifiedCampaignId = unifiedCampaign?.id;
+        
         progress.sequences_synced++;
 
         let metricsStored = false;
@@ -738,22 +761,25 @@ Deno.serve(async (req) => {
             // ==========================================================
             // FIX: Extract lifetime totals - check ALL possible field names
             // Reply.io API uses inconsistent naming across versions
-            // Priority: peopleContacted > contactedPeople > contacted > deliveredContacts > sent
+            // CRITICAL: deliveriesCount is the actual field name used by Reply.io v1 API!
             // ==========================================================
             const totalSent = Number(
+              // Primary: deliveriesCount is the actual Reply.io field name
+              seqDetails.deliveriesCount ?? stats.deliveriesCount ??
+              // Fallbacks for other API versions
               stats.peopleContacted ?? stats.contactedPeople ?? stats.contacted ?? 
               stats.sentCount ?? stats.sent ?? stats.totalSent ??
               stats.deliveredContacts ?? stats.delivered ?? 
               seqDetails.peopleContacted ?? seqDetails.contactedPeople ?? seqDetails.contacted ??
               seqDetails.sentCount ?? seqDetails.sent ?? seqDetails.totalSent ??
               seqDetails.deliveredContacts ?? seqDetails.delivered ??
-              // Fallback to peopleInSequence or contactCount as last resort
+              // Last resort fallback
               seqDetails.peopleInSequence ?? seqDetails.contactCount ?? seqDetails.people ?? 0
             );
-            const totalOpened = Number(stats.openedContacts ?? stats.opened ?? stats.opens ?? seqDetails.openedContacts ?? seqDetails.opened ?? seqDetails.opens ?? 0);
-            const totalClicked = Number(stats.clickedContacts ?? stats.clicked ?? stats.clicks ?? seqDetails.clickedContacts ?? seqDetails.clicked ?? seqDetails.clicks ?? 0);
-            const totalReplied = Number(stats.repliedContacts ?? stats.replied ?? stats.replies ?? seqDetails.repliedContacts ?? seqDetails.replied ?? seqDetails.replies ?? 0);
-            const totalBounced = Number(stats.bouncedContacts ?? stats.bounced ?? stats.bounces ?? seqDetails.bouncedContacts ?? seqDetails.bounced ?? seqDetails.bounces ?? 0);
+            const totalOpened = Number(seqDetails.opensCount ?? stats.opensCount ?? stats.openedContacts ?? stats.opened ?? stats.opens ?? seqDetails.openedContacts ?? seqDetails.opened ?? seqDetails.opens ?? 0);
+            const totalClicked = Number(seqDetails.clicksCount ?? stats.clicksCount ?? stats.clickedContacts ?? stats.clicked ?? stats.clicks ?? seqDetails.clickedContacts ?? seqDetails.clicked ?? seqDetails.clicks ?? 0);
+            const totalReplied = Number(seqDetails.repliesCount ?? stats.repliesCount ?? stats.repliedContacts ?? stats.replied ?? stats.replies ?? seqDetails.repliedContacts ?? seqDetails.replied ?? seqDetails.replies ?? 0);
+            const totalBounced = Number(seqDetails.bouncesCount ?? stats.bouncesCount ?? stats.bouncedContacts ?? stats.bounced ?? stats.bounces ?? seqDetails.bouncedContacts ?? seqDetails.bounced ?? seqDetails.bounces ?? 0);
             const totalInterested = Number(stats.interestedContacts ?? stats.interested ?? seqDetails.interestedContacts ?? seqDetails.interested ?? 0);
             
             // Log all stats fields for debugging
@@ -781,7 +807,7 @@ Deno.serve(async (req) => {
             
             console.log(`  Daily delta: sent=${deltaSent}, opens=${deltaOpened}, replies=${deltaReplied}`);
             
-            // Store cumulative values for next comparison
+            // Store cumulative values for next comparison (old table)
             await supabase.from('replyio_campaign_cumulative').upsert({
               campaign_id: campaignId,
               workspace_id,
@@ -793,6 +819,24 @@ Deno.serve(async (req) => {
               total_interested: totalInterested,
               last_synced_at: new Date().toISOString(),
             }, { onConflict: 'campaign_id' });
+            
+            // ==========================================================
+            // DUAL-WRITE: Also store in unified 'campaign_cumulative' table
+            // ==========================================================
+            if (unifiedCampaignId) {
+              await supabase.from('campaign_cumulative').upsert({
+                campaign_id: unifiedCampaignId,
+                workspace_id,
+                total_sent: totalSent,
+                total_opened: totalOpened,
+                total_clicked: totalClicked,
+                total_replied: totalReplied,
+                total_bounced: totalBounced,
+                total_positive_replies: totalInterested,
+                last_synced_at: new Date().toISOString(),
+              }, { onConflict: 'campaign_id' });
+              console.log(`  ✓ Unified cumulative stored: sent=${totalSent}`);
+            }
             
             // Store daily delta OR initial cumulative on first sync
             // FIX: On first sync, store cumulative totals as initial data point
@@ -818,6 +862,23 @@ Deno.serve(async (req) => {
                 bounced_count: totalBounced,
               }, { onConflict: 'campaign_id,metric_date' });
 
+              // ==========================================================
+              // DUAL-WRITE: Also store in unified 'campaign_metrics' table
+              // ==========================================================
+              if (unifiedCampaignId) {
+                await supabase.from('campaign_metrics').upsert({
+                  workspace_id,
+                  campaign_id: unifiedCampaignId,
+                  metric_date: campaignStartDate,
+                  sent_count: totalSent,
+                  opened_count: totalOpened,
+                  clicked_count: totalClicked,
+                  replied_count: totalReplied,
+                  positive_reply_count: totalInterested,
+                  bounced_count: totalBounced,
+                }, { onConflict: 'campaign_id,metric_date' });
+              }
+
               if (!metricsErr) {
                 progress.metrics_created++;
                 metricsStored = true;
@@ -835,6 +896,23 @@ Deno.serve(async (req) => {
                 positive_reply_count: deltaInterested,
                 bounced_count: deltaBounced,
               }, { onConflict: 'campaign_id,metric_date' });
+
+              // ==========================================================
+              // DUAL-WRITE: Also store in unified 'campaign_metrics' table
+              // ==========================================================
+              if (unifiedCampaignId) {
+                await supabase.from('campaign_metrics').upsert({
+                  workspace_id,
+                  campaign_id: unifiedCampaignId,
+                  metric_date: today,
+                  sent_count: deltaSent,
+                  opened_count: deltaOpened,
+                  clicked_count: deltaClicked,
+                  replied_count: deltaReplied,
+                  positive_reply_count: deltaInterested,
+                  bounced_count: deltaBounced,
+                }, { onConflict: 'campaign_id,metric_date' });
+              }
 
               if (!metricsErr) {
                 progress.metrics_created++;
