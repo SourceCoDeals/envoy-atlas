@@ -682,7 +682,157 @@ serve(async (req) => {
           progress.campaigns_synced++;
 
           // ============================================
-          // Fetch Email Accounts for this campaign
+          // PRIORITY 1: Fetch Leads FIRST (before analytics)
+          // This ensures contacts exist for email_activities
+          // ============================================
+          if (sync_leads) {
+            try {
+              let offset = 0;
+              const limit = 100;
+              let hasMoreLeads = true;
+              
+              // Get category lookup for this engagement
+              const { data: categoriesLookup } = await supabase
+                .from('lead_categories')
+                .select('id, external_id')
+                .eq('engagement_id', activeEngagementId);
+              const categoryMap = new Map(categoriesLookup?.map(c => [c.external_id, c.id]) || []);
+              
+              while (hasMoreLeads && !isTimeBudgetExceeded()) {
+                const leadsUrl = `/campaigns/${campaign.id}/leads?offset=${offset}&limit=${limit}`;
+                const leadsResponse = await smartleadRequest(leadsUrl, apiKey);
+                
+                const leads: SmartleadLead[] = Array.isArray(leadsResponse) 
+                  ? leadsResponse 
+                  : (leadsResponse?.leads || leadsResponse?.data || []);
+                
+                if (leads.length === 0) {
+                  hasMoreLeads = false;
+                  break;
+                }
+                
+                console.log(`  Fetched ${leads.length} leads (offset ${offset})`);
+                
+                // Process leads in batch
+                for (const lead of leads) {
+                  try {
+                    // First, create/upsert company if we have company info
+                    let companyId: string | null = null;
+                    const domain = extractDomain(lead.email);
+                    const companyName = lead.company_name || domain || 'Unknown';
+                    
+                    // Try to find existing company first
+                    if (domain) {
+                      const { data: existingByDomain } = await supabase
+                        .from('companies')
+                        .select('id')
+                        .eq('engagement_id', activeEngagementId)
+                        .eq('domain', domain)
+                        .maybeSingle();
+                      
+                      if (existingByDomain) {
+                        companyId = existingByDomain.id;
+                      }
+                    }
+                    
+                    // If not found by domain, try by name
+                    if (!companyId) {
+                      const { data: existingByName } = await supabase
+                        .from('companies')
+                        .select('id')
+                        .eq('engagement_id', activeEngagementId)
+                        .eq('name', companyName)
+                        .maybeSingle();
+                      
+                      if (existingByName) {
+                        companyId = existingByName.id;
+                      }
+                    }
+                    
+                    // Create new company if not found
+                    if (!companyId) {
+                      const { data: newCompany, error: companyError } = await supabase
+                        .from('companies')
+                        .insert({
+                          engagement_id: activeEngagementId,
+                          name: companyName,
+                          domain: domain,
+                          website: lead.website || (domain ? `https://${domain}` : null),
+                          source: 'smartlead',
+                        })
+                        .select('id')
+                        .single();
+                      
+                      if (!companyError && newCompany) {
+                        companyId = newCompany.id;
+                        progress.companies_synced++;
+                      } else if (companyError?.code === '23505') {
+                        // Duplicate - try to fetch again
+                        const { data: retryCompany } = await supabase
+                          .from('companies')
+                          .select('id')
+                          .eq('engagement_id', activeEngagementId)
+                          .or(`domain.eq.${domain},name.eq.${companyName}`)
+                          .maybeSingle();
+                        companyId = retryCompany?.id;
+                      }
+                    }
+                    
+                    if (!companyId) continue;
+                    
+                    // Map category if available
+                    const categoryId = lead.category_id 
+                      ? categoryMap.get(String(lead.category_id)) 
+                      : null;
+                    
+                    // Upsert contact with extended fields
+                    const enrolledAt = lead.created_at || null;
+                    const { error: contactError } = await supabase
+                      .from('contacts')
+                      .upsert({
+                        engagement_id: activeEngagementId,
+                        company_id: companyId,
+                        email: lead.email,
+                        first_name: lead.first_name || null,
+                        last_name: lead.last_name || null,
+                        phone: lead.phone_number || null,
+                        linkedin_url: lead.linkedin_profile || null,
+                        title: lead.custom_fields?.title || lead.custom_fields?.job_title || null,
+                        email_status: lead.email_status || null,
+                        enrolled_at: enrolledAt,
+                        source: 'smartlead',
+                        // Extended fields
+                        external_lead_id: String(lead.id),
+                        sequence_status: lead.status || lead.lead_status || null,
+                        current_step: lead.last_email_sequence_sent || null,
+                        is_interested: lead.is_interested ?? null,
+                        is_unsubscribed: lead.is_unsubscribed ?? false,
+                        category_id: categoryId,
+                        open_count: lead.open_count || 0,
+                        click_count: lead.click_count || 0,
+                        reply_count: lead.reply_count || 0,
+                      }, { onConflict: 'engagement_id,email' });
+                    
+                    if (!contactError) {
+                      progress.leads_synced++;
+                    }
+                  } catch (leadError) {
+                    // Silently continue on individual lead errors
+                    console.error(`  Error processing lead ${lead.email}:`, leadError);
+                  }
+                }
+                
+                offset += leads.length;
+                if (leads.length < limit) hasMoreLeads = false;
+              }
+            } catch (e) {
+              console.error(`  Leads error for ${campaign.name}:`, e);
+              progress.errors.push(`Leads ${campaign.name}: ${(e as Error).message}`);
+            }
+          }
+
+          // ============================================
+          // PRIORITY 2: Fetch Email Accounts for this campaign
           // ============================================
           if (sync_email_accounts) {
             try {
@@ -1132,218 +1282,8 @@ serve(async (req) => {
             }
           }
 
-          // ============================================
-          // Fetch Leads with Extended Data
-          // ============================================
-          if (sync_leads) {
-            try {
-              let offset = 0;
-              const limit = 100;
-              let hasMoreLeads = true;
-              
-              // Get category lookup for this engagement
-              const { data: categoriesLookup } = await supabase
-                .from('lead_categories')
-                .select('id, external_id')
-                .eq('engagement_id', activeEngagementId);
-              const categoryMap = new Map(categoriesLookup?.map(c => [c.external_id, c.id]) || []);
-              
-              while (hasMoreLeads && !isTimeBudgetExceeded()) {
-                const leadsUrl = `/campaigns/${campaign.id}/leads?offset=${offset}&limit=${limit}`;
-                const leadsResponse = await smartleadRequest(leadsUrl, apiKey);
-                
-                const leads: SmartleadLead[] = Array.isArray(leadsResponse) 
-                  ? leadsResponse 
-                  : (leadsResponse?.leads || leadsResponse?.data || []);
-                
-                if (leads.length === 0) {
-                  hasMoreLeads = false;
-                  break;
-                }
-                
-                console.log(`  Fetched ${leads.length} leads (offset ${offset})`);
-                
-                // Process leads in batch
-                for (const lead of leads) {
-                  try {
-                    // First, create/upsert company if we have company info
-                    let companyId: string | null = null;
-                    const domain = extractDomain(lead.email);
-                    const companyName = lead.company_name || domain || 'Unknown';
-                    
-                    // Try to find existing company first
-                    if (domain) {
-                      const { data: existingByDomain } = await supabase
-                        .from('companies')
-                        .select('id')
-                        .eq('engagement_id', activeEngagementId)
-                        .eq('domain', domain)
-                        .maybeSingle();
-                      
-                      if (existingByDomain) {
-                        companyId = existingByDomain.id;
-                      }
-                    }
-                    
-                    // If not found by domain, try by name
-                    if (!companyId) {
-                      const { data: existingByName } = await supabase
-                        .from('companies')
-                        .select('id')
-                        .eq('engagement_id', activeEngagementId)
-                        .eq('name', companyName)
-                        .maybeSingle();
-                      
-                      if (existingByName) {
-                        companyId = existingByName.id;
-                      }
-                    }
-                    
-                    // Create new company if not found
-                    if (!companyId) {
-                      const { data: newCompany, error: companyError } = await supabase
-                        .from('companies')
-                        .insert({
-                          engagement_id: activeEngagementId,
-                          name: companyName,
-                          domain: domain,
-                          website: lead.website || (domain ? `https://${domain}` : null),
-                          source: 'smartlead',
-                        })
-                        .select('id')
-                        .single();
-                      
-                      if (!companyError && newCompany) {
-                        companyId = newCompany.id;
-                        progress.companies_synced++;
-                      } else if (companyError?.code === '23505') {
-                        // Duplicate - try to fetch again
-                        const { data: retryCompany } = await supabase
-                          .from('companies')
-                          .select('id')
-                          .eq('engagement_id', activeEngagementId)
-                          .or(`domain.eq.${domain},name.eq.${companyName}`)
-                          .maybeSingle();
-                        companyId = retryCompany?.id;
-                      }
-                    }
-                    
-                    if (!companyId) continue;
-                    
-                    // Map category if available
-                    const categoryId = lead.category_id 
-                      ? categoryMap.get(String(lead.category_id)) 
-                      : null;
-                    
-                    // Upsert contact with extended fields
-                    const enrolledAt = lead.created_at || null;
-                    const { error: contactError } = await supabase
-                      .from('contacts')
-                      .upsert({
-                        engagement_id: activeEngagementId,
-                        company_id: companyId,
-                        email: lead.email,
-                        first_name: lead.first_name || null,
-                        last_name: lead.last_name || null,
-                        phone: lead.phone_number || null,
-                        linkedin_url: lead.linkedin_profile || null,
-                        title: lead.custom_fields?.title || lead.custom_fields?.job_title || null,
-                        email_status: lead.email_status || null,
-                        enrolled_at: enrolledAt,
-                        source: 'smartlead',
-                        // Extended fields
-                        external_lead_id: String(lead.id),
-                        sequence_status: lead.status || lead.lead_status || null,
-                        current_step: lead.last_email_sequence_sent || null,
-                        is_interested: lead.is_interested ?? null,
-                        is_unsubscribed: lead.is_unsubscribed ?? false,
-                        category_id: categoryId,
-                        open_count: lead.open_count || 0,
-                        click_count: lead.click_count || 0,
-                        reply_count: lead.reply_count || 0,
-                      }, { onConflict: 'engagement_id,email' });
-                    
-                    if (!contactError) {
-                      progress.leads_synced++;
-                    }
-
-                    // ============================================
-                    // Fetch Message History for replied leads
-                    // ============================================
-                    if (sync_message_history && lead.reply_count && lead.reply_count > 0) {
-                      try {
-                        const messagesUrl = `/campaigns/${campaign.id}/leads/${lead.id}/message-history`;
-                        const messagesResponse = await smartleadRequest(messagesUrl, apiKey);
-                        
-                        const messages: SmartleadMessageHistory[] = Array.isArray(messagesResponse)
-                          ? messagesResponse
-                          : (messagesResponse?.messages || messagesResponse?.history || []);
-                        
-                        if (messages.length > 0) {
-                          // Get contact ID
-                          const { data: contactData } = await supabase
-                            .from('contacts')
-                            .select('id')
-                            .eq('engagement_id', activeEngagementId)
-                            .eq('email', lead.email)
-                            .single();
-                          
-                          if (contactData) {
-                            for (const msg of messages) {
-                              const { error: msgError } = await supabase
-                                .from('message_threads')
-                                .upsert({
-                                  contact_id: contactData.id,
-                                  campaign_id: campaignDbId,
-                                  engagement_id: activeEngagementId,
-                                  external_stats_id: msg.stats_id || null,
-                                  message_type: msg.type?.toLowerCase() || 'sent',
-                                  subject: msg.email_subject || null,
-                                  body_html: msg.email_body || null,
-                                  body_plain: msg.email_body ? stripHtml(msg.email_body) : null,
-                                  body_preview: msg.email_body ? stripHtml(msg.email_body).substring(0, 200) : null,
-                                  sent_at: msg.sent_time ? new Date(msg.sent_time).toISOString() : null,
-                                  from_email: msg.from_email || null,
-                                  to_email: msg.to_email || lead.email,
-                                  is_automated: msg.type === 'SENT',
-                                }, { onConflict: 'engagement_id,external_stats_id,message_type' });
-                              
-                              if (!msgError) {
-                                progress.message_threads_synced++;
-                                
-                                // If this is a reply, update the email_activities with reply text
-                                if (msg.type === 'REPLY' && msg.email_body) {
-                                  await supabase
-                                    .from('email_activities')
-                                    .update({
-                                      reply_text: stripHtml(msg.email_body).substring(0, 2000),
-                                    })
-                                    .eq('campaign_id', campaignDbId)
-                                    .eq('contact_id', contactData.id)
-                                    .eq('replied', true);
-                                }
-                              }
-                            }
-                          }
-                        }
-                      } catch (e) {
-                        // Message history is rate limited, continue silently
-                      }
-                    }
-                  } catch (leadError) {
-                    // Silently continue on individual lead errors
-                    console.error(`  Error processing lead ${lead.email}:`, leadError);
-                  }
-                }
-                
-                offset += leads.length;
-                if (leads.length < limit) hasMoreLeads = false;
-              }
-            } catch (e) {
-              console.error(`  Leads error for ${campaign.name}:`, e);
-              progress.errors.push(`Leads ${campaign.name}: ${(e as Error).message}`);
-            }
-          }
+          // NOTE: Leads are now synced FIRST in PRIORITY 1 section above
+          // to ensure contacts exist before email_activities are synced
 
         } catch (e) {
           console.error(`Error processing campaign ${campaign.name}:`, e);
