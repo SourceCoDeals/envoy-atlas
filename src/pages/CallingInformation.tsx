@@ -288,7 +288,18 @@ export default function CallingInformation() {
               {/* Scoring Deep Dive Tab */}
               <TabsContent value="scoring" className="space-y-6">
                 <div className="grid gap-4 lg:grid-cols-2">
-                  {data && <ScoreRadarChart scores={data.averageScores} />}
+                  {data && <ScoreRadarChart scores={{
+                    sellerInterest: data.averageScores.sellerInterest || 0,
+                    objectionHandling: data.averageScores.objectionHandling || 0,
+                    rapportBuilding: data.averageScores.rapportBuilding || 0,
+                    valueProposition: data.averageScores.valueProposition || 0,
+                    engagement: data.averageScores.engagement || 0,
+                    scriptAdherence: data.averageScores.scriptAdherence || 0,
+                    nextStepClarity: data.averageScores.nextStepClarity || 0,
+                    valuationDiscussion: data.averageScores.valuationDiscussion || 0,
+                    overallQuality: data.averageScores.overallQuality || 0,
+                    decisionMakerIdentification: data.averageScores.decisionMakerIdentification || 0,
+                  }} />}
                   {data && <MandatoryQuestionsBreakdown questions={data.mandatoryQuestions} />}
                 </div>
               </TabsContent>
