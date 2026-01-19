@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,18 +38,10 @@ interface PatternInsight {
 }
 
 export default function TopCallsWeek() {
-  const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [topCalls, setTopCalls] = useState<TopCall[]>([]);
   const [patterns, setPatterns] = useState<PatternInsight[]>([]);
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
 
   useEffect(() => {
     if (currentWorkspace?.id) {
@@ -154,16 +144,6 @@ export default function TopCallsWeek() {
     if (index === 2) return <Trophy className="h-5 w-5 text-amber-600" />;
     return <span className="text-muted-foreground font-medium">{index + 1}</span>;
   };
-
-  if (authLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
 
   return (
     <DashboardLayout>

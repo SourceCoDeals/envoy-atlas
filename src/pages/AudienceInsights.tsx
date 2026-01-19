@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
+import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,8 +15,6 @@ import { VolumeAllocationRecommendations, generateVolumeRecommendations } from '
 import { SegmentCopyMatrix } from '@/components/audience/SegmentCopyMatrix';
 
 export default function AudienceInsights() {
-  const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
   const {
     seniorityPerformance,
     industryPerformance,
@@ -38,12 +34,6 @@ export default function AudienceInsights() {
   const [dimension, setDimension] = useState('seniority');
   const [enriching, setEnriching] = useState(false);
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
-
   const handleEnrichment = async () => {
     setEnriching(true);
     try {
@@ -52,14 +42,6 @@ export default function AudienceInsights() {
       setEnriching(false);
     }
   };
-
-  if (authLoading || !user) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
 
   if (loading) {
     return (

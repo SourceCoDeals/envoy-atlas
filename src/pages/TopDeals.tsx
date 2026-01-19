@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,18 +43,10 @@ interface Deal {
 }
 
 export default function TopDeals() {
-  const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
 
   useEffect(() => {
     if (currentWorkspace?.id) {
@@ -117,16 +107,6 @@ export default function TopDeals() {
     if (revenue >= 1000) return `$${(revenue / 1000).toFixed(0)}K`;
     return `$${revenue}`;
   };
-
-  if (authLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
 
   return (
     <DashboardLayout>

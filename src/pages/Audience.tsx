@@ -1,28 +1,8 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
-import { Loader2, Users } from 'lucide-react';
+import { Users } from 'lucide-react';
 
 export default function Audience() {
-  const navigate = useNavigate();
-  const { user, loading } = useAuth();
-
-  useEffect(() => {
-    if (!loading && !user) {
-      navigate('/auth');
-    }
-  }, [user, loading, navigate]);
-
-  if (loading || !user) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
     <DashboardLayout>
       <div className="space-y-6">

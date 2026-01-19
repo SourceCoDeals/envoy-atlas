@@ -1,6 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
+import { useState, useMemo } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -90,8 +88,6 @@ const BEST_PRACTICES = [
 const REPLY_RATE_THRESHOLD = 5; // Minimum reply rate to be a "winner"
 
 export default function Playbook() {
-  const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { data: copyData, loading: copyLoading } = useCopyInsights();
   
@@ -102,12 +98,6 @@ export default function Playbook() {
   const [sortBy, setSortBy] = useState('reply_rate');
   const [minSends, setMinSends] = useState(50);
   const [activeTab, setActiveTab] = useState('winners');
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
 
   // Process winning templates from copy data
   const winningTemplates: WinningTemplate[] = useMemo(() => {
@@ -178,13 +168,13 @@ export default function Playbook() {
     ? winningTemplates.reduce((sum, t) => sum + t.reply_rate, 0) / winningTemplates.length
     : 0;
 
-  const loading = authLoading || copyLoading;
-
-  if (authLoading || !user) {
+  if (copyLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+      <DashboardLayout>
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
     );
   }
 
@@ -198,7 +188,7 @@ export default function Playbook() {
           </p>
         </div>
 
-        {loading ? (
+        {copyLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
