@@ -77,11 +77,7 @@ export default function CallerDashboard() {
   const [dateRange, setDateRange] = useState<DateRangeOption>('last_week');
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>('all');
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
   // Process data based on filters
   const { todayActivity, goals, coachingTips, trendData, teamRank, bestCall, worstCall } = useMemo(() => {

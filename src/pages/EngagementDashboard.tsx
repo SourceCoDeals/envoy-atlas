@@ -120,11 +120,7 @@ export default function EngagementDashboard() {
 
   const [formData, setFormData] = useState<EngagementFormData>(emptyForm);
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
   useEffect(() => {
     if (currentWorkspace?.id) {

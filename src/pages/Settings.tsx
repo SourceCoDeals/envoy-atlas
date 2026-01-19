@@ -35,11 +35,8 @@ export default function Settings() {
   const [workspaceName, setWorkspaceName] = useState('');
   const [hasNameChanges, setHasNameChanges] = useState(false);
 
-  useEffect(() => {
-    if (!loading && !user) {
-      navigate('/auth');
-    }
-  }, [user, loading, navigate]);
+  // Settings page still allows auth check but doesn't force it
+  // Some settings may require login to modify
 
   useEffect(() => {
     if (currentWorkspace) {

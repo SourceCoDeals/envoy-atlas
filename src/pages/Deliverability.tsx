@@ -19,7 +19,7 @@ import { subDays, format } from 'date-fns';
 
 export default function Deliverability() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const { 
     loading, 
     domains, 
@@ -30,9 +30,7 @@ export default function Deliverability() {
     dismissAlert 
   } = useDeliverabilityData();
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate('/auth');
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
   // Transform hook alerts to component format
   const alerts: DeliverabilityAlert[] = useMemo(() => {
@@ -261,7 +259,7 @@ export default function Deliverability() {
 
   const hasData = (stats?.totalMailboxes || 0) > 0 || domains.length > 0;
 
-  if (authLoading || !user) {
+  if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
