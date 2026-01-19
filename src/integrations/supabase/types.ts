@@ -1685,12 +1685,14 @@ export type Database = {
       }
       engagements: {
         Row: {
+          auto_created: boolean | null
           client_id: string
           created_at: string | null
           deleted_at: string | null
           description: string | null
           end_date: string | null
           id: string
+          industry: string | null
           meeting_goal: number | null
           name: string
           start_date: string | null
@@ -1700,12 +1702,14 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          auto_created?: boolean | null
           client_id: string
           created_at?: string | null
           deleted_at?: string | null
           description?: string | null
           end_date?: string | null
           id?: string
+          industry?: string | null
           meeting_goal?: number | null
           name: string
           start_date?: string | null
@@ -1715,12 +1719,14 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          auto_created?: boolean | null
           client_id?: string
           created_at?: string | null
           deleted_at?: string | null
           description?: string | null
           end_date?: string | null
           id?: string
+          industry?: string | null
           meeting_goal?: number | null
           name?: string
           start_date?: string | null
