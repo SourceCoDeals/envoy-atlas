@@ -7,7 +7,7 @@ export interface CampaignSummaryData {
     id: string;
     name: string;
     status: string;
-    platform: 'smartlead' | 'replyio';
+    platform: string;
     created_at: string;
     engagement_id?: string | null;
   } | null;
@@ -118,7 +118,7 @@ const initialMetrics = {
   positive_rate: 0,
 };
 
-export function useCampaignSummary(campaignId: string | undefined, platform?: 'smartlead' | 'replyio') {
+export function useCampaignSummary(campaignId: string | undefined, platform?: string) {
   const { currentWorkspace } = useWorkspace();
   const [data, setData] = useState<CampaignSummaryData>({
     campaign: null,
@@ -144,39 +144,14 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: 's
     setError(null);
 
     try {
-      // 1. Find campaign based on platform hint or fallback to searching both
-      let campaignData = null;
-      let detectedPlatform: 'smartlead' | 'replyio' = platform || 'smartlead';
+      // 1. Fetch campaign from unified campaigns table
+      const { data: campaignData, error: campaignError } = await supabase
+        .from('campaigns')
+        .select('*')
+        .eq('id', campaignId)
+        .single();
 
-      if (platform === 'smartlead' || !platform) {
-        const { data: slCampaign } = await supabase
-          .from('smartlead_campaigns')
-          .select('*')
-          .eq('id', campaignId)
-          .eq('workspace_id', currentWorkspace.id)
-          .single();
-
-        if (slCampaign) {
-          campaignData = slCampaign;
-          detectedPlatform = 'smartlead';
-        }
-      }
-
-      if (!campaignData && (platform === 'replyio' || !platform)) {
-        const { data: rioCampaign } = await supabase
-          .from('replyio_campaigns')
-          .select('*')
-          .eq('id', campaignId)
-          .eq('workspace_id', currentWorkspace.id)
-          .single();
-
-        if (rioCampaign) {
-          campaignData = rioCampaign;
-          detectedPlatform = 'replyio';
-        }
-      }
-
-      if (!campaignData) {
+      if (campaignError || !campaignData) {
         setData(prev => ({ ...prev, campaign: null }));
         setLoading(false);
         return;
@@ -186,85 +161,54 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: 's
         id: campaignData.id,
         name: campaignData.name,
         status: campaignData.status || 'unknown',
-        platform: detectedPlatform,
-        created_at: campaignData.created_at,
+        platform: campaignData.campaign_type || 'email',
+        created_at: campaignData.created_at || '',
         engagement_id: campaignData.engagement_id || null,
       };
 
-      // 2. Fetch all data in parallel
-      const metricsTable = detectedPlatform === 'smartlead' ? 'smartlead_daily_metrics' : 'replyio_daily_metrics';
-      const variantsTable = detectedPlatform === 'smartlead' ? 'smartlead_variants' : 'replyio_variants';
-      const eventsTable = detectedPlatform === 'smartlead' ? 'smartlead_message_events' : 'replyio_message_events';
-      const stepsTable = detectedPlatform === 'smartlead' ? 'smartlead_sequence_steps' : 'replyio_sequence_steps';
-
+      // 2. Fetch all related data in parallel
       const [
-        metricsResult,
         variantsResult,
-        bounceEventsResult,
-        positiveEventsResult,
-        emailAccountsResult,
-        sendingDomainsResult,
-        leadsResult,
-        stepsResult,
+        dailyMetricsResult,
+        emailActivitiesResult,
+        contactsResult,
       ] = await Promise.all([
-        supabase.from(metricsTable).select('*').eq('campaign_id', campaignId),
-        supabase.from(variantsTable).select('*').eq('campaign_id', campaignId),
-        supabase.from(eventsTable).select('*').eq('campaign_id', campaignId).in('event_type', ['bounce', 'hard_bounce', 'soft_bounce']),
-        supabase.from(eventsTable).select('*').eq('campaign_id', campaignId).eq('event_type', 'positive_reply').limit(10),
-        supabase.from('email_accounts').select('*').eq('workspace_id', currentWorkspace.id),
-        supabase.from('sending_domains').select('*').eq('workspace_id', currentWorkspace.id),
-        supabase.from('leads').select('id, status, email').eq('campaign_id', campaignId).limit(5000),
-        supabase.from(stepsTable).select('*').eq('campaign_id', campaignId).order('step_number'),
+        supabase.from('campaign_variants').select('*').eq('campaign_id', campaignId),
+        supabase.from('daily_metrics').select('*').eq('campaign_id', campaignId),
+        supabase.from('email_activities').select('id, bounced, bounce_type, replied, reply_category, reply_text, sent_at, contact_id').eq('campaign_id', campaignId).limit(5000),
+        supabase.from('contacts').select('id, email').eq('engagement_id', campaignData.engagement_id).limit(5000),
       ]);
 
-      const metricsData = metricsResult.data || [];
       const variantsData = variantsResult.data || [];
-      const bounceEvents = bounceEventsResult.data || [];
-      const positiveEvents = positiveEventsResult.data || [];
-      const emailAccounts = emailAccountsResult.data || [];
-      const sendingDomains = sendingDomainsResult.data || [];
-      const leadsData = leadsResult.data || [];
-      const stepsData = stepsResult.data || [];
+      const dailyMetricsData = dailyMetricsResult.data || [];
+      const emailActivities = emailActivitiesResult.data || [];
+      const contactsData = contactsResult.data || [];
 
-      // 3. Calculate metrics from daily_metrics
-      let total_sent = metricsData.reduce((s, m) => s + (m.sent_count || 0), 0);
-      let total_opened = metricsData.reduce((s, m) => s + (m.opened_count || 0), 0);
-      let total_clicked = metricsData.reduce((s, m) => s + (m.clicked_count || 0), 0);
-      let total_replied = metricsData.reduce((s, m) => s + (m.replied_count || 0), 0);
-      let total_bounced = metricsData.reduce((s, m) => s + (m.bounced_count || 0), 0);
-      let total_positive_replies = metricsData.reduce((s, m) => s + (m.positive_reply_count || 0), 0);
+      // 3. Calculate metrics from campaign data or daily metrics
+      let total_sent = campaignData.total_sent || 0;
+      let total_opened = campaignData.total_opened || 0;
+      let total_replied = campaignData.total_replied || 0;
+      let total_bounced = campaignData.total_bounced || 0;
+      let total_delivered = campaignData.total_delivered || 0;
+      let total_meetings = campaignData.total_meetings || 0;
 
-      // ==============================================================
-      // FALLBACK: If daily metrics have 0 sent, check cumulative table
-      // ==============================================================
-      if (total_sent === 0) {
-        const cumulativeTable = detectedPlatform === 'smartlead' ? 'smartlead_campaign_cumulative' : 'replyio_campaign_cumulative';
-        const { data: cumulative } = await supabase
-          .from(cumulativeTable)
-          .select('*')
-          .eq('campaign_id', campaignId)
-          .single();
-        
-        if (cumulative && (cumulative.total_sent || 0) > 0) {
-          console.log(`CampaignSummary: Using cumulative fallback for campaign ${campaignId}`);
-          total_sent = cumulative.total_sent || 0;
-          total_opened = cumulative.total_opened || 0;
-          total_clicked = cumulative.total_clicked || 0;
-          total_replied = cumulative.total_replied || 0;
-          total_bounced = cumulative.total_bounced || 0;
-          total_positive_replies = cumulative.total_interested || 0;
-        }
-      }
-      
-      // ==============================================================
-      // FALLBACK #2: If still 0, use lead count as sent proxy
-      // ==============================================================
-      if (total_sent === 0 && leadsData.length > 0) {
-        console.log(`CampaignSummary: Using lead count (${leadsData.length}) as sent proxy`);
-        total_sent = leadsData.length;
+      // If campaign aggregates are 0, sum from daily_metrics
+      if (total_sent === 0 && dailyMetricsData.length > 0) {
+        total_sent = dailyMetricsData.reduce((s, m) => s + (m.emails_sent || 0), 0);
+        total_opened = dailyMetricsData.reduce((s, m) => s + (m.emails_opened || 0), 0);
+        total_replied = dailyMetricsData.reduce((s, m) => s + (m.emails_replied || 0), 0);
+        total_bounced = dailyMetricsData.reduce((s, m) => s + (m.emails_bounced || 0), 0);
+        total_delivered = dailyMetricsData.reduce((s, m) => s + (m.emails_delivered || 0), 0);
+        total_meetings = dailyMetricsData.reduce((s, m) => s + (m.meetings_booked || 0), 0);
       }
 
-      const total_delivered = total_sent - total_bounced;
+      // Get positive replies from daily metrics
+      const total_positive_replies = dailyMetricsData.reduce((s, m) => s + (m.positive_replies || 0), 0);
+      const total_clicked = dailyMetricsData.reduce((s, m) => s + (m.emails_clicked || 0), 0);
+
+      if (total_delivered === 0) {
+        total_delivered = total_sent - total_bounced;
+      }
 
       const metrics = {
         total_sent,
@@ -282,78 +226,31 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: 's
         positive_rate: total_sent > 0 ? (total_positive_replies / total_sent) * 100 : 0,
       };
 
-      // 4. Build infrastructure data from email_accounts
-      const inboxes: InboxHealth[] = emailAccounts.slice(0, 50).map(acc => ({
-        id: acc.id,
-        email: acc.email_address,
-        daily_limit: acc.daily_limit || 50,
-        health_score: acc.health_score,
-        warmup_enabled: acc.warmup_enabled || false,
-        is_active: acc.is_active,
-        sent_today: 0,
-      }));
-
-      // Extract domains and map to sending_domains
-      const domainMap = new Map<string, DomainHealth>();
-      inboxes.forEach(inbox => {
-        const domain = inbox.email.split('@')[1];
-        if (domain && !domainMap.has(domain)) {
-          const domainRecord = sendingDomains.find(d => d.domain === domain);
-          domainMap.set(domain, {
-            domain,
-            spf_valid: domainRecord?.spf_valid ?? null,
-            dkim_valid: domainRecord?.dkim_valid ?? null,
-            dmarc_valid: domainRecord?.dmarc_valid ?? null,
-            inbox_count: 0,
-            bounce_rate: 0,
-          });
-        }
-        if (domain) {
-          const existing = domainMap.get(domain)!;
-          existing.inbox_count++;
-        }
-      });
-
+      // 4. Build infrastructure data (placeholder - would need data_sources info)
       const infrastructure = {
-        inboxes,
-        domains: Array.from(domainMap.values()),
-        total_daily_capacity: inboxes.reduce((s, i) => s + i.daily_limit, 0),
-        warmup_count: inboxes.filter(i => i.warmup_enabled).length,
+        inboxes: [] as InboxHealth[],
+        domains: [] as DomainHealth[],
+        total_daily_capacity: 0,
+        warmup_count: 0,
       };
 
-      // 5. Build bounce analysis from events (using available fields)
-      let hard_bounces = 0;
-      let soft_bounces = 0;
+      // 5. Build bounce analysis from email_activities
+      const bouncedEmails = emailActivities.filter(e => e.bounced);
+      const hard_bounces = bouncedEmails.filter(e => e.bounce_type === 'hard').length;
+      const soft_bounces = bouncedEmails.filter(e => e.bounce_type === 'soft').length;
 
-      bounceEvents.forEach(evt => {
-        const isHard = evt.event_type === 'hard_bounce' || evt.event_type === 'bounce';
-        if (isHard) hard_bounces++;
-        else soft_bounces++;
+      // Group bounces by domain
+      const domainCounts: Record<string, number> = {};
+      bouncedEmails.forEach(email => {
+        const contact = contactsData.find(c => c.id === email.contact_id);
+        const domain = contact?.email?.split('@')[1] || 'unknown';
+        domainCounts[domain] = (domainCounts[domain] || 0) + 1;
       });
 
-      // Group bounces by lead to get domain distribution
-      const leadIds = bounceEvents.map(e => e.lead_id).filter(Boolean) as string[];
-      let bounceByDomain: { domain: string; count: number; rate: number }[] = [];
-      
-      if (leadIds.length > 0) {
-        // Get lead emails to extract domains
-        const { data: bouncedLeads } = await supabase
-          .from('leads')
-          .select('id, email')
-          .in('id', leadIds.slice(0, 100));
-        
-        if (bouncedLeads) {
-          const domainCounts: Record<string, number> = {};
-          bouncedLeads.forEach(lead => {
-            const domain = lead.email?.split('@')[1] || 'unknown';
-            domainCounts[domain] = (domainCounts[domain] || 0) + 1;
-          });
-          bounceByDomain = Object.entries(domainCounts)
-            .map(([domain, count]) => ({ domain, count, rate: total_sent > 0 ? (count / total_sent) * 100 : 0 }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 10);
-        }
-      }
+      const bounceByDomain = Object.entries(domainCounts)
+        .map(([domain, count]) => ({ domain, count, rate: total_sent > 0 ? (count / total_sent) * 100 : 0 }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
 
       const bounceAnalysis = {
         hard_bounces,
@@ -363,90 +260,67 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: 's
           { reason: 'Temporary failure', count: soft_bounces, type: 'soft' as const },
         ].filter(r => r.count > 0),
         by_domain: bounceByDomain,
-        by_inbox: [], // Not available without email_account_id in events
+        by_inbox: [],
       };
 
-      // 6. Lead breakdown
-      const statusCounts: Record<string, number> = {};
-      leadsData.forEach(lead => {
-        const status = lead.status || 'unknown';
-        statusCounts[status] = (statusCounts[status] || 0) + 1;
-      });
-
+      // 6. Contact breakdown (using contacts as leads)
       const leadBreakdown = {
-        total: leadsData.length,
-        by_status: Object.entries(statusCounts)
-          .map(([status, count]) => ({ status, count }))
-          .sort((a, b) => b.count - a.count),
+        total: contactsData.length,
+        by_status: [],
       };
 
-      // 7. Positive replies (using reply_text from events)
+      // 7. Positive replies
+      const positiveEmails = emailActivities.filter(e => e.reply_category === 'positive' || e.reply_category === 'interested');
       const positiveReplies = {
-        count: total_positive_replies,
+        count: total_positive_replies || positiveEmails.length,
         rate: metrics.positive_rate,
-        samples: positiveEvents.map(evt => ({
-          lead_id: evt.lead_id || '',
-          snippet: (evt.reply_text || '').slice(0, 150),
-          timestamp: evt.event_timestamp || evt.created_at,
+        samples: positiveEmails.slice(0, 10).map(e => ({
+          lead_id: e.contact_id || '',
+          snippet: (e.reply_text || '').slice(0, 150),
+          timestamp: e.sent_at || '',
         })),
       };
 
       // 8. Variants with metrics
-      const variants: VariantPerformance[] = variantsData.map(v => {
-        const vMetrics = metricsData.filter(m => m.variant_id === v.id);
-        const sent = vMetrics.reduce((s, m) => s + (m.sent_count || 0), 0);
-        const opened = vMetrics.reduce((s, m) => s + (m.opened_count || 0), 0);
-        const clicked = vMetrics.reduce((s, m) => s + (m.clicked_count || 0), 0);
-        const replied = vMetrics.reduce((s, m) => s + (m.replied_count || 0), 0);
+      const variants: VariantPerformance[] = variantsData.map(v => ({
+        id: v.id,
+        name: v.subject_line || 'Variant',
+        subject_line: v.subject_line || '',
+        variant_type: 'email',
+        sent: v.total_sent || 0,
+        opened: v.total_opened || 0,
+        clicked: v.total_clicked || 0,
+        replied: v.total_replied || 0,
+        open_rate: v.open_rate || 0,
+        click_rate: v.click_rate || 0,
+        reply_rate: v.reply_rate || 0,
+      })).sort((a, b) => b.reply_rate - a.reply_rate);
 
-        return {
-          id: v.id,
-          name: v.name,
-          subject_line: v.subject_line || '',
-          variant_type: v.variant_type || 'email',
-          sent,
-          opened,
-          clicked,
-          replied,
-          open_rate: sent > 0 ? (opened / sent) * 100 : 0,
-          click_rate: sent > 0 ? (clicked / sent) * 100 : 0,
-          reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
-        };
-      }).sort((a, b) => b.reply_rate - a.reply_rate);
-
-      // 9. Sequence steps
-      const sequenceSteps: SequenceStepPerformance[] = stepsData.map(step => {
-        // Get metrics for this step via variant_id
-        const stepVariantId = step.variant_id;
-        const stepMetrics = stepVariantId 
-          ? metricsData.filter(m => m.variant_id === stepVariantId)
-          : [];
-        const sent = stepMetrics.reduce((s, m) => s + (m.sent_count || 0), 0);
-        const opened = stepMetrics.reduce((s, m) => s + (m.opened_count || 0), 0);
-        const replied = stepMetrics.reduce((s, m) => s + (m.replied_count || 0), 0);
-
-        return {
-          step_number: step.step_number,
-          step_type: step.step_type || 'email',
-          sent,
-          opened,
-          replied,
-          open_rate: sent > 0 ? (opened / sent) * 100 : 0,
-          reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
-        };
-      });
+      // 9. Sequence steps from variants with step_number
+      const sequenceSteps: SequenceStepPerformance[] = variantsData
+        .filter(v => v.step_number !== null)
+        .map(v => ({
+          step_number: v.step_number || 1,
+          step_type: 'email',
+          sent: v.total_sent || 0,
+          opened: v.total_opened || 0,
+          replied: v.total_replied || 0,
+          open_rate: v.open_rate || 0,
+          reply_rate: v.reply_rate || 0,
+        }))
+        .sort((a, b) => a.step_number - b.step_number);
 
       // 10. Daily data for chart
       const dailyMap = new Map<string, { sent: number; opened: number; replied: number }>();
-      metricsData.forEach(m => {
-        const date = m.metric_date;
+      dailyMetricsData.forEach(m => {
+        const date = m.date;
         if (!dailyMap.has(date)) {
           dailyMap.set(date, { sent: 0, opened: 0, replied: 0 });
         }
         const d = dailyMap.get(date)!;
-        d.sent += m.sent_count || 0;
-        d.opened += m.opened_count || 0;
-        d.replied += m.replied_count || 0;
+        d.sent += m.emails_sent || 0;
+        d.opened += m.emails_opened || 0;
+        d.replied += m.emails_replied || 0;
       });
 
       const dailyData = Array.from(dailyMap.entries())
