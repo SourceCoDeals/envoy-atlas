@@ -37,8 +37,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2, ChevronDown, ChevronRight,
-  Phone, Target, TrendingUp, Users, Link as LinkIcon, BarChart3, Wand2, Check, X
+  Phone, Target, TrendingUp, Users, Link as LinkIcon, BarChart3, Wand2, Check, X, Archive
 } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { LinkedCampaignsList, LinkedCampaign } from '@/components/engagements/LinkedCampaignsList';
 import { LinkCampaignsDialog, UnlinkedCampaign } from '@/components/engagements/LinkCampaignsDialog';
@@ -83,7 +84,7 @@ export default function EngagementDashboard() {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  
+  const [activeTab, setActiveTab] = useState<'active' | 'closed'>('active');
   // Campaign linking state
   const [linkedCampaigns, setLinkedCampaigns] = useState<Record<string, LinkedCampaign[]>>({});
   const [unlinkedCampaigns, setUnlinkedCampaigns] = useState<UnlinkedCampaign[]>([]);
@@ -534,6 +535,43 @@ export default function EngagementDashboard() {
       setAutoPairLoading(false);
     }
   };
+
+  // Toggle engagement status
+  const handleToggleStatus = async (engagementId: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'active' ? 'closed' : 'active';
+    try {
+      const { error } = await supabase
+        .from('engagements')
+        .update({ status: newStatus })
+        .eq('id', engagementId);
+
+      if (error) throw error;
+      
+      setEngagements(prev => 
+        prev.map(e => e.id === engagementId ? { ...e, status: newStatus } : e)
+      );
+      toast.success(`Engagement marked as ${newStatus}`);
+    } catch (err) {
+      console.error('Error updating status:', err);
+      toast.error('Failed to update status');
+    }
+  };
+
+  // Filter engagements by active tab
+  const filteredEngagements = useMemo(() => {
+    return engagements.filter(e => {
+      const status = e.status || 'active';
+      return activeTab === 'active' ? status === 'active' : status === 'closed';
+    });
+  }, [engagements, activeTab]);
+
+  // Count by status
+  const statusCounts = useMemo(() => {
+    const active = engagements.filter(e => (e.status || 'active') === 'active').length;
+    const closed = engagements.filter(e => e.status === 'closed').length;
+    return { active, closed };
+  }, [engagements]);
+
   const totals = useMemo(() => {
     return campaignSummaries.reduce(
       (acc, c) => ({
@@ -621,27 +659,46 @@ export default function EngagementDashboard() {
           </Card>
         </div>
 
-        {/* Engagements Table */}
+        {/* Engagements Table with Tabs */}
         <Card>
-          <CardHeader>
-            <CardTitle>Active Engagements</CardTitle>
+          <CardHeader className="pb-3">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'active' | 'closed')}>
+              <TabsList>
+                <TabsTrigger value="active" className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4" />
+                  Active
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5">{statusCounts.active}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="closed" className="flex items-center gap-2">
+                  <Archive className="h-4 w-4" />
+                  Closed
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5">{statusCounts.closed}</Badge>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </CardHeader>
           <CardContent>
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : engagements.length === 0 ? (
+            ) : filteredEngagements.length === 0 ? (
               <div className="text-center py-12">
                 <Building2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No engagements yet</h3>
+                <h3 className="text-lg font-semibold mb-2">
+                  {activeTab === 'active' ? 'No active engagements' : 'No closed engagements'}
+                </h3>
                 <p className="text-muted-foreground mb-4">
-                  Create your first engagement to start tracking performance
+                  {activeTab === 'active' 
+                    ? 'Create your first engagement to start tracking performance'
+                    : 'Closed engagements will appear here'}
                 </p>
-                <Button onClick={openCreate}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Engagement
-                </Button>
+                {activeTab === 'active' && (
+                  <Button onClick={openCreate}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Engagement
+                  </Button>
+                )}
               </div>
             ) : (
               <Table>
@@ -659,7 +716,7 @@ export default function EngagementDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {engagements.map((engagement) => {
+                  {filteredEngagements.map((engagement) => {
                     const metrics = engagementMetrics[engagement.id] || {
                       totalCalls: 0,
                       avgScore: 0,
@@ -669,18 +726,25 @@ export default function EngagementDashboard() {
                     };
                     const campaigns = linkedCampaigns[engagement.id] || [];
                     const isExpanded = expandedRows.has(engagement.id);
+                    const currentStatus = engagement.status || 'active';
 
                     return (
                       <>
-                        <TableRow key={engagement.id} className="cursor-pointer hover:bg-muted/50">
-                          <TableCell onClick={() => toggleRow(engagement.id)}>
+                        <TableRow key={engagement.id} className="hover:bg-muted/50">
+                          <TableCell 
+                            className="cursor-pointer"
+                            onClick={() => toggleRow(engagement.id)}
+                          >
                             {isExpanded ? (
                               <ChevronDown className="h-4 w-4" />
                             ) : (
                               <ChevronRight className="h-4 w-4" />
                             )}
                           </TableCell>
-                          <TableCell onClick={() => toggleRow(engagement.id)}>
+                          <TableCell 
+                            className="cursor-pointer"
+                            onClick={() => toggleRow(engagement.id)}
+                          >
                             <div>
                               <div className="font-medium">{engagement.name}</div>
                               {engagement.description && (
@@ -691,8 +755,12 @@ export default function EngagementDashboard() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={engagement.status === 'active' ? 'default' : 'secondary'}>
-                              {engagement.status || 'active'}
+                            <Badge 
+                              variant={currentStatus === 'active' ? 'default' : 'secondary'}
+                              className="cursor-pointer hover:opacity-80 transition-opacity"
+                              onClick={() => handleToggleStatus(engagement.id, currentStatus)}
+                            >
+                              {currentStatus}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">{metrics.totalCalls}</TableCell>
