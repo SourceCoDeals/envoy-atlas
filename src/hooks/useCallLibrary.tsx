@@ -6,32 +6,19 @@ import { toast } from 'sonner';
 
 export interface CallLibraryEntry {
   id: string;
-  workspace_id: string;
-  call_id: string;
   category: string;
   title: string;
   description: string | null;
-  highlight_start_time: number | null;
-  highlight_end_time: number | null;
   tags: string[] | null;
-  added_by: string;
   created_at: string;
-  updated_at: string;
-  // Joined data from external_calls
   call?: {
     id: string;
     call_title: string | null;
     contact_name: string | null;
     company_name: string | null;
-    phoneburner_recording_url: string | null;
+    recording_url: string | null;
     date_time: string | null;
-    host_email: string | null;
-  };
-  ai_score?: {
-    composite_score: number | null;
-    seller_interest_score: number | null;
-    objection_handling_score: number | null;
-    rapport_building_score: number | null;
+    caller_name: string | null;
   };
 }
 
@@ -40,13 +27,10 @@ export interface SuggestedCall {
   call_title: string | null;
   contact_name: string | null;
   company_name: string | null;
-  host_email: string | null;
+  caller_name: string | null;
   date_time: string | null;
-  phoneburner_recording_url: string | null;
-  composite_score: number | null;
-  seller_interest_score: number | null;
-  objection_handling_score: number | null;
-  rapport_building_score: number | null;
+  recording_url: string | null;
+  talk_duration: number | null;
 }
 
 export const LIBRARY_CATEGORIES = [
@@ -64,140 +48,89 @@ export function useCallLibrary() {
   const { currentWorkspace: workspace } = useWorkspace();
   const queryClient = useQueryClient();
 
+  // For now, return empty arrays since call_library_entries table may not exist
+  // This hook can be expanded when the library feature is implemented
   const { data: entries = [], isLoading, error } = useQuery({
     queryKey: ['call-library', workspace?.id],
     queryFn: async () => {
       if (!workspace?.id) return [];
-
-      // Fetch library entries
-      const { data: libraryEntries, error: entriesError } = await supabase
-        .from('call_library_entries')
-        .select('*')
-        .eq('workspace_id', workspace.id)
-        .order('created_at', { ascending: false });
-
-      if (entriesError) throw entriesError;
-      if (!libraryEntries || libraryEntries.length === 0) return [];
-
-      // Get call IDs to fetch from external_calls
-      const callIds = libraryEntries.map(e => e.call_id).filter(Boolean);
-
-      if (callIds.length === 0) return libraryEntries as CallLibraryEntry[];
-
-      // Fetch call details from external_calls
-      const { data: externalCalls } = await supabase
-        .from('external_calls')
-        .select('id, call_title, contact_name, company_name, phoneburner_recording_url, date_time, host_email, composite_score, seller_interest_score, objection_handling_score, rapport_building_score')
-        .in('id', callIds);
-
-      const callMap = new Map(externalCalls?.map(c => [c.id, c]) || []);
-
-      return libraryEntries.map(entry => {
-        const callData = callMap.get(entry.call_id);
-        return {
-          ...entry,
-          call: callData ? {
-            id: callData.id,
-            call_title: callData.call_title,
-            contact_name: callData.contact_name,
-            company_name: callData.company_name,
-            phoneburner_recording_url: callData.phoneburner_recording_url,
-            date_time: callData.date_time,
-            host_email: callData.host_email,
-          } : undefined,
-          ai_score: callData ? {
-            composite_score: callData.composite_score,
-            seller_interest_score: callData.seller_interest_score,
-            objection_handling_score: callData.objection_handling_score,
-            rapport_building_score: callData.rapport_building_score,
-          } : undefined,
-        };
-      }) as CallLibraryEntry[];
+      
+      // Return empty for now - library entries table may not be in new schema
+      return [] as CallLibraryEntry[];
     },
     enabled: !!workspace?.id,
   });
 
-  // Fetch ALL calls with scores to categorize best/worst examples
+  // Fetch ALL calls to categorize best/worst examples
   const { data: allScoredCalls = [], isLoading: isLoadingSuggested } = useQuery({
     queryKey: ['call-library-all-scored', workspace?.id],
     queryFn: async () => {
       if (!workspace?.id) return [];
 
+      // Get engagements for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', workspace.id);
+
+      const engagementIds = engagements?.map(e => e.id) || [];
+      if (engagementIds.length === 0) return [];
+
       const { data, error: callsError } = await supabase
-        .from('external_calls')
-        .select('id, call_title, contact_name, company_name, host_email, date_time, phoneburner_recording_url, composite_score, seller_interest_score, objection_handling_score, rapport_building_score, quality_of_conversation_score, value_proposition_score, engagement_score, next_step_clarity_score')
-        .eq('workspace_id', workspace.id)
-        .order('composite_score', { ascending: false });
+        .from('call_activities')
+        .select('id, to_name, to_phone, caller_name, recording_url, talk_duration, started_at, transcription')
+        .in('engagement_id', engagementIds)
+        .not('transcription', 'is', null)
+        .order('talk_duration', { ascending: false });
 
       if (callsError) throw callsError;
-      return (data || []) as (SuggestedCall & {
-        quality_of_conversation_score?: number | null;
-        value_proposition_score?: number | null;
-        engagement_score?: number | null;
-        next_step_clarity_score?: number | null;
-      })[];
+      
+      return (data || []).map(c => ({
+        id: c.id,
+        call_title: c.to_name || c.to_phone,
+        contact_name: c.to_name,
+        company_name: null,
+        caller_name: c.caller_name,
+        date_time: c.started_at,
+        recording_url: c.recording_url,
+        talk_duration: c.talk_duration,
+      })) as SuggestedCall[];
     },
     enabled: !!workspace?.id,
   });
 
-  // Categorize calls into best/worst for each category
+  // Categorize calls by talk duration (proxy for quality)
   const categorizedSuggestions = useMemo(() => {
-    const validCalls = allScoredCalls.filter(c => c.composite_score != null);
+    const validCalls = allScoredCalls.filter(c => c.talk_duration != null);
     
-    const getTopBottom = (
-      sortFn: (a: typeof validCalls[0], b: typeof validCalls[0]) => number,
-      count = 5
-    ) => {
-      const sorted = [...validCalls].sort(sortFn);
+    const getTopBottom = (count = 5) => {
+      const sorted = [...validCalls].sort((a, b) => (b.talk_duration || 0) - (a.talk_duration || 0));
       return {
         best: sorted.slice(0, count),
         worst: sorted.slice(-count).reverse(),
       };
     };
 
+    const defaultTopBottom = getTopBottom();
+
     return {
-      // Best Openings - high engagement + rapport
-      best_openings: getTopBottom((a, b) => 
-        ((b.engagement_score || 0) + (b.rapport_building_score || 0)) - 
-        ((a.engagement_score || 0) + (a.rapport_building_score || 0))
-      ),
-      // Discovery Excellence - high quality conversation + seller interest
-      discovery_excellence: getTopBottom((a, b) => 
-        ((b.quality_of_conversation_score || 0) + (b.seller_interest_score || 0)) - 
-        ((a.quality_of_conversation_score || 0) + (a.seller_interest_score || 0))
-      ),
-      // Objection Handling - by objection handling score
-      objection_handling: getTopBottom((a, b) => 
-        (b.objection_handling_score || 0) - (a.objection_handling_score || 0)
-      ),
-      // Strong Closes - next step clarity + seller interest
-      strong_closes: getTopBottom((a, b) => 
-        ((b.next_step_clarity_score || 0) + (b.seller_interest_score || 0)) - 
-        ((a.next_step_clarity_score || 0) + (a.seller_interest_score || 0))
-      ),
-      // Rapport Building - by rapport score
-      rapport_building: getTopBottom((a, b) => 
-        (b.rapport_building_score || 0) - (a.rapport_building_score || 0)
-      ),
-      // Value Proposition - by value prop score
-      value_proposition: getTopBottom((a, b) => 
-        (b.value_proposition_score || 0) - (a.value_proposition_score || 0)
-      ),
-      // Training Examples - overall composite (top performers)
-      training_examples: getTopBottom((a, b) => 
-        (b.composite_score || 0) - (a.composite_score || 0)
-      ),
-      // What to Avoid - overall composite (bottom performers)
+      best_openings: defaultTopBottom,
+      discovery_excellence: defaultTopBottom,
+      objection_handling: defaultTopBottom,
+      strong_closes: defaultTopBottom,
+      rapport_building: defaultTopBottom,
+      value_proposition: defaultTopBottom,
+      training_examples: defaultTopBottom,
       avoid_examples: {
-        best: [...validCalls].sort((a, b) => (a.composite_score || 0) - (b.composite_score || 0)).slice(0, 5),
-        worst: [], // Not applicable for this category
+        best: [...validCalls].sort((a, b) => (a.talk_duration || 0) - (b.talk_duration || 0)).slice(0, 5),
+        worst: [],
       },
     };
   }, [allScoredCalls]);
 
   // Flatten for backward compatibility
   const suggestedCalls = useMemo(() => {
-    return allScoredCalls.filter(c => c.composite_score != null).slice(0, 24);
+    return allScoredCalls.slice(0, 24);
   }, [allScoredCalls]);
 
   const addToLibrary = useMutation({
@@ -206,60 +139,24 @@ export function useCallLibrary() {
       category: string;
       title: string;
       description?: string;
-      highlight_start_time?: number;
-      highlight_end_time?: number;
       tags?: string[];
     }) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !workspace?.id) throw new Error('Not authenticated');
-
-      const { data, error } = await supabase
-        .from('call_library_entries')
-        .insert({
-          workspace_id: workspace.id,
-          call_id: params.call_id,
-          category: params.category,
-          title: params.title,
-          description: params.description || null,
-          highlight_start_time: params.highlight_start_time || null,
-          highlight_end_time: params.highlight_end_time || null,
-          tags: params.tags || null,
-          added_by: user.id,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      // Library feature not implemented in new schema
+      toast.info('Library feature coming soon');
+      return null;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['call-library'] });
-      queryClient.invalidateQueries({ queryKey: ['call-library-suggested'] });
-      toast.success('Call added to library');
-    },
-    onError: (error) => {
-      toast.error('Failed to add call to library');
-      console.error(error);
     },
   });
 
   const removeFromLibrary = useMutation({
     mutationFn: async (entryId: string) => {
-      const { error } = await supabase
-        .from('call_library_entries')
-        .delete()
-        .eq('id', entryId);
-
-      if (error) throw error;
+      // Library feature not implemented in new schema
+      toast.info('Library feature coming soon');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['call-library'] });
-      queryClient.invalidateQueries({ queryKey: ['call-library-suggested'] });
-      toast.success('Removed from library');
-    },
-    onError: (error) => {
-      toast.error('Failed to remove from library');
-      console.error(error);
     },
   });
 

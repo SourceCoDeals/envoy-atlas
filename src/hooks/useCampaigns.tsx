@@ -56,7 +56,7 @@ export function useCampaigns() {
       // Get engagement IDs for this client
       const { data: engagements, error: engError } = await supabase
         .from('engagements')
-        .select('id, engagement_name')
+        .select('id, name')
         .eq('client_id', currentWorkspace.id);
 
       if (engError) throw engError;
@@ -64,7 +64,7 @@ export function useCampaigns() {
       const engagementIds = (engagements || []).map(e => e.id);
       const engagementMap = new Map<string, string>();
       (engagements || []).forEach(e => {
-        engagementMap.set(e.id, e.engagement_name);
+        engagementMap.set(e.id, e.name);
       });
 
       if (engagementIds.length === 0) {

@@ -14,46 +14,29 @@ export const DATE_RANGE_OPTIONS: { value: DateRangeOption; label: string }[] = [
 
 export interface ExternalCall {
   id: string;
-  workspace_id: string;
+  engagement_id: string;
   call_title: string | null;
   date_time: string | null;
-  call_date: string | null;
   contact_name: string | null;
   company_name: string | null;
-  host_email: string | null;
-  rep_name: string | null;
-  engagement_name: string | null;
-  call_category: string | null;
-  composite_score: number | null;
-  seller_interest_score: number | null;
-  objection_handling_score: number | null;
-  rapport_building_score: number | null;
-  value_proposition_score: number | null;
-  engagement_score: number | null;
-  next_step_clarity_score: number | null;
-  gatekeeper_handling_score: number | null;
-  quality_of_conversation_score: number | null;
-  opening_type: string | null;
-  call_summary: string | null;
-  transcript_text: string | null;
-  duration: number | null;
-  key_concerns: string[] | null;
-  target_pain_points: string | null;
-  phoneburner_recording_url: string | null;
-  fireflies_url: string | null;
-  salesforce_url: string | null;
-  import_status: string | null;
+  caller_name: string | null;
+  disposition: string | null;
+  talk_duration: number | null;
+  recording_url: string | null;
+  transcription: string | null;
+  notes: string | null;
+  conversation_outcome: string | null;
+  voicemail_left: boolean | null;
 }
 
 interface UseExternalCallsOptions {
-  requireScores?: boolean;
-  columns?: string;
+  requireTranscript?: boolean;
 }
 
 const BATCH_SIZE = 1000;
 
 /**
- * Hook to fetch ALL external_calls with proper pagination (overcoming the 1000 row limit).
+ * Hook to fetch ALL call_activities with proper pagination (overcoming the 1000 row limit).
  * Returns calls, unique analysts, loading state, and a refresh function.
  */
 export function useExternalCalls(options: UseExternalCallsOptions = {}) {
@@ -73,6 +56,19 @@ export function useExternalCalls(options: UseExternalCallsOptions = {}) {
     setError(null);
 
     try {
+      // Get engagements for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = engagements?.map(e => e.id) || [];
+      if (engagementIds.length === 0) {
+        setAllCalls([]);
+        setLoading(false);
+        return;
+      }
+
       const allData: ExternalCall[] = [];
       let offset = 0;
       let hasMore = true;
@@ -80,14 +76,14 @@ export function useExternalCalls(options: UseExternalCallsOptions = {}) {
       // Fetch in batches to overcome the 1000 row limit
       while (hasMore) {
         let query = supabase
-          .from('external_calls')
-          .select(options.columns || '*')
-          .eq('workspace_id', currentWorkspace.id)
+          .from('call_activities')
+          .select('id, engagement_id, to_name, to_phone, caller_name, recording_url, transcription, talk_duration, disposition, notes, conversation_outcome, voicemail_left, started_at')
+          .in('engagement_id', engagementIds)
           .range(offset, offset + BATCH_SIZE - 1)
-          .order('date_time', { ascending: false, nullsFirst: false });
+          .order('started_at', { ascending: false, nullsFirst: false });
 
-        if (options.requireScores) {
-          query = query.not('composite_score', 'is', null);
+        if (options.requireTranscript) {
+          query = query.not('transcription', 'is', null);
         }
 
         const { data, error: queryError } = await query;
@@ -95,7 +91,23 @@ export function useExternalCalls(options: UseExternalCallsOptions = {}) {
         if (queryError) throw queryError;
 
         if (data && data.length > 0) {
-          allData.push(...(data as unknown as ExternalCall[]));
+          const mapped = data.map(c => ({
+            id: c.id,
+            engagement_id: c.engagement_id,
+            call_title: c.to_name || c.to_phone,
+            date_time: c.started_at,
+            contact_name: c.to_name,
+            company_name: null,
+            caller_name: c.caller_name,
+            disposition: c.disposition,
+            talk_duration: c.talk_duration,
+            recording_url: c.recording_url,
+            transcription: c.transcription,
+            notes: c.notes,
+            conversation_outcome: c.conversation_outcome,
+            voicemail_left: c.voicemail_left,
+          }));
+          allData.push(...mapped);
           offset += BATCH_SIZE;
           hasMore = data.length === BATCH_SIZE;
         } else {
@@ -105,12 +117,12 @@ export function useExternalCalls(options: UseExternalCallsOptions = {}) {
 
       setAllCalls(allData);
     } catch (err) {
-      console.error('Error fetching external calls:', err);
+      console.error('Error fetching calls:', err);
       setError(err instanceof Error ? err.message : 'Failed to load calls');
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspace?.id, options.columns, options.requireScores]);
+  }, [currentWorkspace?.id, options.requireTranscript]);
 
   useEffect(() => {
     fetchAllCalls();
@@ -120,9 +132,8 @@ export function useExternalCalls(options: UseExternalCallsOptions = {}) {
   const analysts = useMemo(() => {
     const uniqueAnalysts = new Set<string>();
     allCalls.forEach(c => {
-      const analyst = c.rep_name || c.host_email;
-      if (analyst) {
-        uniqueAnalysts.add(analyst);
+      if (c.caller_name) {
+        uniqueAnalysts.add(c.caller_name);
       }
     });
     return Array.from(uniqueAnalysts).sort();
@@ -176,18 +187,13 @@ export function filterCalls(
   return calls.filter(call => {
     // Date filter
     if (rangeStart) {
-      const callDate = call.date_time 
-        ? new Date(call.date_time) 
-        : call.call_date 
-          ? new Date(call.call_date) 
-          : null;
+      const callDate = call.date_time ? new Date(call.date_time) : null;
       if (!callDate || callDate < rangeStart) return false;
     }
 
     // Analyst filter
     if (selectedAnalyst !== 'all') {
-      const analyst = call.rep_name || call.host_email || '';
-      if (analyst !== selectedAnalyst) return false;
+      if (call.caller_name !== selectedAnalyst) return false;
     }
 
     return true;
@@ -195,43 +201,30 @@ export function filterCalls(
 }
 
 /**
- * Determine if a call is a "connection" based on category or score
+ * Determine if a call is a "connection" based on talk duration
  */
 export function isConnection(call: ExternalCall): boolean {
-  const category = (call.call_category || '').toLowerCase();
-  return (
-    category === 'connection' ||
-    category.includes('interested') ||
-    (call.seller_interest_score || 0) >= 3
-  );
+  return (call.talk_duration || 0) > 30;
 }
 
 /**
- * Determine if a call resulted in a meeting (high interest)
+ * Determine if a call resulted in a meeting
  */
 export function isMeeting(call: ExternalCall): boolean {
-  return (call.seller_interest_score || 0) >= 7;
+  const outcome = (call.conversation_outcome || '').toLowerCase();
+  return outcome.includes('meeting') || outcome.includes('scheduled');
 }
 
 /**
  * Determine if a call is a quality conversation
  */
 export function isQualityConversation(call: ExternalCall): boolean {
-  const category = (call.call_category || '').toLowerCase();
-  return (
-    (call.composite_score || 0) >= 5 ||
-    ['conversation', 'interested', 'meeting'].includes(category)
-  );
+  return (call.talk_duration || 0) > 60;
 }
 
 /**
  * Determine if a call was a voicemail
  */
 export function isVoicemail(call: ExternalCall): boolean {
-  const category = (call.call_category || '').toLowerCase();
-  return (
-    category.includes('voicemail') ||
-    category.includes('vm') ||
-    ((call.seller_interest_score || 0) < 2 && !call.transcript_text)
-  );
+  return call.voicemail_left === true;
 }

@@ -28,7 +28,7 @@ export interface SubjectLineAnalysis {
   reply_rate: number;
   positive_rate: number;
   
-  // Analysis (from features table or fallback)
+  // Analysis
   personalization_type: PersonalizationType;
   format_type: FormatType;
   length_category: LengthCategory;
@@ -40,7 +40,6 @@ export interface SubjectLineAnalysis {
   spam_score: number;
   capitalization_style: string;
   
-  // Statistical
   confidence_level: 'low' | 'medium' | 'high';
 }
 
@@ -59,7 +58,7 @@ export interface BodyCopyAnalysis {
   reply_rate: number;
   positive_rate: number;
   
-  // Body analysis (from features table or fallback)
+  // Body analysis
   word_count: number;
   personalization_depth: 0 | 1 | 2 | 3 | 4;
   personalization_vars: string[];
@@ -102,7 +101,7 @@ export interface CopyAnalyticsData {
   error: string | null;
 }
 
-// Helper functions for analysis (fallback when features not extracted)
+// Helper functions for analysis
 function detectPersonalizationType(subject: string): PersonalizationType {
   const lower = subject.toLowerCase();
   if (lower.includes('{{company') || lower.includes('{company')) return 'company';
@@ -159,30 +158,26 @@ function detectCTAType(body: string): 'soft' | 'meeting' | 'calendar' | 'permiss
 
 interface VariantFeatures {
   variant_id: string;
-  subject_char_count: number | null;
+  subject_length: number | null;
   subject_word_count: number | null;
-  subject_is_question: boolean | null;
+  subject_has_personalization: boolean | null;
   subject_has_number: boolean | null;
   subject_has_emoji: boolean | null;
-  subject_personalization_count: number | null;
-  subject_spam_score: number | null;
-  subject_capitalization_style: string | null;
-  subject_first_word_type: string | null;
+  subject_capitalization: string | null;
+  subject_punctuation: string | null;
   body_word_count: number | null;
   body_sentence_count: number | null;
   body_paragraph_count: number | null;
   body_question_count: number | null;
-  body_bullet_point_count: number | null;
-  body_has_link: boolean | null;
+  body_bullet_count: number | null;
+  body_has_bullets: boolean | null;
   body_link_count: number | null;
   body_cta_type: string | null;
   body_cta_position: string | null;
-  body_tone: string | null;
+  tone: string | null;
   body_reading_grade: number | null;
-  body_personalization_density: number | null;
-  body_personalization_types: string[] | null;
+  body_personalization_count: number | null;
   body_has_calendar_link: boolean | null;
-  body_has_proof: boolean | null;
 }
 
 // Unified variant interface for processing
@@ -191,12 +186,13 @@ interface UnifiedVariant {
   name: string;
   subject_line: string | null;
   body_preview: string | null;
-  email_body: string | null;
+  body_plain: string | null;
   campaign_id: string;
-  word_count: number | null;
-  personalization_vars: any;
-  platform: string;
   campaign_name: string;
+  total_sent: number;
+  total_opened: number;
+  total_replied: number;
+  positive_replies: number;
 }
 
 export function useCopyAnalytics(): CopyAnalyticsData {
@@ -219,213 +215,107 @@ export function useCopyAnalytics(): CopyAnalyticsData {
     setError(null);
 
     try {
-      // Fetch variants from PLATFORM-SPECIFIC tables (not legacy campaign_variants)
-      const [smartleadVariantsRes, replyioVariantsRes] = await Promise.all([
-        supabase.from('smartlead_variants').select(`
-          id,
-          campaign_id,
-          name,
-          subject_line,
-          body_preview,
-          email_body,
-          personalization_vars,
-          word_count,
-          smartlead_campaigns!inner (
-            id,
-            name,
-            workspace_id
-          )
-        `).eq('smartlead_campaigns.workspace_id', currentWorkspace.id),
-        
-        supabase.from('replyio_variants').select(`
-          id,
-          campaign_id,
-          name,
-          subject_line,
-          body_preview,
-          email_body,
-          personalization_vars,
-          word_count,
-          replyio_campaigns!inner (
-            id,
-            name,
-            workspace_id
-          )
-        `).eq('replyio_campaigns.workspace_id', currentWorkspace.id)
-      ]);
+      // Get engagements for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
 
-      // Unify variants from both platforms
-      const variants: UnifiedVariant[] = [
-        ...(smartleadVariantsRes.data || []).map(v => ({
-          id: v.id,
-          name: v.name,
-          subject_line: v.subject_line,
-          body_preview: v.body_preview,
-          email_body: v.email_body,
-          campaign_id: v.campaign_id,
-          word_count: v.word_count,
-          personalization_vars: v.personalization_vars,
-          platform: 'smartlead',
-          campaign_name: (v.smartlead_campaigns as any)?.name || 'Unknown',
-        })),
-        ...(replyioVariantsRes.data || []).map(v => ({
-          id: v.id,
-          name: v.name,
-          subject_line: v.subject_line,
-          body_preview: v.body_preview,
-          email_body: v.email_body,
-          campaign_id: v.campaign_id,
-          word_count: v.word_count,
-          personalization_vars: v.personalization_vars,
-          platform: 'replyio',
-          campaign_name: (v.replyio_campaigns as any)?.name || 'Unknown',
-        })),
-      ];
-
-      console.log(`[useCopyAnalytics] Loaded ${smartleadVariantsRes.data?.length || 0} Smartlead + ${replyioVariantsRes.data?.length || 0} Reply.io variants`);
-
-      // Fetch extracted features from PLATFORM-SPECIFIC tables first, fallback to legacy
-      const smartleadVariantIds = (smartleadVariantsRes.data || []).map(v => v.id);
-      const replyioVariantIds = (replyioVariantsRes.data || []).map(v => v.id);
-      
-      const [smartleadFeaturesRes, replyioFeaturesRes] = await Promise.all([
-        smartleadVariantIds.length > 0
-          ? supabase.from('smartlead_variant_features')
-              .select('*')
-              .eq('workspace_id', currentWorkspace.id)
-          : Promise.resolve({ data: [], error: null }),
-        replyioVariantIds.length > 0
-          ? supabase.from('replyio_variant_features')
-              .select('*')
-              .eq('workspace_id', currentWorkspace.id)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-
-      // Create features map from platform-specific tables
-      const featuresMap = new Map<string, VariantFeatures>();
-      
-      // Add Smartlead features
-      (smartleadFeaturesRes.data || []).forEach((f: any) => {
-        featuresMap.set(f.variant_id, f as VariantFeatures);
-      });
-      
-      // Add Reply.io features
-      (replyioFeaturesRes.data || []).forEach((f: any) => {
-        featuresMap.set(f.variant_id, f as VariantFeatures);
-      });
-      
-      console.log(`[useCopyAnalytics] Platform features: ${smartleadFeaturesRes.data?.length || 0} Smartlead + ${replyioFeaturesRes.data?.length || 0} Reply.io`);
-
-      // Fallback to legacy campaign_variant_features if platform tables are empty
-      if (featuresMap.size === 0) {
-        console.log('[useCopyAnalytics] Platform feature tables empty, falling back to legacy campaign_variant_features');
-        const { data: legacyFeatures, error: legacyError } = await supabase
-          .from('campaign_variant_features')
-          .select('*')
-          .eq('workspace_id', currentWorkspace.id);
-
-        if (legacyError) {
-          console.warn('Legacy features table query failed:', legacyError);
-        } else {
-          (legacyFeatures || []).forEach(f => {
-            featuresMap.set(f.variant_id, f as VariantFeatures);
-          });
-          console.log(`[useCopyAnalytics] Loaded ${legacyFeatures?.length || 0} legacy features`);
-        }
+      const engagementIds = (engagements || []).map(e => e.id);
+      if (engagementIds.length === 0) {
+        setSubjectLines([]);
+        setBodyCopy([]);
+        setDiscoveredPatterns([]);
+        setLoading(false);
+        return;
       }
 
-      // Fetch discovered patterns from copy_patterns table
-      const { data: dbPatterns, error: patternsError } = await supabase
+      // Fetch campaigns for these engagements
+      const { data: campaigns } = await supabase
+        .from('campaigns')
+        .select('id, name')
+        .in('engagement_id', engagementIds);
+
+      const campaignIds = (campaigns || []).map(c => c.id);
+      const campaignMap = new Map<string, string>();
+      (campaigns || []).forEach(c => campaignMap.set(c.id, c.name));
+
+      if (campaignIds.length === 0) {
+        setSubjectLines([]);
+        setBodyCopy([]);
+        setDiscoveredPatterns([]);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch variants for these campaigns
+      const { data: variantsData } = await supabase
+        .from('campaign_variants')
+        .select('*')
+        .in('campaign_id', campaignIds);
+
+      const variants: UnifiedVariant[] = (variantsData || []).map(v => ({
+        id: v.id,
+        name: v.subject_line || 'Variant',
+        subject_line: v.subject_line,
+        body_preview: v.body_preview,
+        body_plain: v.body_plain,
+        campaign_id: v.campaign_id,
+        campaign_name: campaignMap.get(v.campaign_id) || 'Unknown',
+        total_sent: v.total_sent || 0,
+        total_opened: v.total_opened || 0,
+        total_replied: v.total_replied || 0,
+        positive_replies: v.positive_replies || 0,
+      }));
+
+      // Fetch extracted features
+      const variantIds = variants.map(v => v.id);
+      const { data: featuresData } = await supabase
+        .from('campaign_variant_features')
+        .select('*')
+        .in('variant_id', variantIds);
+
+      const featuresMap = new Map<string, VariantFeatures>();
+      (featuresData || []).forEach(f => {
+        featuresMap.set(f.variant_id, f as VariantFeatures);
+      });
+
+      // Fetch discovered patterns
+      const { data: dbPatterns } = await supabase
         .from('copy_patterns')
         .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .order('reply_rate', { ascending: false });
-
-      if (patternsError) {
-        console.warn('Patterns table query failed:', patternsError);
-      }
+        .in('engagement_id', engagementIds)
+        .order('avg_reply_rate', { ascending: false });
 
       // Transform DB patterns to PatternAnalysis
       const discovered: PatternAnalysis[] = (dbPatterns || []).map(p => ({
-        pattern: p.pattern_name,
-        description: p.pattern_description || '',
-        sample_size: p.sample_size,
-        avg_reply_rate: p.reply_rate || 0,
-        avg_positive_rate: p.positive_rate || 0,
-        significance: (p.confidence_level as 'low' | 'medium' | 'high') || 'low',
-        comparison_to_baseline: p.reply_rate_lift || 0,
+        pattern: p.pattern_type,
+        description: p.pattern_value || '',
+        sample_size: p.total_sent || 0,
+        avg_reply_rate: p.avg_reply_rate || 0,
+        avg_positive_rate: 0,
+        significance: p.is_significant ? 'high' : 'low',
+        comparison_to_baseline: p.lift_vs_baseline || 0,
         p_value: p.p_value || undefined,
-        confidence_interval_lower: p.confidence_interval_lower || undefined,
-        confidence_interval_upper: p.confidence_interval_upper || undefined,
-        is_validated: p.is_validated || false,
+        confidence_interval_lower: p.reply_rate_ci_lower || undefined,
+        confidence_interval_upper: p.reply_rate_ci_upper || undefined,
+        is_validated: p.is_significant || false,
       }));
       setDiscoveredPatterns(discovered);
 
-      // Fetch metrics from PLATFORM-SPECIFIC tables
-      const smartleadCampaignIds = (smartleadVariantsRes.data || []).map(v => v.campaign_id);
-      const replyioCampaignIds = (replyioVariantsRes.data || []).map(v => v.campaign_id);
-
-      const [smartleadMetricsRes, replyioMetricsRes] = await Promise.all([
-        smartleadCampaignIds.length > 0
-          ? supabase.from('smartlead_daily_metrics')
-              .select('campaign_id, variant_id, sent_count, opened_count, replied_count, positive_reply_count')
-              .eq('workspace_id', currentWorkspace.id)
-          : Promise.resolve({ data: [], error: null }),
-        replyioCampaignIds.length > 0
-          ? supabase.from('replyio_daily_metrics')
-              .select('campaign_id, variant_id, sent_count, opened_count, replied_count, positive_reply_count')
-              .eq('workspace_id', currentWorkspace.id)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-
-      // Aggregate campaign-level metrics (variant_id is null in most cases)
-      const campaignMetricsMap = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
-      
-      [...(smartleadMetricsRes.data || []), ...(replyioMetricsRes.data || [])].forEach(m => {
-        if (!m.campaign_id) return;
-        const existing = campaignMetricsMap.get(m.campaign_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
-        campaignMetricsMap.set(m.campaign_id, {
-          sent: existing.sent + (m.sent_count || 0),
-          opened: existing.opened + (m.opened_count || 0),
-          replied: existing.replied + (m.replied_count || 0),
-          positive: existing.positive + (m.positive_reply_count || 0),
-        });
-      });
-
-      // Count variants per campaign for metric distribution
-      const variantCountPerCampaign = new Map<string, number>();
-      variants.forEach(v => {
-        variantCountPerCampaign.set(v.campaign_id, (variantCountPerCampaign.get(v.campaign_id) || 0) + 1);
-      });
-
-      // Process subject lines with extracted features
+      // Process subject lines
       const subjectAnalysis: SubjectLineAnalysis[] = variants
         .filter(v => v.subject_line)
         .map(v => {
-          // Use campaign-level metrics distributed across variants
-          const campaignM = campaignMetricsMap.get(v.campaign_id);
-          const variantCount = variantCountPerCampaign.get(v.campaign_id) || 1;
-          
-          const m = campaignM 
-            ? {
-                sent: Math.round(campaignM.sent / variantCount),
-                opened: Math.round(campaignM.opened / variantCount),
-                replied: Math.round(campaignM.replied / variantCount),
-                positive: Math.round(campaignM.positive / variantCount),
-              }
-            : { sent: 0, opened: 0, replied: 0, positive: 0 };
-
           const subjectLine = v.subject_line || '';
           const feat = featuresMap.get(v.id);
           
-          // Use extracted features if available, otherwise fallback
-          const charCount = feat?.subject_char_count ?? subjectLine.length;
+          const charCount = feat?.subject_length ?? subjectLine.length;
           const wordCount = feat?.subject_word_count ?? subjectLine.split(/\s+/).filter(Boolean).length;
-          const hasQuestion = feat?.subject_is_question ?? subjectLine.includes('?');
+          const hasQuestion = subjectLine.includes('?');
           const hasNumber = feat?.subject_has_number ?? /\d/.test(subjectLine);
           const hasEmoji = feat?.subject_has_emoji ?? /[\u{1F600}-\u{1F64F}]/u.test(subjectLine);
-          const spamScore = feat?.subject_spam_score ?? 0;
-          const capStyle = feat?.subject_capitalization_style ?? 'normal';
+          const capStyle = feat?.subject_capitalization ?? 'normal';
           
           const persType = detectPersonalizationType(subjectLine);
           
@@ -435,17 +325,17 @@ export function useCopyAnalytics(): CopyAnalyticsData {
             campaign_name: v.campaign_name,
             variant_name: v.name,
             subject_line: subjectLine,
-            platform: v.platform,
+            platform: 'email',
             
-            sent_count: m.sent,
-            open_count: m.opened,
-            reply_count: m.replied,
-            positive_count: m.positive,
+            sent_count: v.total_sent,
+            open_count: v.total_opened,
+            reply_count: v.total_replied,
+            positive_count: v.positive_replies,
             meeting_count: 0,
             
-            open_rate: m.sent > 0 ? (m.opened / m.sent) * 100 : 0,
-            reply_rate: m.sent > 0 ? (m.replied / m.sent) * 100 : 0,
-            positive_rate: m.sent > 0 ? (m.positive / m.sent) * 100 : 0,
+            open_rate: v.total_sent > 0 ? (v.total_opened / v.total_sent) * 100 : 0,
+            reply_rate: v.total_sent > 0 ? (v.total_replied / v.total_sent) * 100 : 0,
+            positive_rate: v.total_sent > 0 ? (v.positive_replies / v.total_sent) * 100 : 0,
             
             personalization_type: persType,
             format_type: detectFormatType(subjectLine),
@@ -455,247 +345,190 @@ export function useCopyAnalytics(): CopyAnalyticsData {
             has_question: hasQuestion,
             has_number: hasNumber,
             has_emoji: hasEmoji,
-            spam_score: spamScore,
+            spam_score: 0,
             capitalization_style: capStyle,
             
-            confidence_level: getConfidenceLevel(m.sent),
+            confidence_level: getConfidenceLevel(v.total_sent),
           };
-        });
+        })
+        .sort((a, b) => b.reply_rate - a.reply_rate);
 
       setSubjectLines(subjectAnalysis);
 
-      // Process body copy with extracted features
+      // Process body copy
       const bodyAnalysis: BodyCopyAnalysis[] = variants
-        .filter(v => v.body_preview || v.email_body)
+        .filter(v => v.body_plain || v.body_preview)
         .map(v => {
-          // Use campaign-level metrics distributed across variants
-          const campaignM = campaignMetricsMap.get(v.campaign_id);
-          const variantCount = variantCountPerCampaign.get(v.campaign_id) || 1;
-          
-          const m = campaignM 
-            ? {
-                sent: Math.round(campaignM.sent / variantCount),
-                opened: Math.round(campaignM.opened / variantCount),
-                replied: Math.round(campaignM.replied / variantCount),
-                positive: Math.round(campaignM.positive / variantCount),
-              }
-            : { sent: 0, opened: 0, replied: 0, positive: 0 };
-            
-          const body = v.email_body || v.body_preview || '';
-          const vars = Array.isArray(v.personalization_vars) 
-            ? (v.personalization_vars as string[]) 
-            : [];
+          const body = v.body_plain || v.body_preview || '';
           const feat = featuresMap.get(v.id);
           
-          // Use extracted features if available
-          const wordCount = feat?.body_word_count ?? v.word_count ?? body.split(/\s+/).filter(Boolean).length;
-          const sentenceCount = feat?.body_sentence_count ?? 0;
-          const paragraphCount = feat?.body_paragraph_count ?? 0;
-          const bulletCount = feat?.body_bullet_point_count ?? (body.match(/^[\s]*[-•*]\s/gm)?.length || 0);
-          const hasLink = feat?.body_has_link ?? /https?:\/\/|www\./i.test(body);
-          const hasQuestion = feat?.body_question_count ? feat.body_question_count > 0 : body.includes('?');
+          const wordCount = feat?.body_word_count ?? body.split(/\s+/).filter(Boolean).length;
+          const sentenceCount = feat?.body_sentence_count ?? (body.match(/[.!?]+/g) || []).length;
+          const paragraphCount = feat?.body_paragraph_count ?? (body.split(/\n\n+/).length);
+          const bulletCount = feat?.body_bullet_count ?? 0;
+          const hasLink = (feat?.body_link_count ?? 0) > 0 || body.includes('http');
+          const hasQuestion = (feat?.body_question_count ?? 0) > 0 || body.includes('?');
           const ctaType = (feat?.body_cta_type as any) ?? detectCTAType(body);
-          const ctaPosition = feat?.body_cta_position ?? 'unknown';
-          const bodyTone = feat?.body_tone ?? 'professional';
-          const readingGrade = feat?.body_reading_grade ?? 0;
-          
-          // Calculate personalization depth from features or vars
-          const persDepth = feat?.body_personalization_density 
-            ? Math.min(4, Math.floor(feat.body_personalization_density * 10)) as 0 | 1 | 2 | 3 | 4
-            : detectPersonalizationDepth(vars);
+          const ctaPosition = feat?.body_cta_position ?? 'end';
+          const tone = feat?.tone ?? 'professional';
+          const readingGrade = feat?.body_reading_grade ?? 8;
           
           return {
             variant_id: v.id,
             campaign_name: v.campaign_name,
             subject_line: v.subject_line || '',
-            body_preview: v.body_preview || body.substring(0, 200),
-            email_body: v.email_body,
-            platform: v.platform,
+            body_preview: v.body_preview || '',
+            email_body: v.body_plain,
+            platform: 'email',
             
-            sent_count: m.sent,
-            reply_count: m.replied,
-            positive_count: m.positive,
-            reply_rate: m.sent > 0 ? (m.replied / m.sent) * 100 : 0,
-            positive_rate: m.sent > 0 ? (m.positive / m.sent) * 100 : 0,
+            sent_count: v.total_sent,
+            reply_count: v.total_replied,
+            positive_count: v.positive_replies,
+            reply_rate: v.total_sent > 0 ? (v.total_replied / v.total_sent) * 100 : 0,
+            positive_rate: v.total_sent > 0 ? (v.positive_replies / v.total_sent) * 100 : 0,
             
             word_count: wordCount,
-            personalization_depth: persDepth,
-            personalization_vars: feat?.body_personalization_types || vars,
+            personalization_depth: detectPersonalizationDepth([]),
+            personalization_vars: [],
             has_link: hasLink,
             has_question: hasQuestion,
             has_cta: ctaType !== 'none',
             cta_type: ctaType,
             cta_position: ctaPosition,
-            body_tone: bodyTone,
+            body_tone: tone,
             reading_grade: readingGrade,
             sentence_count: sentenceCount,
             paragraph_count: paragraphCount,
             bullet_count: bulletCount,
             
-            confidence_level: getConfidenceLevel(m.sent),
+            confidence_level: getConfidenceLevel(v.total_sent),
           };
-        });
+        })
+        .sort((a, b) => b.reply_rate - a.reply_rate);
 
       setBodyCopy(bodyAnalysis);
     } catch (err) {
       console.error('Error fetching copy analytics:', err);
-      setError('Failed to load copy analytics');
+      setError(err instanceof Error ? err.message : 'Failed to load copy analytics');
     } finally {
       setLoading(false);
     }
   };
 
-  // Calculate pattern analysis (fallback when no discovered patterns)
-  const patterns = useMemo((): PatternAnalysis[] => {
-    // If we have discovered patterns from DB, prioritize those
-    if (discoveredPatterns.length > 0) {
-      return discoveredPatterns;
-    }
-    
-    if (subjectLines.length === 0) return [];
+  // Compute patterns from data
+  const patterns = useMemo(() => {
+    const patternMap = new Map<string, { 
+      samples: SubjectLineAnalysis[]; 
+      description: string;
+    }>();
 
-    const baseline = subjectLines.reduce((sum, s) => sum + s.reply_rate, 0) / subjectLines.length;
-    const computedPatterns: PatternAnalysis[] = [];
-
-    // Personalization patterns
-    const personalizationGroups = subjectLines.reduce((acc, s) => {
-      const key = s.personalization_type;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(s);
-      return acc;
-    }, {} as Record<PersonalizationType, SubjectLineAnalysis[]>);
-
-    Object.entries(personalizationGroups).forEach(([type, items]) => {
-      const totalSent = items.reduce((sum, i) => sum + i.sent_count, 0);
-      const avgReply = totalSent > 0 
-        ? items.reduce((sum, i) => sum + i.reply_rate * i.sent_count, 0) / totalSent 
-        : 0;
-      const avgPositive = totalSent > 0
-        ? items.reduce((sum, i) => sum + i.positive_rate * i.sent_count, 0) / totalSent
-        : 0;
-
-      computedPatterns.push({
-        pattern: `Contains {{${type}}}`,
-        description: `Subject lines with ${type.replace('_', ' ')} personalization`,
-        sample_size: totalSent,
-        avg_reply_rate: avgReply,
-        avg_positive_rate: avgPositive,
-        significance: totalSent >= 500 ? 'high' : totalSent >= 200 ? 'medium' : 'low',
-        comparison_to_baseline: baseline > 0 ? ((avgReply - baseline) / baseline) * 100 : 0,
-      });
+    // Group by personalization type
+    subjectLines.forEach(sl => {
+      const key = `personalization_${sl.personalization_type}`;
+      if (!patternMap.has(key)) {
+        patternMap.set(key, { samples: [], description: `Personalization: ${sl.personalization_type}` });
+      }
+      patternMap.get(key)!.samples.push(sl);
     });
 
-    // Format patterns
-    const formatGroups = subjectLines.reduce((acc, s) => {
-      const key = s.format_type;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(s);
-      return acc;
-    }, {} as Record<FormatType, SubjectLineAnalysis[]>);
-
-    Object.entries(formatGroups).forEach(([type, items]) => {
-      const totalSent = items.reduce((sum, i) => sum + i.sent_count, 0);
-      const avgReply = totalSent > 0
-        ? items.reduce((sum, i) => sum + i.reply_rate * i.sent_count, 0) / totalSent
-        : 0;
-      const avgPositive = totalSent > 0
-        ? items.reduce((sum, i) => sum + i.positive_rate * i.sent_count, 0) / totalSent
-        : 0;
-
-      computedPatterns.push({
-        pattern: `${type.replace('_', ' ')} format`,
-        description: `Subject lines using ${type.replace('_', ' ')} format`,
-        sample_size: totalSent,
-        avg_reply_rate: avgReply,
-        avg_positive_rate: avgPositive,
-        significance: totalSent >= 500 ? 'high' : totalSent >= 200 ? 'medium' : 'low',
-        comparison_to_baseline: baseline > 0 ? ((avgReply - baseline) / baseline) * 100 : 0,
-      });
+    // Group by format type
+    subjectLines.forEach(sl => {
+      const key = `format_${sl.format_type}`;
+      if (!patternMap.has(key)) {
+        patternMap.set(key, { samples: [], description: `Format: ${sl.format_type}` });
+      }
+      patternMap.get(key)!.samples.push(sl);
     });
 
-    // Length patterns
-    const lengthGroups = subjectLines.reduce((acc, s) => {
-      const key = s.length_category;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(s);
-      return acc;
-    }, {} as Record<LengthCategory, SubjectLineAnalysis[]>);
-
-    Object.entries(lengthGroups).forEach(([type, items]) => {
-      const totalSent = items.reduce((sum, i) => sum + i.sent_count, 0);
-      const avgReply = totalSent > 0
-        ? items.reduce((sum, i) => sum + i.reply_rate * i.sent_count, 0) / totalSent
-        : 0;
-      const avgPositive = totalSent > 0
-        ? items.reduce((sum, i) => sum + i.positive_rate * i.sent_count, 0) / totalSent
-        : 0;
-
-      const charRange = type === 'very_short' ? '1-20' : type === 'short' ? '21-40' : type === 'medium' ? '41-60' : '61+';
-
-      computedPatterns.push({
-        pattern: `Length ${charRange} chars`,
-        description: `Subject lines with ${type.replace('_', ' ')} length`,
-        sample_size: totalSent,
-        avg_reply_rate: avgReply,
-        avg_positive_rate: avgPositive,
-        significance: totalSent >= 500 ? 'high' : totalSent >= 200 ? 'medium' : 'low',
-        comparison_to_baseline: baseline > 0 ? ((avgReply - baseline) / baseline) * 100 : 0,
-      });
+    // Group by length category
+    subjectLines.forEach(sl => {
+      const key = `length_${sl.length_category}`;
+      if (!patternMap.has(key)) {
+        patternMap.set(key, { samples: [], description: `Length: ${sl.length_category}` });
+      }
+      patternMap.get(key)!.samples.push(sl);
     });
 
-    return computedPatterns.sort((a, b) => b.avg_reply_rate - a.avg_reply_rate);
-  }, [subjectLines, discoveredPatterns]);
+    const baselineReplyRate = subjectLines.length > 0
+      ? subjectLines.reduce((sum, sl) => sum + sl.reply_rate, 0) / subjectLines.length
+      : 0;
+
+    return Array.from(patternMap.entries())
+      .map(([pattern, { samples, description }]) => {
+        const totalSent = samples.reduce((sum, s) => sum + s.sent_count, 0);
+        const avgReplyRate = samples.length > 0
+          ? samples.reduce((sum, s) => sum + s.reply_rate, 0) / samples.length
+          : 0;
+        const avgPositiveRate = samples.length > 0
+          ? samples.reduce((sum, s) => sum + s.positive_rate, 0) / samples.length
+          : 0;
+
+        return {
+          pattern,
+          description,
+          sample_size: totalSent,
+          avg_reply_rate: avgReplyRate,
+          avg_positive_rate: avgPositiveRate,
+          significance: getConfidenceLevel(totalSent),
+          comparison_to_baseline: baselineReplyRate > 0 
+            ? ((avgReplyRate - baselineReplyRate) / baselineReplyRate) * 100
+            : 0,
+        };
+      })
+      .filter(p => p.sample_size > 0)
+      .sort((a, b) => b.avg_reply_rate - a.avg_reply_rate);
+  }, [subjectLines]);
 
   // Top performers
   const topPerformers = useMemo(() => {
-    return [...subjectLines]
-      .filter(s => s.sent_count >= 100)
-      .sort((a, b) => b.reply_rate - a.reply_rate)
-      .slice(0, 5);
+    return subjectLines
+      .filter(sl => sl.sent_count >= 100)
+      .slice(0, 10);
   }, [subjectLines]);
 
   // Generate recommendations
   const recommendations = useMemo(() => {
     const recs: string[] = [];
     
-    if (patterns.length === 0) return recs;
+    if (subjectLines.length === 0) {
+      return ['No email variants found. Connect your email platform to get copy insights.'];
+    }
 
-    // Find best personalization
-    const personalizationPatterns = patterns.filter(p => p.pattern.includes('{{'));
-    if (personalizationPatterns.length > 0) {
-      const best = personalizationPatterns.sort((a, b) => b.avg_reply_rate - a.avg_reply_rate)[0];
-      if (best.significance !== 'low') {
-        recs.push(`${best.pattern} outperforms other personalization types with ${best.avg_reply_rate.toFixed(1)}% reply rate`);
+    // Find best performing patterns
+    const topPattern = patterns[0];
+    if (topPattern && topPattern.comparison_to_baseline > 10) {
+      recs.push(`"${topPattern.description}" is outperforming baseline by ${topPattern.comparison_to_baseline.toFixed(1)}%`);
+    }
+
+    // Check personalization impact
+    const personalized = subjectLines.filter(sl => sl.personalization_type !== 'none');
+    const nonPersonalized = subjectLines.filter(sl => sl.personalization_type === 'none');
+    if (personalized.length > 0 && nonPersonalized.length > 0) {
+      const persReplyRate = personalized.reduce((sum, s) => sum + s.reply_rate, 0) / personalized.length;
+      const nonPersReplyRate = nonPersonalized.reduce((sum, s) => sum + s.reply_rate, 0) / nonPersonalized.length;
+      if (persReplyRate > nonPersReplyRate * 1.1) {
+        recs.push(`Personalized subject lines are getting ${((persReplyRate / nonPersReplyRate - 1) * 100).toFixed(0)}% higher reply rates`);
       }
     }
 
-    // Find best format
-    const formatPatterns = patterns.filter(p => p.pattern.includes('format'));
-    if (formatPatterns.length > 0) {
-      const best = formatPatterns.sort((a, b) => b.avg_reply_rate - a.avg_reply_rate)[0];
-      if (best.significance !== 'low') {
-        recs.push(`${best.pattern} achieves ${best.comparison_to_baseline > 0 ? '+' : ''}${best.comparison_to_baseline.toFixed(0)}% vs baseline`);
+    // Check question format
+    const questions = subjectLines.filter(sl => sl.has_question);
+    if (questions.length > 0) {
+      const avgQuestionReply = questions.reduce((sum, s) => sum + s.reply_rate, 0) / questions.length;
+      const avgNonQuestionReply = subjectLines.filter(s => !s.has_question).length > 0
+        ? subjectLines.filter(s => !s.has_question).reduce((sum, s) => sum + s.reply_rate, 0) / subjectLines.filter(s => !s.has_question).length
+        : 0;
+      if (avgQuestionReply > avgNonQuestionReply * 1.1) {
+        recs.push('Subject lines with questions tend to get higher reply rates');
       }
     }
 
-    // Length recommendation
-    const lengthPatterns = patterns.filter(p => p.pattern.includes('Length'));
-    if (lengthPatterns.length > 0) {
-      const best = lengthPatterns.sort((a, b) => b.avg_reply_rate - a.avg_reply_rate)[0];
-      if (best.significance !== 'low') {
-        recs.push(`${best.pattern} performs best for subject line length`);
-      }
-    }
-
-    // Add validated pattern recommendations
-    const validatedPatterns = discoveredPatterns.filter(p => p.is_validated && p.significance === 'high');
-    if (validatedPatterns.length > 0) {
-      const top = validatedPatterns[0];
-      recs.push(`✓ Validated: "${top.pattern}" shows ${top.avg_reply_rate.toFixed(1)}% reply rate (statistically significant)`);
+    if (recs.length === 0) {
+      recs.push('Continue testing different subject line formats and personalization strategies');
     }
 
     return recs;
-  }, [patterns, discoveredPatterns]);
+  }, [subjectLines, patterns]);
 
   return {
     subjectLines,
@@ -706,5 +539,15 @@ export function useCopyAnalytics(): CopyAnalyticsData {
     recommendations,
     loading,
     error,
+  };
+}
+
+// Hook for copy insights with AI chat
+export function useCopyInsightsData() {
+  const analytics = useCopyAnalytics();
+  
+  return {
+    ...analytics,
+    hasData: analytics.subjectLines.length > 0 || analytics.bodyCopy.length > 0,
   };
 }
