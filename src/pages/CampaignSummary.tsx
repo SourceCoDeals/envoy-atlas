@@ -20,17 +20,13 @@ import { CampaignInbox } from '@/components/campaigns/CampaignInbox';
 export default function CampaignSummary() {
   const { campaignId, platform } = useParams<{ campaignId: string; platform?: string }>();
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const validPlatform = platform === 'smartlead' || platform === 'replyio' ? platform : undefined;
   const { data, loading, error, refetch } = useCampaignSummary(campaignId, validPlatform);
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
-  if (authLoading || !user) {
+  if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

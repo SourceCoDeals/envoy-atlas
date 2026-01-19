@@ -45,9 +45,7 @@ export default function DataInsights() {
   const [dateRange, setDateRange] = useState<DateRangeOption>('last_month');
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>('all');
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate('/auth');
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
   // Build benchmarks from local constants
   const benchmarks = useMemo(() => {

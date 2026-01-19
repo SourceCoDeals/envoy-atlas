@@ -152,11 +152,7 @@ export default function CopyInsights() {
     }
   }, [currentWorkspace?.id]);
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
   // Calculate baseline reply rate
   const baselineReplyRate = useMemo(() => {
@@ -165,7 +161,7 @@ export default function CopyInsights() {
     return totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
   }, [subjectLines]);
 
-  if (authLoading || !user) {
+  if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

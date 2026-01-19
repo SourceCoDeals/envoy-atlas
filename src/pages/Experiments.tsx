@@ -33,14 +33,12 @@ interface ExperimentData {
 
 export default function Experiments() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [experiments, setExperiments] = useState<ExperimentData[]>([]);
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate('/auth');
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
   useEffect(() => {
     if (currentWorkspace?.id) fetchExperiments();
@@ -137,7 +135,7 @@ export default function Experiments() {
     );
   }
 
-  if (!user) return null;
+  // Auth not required - public read access enabled
 
   return (
     <DashboardLayout>

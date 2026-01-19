@@ -43,7 +43,7 @@ import {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const { loading: workspaceLoading } = useWorkspace();
   const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('last30');
   const dateRange = getDateRange(dateRangeOption);
@@ -54,12 +54,6 @@ export default function Dashboard() {
     await triggerSync();
     refetch();
   };
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
 
   // Calculate system health with new 4-component model
   const healthData = useMemo(() => calculateSystemHealth({
@@ -175,10 +169,7 @@ export default function Dashboard() {
     );
   }
 
-  if (!user) return null;
-
-  // Note: SourceCo workspace is auto-created, but if still loading or no workspaces yet, show loading
-  // Don't show CreateWorkspace screen as the workspace is auto-provisioned
+  // Note: SourceCo workspace is auto-created for all visitors (auth not required)
 
 
   return (

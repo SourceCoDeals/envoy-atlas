@@ -23,7 +23,7 @@ interface Engagement {
 
 export default function Campaigns() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { campaigns, loading, error, refetch } = useCampaigns();
   const { health: dataHealth } = useDataHealth();
@@ -55,13 +55,9 @@ export default function Campaigns() {
     toast.info('Refreshed campaign data. For a full sync, go to Settings → Connections.');
   };
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
-  if (authLoading || !user) {
+  if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

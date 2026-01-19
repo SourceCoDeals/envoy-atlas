@@ -3734,6 +3734,19 @@ export type Database = {
         Args: { connection_id: string }
         Returns: string
       }
+      get_default_workspace: {
+        Args: never
+        Returns: {
+          client_type: string
+          created_at: string
+          id: string
+          name: string
+          settings: Json
+          slug: string
+          status: string
+          updated_at: string
+        }[]
+      }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]

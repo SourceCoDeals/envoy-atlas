@@ -44,6 +44,25 @@ async function ensureSourceCoWorkspace(userId: string): Promise<void> {
   }
 }
 
+// Fetch default workspace for anonymous users
+async function fetchDefaultWorkspace(): Promise<ClientWithRole | null> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('slug', 'sourceco')
+    .single();
+
+  if (error || !data) {
+    console.error('Error fetching default workspace:', error);
+    return null;
+  }
+
+  return {
+    ...data,
+    role: 'viewer',
+  };
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [workspaces, setWorkspaces] = useState<ClientWithRole[]>([]);
@@ -51,52 +70,63 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchWorkspaces = async () => {
-    if (!user) {
-      setWorkspaces([]);
-      setCurrentWorkspace(null);
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     try {
-      // Ensure user has SourceCo workspace
-      await ensureSourceCoWorkspace(user.id);
+      // If user is authenticated, fetch their workspaces
+      if (user) {
+        // Ensure user has SourceCo workspace
+        await ensureSourceCoWorkspace(user.id);
 
-      const { data: members, error } = await supabase
-        .from('client_members')
-        .select(`
-          role,
-          client:clients(*)
-        `)
-        .eq('user_id', user.id);
+        const { data: members, error } = await supabase
+          .from('client_members')
+          .select(`
+            role,
+            client:clients(*)
+          `)
+          .eq('user_id', user.id);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      const clientsWithRoles: ClientWithRole[] = (members || [])
-        .filter(m => m.client)
-        .map(m => ({
-          ...(m.client as Client),
-          role: m.role || 'viewer',
-        }));
+        const clientsWithRoles: ClientWithRole[] = (members || [])
+          .filter(m => m.client)
+          .map(m => ({
+            ...(m.client as Client),
+            role: m.role || 'viewer',
+          }));
 
-      setWorkspaces(clientsWithRoles);
+        setWorkspaces(clientsWithRoles);
 
-      // Set current workspace from localStorage or first available
-      const storedWorkspaceId = localStorage.getItem('currentWorkspaceId');
-      const storedWorkspace = clientsWithRoles.find(w => w.id === storedWorkspaceId);
-      
-      if (storedWorkspace) {
-        setCurrentWorkspace(storedWorkspace);
+        // Set current workspace from localStorage or first available
+        const storedWorkspaceId = localStorage.getItem('currentWorkspaceId');
+        const storedWorkspace = clientsWithRoles.find(w => w.id === storedWorkspaceId);
+        
+        if (storedWorkspace) {
+          setCurrentWorkspace(storedWorkspace);
+        } else {
+          const firstWorkspace = clientsWithRoles[0];
+          if (firstWorkspace) {
+            setCurrentWorkspace(firstWorkspace);
+            localStorage.setItem('currentWorkspaceId', firstWorkspace.id);
+          }
+        }
       } else {
-        const firstWorkspace = clientsWithRoles[0];
-        if (firstWorkspace) {
-          setCurrentWorkspace(firstWorkspace);
-          localStorage.setItem('currentWorkspaceId', firstWorkspace.id);
+        // For anonymous users, fetch the default SourceCo workspace
+        const defaultWorkspace = await fetchDefaultWorkspace();
+        if (defaultWorkspace) {
+          setWorkspaces([defaultWorkspace]);
+          setCurrentWorkspace(defaultWorkspace);
         }
       }
     } catch (err) {
       console.error('Error fetching clients:', err);
+      // Fallback for anonymous users on error
+      if (!user) {
+        const defaultWorkspace = await fetchDefaultWorkspace();
+        if (defaultWorkspace) {
+          setWorkspaces([defaultWorkspace]);
+          setCurrentWorkspace(defaultWorkspace);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -116,6 +146,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   };
 
   const createWorkspace = async (name: string): Promise<{ error: Error | null; workspace?: Client }> => {
+    if (!user) {
+      return { error: new Error('Must be logged in to create a workspace') };
+    }
+    
     try {
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       

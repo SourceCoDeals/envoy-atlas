@@ -26,7 +26,7 @@ interface InboxItem {
 
 export default function Inbox() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { syncing, triggerSync } = useSyncData();
   const [items, setItems] = useState<InboxItem[]>([]);
@@ -38,9 +38,7 @@ export default function Inbox() {
     fetchInboxItems();
   };
 
-  useEffect(() => {
-    if (!authLoading && !user) navigate('/auth');
-  }, [user, authLoading, navigate]);
+  // Auth not required - public read access enabled
 
   useEffect(() => {
     if (currentWorkspace?.id) fetchInboxItems();
@@ -130,7 +128,7 @@ export default function Inbox() {
     );
   }
 
-  if (!user) return null;
+  // Auth not required - public read access enabled
 
   return (
     <DashboardLayout>
