@@ -28,7 +28,15 @@ export default function Campaigns() {
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { campaigns, loading, error, refetch } = useCampaigns();
-  const { syncing, progress, elapsedTime, triggerSync } = useSyncData();
+  const { 
+    syncing, 
+    progress, 
+    elapsedTime, 
+    staleSyncs,
+    triggerSync, 
+    triggerPlatformSync,
+    resumeStaleSyncs,
+  } = useSyncData();
   const { health: dataHealth } = useDataHealth();
   const [tierFilter, setTierFilter] = useState('all');
   const [engagementFilter, setEngagementFilter] = useState('all');
@@ -122,7 +130,10 @@ export default function Campaigns() {
         <SyncProgressBar 
           progress={progress} 
           isActive={syncing} 
-          elapsedTime={elapsedTime} 
+          elapsedTime={elapsedTime}
+          staleSyncs={staleSyncs}
+          onResume={resumeStaleSyncs}
+          onPlatformSync={triggerPlatformSync}
         />
 
         {loading ? (

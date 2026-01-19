@@ -16,8 +16,10 @@ const REPLYIO_V3_URL = 'https://api.reply.io/v3';
 // Reply.io Rate Limit: 10 seconds between API calls (strict!), 15,000 requests/month
 const RATE_LIMIT_DELAY_LIST = 3000;
 const RATE_LIMIT_DELAY_STATS = 10500;
-const TIME_BUDGET_MS = 50000;
+// Increased from 50s to 120s for more processing per batch
+const TIME_BUDGET_MS = 120000;
 const MAX_BATCHES = 250;
+const CONTINUATION_RETRIES = 3;
 
 function mapSequenceStatus(status: string): string {
   const statusMap: Record<string, string> = {
@@ -109,6 +111,7 @@ async function replyioRequest(
   }
 }
 
+// Self-continuation for next batch with exponential backoff retry
 async function triggerNextBatch(
   supabaseUrl: string,
   serviceKey: string,
@@ -119,28 +122,46 @@ async function triggerNextBatch(
   phase: string
 ) {
   console.log(`Triggering next Reply.io batch (${batchNumber}, phase=${phase}) via self-continuation...`);
-  try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/replyio-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({
-        client_id: clientId,
-        engagement_id: engagementId,
-        data_source_id: dataSourceId,
-        reset: false,
-        batch_number: batchNumber,
-        auto_continue: true,
-        internal_continuation: true,
-        current_phase: phase,
-      }),
-    });
-    console.log(`Next batch triggered, status: ${response.status}`);
-  } catch (error) {
-    console.error('Failed to trigger next batch:', error);
+  
+  for (let attempt = 0; attempt < CONTINUATION_RETRIES; attempt++) {
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/replyio-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          engagement_id: engagementId,
+          data_source_id: dataSourceId,
+          reset: false,
+          batch_number: batchNumber,
+          auto_continue: true,
+          internal_continuation: true,
+          current_phase: phase,
+        }),
+      });
+      
+      if (response.ok) {
+        console.log(`Next batch triggered successfully, status: ${response.status}`);
+        return;
+      }
+      
+      console.warn(`Continuation attempt ${attempt + 1} failed with status: ${response.status}`);
+    } catch (error) {
+      console.error(`Continuation attempt ${attempt + 1} error:`, error);
+    }
+    
+    // Exponential backoff: 1s, 2s, 4s
+    if (attempt < CONTINUATION_RETRIES - 1) {
+      const backoffMs = 1000 * Math.pow(2, attempt);
+      console.log(`Retrying in ${backoffMs}ms...`);
+      await delay(backoffMs);
+    }
   }
+  
+  console.error(`Failed to trigger next batch after ${CONTINUATION_RETRIES} attempts`);
 }
 
 async function triggerAnalysis(

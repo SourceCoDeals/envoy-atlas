@@ -15,8 +15,10 @@ const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 // SmartLead Rate Limit: 10 requests per 2 seconds = 5 req/s
 // Using 250ms delay = 4 req/s to stay safely within limits
 const RATE_LIMIT_DELAY = 250;
-const TIME_BUDGET_MS = 55000;
+// Increased from 55s to 120s for more processing per batch
+const TIME_BUDGET_MS = 120000;
 const MAX_BATCHES = 100;
+const CONTINUATION_RETRIES = 3;
 
 interface SmartleadCampaign {
   id: number;
@@ -153,7 +155,7 @@ function extractDomain(email: string): string | null {
   return domain;
 }
 
-// Self-continuation for next batch
+// Self-continuation for next batch with exponential backoff retry
 async function triggerNextBatch(
   supabaseUrl: string,
   authToken: string,
@@ -164,27 +166,45 @@ async function triggerNextBatch(
   phase: string
 ) {
   console.log(`Triggering next batch (${batchNumber}, phase=${phase}) via self-continuation...`);
-  try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authToken,
-      },
-      body: JSON.stringify({
-        client_id: clientId,
-        engagement_id: engagementId,
-        data_source_id: dataSourceId,
-        reset: false,
-        batch_number: batchNumber,
-        auto_continue: true,
-        current_phase: phase,
-      }),
-    });
-    console.log(`Next batch triggered, status: ${response.status}`);
-  } catch (error) {
-    console.error('Failed to trigger next batch:', error);
+  
+  for (let attempt = 0; attempt < CONTINUATION_RETRIES; attempt++) {
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authToken,
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          engagement_id: engagementId,
+          data_source_id: dataSourceId,
+          reset: false,
+          batch_number: batchNumber,
+          auto_continue: true,
+          current_phase: phase,
+        }),
+      });
+      
+      if (response.ok) {
+        console.log(`Next batch triggered successfully, status: ${response.status}`);
+        return;
+      }
+      
+      console.warn(`Continuation attempt ${attempt + 1} failed with status: ${response.status}`);
+    } catch (error) {
+      console.error(`Continuation attempt ${attempt + 1} error:`, error);
+    }
+    
+    // Exponential backoff: 1s, 2s, 4s
+    if (attempt < CONTINUATION_RETRIES - 1) {
+      const backoffMs = 1000 * Math.pow(2, attempt);
+      console.log(`Retrying in ${backoffMs}ms...`);
+      await delay(backoffMs);
+    }
   }
+  
+  console.error(`Failed to trigger next batch after ${CONTINUATION_RETRIES} attempts`);
 }
 
 // Trigger post-sync analysis
