@@ -15,7 +15,7 @@ import {
   ChevronUp,
   MessageSquare
 } from 'lucide-react';
-import { useCallsWithScores } from '@/hooks/useCallIntelligence';
+import { useCallsWithScores, CallWithScores } from '@/hooks/useCallIntelligence';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { format } from 'date-fns';
 
@@ -26,8 +26,6 @@ function getScoreBadgeVariant(score: number): 'default' | 'secondary' | 'destruc
 }
 
 const quickFilters = [
-  { label: 'High Interest', filter: { minScore: 70 } },
-  { label: 'Needs Coaching', filter: { maxScore: 50 } },
   { label: 'Has Transcript', filter: { hasTranscript: true } },
 ];
 
@@ -156,23 +154,20 @@ export default function CallSearch() {
                                 : 'Unknown date'
                               }
                             </span>
+                            {call.talk_duration && (
+                              <span>{Math.round(call.talk_duration / 60)}min</span>
+                            )}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        {call.import_status && (
-                          <Badge variant="outline">{call.import_status}</Badge>
+                        {call.disposition && (
+                          <Badge variant="outline">{call.disposition}</Badge>
                         )}
                         {call.transcript_text && (
                           <Badge variant="secondary" className="gap-1">
                             <FileText className="h-3 w-3" />
                             Transcribed
-                          </Badge>
-                        )}
-                        {call.composite_score !== null && (
-                          <Badge variant={getScoreBadgeVariant(call.composite_score || 0)}>
-                            <Brain className="h-3 w-3 mr-1" />
-                            {call.composite_score}/100
                           </Badge>
                         )}
                         {expandedCallId === call.id ? (
@@ -186,45 +181,31 @@ export default function CallSearch() {
                     {/* Expanded Content */}
                     {expandedCallId === call.id && (
                       <div className="border-t bg-muted/30 p-4 space-y-4">
-                        {/* Score Breakdown */}
-                        {call.composite_score !== null && (
-                          <div className="space-y-3">
-                            <h4 className="font-medium text-sm">AI Score Breakdown</h4>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                              <div className="bg-card rounded-lg p-3">
-                                <p className="text-xs text-muted-foreground">Seller Interest</p>
-                                <p className="text-lg font-bold">{call.seller_interest_score || '--'}/10</p>
-                              </div>
-                              <div className="bg-card rounded-lg p-3">
-                                <p className="text-xs text-muted-foreground">Objection Handling</p>
-                                <p className="text-lg font-bold">{call.objection_handling_score || '--'}/10</p>
-                              </div>
-                              <div className="bg-card rounded-lg p-3">
-                                <p className="text-xs text-muted-foreground">Rapport Building</p>
-                                <p className="text-lg font-bold">{call.rapport_building_score || '--'}/10</p>
-                              </div>
-                              <div className="bg-card rounded-lg p-3">
-                                <p className="text-xs text-muted-foreground">Next Step Clarity</p>
-                                <p className="text-lg font-bold">{call.next_step_clarity_score || '--'}/10</p>
-                              </div>
-                            </div>
+                        {/* Call Details */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="bg-card rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground">Caller</p>
+                            <p className="text-sm font-medium">{call.caller_name || '--'}</p>
+                          </div>
+                          <div className="bg-card rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground">Outcome</p>
+                            <p className="text-sm font-medium">{call.conversation_outcome || '--'}</p>
+                          </div>
+                          <div className="bg-card rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground">Duration</p>
+                            <p className="text-sm font-medium">{call.talk_duration ? `${Math.round(call.talk_duration / 60)}min` : '--'}</p>
+                          </div>
+                          <div className="bg-card rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground">Disposition</p>
+                            <p className="text-sm font-medium">{call.disposition || '--'}</p>
+                          </div>
+                        </div>
 
-                            {/* Insights */}
-                            <div className="flex flex-wrap gap-2">
-                              {call.opening_type && (
-                                <Badge variant="outline">Opening: {call.opening_type}</Badge>
-                              )}
-                              {call.timeline_to_sell && (
-                                <Badge variant="outline">Timeline: {call.timeline_to_sell}</Badge>
-                              )}
-                            </div>
-
-                            {call.call_summary && (
-                              <div className="bg-card rounded-lg p-3">
-                                <p className="text-xs text-muted-foreground mb-1">Call Summary</p>
-                                <p className="text-sm">{call.call_summary}</p>
-                              </div>
-                            )}
+                        {/* Notes */}
+                        {call.notes && (
+                          <div className="bg-card rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground mb-1">Notes</p>
+                            <p className="text-sm">{call.notes}</p>
                           </div>
                         )}
 
@@ -246,19 +227,11 @@ export default function CallSearch() {
 
                         {/* Actions */}
                         <div className="flex gap-2">
-                          {call.phoneburner_recording_url && (
+                          {call.recording_url && (
                             <Button variant="outline" size="sm" asChild>
-                              <a href={call.phoneburner_recording_url} target="_blank" rel="noopener noreferrer">
+                              <a href={call.recording_url} target="_blank" rel="noopener noreferrer">
                                 <Play className="h-4 w-4 mr-2" />
                                 Listen
-                              </a>
-                            </Button>
-                          )}
-                          {call.fireflies_url && (
-                            <Button variant="outline" size="sm" asChild>
-                              <a href={call.fireflies_url} target="_blank" rel="noopener noreferrer">
-                                <FileText className="h-4 w-4 mr-2" />
-                                View in Fireflies
                               </a>
                             </Button>
                           )}

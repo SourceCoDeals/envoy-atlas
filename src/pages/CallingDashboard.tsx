@@ -115,13 +115,13 @@ export default function CallingDashboard() {
     const repMap = new Map<string, RepPerformance>();
 
     for (const call of filtered) {
-      const repKey = call.rep_name || call.host_email || 'unknown';
-      const displayName = call.rep_name || (call.host_email ? call.host_email.split('@')[0] : 'Unknown');
+      const repKey = call.caller_name || 'unknown';
+      const displayName = call.caller_name || 'Unknown';
       
       const existing = repMap.get(repKey);
       const connected = isConnection(call);
       const voicemail = isVoicemail(call);
-      const duration = call.duration || 0;
+      const duration = call.talk_duration || 0;
       
       if (existing) {
         existing.totalCalls += 1;

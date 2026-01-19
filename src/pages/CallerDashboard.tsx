@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
 import {
   Phone,
   PhoneCall,
@@ -36,12 +35,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-
-interface RepProfile {
-  id: string;
-  first_name: string;
-  last_name: string;
-}
+import { useExternalCalls, filterCalls, isConnection, DateRangeOption, DATE_RANGE_OPTIONS } from '@/hooks/useExternalCalls';
 
 interface TodayActivity {
   dials: number;
@@ -70,46 +64,18 @@ interface RecentCall {
   contact: string;
   company: string;
   outcome: string;
-  aiScore: number | null;
+  duration: number | null;
 }
-
-type DateRangeOption = 'today' | 'last_week' | 'last_2_weeks' | 'last_month' | 'all_time';
-
-const DATE_RANGE_OPTIONS: { value: DateRangeOption; label: string }[] = [
-  { value: 'today', label: 'Today' },
-  { value: 'last_week', label: 'Last 7 Days' },
-  { value: 'last_2_weeks', label: 'Last 14 Days' },
-  { value: 'last_month', label: 'Last 30 Days' },
-  { value: 'all_time', label: 'All Time' },
-];
 
 export default function CallerDashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
-  const [loading, setLoading] = useState(true);
-  const [repProfile, setRepProfile] = useState<RepProfile | null>(null);
-  const [allCalls, setAllCalls] = useState<any[]>([]);
-  const [analysts, setAnalysts] = useState<string[]>([]);
+  const { calls: allCalls, analysts, loading, totalCount } = useExternalCalls();
   
   // Filters
   const [dateRange, setDateRange] = useState<DateRangeOption>('last_week');
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>('all');
-  
-  const [todayActivity, setTodayActivity] = useState<TodayActivity>({
-    dials: 0,
-    connects: 0,
-    conversations: 0,
-    meetings: 0,
-    talkTimeSeconds: 0,
-  });
-  const [goals, setGoals] = useState<GoalProgress[]>([]);
-  const [coachingTips, setCoachingTips] = useState<CoachingTip[]>([]);
-  const [trendData, setTrendData] = useState<{ week: string; meetingRate: number; aiScore: number }[]>([]);
-  const [teamRank, setTeamRank] = useState<{ rank: number; total: number; vsAvg: string } | null>(null);
-  const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
-  const [bestCall, setBestCall] = useState<RecentCall | null>(null);
-  const [worstCall, setWorstCall] = useState<RecentCall | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -117,155 +83,50 @@ export default function CallerDashboard() {
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    if (currentWorkspace?.id && user?.id) {
-      fetchAllCalls();
-    }
-  }, [currentWorkspace?.id, user?.id]);
-
-  // Re-process data when filters change
-  useEffect(() => {
-    if (allCalls.length > 0) {
-      processCallerData();
-    }
-  }, [dateRange, selectedAnalyst, allCalls]);
-
-  const getDateRangeStart = (range: DateRangeOption): Date | null => {
-    const now = new Date();
-    switch (range) {
-      case 'today':
-        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      case 'last_week':
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return weekAgo;
-      case 'last_2_weeks':
-        const twoWeeksAgo = new Date(now);
-        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-        return twoWeeksAgo;
-      case 'last_month':
-        const monthAgo = new Date(now);
-        monthAgo.setDate(monthAgo.getDate() - 30);
-        return monthAgo;
-      case 'all_time':
-        return null;
-    }
-  };
-
-  const fetchAllCalls = async () => {
-    if (!currentWorkspace?.id || !user?.id) return;
-    setLoading(true);
-
-    try {
-      // Fetch rep profile
-      const { data: profile } = await supabase
-        .from('rep_profiles')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (profile) {
-        setRepProfile(profile);
-      }
-
-      // Fetch all calls from external_calls
-      const { data: calls } = await supabase
-        .from('external_calls')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .not('composite_score', 'is', null);
-
-      if (!calls || calls.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      setAllCalls(calls);
-
-      // Extract unique analysts
-      const uniqueAnalysts = new Set<string>();
-      calls.forEach(c => {
-        const analyst = c.rep_name || c.host_email;
-        if (analyst) {
-          uniqueAnalysts.add(analyst);
-        }
-      });
-      setAnalysts(Array.from(uniqueAnalysts).sort());
-
-    } catch (err) {
-      console.error('Error fetching calls:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const processCallerData = () => {
-    if (allCalls.length === 0) return;
-
-    const rangeStart = getDateRangeStart(dateRange);
-    
-    // Filter calls by date range and analyst
-    let filteredCalls = allCalls.filter(c => {
-      const callDate = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
-      if (!callDate) return false;
-      if (rangeStart && callDate < rangeStart) return false;
-      return true;
-    });
-
-    // Filter by selected analyst
-    if (selectedAnalyst !== 'all') {
-      filteredCalls = filteredCalls.filter(c => {
-        const analyst = c.rep_name || c.host_email || '';
-        return analyst === selectedAnalyst;
-      });
-    }
+  // Process data based on filters
+  const { todayActivity, goals, coachingTips, trendData, teamRank, bestCall, worstCall } = useMemo(() => {
+    const filteredCalls = filterCalls(allCalls, dateRange, selectedAnalyst);
 
     // Activity metrics for the selected period
     const dials = filteredCalls.length;
-    const connects = filteredCalls.filter(c => 
-      c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
+    const connects = filteredCalls.filter(c => isConnection(c)).length;
+    const conversations = filteredCalls.filter(c => (c.talk_duration || 0) > 60).length;
+    const meetings = filteredCalls.filter(c => 
+      (c.conversation_outcome || '').toLowerCase().includes('meeting')
     ).length;
-    const conversations = filteredCalls.filter(c => 
-      (c.composite_score || 0) >= 5 || 
-      ['conversation', 'interested', 'meeting'].includes((c.call_category || '').toLowerCase())
-    ).length;
-    const meetings = filteredCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
-    const talkTimeSeconds = filteredCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
+    const talkTimeSeconds = filteredCalls.reduce((sum, c) => sum + (c.talk_duration || 0), 0);
 
-    setTodayActivity({ dials, connects, conversations, meetings, talkTimeSeconds });
+    const todayActivity: TodayActivity = { dials, connects, conversations, meetings, talkTimeSeconds };
 
     // Goals - calculated from filtered data
-    const avgScore = filteredCalls.length > 0 
-      ? filteredCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / filteredCalls.length 
-      : 0;
-
-    setGoals([
+    const goals: GoalProgress[] = [
       { label: 'Total Dials', current: dials, target: 100, unit: '' },
       { label: 'Connects', current: connects, target: 30, unit: '' },
       { label: 'Meetings Set', current: meetings, target: 5, unit: '' },
-      { label: 'AI Score Avg', current: Math.round(avgScore * 10) / 10, target: 7, unit: 'pts' },
-    ]);
+      { label: 'Talk Time', current: Math.round(talkTimeSeconds / 60), target: 120, unit: 'min' },
+    ];
 
     // Coaching tips from call patterns
-    const lowScoreCalls = filteredCalls.filter(c => (c.composite_score || 0) < 5);
-    const highScoreCalls = filteredCalls.filter(c => (c.composite_score || 0) >= 7);
     const tips: CoachingTip[] = [];
 
-    if (highScoreCalls.length > 0) {
+    const longCalls = filteredCalls.filter(c => (c.talk_duration || 0) > 120).length;
+    if (longCalls > 0) {
       tips.push({
         type: 'strength',
-        title: `${highScoreCalls.length} high-quality calls`,
-        description: 'Conversation quality is strong. Keep building rapport early.',
+        title: `${longCalls} quality conversations`,
+        description: 'You had extended conversations. Keep building rapport early.',
       });
     }
-    if (lowScoreCalls.length > 3) {
+    
+    const shortCalls = filteredCalls.filter(c => (c.talk_duration || 0) < 30 && (c.talk_duration || 0) > 0).length;
+    if (shortCalls > dials * 0.5 && dials > 5) {
       tips.push({
         type: 'improvement',
-        title: 'Focus on objection handling',
-        description: `${lowScoreCalls.length} calls scored below 5. Review objection responses.`,
+        title: 'Improve call duration',
+        description: `${shortCalls} calls were under 30 seconds. Focus on stronger openers.`,
       });
     }
+    
     if (connects > 0 && meetings === 0) {
       tips.push({
         type: 'improvement',
@@ -273,130 +134,90 @@ export default function CallerDashboard() {
         description: 'Had connects but no meetings. Work on stronger closes.',
       });
     }
-    if (avgScore >= 6.5) {
-      tips.push({
-        type: 'strength',
-        title: `Strong AI score: ${avgScore.toFixed(1)}`,
-        description: 'Call quality is above average. Great work!',
-      });
-    }
-    setCoachingTips(tips.slice(0, 4));
 
-    // 4-week trend data (uses all calls, respecting analyst filter only)
-    const fourWeeksAgo = new Date();
-    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-    
-    let trendBaseCalls = allCalls.filter(c => {
-      const callDate = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
-      return callDate && callDate >= fourWeeksAgo;
-    });
-
-    if (selectedAnalyst !== 'all') {
-      trendBaseCalls = trendBaseCalls.filter(c => {
-        const analyst = c.rep_name || c.host_email || '';
-        return analyst === selectedAnalyst;
-      });
-    }
-    
-    const weeklyData: { week: string; meetingRate: number; aiScore: number }[] = [];
+    // 4-week trend data
+    const weeklyData: { week: string; dials: number; connects: number }[] = [];
     for (let i = 3; i >= 0; i--) {
       const weekStart = new Date();
       weekStart.setDate(weekStart.getDate() - (i + 1) * 7);
       const weekEnd = new Date();
       weekEnd.setDate(weekEnd.getDate() - i * 7);
       
-      const weekTrendCalls = trendBaseCalls.filter(c => {
-        const d = c.date_time ? new Date(c.date_time) : c.call_date ? new Date(c.call_date) : null;
-        return d && d >= weekStart && d < weekEnd;
+      const weekCalls = allCalls.filter(c => {
+        const d = c.date_time ? new Date(c.date_time) : null;
+        if (!d) return false;
+        if (selectedAnalyst !== 'all' && c.caller_name !== selectedAnalyst) return false;
+        return d >= weekStart && d < weekEnd;
       });
-      
-      const weekTrendConnects = weekTrendCalls.filter(c => 
-        c.call_category?.toLowerCase() === 'connection' || (c.seller_interest_score || 0) >= 3
-      ).length;
-      const weekTrendMeetings = weekTrendCalls.filter(c => (c.seller_interest_score || 0) >= 7).length;
-      const avgTrendScore = weekTrendCalls.length > 0 
-        ? weekTrendCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / weekTrendCalls.length 
-        : 0;
       
       weeklyData.push({
         week: `Week ${4 - i}`,
-        meetingRate: weekTrendConnects > 0 ? (weekTrendMeetings / weekTrendConnects) * 100 : 0,
-        aiScore: avgTrendScore,
+        dials: weekCalls.length,
+        connects: weekCalls.filter(c => isConnection(c)).length,
       });
     }
-    setTrendData(weeklyData);
 
-    // Team rank calculation - use all calls (not filtered by date)
-    const repStats = new Map<string, { calls: number; totalScore: number }>();
+    // Team rank calculation
+    const repStats = new Map<string, { calls: number; totalDuration: number }>();
     allCalls.forEach(c => {
-      const rep = c.rep_name || c.host_email || 'Unknown';
-      if (!repStats.has(rep)) repStats.set(rep, { calls: 0, totalScore: 0 });
+      const rep = c.caller_name || 'Unknown';
+      if (!repStats.has(rep)) repStats.set(rep, { calls: 0, totalDuration: 0 });
       const stats = repStats.get(rep)!;
       stats.calls++;
-      stats.totalScore += c.composite_score || 0;
+      stats.totalDuration += c.talk_duration || 0;
     });
 
     const rankings = Array.from(repStats.entries())
       .map(([name, stats]) => ({
         name,
-        avgScore: stats.calls > 0 ? stats.totalScore / stats.calls : 0,
+        avgDuration: stats.calls > 0 ? stats.totalDuration / stats.calls : 0,
       }))
-      .sort((a, b) => b.avgScore - a.avgScore);
+      .sort((a, b) => b.avgDuration - a.avgDuration);
 
-    // Find selected analyst's rank or current user's rank
     const targetAnalyst = selectedAnalyst !== 'all' ? selectedAnalyst : null;
-    const myRankIdx = rankings.findIndex(r => {
-      if (targetAnalyst) {
-        return r.name === targetAnalyst;
-      }
-      // Fall back to matching by user email
-      const userEmail = user?.email || '';
-      const userNamePrefix = userEmail.toLowerCase().split('@')[0] || '';
-      const repLower = r.name.toLowerCase();
-      return repLower.includes(userNamePrefix);
-    });
+    const myRankIdx = rankings.findIndex(r => targetAnalyst ? r.name === targetAnalyst : false);
     
-    const teamAvg = rankings.length > 0 ? rankings.reduce((sum, r) => sum + r.avgScore, 0) / rankings.length : 0;
-    const myAvg = myRankIdx >= 0 ? rankings[myRankIdx].avgScore : 0;
+    const teamAvg = rankings.length > 0 ? rankings.reduce((sum, r) => sum + r.avgDuration, 0) / rankings.length : 0;
+    const myAvg = myRankIdx >= 0 ? rankings[myRankIdx].avgDuration : 0;
     const vsAvgPct = teamAvg > 0 ? ((myAvg - teamAvg) / teamAvg) * 100 : 0;
 
-    setTeamRank({
+    const teamRank = {
       rank: myRankIdx >= 0 ? myRankIdx + 1 : rankings.length,
       total: rankings.length,
       vsAvg: `${vsAvgPct >= 0 ? '+' : ''}${vsAvgPct.toFixed(0)}%`,
-    });
+    };
 
     // Best and worst calls in the filtered period
-    const sortedCalls = [...filteredCalls].sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
+    const sortedCalls = [...filteredCalls].sort((a, b) => (b.talk_duration || 0) - (a.talk_duration || 0));
     
-    if (sortedCalls.length > 0) {
-      const best = sortedCalls[0];
-      setBestCall({
-        id: best.id,
-        time: best.date_time || '',
-        contact: best.contact_name || 'Unknown Contact',
-        company: best.company_name || 'Unknown Company',
-        outcome: best.call_category || 'Scored',
-        aiScore: best.composite_score,
-      });
-    } else {
-      setBestCall(null);
-    }
+    const bestCall: RecentCall | null = sortedCalls.length > 0 ? {
+      id: sortedCalls[0].id,
+      time: sortedCalls[0].date_time || '',
+      contact: sortedCalls[0].contact_name || 'Unknown Contact',
+      company: sortedCalls[0].company_name || 'Unknown Company',
+      outcome: sortedCalls[0].disposition || 'Connected',
+      duration: sortedCalls[0].talk_duration,
+    } : null;
 
-    if (sortedCalls.length > 1) {
-      const worst = sortedCalls[sortedCalls.length - 1];
-      setWorstCall({
-        id: worst.id,
-        time: worst.date_time || '',
-        contact: worst.contact_name || 'Unknown Contact',
-        company: worst.company_name || 'Unknown Company',
-        outcome: worst.call_category || 'Needs Review',
-        aiScore: worst.composite_score,
-      });
-    } else {
-      setWorstCall(null);
-    }
-  };
+    const worstCall: RecentCall | null = sortedCalls.length > 1 ? {
+      id: sortedCalls[sortedCalls.length - 1].id,
+      time: sortedCalls[sortedCalls.length - 1].date_time || '',
+      contact: sortedCalls[sortedCalls.length - 1].contact_name || 'Unknown Contact',
+      company: sortedCalls[sortedCalls.length - 1].company_name || 'Unknown Company',
+      outcome: sortedCalls[sortedCalls.length - 1].disposition || 'Short Call',
+      duration: sortedCalls[sortedCalls.length - 1].talk_duration,
+    } : null;
+
+    return { 
+      todayActivity, 
+      goals, 
+      coachingTips: tips.slice(0, 4), 
+      trendData: weeklyData, 
+      teamRank, 
+      bestCall, 
+      worstCall 
+    };
+  }, [allCalls, dateRange, selectedAnalyst]);
 
   const formatDuration = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600);
@@ -424,7 +245,7 @@ export default function CallerDashboard() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              {selectedAnalyst !== 'all' ? selectedAnalyst : repProfile ? `Welcome back, ${repProfile.first_name}` : 'Caller Dashboard'}
+              {selectedAnalyst !== 'all' ? selectedAnalyst : 'Caller Dashboard'}
             </h1>
             <p className="text-muted-foreground">Performance metrics for {dateRangeLabel.toLowerCase()}</p>
           </div>
@@ -525,12 +346,12 @@ export default function CallerDashboard() {
               <Card>
                 <CardContent className="pt-6">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center">
-                      <Calendar className="h-5 w-5 text-success" />
+                    <div className="h-10 w-10 rounded-lg bg-chart-4/10 flex items-center justify-center">
+                      <Calendar className="h-5 w-5 text-chart-4" />
                     </div>
                     <div>
                       <p className="text-2xl font-bold">{todayActivity.meetings}</p>
-                      <p className="text-sm text-muted-foreground">Meetings Set</p>
+                      <p className="text-sm text-muted-foreground">Meetings</p>
                     </div>
                   </div>
                 </CardContent>
@@ -539,8 +360,8 @@ export default function CallerDashboard() {
               <Card>
                 <CardContent className="pt-6">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-chart-4/10 flex items-center justify-center">
-                      <Clock className="h-5 w-5 text-chart-4" />
+                    <div className="h-10 w-10 rounded-lg bg-chart-5/10 flex items-center justify-center">
+                      <Clock className="h-5 w-5 text-chart-5" />
                     </div>
                     <div>
                       <p className="text-2xl font-bold">{formatDuration(todayActivity.talkTimeSeconds)}</p>
@@ -551,229 +372,152 @@ export default function CallerDashboard() {
               </Card>
             </div>
 
-            {/* Goal Progress + AI Coaching */}
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-6 lg:grid-cols-2">
               {/* Goal Progress */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">Performance Summary</CardTitle>
-                  <CardDescription>Metrics for {dateRangeLabel.toLowerCase()}</CardDescription>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="h-5 w-5" />
+                    Goal Progress
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  {goals.length > 0 ? (
-                    goals.map((goal, idx) => (
-                      <div key={idx} className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span>{goal.label}</span>
-                          <span className="text-muted-foreground">
-                            {goal.current} / {goal.target} {goal.unit}
-                          </span>
-                        </div>
-                        <Progress value={(goal.current / goal.target) * 100} className="h-2" />
+                <CardContent className="space-y-6">
+                  {goals.map((goal, idx) => (
+                    <div key={idx} className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="font-medium">{goal.label}</span>
+                        <span className="text-muted-foreground">
+                          {goal.current} / {goal.target} {goal.unit}
+                        </span>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Target className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p>No goals set yet</p>
-                      <Button variant="outline" size="sm" className="mt-2">
-                        Set Goals
-                      </Button>
+                      <Progress value={Math.min((goal.current / goal.target) * 100, 100)} className="h-2" />
                     </div>
-                  )}
+                  ))}
                 </CardContent>
               </Card>
 
-              {/* AI Coaching Focus */}
+              {/* Coaching Tips */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Zap className="h-5 w-5 text-chart-4" />
-                    AI Coaching Focus
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5" />
+                    Coaching Insights
                   </CardTitle>
-                  <CardDescription>Personalized insights from your calls</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {coachingTips.length > 0 ? (
+                <CardContent className="space-y-4">
+                  {coachingTips.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">No insights available yet. Make more calls!</p>
+                  ) : (
                     coachingTips.map((tip, idx) => (
                       <div
                         key={idx}
-                        className={`p-3 rounded-lg border ${
-                          tip.type === 'strength'
-                            ? 'border-success/30 bg-success/5'
-                            : 'border-warning/30 bg-warning/5'
+                        className={`flex items-start gap-3 p-3 rounded-lg ${
+                          tip.type === 'strength' ? 'bg-green-500/10' : 'bg-amber-500/10'
                         }`}
                       >
-                        <div className="flex items-start gap-2">
-                          {tip.type === 'strength' ? (
-                            <TrendingUp className="h-4 w-4 text-success mt-0.5" />
-                          ) : (
-                            <AlertTriangle className="h-4 w-4 text-warning mt-0.5" />
-                          )}
-                          <div>
-                            <p className="font-medium text-sm">{tip.title}</p>
-                            <p className="text-xs text-muted-foreground">{tip.description}</p>
-                          </div>
+                        {tip.type === 'strength' ? (
+                          <Star className="h-5 w-5 text-green-500 mt-0.5" />
+                        ) : (
+                          <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5" />
+                        )}
+                        <div>
+                          <p className="font-medium text-sm">{tip.title}</p>
+                          <p className="text-xs text-muted-foreground">{tip.description}</p>
                         </div>
                       </div>
                     ))
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Zap className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p>Complete more calls for AI insights</p>
-                    </div>
                   )}
                 </CardContent>
               </Card>
-            </div>
 
-            {/* Trends + Team Comparison */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              {/* My Trends */}
+              {/* Weekly Trend */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">My Trends</CardTitle>
-                  <CardDescription>4-week performance</CardDescription>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5" />
+                    4-Week Trend
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[200px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={trendData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="week" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                        <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'hsl(var(--card))',
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: '8px',
-                          }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="meetingRate"
-                          stroke="hsl(var(--success))"
-                          strokeWidth={2}
-                          name="Meeting Rate %"
-                          dot={{ fill: 'hsl(var(--success))' }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="aiScore"
-                          stroke="hsl(var(--chart-4))"
-                          strokeWidth={2}
-                          name="AI Score"
-                          dot={{ fill: 'hsl(var(--chart-4))' }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
+                  {trendData.length > 0 ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={trendData}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                          <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--card))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px',
+                            }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="dials"
+                            stroke="hsl(var(--primary))"
+                            strokeWidth={2}
+                            name="Dials"
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="connects"
+                            stroke="hsl(var(--chart-2))"
+                            strokeWidth={2}
+                            name="Connects"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-center py-8">No trend data available</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Team Ranking */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Trophy className="h-5 w-5" />
+                    Team Ranking
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-center gap-8 py-4">
+                    <div className="text-center">
+                      <p className="text-4xl font-bold text-primary">#{teamRank.rank}</p>
+                      <p className="text-sm text-muted-foreground">of {teamRank.total}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className={`text-2xl font-bold ${teamRank.vsAvg.startsWith('+') ? 'text-green-500' : 'text-amber-500'}`}>
+                        {teamRank.vsAvg}
+                      </p>
+                      <p className="text-sm text-muted-foreground">vs team avg</p>
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
 
-              {/* Team Comparison */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Trophy className="h-5 w-5 text-yellow-500" />
-                    Team Comparison
-                  </CardTitle>
-                  <CardDescription>How you stack up</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {teamRank ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-center gap-4 py-4">
-                        <div className="text-center">
-                          <p className="text-4xl font-bold">#{teamRank.rank}</p>
-                          <p className="text-sm text-muted-foreground">of {teamRank.total} reps</p>
-                        </div>
-                        <div className="h-16 w-px bg-border" />
-                        <div className="text-center">
-                          <p className="text-2xl font-bold text-success">{teamRank.vsAvg}</p>
-                          <p className="text-sm text-muted-foreground">vs team avg</p>
-                        </div>
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    {bestCall && (
+                      <div className="p-3 rounded-lg bg-green-500/10">
+                        <p className="text-xs text-muted-foreground mb-1">Best Call</p>
+                        <p className="font-medium text-sm">{bestCall.contact}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {bestCall.duration ? `${Math.round(bestCall.duration / 60)}min` : 'N/A'}
+                        </p>
                       </div>
-                      <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                        <div className="p-2 rounded-lg bg-accent/50">
-                          <p className="font-medium">Connect Rate</p>
-                          <p className="text-muted-foreground">Top 20%</p>
-                        </div>
-                        <div className="p-2 rounded-lg bg-accent/50">
-                          <p className="font-medium">Meeting Rate</p>
-                          <p className="text-muted-foreground">Top 30%</p>
-                        </div>
-                        <div className="p-2 rounded-lg bg-accent/50">
-                          <p className="font-medium">AI Score</p>
-                          <p className="text-muted-foreground">Top 25%</p>
-                        </div>
+                    )}
+                    {worstCall && (
+                      <div className="p-3 rounded-lg bg-amber-500/10">
+                        <p className="text-xs text-muted-foreground mb-1">Shortest Call</p>
+                        <p className="font-medium text-sm">{worstCall.contact}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {worstCall.duration ? `${Math.round(worstCall.duration / 60)}min` : 'N/A'}
+                        </p>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Trophy className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p>Team data loading...</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Best/Worst This Week */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card className="border-success/30">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Star className="h-5 w-5 text-success" />
-                    Best Call ({dateRangeLabel})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {bestCall ? (
-                    <div className="space-y-2">
-                      <p className="font-medium">{bestCall.contact}</p>
-                      <p className="text-sm text-muted-foreground">{bestCall.company}</p>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="bg-success/10 text-success border-success/30">
-                          Score: {bestCall.aiScore}
-                        </Badge>
-                        <Badge variant="outline">{bestCall.outcome}</Badge>
-                      </div>
-                      <Button variant="ghost" size="sm" className="mt-2">
-                        Listen <ChevronRight className="h-4 w-4 ml-1" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-center py-4">No scored calls this week</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="border-warning/30">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <AlertTriangle className="h-5 w-5 text-warning" />
-                    Learning Opportunity
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {worstCall ? (
-                    <div className="space-y-2">
-                      <p className="font-medium">{worstCall.contact}</p>
-                      <p className="text-sm text-muted-foreground">{worstCall.company}</p>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">
-                          Score: {worstCall.aiScore}
-                        </Badge>
-                        <Badge variant="outline">{worstCall.outcome}</Badge>
-                      </div>
-                      <Button variant="ghost" size="sm" className="mt-2">
-                        Review <ChevronRight className="h-4 w-4 ml-1" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-center py-4">No calls to review</p>
-                  )}
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </div>

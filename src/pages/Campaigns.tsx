@@ -43,11 +43,11 @@ export default function Campaigns() {
     const fetchEngagements = async () => {
       const { data } = await supabase
         .from('engagements')
-        .select('id, engagement_name')
-        .eq('workspace_id', currentWorkspace.id)
-        .order('engagement_name');
+        .select('id, name')
+        .eq('client_id', currentWorkspace.id)
+        .order('name');
       
-      if (data) setEngagements(data);
+      if (data) setEngagements(data.map(e => ({ id: e.id, engagement_name: e.name })));
     };
     
     fetchEngagements();

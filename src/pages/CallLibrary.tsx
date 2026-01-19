@@ -29,16 +29,11 @@ function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemo
             )}
 
             <div className="flex flex-wrap items-center gap-2 mt-3">
-              {entry.call?.host_email && (
+              {entry.call?.caller_name && (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <User className="h-3 w-3" />
-                  {entry.call.host_email}
+                  {entry.call.caller_name}
                 </div>
-              )}
-              {entry.ai_score?.composite_score != null && (
-                <Badge variant={entry.ai_score.composite_score >= 70 ? 'default' : 'secondary'}>
-                  Score: {entry.ai_score.composite_score}
-                </Badge>
               )}
             </div>
 
@@ -54,9 +49,9 @@ function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemo
           </div>
 
           <div className="flex flex-col gap-2">
-            {entry.call?.phoneburner_recording_url && (
+            {entry.call?.recording_url && (
               <Button size="sm" variant="outline" asChild>
-                <a href={entry.call.phoneburner_recording_url} target="_blank" rel="noopener noreferrer">
+                <a href={entry.call.recording_url} target="_blank" rel="noopener noreferrer">
                   <Play className="h-4 w-4" />
                 </a>
               </Button>
@@ -84,9 +79,8 @@ function SuggestedCallRow({ call, onAdd, type }: { call: SuggestedCall; onAdd: (
           <p className="text-sm font-medium truncate">{call.company_name || call.call_title || 'Untitled call'}</p>
         </div>
         <p className="text-xs text-muted-foreground truncate">
-          {call.host_email || 'Unknown rep'}
-          {call.composite_score != null ? ` • Score ${call.composite_score}` : ''}
-          {call.seller_interest_score != null ? ` • Interest ${call.seller_interest_score}/10` : ''}
+          {call.caller_name || 'Unknown rep'}
+          {call.talk_duration != null ? ` • ${Math.round(call.talk_duration / 60)}min` : ''}
         </p>
       </div>
       <Button size="sm" onClick={onAdd}>
@@ -236,7 +230,7 @@ export default function CallLibrary() {
             <div className="flex items-center justify-between gap-3 mb-4">
               <div>
                 <p className="font-medium">AI-Categorized Call Suggestions</p>
-                <p className="text-sm text-muted-foreground">Best and worst examples for each skill area, based on AI scoring</p>
+                <p className="text-sm text-muted-foreground">Best and worst examples for each skill area, based on call duration</p>
               </div>
               <Badge variant="outline" className="gap-2">
                 <Sparkles className="h-4 w-4" />
@@ -261,7 +255,7 @@ export default function CallLibrary() {
                     
                     {cat.value === 'avoid_examples' ? (
                       <div>
-                        <h4 className="text-sm font-medium text-destructive mb-2">Calls to Avoid (Lowest Scores)</h4>
+                        <h4 className="text-sm font-medium text-destructive mb-2">Calls to Avoid (Shortest Duration)</h4>
                         <div className="grid gap-2 md:grid-cols-2">
                           {suggestions?.best.slice(0, 6).map((c) => (
                             <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} type="worst" />

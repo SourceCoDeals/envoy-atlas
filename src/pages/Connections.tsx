@@ -124,13 +124,21 @@ export default function Connections() {
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from("api_connections")
-        .select("id, platform, is_active, last_sync_at, last_full_sync_at, sync_status, sync_progress, created_at")
-        .eq("workspace_id", currentWorkspace.id)
+        .from("data_sources")
+        .select("id, source_type, status, last_sync_at, last_sync_status, created_at")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setConnections((data as any) ?? []);
+      setConnections((data || []).map((d: any) => ({
+        id: d.id,
+        platform: d.source_type,
+        is_active: d.status === 'active',
+        last_sync_at: d.last_sync_at,
+        last_full_sync_at: d.last_sync_at,
+        sync_status: d.last_sync_status,
+        sync_progress: 100,
+        created_at: d.created_at,
+      })));
     } catch (e: any) {
       console.error(e);
       setError(e?.message || "Failed to load connections");

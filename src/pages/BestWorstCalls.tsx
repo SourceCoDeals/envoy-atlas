@@ -212,7 +212,7 @@ export default function BestWorstCalls() {
               <div className="flex flex-wrap gap-2">
                 {Object.entries(topCallsInsights.commonOpenings).map(([type, count]) => (
                   <Badge key={type} variant="outline" className="border-yellow-500/50">
-                    {type} opening ({count} calls)
+                    {type} opening ({count as number} calls)
                   </Badge>
                 ))}
               </div>
