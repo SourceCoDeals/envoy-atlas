@@ -26,11 +26,11 @@ interface SaveToLibraryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   variantData: {
+    title?: string;
     subject_line: string;
-    email_body?: string | null;
-    body_preview?: string | null;
-    personalization_vars?: string[];
-    source_variant_id?: string | null;
+    body_html?: string | null;
+    body_plain?: string | null;
+    variant_id?: string | null;
     performance?: {
       sent_count?: number;
       reply_rate?: number;
@@ -54,10 +54,11 @@ const CATEGORIES = [
 export function SaveToLibraryDialog({ open, onOpenChange, variantData }: SaveToLibraryDialogProps) {
   const { saveToLibrary, generateTags, saving, generatingTags } = useCopyLibrary();
   
+  const [title, setTitle] = useState('');
   const [category, setCategory] = useState('custom');
   const [notes, setNotes] = useState('');
   const [isTemplate, setIsTemplate] = useState(false);
-  const [manualTags, setManualTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [aiTags, setAiTags] = useState<string[]>([]);
   const [qualityScore, setQualityScore] = useState<number | null>(null);
@@ -65,10 +66,11 @@ export function SaveToLibraryDialog({ open, onOpenChange, variantData }: SaveToL
   // Reset state when dialog opens with new data
   useEffect(() => {
     if (open && variantData) {
+      setTitle(variantData.title || variantData.subject_line.substring(0, 50));
       setCategory('custom');
       setNotes('');
       setIsTemplate(false);
-      setManualTags([]);
+      setTags([]);
       setNewTag('');
       setAiTags([]);
       setQualityScore(null);
@@ -80,7 +82,7 @@ export function SaveToLibraryDialog({ open, onOpenChange, variantData }: SaveToL
     
     const result = await generateTags(
       variantData.subject_line,
-      variantData.email_body,
+      variantData.body_html || variantData.body_plain,
       category
     );
     
@@ -95,34 +97,46 @@ export function SaveToLibraryDialog({ open, onOpenChange, variantData }: SaveToL
 
   const handleAddTag = () => {
     const tag = newTag.trim().toLowerCase();
-    if (tag && !manualTags.includes(tag)) {
-      setManualTags([...manualTags, tag]);
+    if (tag && !tags.includes(tag)) {
+      setTags([...tags, tag]);
       setNewTag('');
     }
   };
 
   const handleRemoveTag = (tag: string) => {
-    setManualTags(manualTags.filter(t => t !== tag));
+    setTags(tags.filter(t => t !== tag));
   };
 
   const handleSave = async () => {
     if (!variantData) return;
 
+    const allTags = [...tags, ...aiTags];
+
     const options: SaveToLibraryOptions = {
       category,
       notes: notes.trim() || undefined,
       is_template: isTemplate,
-      manual_tags: manualTags,
+      tags: allTags,
       generateTags: aiTags.length === 0 // Only generate if not already done
     };
 
-    const result = await saveToLibrary(variantData, options);
+    const result = await saveToLibrary({
+      title: title || variantData.subject_line.substring(0, 50),
+      subject_line: variantData.subject_line,
+      body_html: variantData.body_html,
+      body_plain: variantData.body_plain,
+      variant_id: variantData.variant_id,
+      performance: variantData.performance,
+    }, options);
+    
     if (result) {
       onOpenChange(false);
     }
   };
 
   if (!variantData) return null;
+
+  const bodyPreview = variantData.body_html || variantData.body_plain;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -132,12 +146,22 @@ export function SaveToLibraryDialog({ open, onOpenChange, variantData }: SaveToL
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {/* Title */}
+          <div className="space-y-2">
+            <Label>Title</Label>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Give this copy a name..."
+            />
+          </div>
+
           {/* Preview */}
           <div className="rounded-lg border bg-muted/50 p-3">
             <p className="font-medium text-sm mb-1">{variantData.subject_line}</p>
-            {variantData.body_preview && (
+            {bodyPreview && (
               <p className="text-xs text-muted-foreground line-clamp-2">
-                {variantData.body_preview}
+                {bodyPreview.substring(0, 200)}
               </p>
             )}
             {variantData.performance?.reply_rate !== undefined && (
@@ -195,9 +219,9 @@ export function SaveToLibraryDialog({ open, onOpenChange, variantData }: SaveToL
                 Add
               </Button>
             </div>
-            {manualTags.length > 0 && (
+            {tags.length > 0 && (
               <div className="flex flex-wrap gap-1">
-                {manualTags.map((tag, i) => (
+                {tags.map((tag, i) => (
                   <Badge key={i} variant="outline" className="text-xs pr-1">
                     {tag}
                     <button onClick={() => handleRemoveTag(tag)} className="ml-1 hover:text-destructive">

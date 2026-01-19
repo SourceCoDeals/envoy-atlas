@@ -6,26 +6,28 @@ import { toast } from 'sonner';
 
 export interface CopyLibraryEntry {
   id: string;
-  workspace_id: string;
-  source_variant_id: string | null;
+  engagement_id: string | null;
+  variant_id: string | null;
+  title: string;
   subject_line: string;
-  email_body: string | null;
-  body_preview: string | null;
-  personalization_vars: string[];
+  body_html: string | null;
+  body_plain: string | null;
   performance_snapshot: {
     sent_count?: number;
     reply_rate?: number;
     positive_rate?: number;
     open_rate?: number;
     saved_at?: string;
-  };
-  ai_tags: string[];
-  manual_tags: string[];
+  } | null;
+  tags: string[];
   notes: string | null;
-  category: string;
-  status: string;
+  category: string | null;
   is_template: boolean;
-  created_by: string;
+  total_sent: number;
+  total_replied: number;
+  reply_rate: number;
+  positive_rate: number;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -34,7 +36,7 @@ export interface SaveToLibraryOptions {
   category?: string;
   notes?: string;
   is_template?: boolean;
-  manual_tags?: string[];
+  tags?: string[];
   generateTags?: boolean;
 }
 
@@ -63,22 +65,48 @@ export function useCopyLibrary() {
     const fetchEntries = async () => {
       setLoading(true);
       try {
+        // Get engagements for this client
+        const { data: engagements } = await supabase
+          .from('engagements')
+          .select('id')
+          .eq('client_id', currentWorkspace.id);
+
+        const engagementIds = (engagements || []).map(e => e.id);
+
+        if (engagementIds.length === 0) {
+          setEntries([]);
+          setLoading(false);
+          return;
+        }
+
         const { data, error } = await supabase
           .from('copy_library')
           .select('*')
-          .eq('workspace_id', currentWorkspace.id)
+          .in('engagement_id', engagementIds)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
 
-        const transformed = (data || []).map(entry => ({
-          ...entry,
-          personalization_vars: Array.isArray(entry.personalization_vars) 
-            ? entry.personalization_vars as string[]
-            : [],
-          performance_snapshot: (entry.performance_snapshot || {}) as CopyLibraryEntry['performance_snapshot'],
-          ai_tags: entry.ai_tags || [],
-          manual_tags: entry.manual_tags || [],
+        const transformed: CopyLibraryEntry[] = (data || []).map(entry => ({
+          id: entry.id,
+          engagement_id: entry.engagement_id,
+          variant_id: entry.variant_id,
+          title: entry.title,
+          subject_line: entry.subject_line,
+          body_html: entry.body_html,
+          body_plain: entry.body_plain,
+          performance_snapshot: entry.performance_snapshot as CopyLibraryEntry['performance_snapshot'],
+          tags: Array.isArray(entry.tags) ? entry.tags : [],
+          notes: entry.notes,
+          category: entry.category,
+          is_template: entry.is_template || false,
+          total_sent: entry.total_sent || 0,
+          total_replied: entry.total_replied || 0,
+          reply_rate: Number(entry.reply_rate) || 0,
+          positive_rate: Number(entry.positive_rate) || 0,
+          created_by: entry.created_by,
+          created_at: entry.created_at,
+          updated_at: entry.updated_at,
         }));
 
         setEntries(transformed);
@@ -123,11 +151,11 @@ export function useCopyLibrary() {
   // Save a variant to the library
   const saveToLibrary = async (
     variantData: {
+      title: string;
       subject_line: string;
-      email_body?: string | null;
-      body_preview?: string | null;
-      personalization_vars?: string[];
-      source_variant_id?: string | null;
+      body_html?: string | null;
+      body_plain?: string | null;
+      variant_id?: string | null;
       performance?: {
         sent_count?: number;
         reply_rate?: number;
@@ -144,18 +172,27 @@ export function useCopyLibrary() {
 
     setSaving(true);
     try {
-      let aiTags: string[] = [];
+      // Get first engagement for this client
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id)
+        .limit(1);
+
+      const engagementId = engagements?.[0]?.id;
+
+      let tags: string[] = options.tags || [];
       let category = options.category || 'custom';
 
       // Generate AI tags if requested
       if (options.generateTags !== false) {
         const tagResult = await generateTags(
           variantData.subject_line,
-          variantData.email_body,
+          variantData.body_html || variantData.body_plain,
           category
         );
         if (tagResult) {
-          aiTags = tagResult.ai_tags;
+          tags = [...tags, ...tagResult.ai_tags];
           if (!options.category) {
             category = tagResult.suggested_category;
           }
@@ -163,22 +200,24 @@ export function useCopyLibrary() {
       }
 
       const insertData = {
-        workspace_id: currentWorkspace.id,
-        source_variant_id: variantData.source_variant_id || null,
+        engagement_id: engagementId,
+        variant_id: variantData.variant_id || null,
+        title: variantData.title,
         subject_line: variantData.subject_line,
-        email_body: variantData.email_body || null,
-        body_preview: variantData.body_preview || null,
-        personalization_vars: variantData.personalization_vars || [],
+        body_html: variantData.body_html || null,
+        body_plain: variantData.body_plain || null,
         performance_snapshot: {
           ...variantData.performance,
           saved_at: new Date().toISOString()
         },
-        ai_tags: aiTags,
-        manual_tags: options.manual_tags || [],
+        tags,
         notes: options.notes || null,
         category,
-        status: 'active',
         is_template: options.is_template || false,
+        total_sent: variantData.performance?.sent_count || 0,
+        total_replied: 0,
+        reply_rate: variantData.performance?.reply_rate || 0,
+        positive_rate: variantData.performance?.positive_rate || 0,
         created_by: user.id
       };
 
@@ -191,13 +230,25 @@ export function useCopyLibrary() {
       if (error) throw error;
 
       const newEntry: CopyLibraryEntry = {
-        ...data,
-        personalization_vars: Array.isArray(data.personalization_vars) 
-          ? data.personalization_vars as string[]
-          : [],
+        id: data.id,
+        engagement_id: data.engagement_id,
+        variant_id: data.variant_id,
+        title: data.title,
+        subject_line: data.subject_line,
+        body_html: data.body_html,
+        body_plain: data.body_plain,
         performance_snapshot: data.performance_snapshot as CopyLibraryEntry['performance_snapshot'],
-        ai_tags: data.ai_tags || [],
-        manual_tags: data.manual_tags || [],
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        notes: data.notes,
+        category: data.category,
+        is_template: data.is_template || false,
+        total_sent: data.total_sent || 0,
+        total_replied: data.total_replied || 0,
+        reply_rate: Number(data.reply_rate) || 0,
+        positive_rate: Number(data.positive_rate) || 0,
+        created_by: data.created_by,
+        created_at: data.created_at,
+        updated_at: data.updated_at,
       };
 
       setEntries(prev => [newEntry, ...prev]);
@@ -215,7 +266,7 @@ export function useCopyLibrary() {
   // Update an entry
   const updateEntry = async (
     id: string,
-    updates: Partial<Pick<CopyLibraryEntry, 'notes' | 'manual_tags' | 'category' | 'status' | 'is_template'>>
+    updates: Partial<Pick<CopyLibraryEntry, 'notes' | 'tags' | 'category' | 'is_template'>>
   ): Promise<boolean> => {
     try {
       const { error } = await supabase
@@ -225,7 +276,7 @@ export function useCopyLibrary() {
 
       if (error) throw error;
 
-      setEntries(prev => prev.map(entry => 
+      setEntries(prev => prev.map(entry =>
         entry.id === id ? { ...entry, ...updates } : entry
       ));
       toast.success('Entry updated');
@@ -261,14 +312,9 @@ export function useCopyLibrary() {
   const searchEntries = useMemo(() => {
     return (
       query: string,
-      filters: { category?: string; status?: string; isTemplate?: boolean; tags?: string[] }
+      filters: { category?: string; isTemplate?: boolean; tags?: string[] }
     ): CopyLibraryEntry[] => {
       let filtered = entries;
-
-      // Filter by status
-      if (filters.status) {
-        filtered = filtered.filter(e => e.status === filters.status);
-      }
 
       // Filter by category
       if (filters.category) {
@@ -283,8 +329,7 @@ export function useCopyLibrary() {
       // Filter by tags
       if (filters.tags && filters.tags.length > 0) {
         filtered = filtered.filter(e => {
-          const allTags = [...e.ai_tags, ...e.manual_tags];
-          return filters.tags!.some(tag => allTags.includes(tag));
+          return filters.tags!.some(tag => e.tags.includes(tag));
         });
       }
 
@@ -293,10 +338,10 @@ export function useCopyLibrary() {
         const lowerQuery = query.toLowerCase();
         filtered = filtered.filter(e =>
           e.subject_line.toLowerCase().includes(lowerQuery) ||
-          e.body_preview?.toLowerCase().includes(lowerQuery) ||
+          e.body_plain?.toLowerCase().includes(lowerQuery) ||
           e.notes?.toLowerCase().includes(lowerQuery) ||
-          e.ai_tags.some(t => t.toLowerCase().includes(lowerQuery)) ||
-          e.manual_tags.some(t => t.toLowerCase().includes(lowerQuery))
+          e.title.toLowerCase().includes(lowerQuery) ||
+          e.tags.some(t => t.toLowerCase().includes(lowerQuery))
         );
       }
 
@@ -308,8 +353,7 @@ export function useCopyLibrary() {
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
     entries.forEach(e => {
-      e.ai_tags.forEach(t => tagSet.add(t));
-      e.manual_tags.forEach(t => tagSet.add(t));
+      e.tags.forEach(t => tagSet.add(t));
     });
     return Array.from(tagSet).sort();
   }, [entries]);

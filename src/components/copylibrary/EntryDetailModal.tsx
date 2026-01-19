@@ -46,7 +46,7 @@ export function EntryDetailModal({ entry, open, onOpenChange, onUpdate }: EntryD
   const [isEditing, setIsEditing] = useState(false);
   const [editedNotes, setEditedNotes] = useState(entry?.notes || '');
   const [editedCategory, setEditedCategory] = useState(entry?.category || 'custom');
-  const [editedManualTags, setEditedManualTags] = useState<string[]>(entry?.manual_tags || []);
+  const [editedTags, setEditedTags] = useState<string[]>(entry?.tags || []);
   const [newTag, setNewTag] = useState('');
   const [editedIsTemplate, setEditedIsTemplate] = useState(entry?.is_template || false);
 
@@ -54,17 +54,19 @@ export function EntryDetailModal({ entry, open, onOpenChange, onUpdate }: EntryD
   if (entry && (editedNotes !== entry.notes || editedCategory !== entry.category)) {
     if (!isEditing) {
       setEditedNotes(entry.notes || '');
-      setEditedCategory(entry.category);
-      setEditedManualTags(entry.manual_tags || []);
+      setEditedCategory(entry.category || 'custom');
+      setEditedTags(entry.tags || []);
       setEditedIsTemplate(entry.is_template);
     }
   }
 
   if (!entry) return null;
 
+  const emailBody = entry.body_html || entry.body_plain;
+
   const copyToClipboard = () => {
-    const text = entry.email_body 
-      ? `Subject: ${entry.subject_line}\n\n${entry.email_body}`
+    const text = emailBody 
+      ? `Subject: ${entry.subject_line}\n\n${emailBody}`
       : entry.subject_line;
     navigator.clipboard.writeText(text);
     toast.success('Copied to clipboard');
@@ -72,21 +74,21 @@ export function EntryDetailModal({ entry, open, onOpenChange, onUpdate }: EntryD
 
   const handleAddTag = () => {
     const tag = newTag.trim().toLowerCase();
-    if (tag && !editedManualTags.includes(tag)) {
-      setEditedManualTags([...editedManualTags, tag]);
+    if (tag && !editedTags.includes(tag)) {
+      setEditedTags([...editedTags, tag]);
       setNewTag('');
     }
   };
 
   const handleRemoveTag = (tag: string) => {
-    setEditedManualTags(editedManualTags.filter(t => t !== tag));
+    setEditedTags(editedTags.filter(t => t !== tag));
   };
 
   const handleSave = async () => {
     const success = await onUpdate(entry.id, {
       notes: editedNotes.trim() || null,
       category: editedCategory,
-      manual_tags: editedManualTags,
+      tags: editedTags,
       is_template: editedIsTemplate,
     });
     if (success) {
@@ -118,11 +120,11 @@ export function EntryDetailModal({ entry, open, onOpenChange, onUpdate }: EntryD
               </div>
             </div>
 
-            {entry.email_body && (
+            {emailBody && (
               <div>
                 <Label className="text-xs text-muted-foreground">Email Body</Label>
                 <div className="rounded-lg border bg-muted/50 p-3 mt-1 max-h-48 overflow-y-auto">
-                  <p className="text-sm whitespace-pre-wrap">{entry.email_body}</p>
+                  <p className="text-sm whitespace-pre-wrap">{emailBody}</p>
                 </div>
               </div>
             )}
@@ -177,24 +179,11 @@ export function EntryDetailModal({ entry, open, onOpenChange, onUpdate }: EntryD
           {/* Tags */}
           <div className="space-y-3">
             <Label>Tags</Label>
-            
-            {entry.ai_tags.length > 0 && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">AI-Generated</p>
-                <div className="flex flex-wrap gap-1">
-                  {entry.ai_tags.map((tag, i) => (
-                    <Badge key={i} variant="secondary" className="text-xs">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div>
-              <p className="text-xs text-muted-foreground mb-1">Custom Tags</p>
+              <p className="text-xs text-muted-foreground mb-1">Tags</p>
               <div className="flex flex-wrap gap-1 mb-2">
-                {(isEditing ? editedManualTags : entry.manual_tags).map((tag, i) => (
+                {(isEditing ? editedTags : entry.tags).map((tag, i) => (
                   <Badge key={i} variant="outline" className="text-xs">
                     {tag}
                     {isEditing && (
@@ -204,8 +193,8 @@ export function EntryDetailModal({ entry, open, onOpenChange, onUpdate }: EntryD
                     )}
                   </Badge>
                 ))}
-                {!isEditing && entry.manual_tags.length === 0 && (
-                  <span className="text-xs text-muted-foreground">No custom tags</span>
+                {!isEditing && entry.tags.length === 0 && (
+                  <span className="text-xs text-muted-foreground">No tags</span>
                 )}
               </div>
               {isEditing && (

@@ -28,7 +28,7 @@ export interface DataHealthSummary {
     patterns: DataSourceHealth;
   };
   pipeline: {
-    leads: DataSourceHealth;
+    contacts: DataSourceHealth;
     deals: DataSourceHealth;
     engagements: DataSourceHealth;
   };
@@ -55,32 +55,60 @@ export function useDataHealth() {
     try {
       setLoading(true);
 
-      // Fetch all counts in parallel using unified tables
-      // Fetch counts sequentially to avoid deep type instantiation
-      const campaignsResult = await supabase.from('campaigns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const metricsResult = await supabase.from('campaign_metrics').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const callsResult = await supabase.from('calls').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const leadsResult = await supabase.from('leads').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const dealsResult = await supabase.from('calling_deals').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const engagementsResult = await supabase.from('engagements').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const variantsResult = await supabase.from('campaign_variants').select('id', { count: 'exact', head: true });
-      const libraryResult = await supabase.from('copy_library').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
-      const patternsResult = await supabase.from('copy_patterns').select('id', { count: 'exact', head: true }).eq('workspace_id', currentWorkspace.id);
+      // Get engagements for this client first
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
 
-      const campaignsCount = campaignsResult.count || 0;
-      const metricsCount = metricsResult.count || 0;
-      const callsCount = callsResult.count || 0;
-      const leadsCount = leadsResult.count || 0;
-      const dealsCount = dealsResult.count || 0;
-      const engagementsCount = engagementsResult.count || 0;
-      const copyVariantsCount = variantsResult.count || 0;
-      const copyLibraryCount = libraryResult.count || 0;
-      const patternsCount = patternsResult.count || 0;
+      const engagementIds = (engagements || []).map(e => e.id);
+      const engagementsCount = engagementIds.length;
+
+      // Fetch counts for tables that use engagement_id
+      let campaignsCount = 0;
+      let metricsCount = 0;
+      let callsCount = 0;
+      let contactsCount = 0;
+      let dealsCount = 0;
+      let copyVariantsCount = 0;
+      let copyLibraryCount = 0;
+      let patternsCount = 0;
+
+      if (engagementIds.length > 0) {
+        const [
+          campaignsResult,
+          metricsResult,
+          callsResult,
+          contactsResult,
+          dealsResult,
+          variantsResult,
+          libraryResult,
+          patternsResult,
+        ] = await Promise.all([
+          supabase.from('campaigns').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
+          supabase.from('daily_metrics').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
+          supabase.from('call_activities').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
+          supabase.from('contacts').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
+          supabase.from('deals').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
+          supabase.from('campaign_variants').select('id, campaign_id', { count: 'exact', head: true }),
+          supabase.from('copy_library').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
+          supabase.from('copy_patterns').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
+        ]);
+
+        campaignsCount = campaignsResult.count || 0;
+        metricsCount = metricsResult.count || 0;
+        callsCount = callsResult.count || 0;
+        contactsCount = contactsResult.count || 0;
+        dealsCount = dealsResult.count || 0;
+        copyVariantsCount = variantsResult.count || 0;
+        copyLibraryCount = libraryResult.count || 0;
+        patternsCount = patternsResult.count || 0;
+      }
 
       // Determine campaign status
       const campaignsStatus: DataHealthStatus = campaignsCount > 0 ? 'healthy' : 'empty';
       
-      // Metrics are healthy if we have sent_count > 0, broken if campaigns exist but no metrics
+      // Metrics are healthy if we have data, broken if campaigns exist but no metrics
       const metricsStatus: DataHealthStatus = campaignsCount > 0
         ? (metricsCount > 0 ? 'healthy' : 'broken')
         : 'empty';
@@ -96,8 +124,8 @@ export function useDataHealth() {
             details: campaignsCount > 0 ? `${campaignsCount} campaigns` : 'Not connected',
           },
           metrics: {
-            name: 'Campaign Metrics',
-            table: 'campaign_metrics',
+            name: 'Daily Metrics',
+            table: 'daily_metrics',
             rowCount: metricsCount,
             hasData: metricsCount > 0,
             status: metricsStatus,
@@ -109,7 +137,7 @@ export function useDataHealth() {
         calling: {
           calls: {
             name: 'Calls',
-            table: 'calls',
+            table: 'call_activities',
             rowCount: callsCount,
             hasData: callsCount > 0,
             status: callsCount > 0 ? 'healthy' : 'empty',
@@ -143,17 +171,17 @@ export function useDataHealth() {
           },
         },
         pipeline: {
-          leads: {
-            name: 'Leads',
-            table: 'leads',
-            rowCount: leadsCount,
-            hasData: leadsCount > 0,
-            status: leadsCount > 0 ? 'healthy' : 'empty',
-            details: leadsCount > 0 ? `${leadsCount.toLocaleString()} leads` : 'No leads',
+          contacts: {
+            name: 'Contacts',
+            table: 'contacts',
+            rowCount: contactsCount,
+            hasData: contactsCount > 0,
+            status: contactsCount > 0 ? 'healthy' : 'empty',
+            details: contactsCount > 0 ? `${contactsCount.toLocaleString()} contacts` : 'No contacts',
           },
           deals: {
             name: 'Deals',
-            table: 'calling_deals',
+            table: 'deals',
             rowCount: dealsCount,
             hasData: dealsCount > 0,
             status: dealsCount > 0 ? 'healthy' : 'empty',
@@ -184,7 +212,7 @@ export function useDataHealth() {
         healthData.insights.copyVariants,
         healthData.insights.copyLibrary,
         healthData.insights.patterns,
-        healthData.pipeline.leads,
+        healthData.pipeline.contacts,
         healthData.pipeline.deals,
         healthData.pipeline.engagements,
       ];
