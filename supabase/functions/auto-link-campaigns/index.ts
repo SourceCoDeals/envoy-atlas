@@ -39,42 +39,22 @@ Deno.serve(async (req) => {
 
     console.log(`Auto-linking ${matches.length} campaigns for workspace ${workspace_id}`);
 
-    // Group matches by platform for efficient updates
-    const smartleadMatches = matches.filter(m => m.platform === 'smartlead');
-    const replyioMatches = matches.filter(m => m.platform === 'replyio');
-
     let successCount = 0;
     const errors: string[] = [];
 
-    // Update SmartLead campaigns
-    for (const match of smartleadMatches) {
+    // Update campaigns in unified table - all platforms use the same table now
+    for (const match of matches) {
       const { error } = await supabase
-        .from('smartlead_campaigns')
+        .from('campaigns')
         .update({ engagement_id: match.engagementId })
-        .eq('id', match.campaignId)
-        .eq('workspace_id', workspace_id);
+        .eq('id', match.campaignId);
 
       if (error) {
-        console.error(`Failed to update smartlead campaign ${match.campaignId}:`, error);
+        console.error(`Failed to update campaign ${match.campaignId} (${match.platform}):`, error);
         errors.push(`${match.campaignName}: ${error.message}`);
       } else {
         successCount++;
-      }
-    }
-
-    // Update Reply.io campaigns
-    for (const match of replyioMatches) {
-      const { error } = await supabase
-        .from('replyio_campaigns')
-        .update({ engagement_id: match.engagementId })
-        .eq('id', match.campaignId)
-        .eq('workspace_id', workspace_id);
-
-      if (error) {
-        console.error(`Failed to update replyio campaign ${match.campaignId}:`, error);
-        errors.push(`${match.campaignName}: ${error.message}`);
-      } else {
-        successCount++;
+        console.log(`Linked ${match.platform} campaign "${match.campaignName}" to engagement "${match.engagementName}"`);
       }
     }
 
