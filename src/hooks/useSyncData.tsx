@@ -274,8 +274,15 @@ export function useSyncData() {
           data_source_id: ds.id,
           reset: shouldReset,
           auto_continue: true,
-          sync_people: false, // Disable to prevent timeout
-          sync_email_activities: false, // Disable to prevent timeout
+          // Enable comprehensive sync options
+          sync_leads: true,
+          sync_people: true,
+          sync_email_accounts: true,
+          sync_lead_categories: true,
+          sync_statistics: true,
+          sync_email_activities: true,
+          sync_message_history: false, // Keep disabled - very expensive
+          classify_replies: true,
         }
       });
 
@@ -363,12 +370,19 @@ export function useSyncData() {
               body: { 
                 client_id: currentWorkspace.id,
                 engagement_id: engagementId,
-                data_source_id: ds.id, // FIX: Pass correct data_source_id
+                data_source_id: ds.id,
                 sync_type: 'full',
                 reset: options.reset ?? true,
                 auto_continue: true,
-                sync_people: false, // Disable to prevent timeout
-                sync_email_activities: false, // Disable to prevent timeout
+                // Enable comprehensive sync options
+                sync_leads: true,
+                sync_people: true,
+                sync_email_accounts: true,
+                sync_lead_categories: true,
+                sync_statistics: true,
+                sync_email_activities: true,
+                sync_message_history: false, // Keep disabled - very expensive
+                classify_replies: true,
               }
             })
           );

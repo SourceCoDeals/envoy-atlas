@@ -340,6 +340,21 @@ async function triggerAnalysis(
     console.error('Failed to trigger compute-patterns:', e);
   }
   
+  // Trigger variant decay computation
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/compute-variant-decay`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ engagement_id: engagementId }),
+    });
+    console.log('compute-variant-decay triggered');
+  } catch (e) {
+    console.error('Failed to trigger compute-variant-decay:', e);
+  }
+  
   // Trigger AI reply classification
   if (classifyReplies) {
     try {
