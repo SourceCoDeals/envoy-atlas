@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router-dom';
-import { Mail, MessageSquare, ThumbsUp, Reply } from 'lucide-react';
+import { Users, Mail, MessageSquare, ThumbsUp, Reply } from 'lucide-react';
 
 interface CampaignSummaryCardProps {
   campaign: {
@@ -9,6 +9,7 @@ interface CampaignSummaryCardProps {
     name: string;
     platform: string;
     status?: string | null;
+    enrolled?: number;
     sent?: number;
     replied?: number;
     replyRate?: number;
@@ -38,6 +39,9 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
   // Convert decimal rates to percentages (database stores as 0.043, display as 4.3%)
   const replyRateDisplay = ((campaign.replyRate || 0) * 100).toFixed(1);
   const positiveRateDisplay = ((campaign.positiveRate || 0) * 100).toFixed(1);
+  
+  // Check if we have real enrollment data (different from sent)
+  const hasEnrollmentData = campaign.enrolled && campaign.enrolled !== campaign.sent;
 
   return (
     <Card 
@@ -58,7 +62,16 @@ export function CampaignSummaryCard({ campaign }: CampaignSummaryCardProps) {
         </div>
       </div>
       
-      <div className="grid grid-cols-4 gap-2 text-center">
+      <div className={`grid ${hasEnrollmentData ? 'grid-cols-5' : 'grid-cols-4'} gap-2 text-center`}>
+        {hasEnrollmentData && (
+          <div className="p-2 rounded bg-muted/50">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <Users className="h-3 w-3 text-muted-foreground" />
+            </div>
+            <p className="text-xs font-bold">{(campaign.enrolled || 0).toLocaleString()}</p>
+            <p className="text-[10px] text-muted-foreground">Enrolled</p>
+          </div>
+        )}
         <div className="p-2 rounded bg-muted/50">
           <div className="flex items-center justify-center gap-1 mb-1">
             <Mail className="h-3 w-3 text-muted-foreground" />
