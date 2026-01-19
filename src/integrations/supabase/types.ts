@@ -2149,36 +2149,6 @@ export type Database = {
         }
         Relationships: []
       }
-      replyio_sequence_steps: {
-        Row: {
-          campaign_id: string
-          created_at: string
-          delay_days: number | null
-          id: string
-          step_number: number
-          step_type: string | null
-          variant_id: string | null
-        }
-        Insert: {
-          campaign_id: string
-          created_at?: string
-          delay_days?: number | null
-          id?: string
-          step_number: number
-          step_type?: string | null
-          variant_id?: string | null
-        }
-        Update: {
-          campaign_id?: string
-          created_at?: string
-          delay_days?: number | null
-          id?: string
-          step_number?: number
-          step_type?: string | null
-          variant_id?: string | null
-        }
-        Relationships: []
-      }
       replyio_variant_features: {
         Row: {
           body_avg_sentence_length: number | null
@@ -2621,36 +2591,6 @@ export type Database = {
           reply_text?: string | null
           variant_id?: string | null
           workspace_id?: string
-        }
-        Relationships: []
-      }
-      smartlead_sequence_steps: {
-        Row: {
-          campaign_id: string
-          created_at: string
-          delay_days: number | null
-          id: string
-          step_number: number
-          step_type: string | null
-          variant_id: string | null
-        }
-        Insert: {
-          campaign_id: string
-          created_at?: string
-          delay_days?: number | null
-          id?: string
-          step_number: number
-          step_type?: string | null
-          variant_id?: string | null
-        }
-        Update: {
-          campaign_id?: string
-          created_at?: string
-          delay_days?: number | null
-          id?: string
-          step_number?: number
-          step_type?: string | null
-          variant_id?: string | null
         }
         Relationships: []
       }
