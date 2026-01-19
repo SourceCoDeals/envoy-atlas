@@ -710,7 +710,7 @@ export default function Connections() {
         )}
 
         {/* Data Coverage */}
-        <DataCoverageIndicator />
+        {currentWorkspace?.id && <DataCoverageIndicator workspaceId={currentWorkspace.id} />}
 
         {/* Connection Cards */}
         <div className="grid gap-6 md:grid-cols-2">
