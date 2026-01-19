@@ -15,14 +15,10 @@ export interface CampaignSummaryData {
   metrics: {
     total_sent: number;
     total_delivered: number;
-    total_opened: number;
-    total_clicked: number;
     total_replied: number;
     total_bounced: number;
     total_positive_replies: number;
     delivery_rate: number;
-    open_rate: number;
-    click_rate: number;
     reply_rate: number;
     bounce_rate: number;
     positive_rate: number;
@@ -84,11 +80,7 @@ export interface VariantPerformance {
   subject_line: string;
   variant_type: string;
   sent: number;
-  opened: number;
-  clicked: number;
   replied: number;
-  open_rate: number;
-  click_rate: number;
   reply_rate: number;
 }
 
@@ -96,23 +88,17 @@ export interface SequenceStepPerformance {
   step_number: number;
   step_type: string;
   sent: number;
-  opened: number;
   replied: number;
-  open_rate: number;
   reply_rate: number;
 }
 
 const initialMetrics = {
   total_sent: 0,
   total_delivered: 0,
-  total_opened: 0,
-  total_clicked: 0,
   total_replied: 0,
   total_bounced: 0,
   total_positive_replies: 0,
   delivery_rate: 0,
-  open_rate: 0,
-  click_rate: 0,
   reply_rate: 0,
   bounce_rate: 0,
   positive_rate: 0,
@@ -186,7 +172,6 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
 
       // 3. Calculate metrics from campaign data or daily metrics
       let total_sent = campaignData.total_sent || 0;
-      let total_opened = campaignData.total_opened || 0;
       let total_replied = campaignData.total_replied || 0;
       let total_bounced = campaignData.total_bounced || 0;
       let total_delivered = campaignData.total_delivered || 0;
@@ -195,7 +180,6 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
       // If campaign aggregates are 0, sum from daily_metrics
       if (total_sent === 0 && dailyMetricsData.length > 0) {
         total_sent = dailyMetricsData.reduce((s, m) => s + (m.emails_sent || 0), 0);
-        total_opened = dailyMetricsData.reduce((s, m) => s + (m.emails_opened || 0), 0);
         total_replied = dailyMetricsData.reduce((s, m) => s + (m.emails_replied || 0), 0);
         total_bounced = dailyMetricsData.reduce((s, m) => s + (m.emails_bounced || 0), 0);
         total_delivered = dailyMetricsData.reduce((s, m) => s + (m.emails_delivered || 0), 0);
@@ -204,7 +188,6 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
 
       // Get positive replies from daily metrics
       const total_positive_replies = dailyMetricsData.reduce((s, m) => s + (m.positive_replies || 0), 0);
-      const total_clicked = dailyMetricsData.reduce((s, m) => s + (m.emails_clicked || 0), 0);
 
       if (total_delivered === 0) {
         total_delivered = total_sent - total_bounced;
@@ -213,14 +196,10 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
       const metrics = {
         total_sent,
         total_delivered,
-        total_opened,
-        total_clicked,
         total_replied,
         total_bounced,
         total_positive_replies,
         delivery_rate: total_sent > 0 ? (total_delivered / total_sent) * 100 : 0,
-        open_rate: total_sent > 0 ? (total_opened / total_sent) * 100 : 0,
-        click_rate: total_sent > 0 ? (total_clicked / total_sent) * 100 : 0,
         reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
         bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
         positive_rate: total_sent > 0 ? (total_positive_replies / total_sent) * 100 : 0,
@@ -282,11 +261,8 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
       };
 
       // 8. Variants with metrics
-      // Note: Rate columns in DB are stored as decimals (0.0-1.0), convert to percentages for display
       const variants: VariantPerformance[] = variantsData.map(v => {
         const sent = v.total_sent || 0;
-        const opened = v.total_opened || 0;
-        const clicked = v.total_clicked || 0;
         const replied = v.total_replied || 0;
         return {
           id: v.id,
@@ -294,31 +270,22 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
           subject_line: v.subject_line || '',
           variant_type: 'email',
           sent,
-          opened,
-          clicked,
           replied,
-          // Calculate percentages from raw counts for accurate display
-          open_rate: sent > 0 ? (opened / sent) * 100 : 0,
-          click_rate: sent > 0 ? (clicked / sent) * 100 : 0,
           reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
         };
       }).sort((a, b) => b.reply_rate - a.reply_rate);
 
       // 9. Sequence steps from variants with step_number
-      // Calculate rates from raw counts for accurate display
       const sequenceSteps: SequenceStepPerformance[] = variantsData
         .filter(v => v.step_number !== null)
         .map(v => {
           const sent = v.total_sent || 0;
-          const opened = v.total_opened || 0;
           const replied = v.total_replied || 0;
           return {
             step_number: v.step_number || 1,
             step_type: 'email',
             sent,
-            opened,
             replied,
-            open_rate: sent > 0 ? (opened / sent) * 100 : 0,
             reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
           };
         })

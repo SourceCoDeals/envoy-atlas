@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowLeft, Mail, MessageSquare, ThumbsUp, MousePointer, AlertTriangle, Clock } from 'lucide-react';
+import { Loader2, ArrowLeft, Mail, MessageSquare, AlertTriangle, Clock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { format } from 'date-fns';
@@ -27,18 +27,13 @@ interface VariantPerformance {
   subject_line: string;
   step_number: number | null;
   sent: number;
-  opened: number;
-  clicked: number;
   replied: number;
-  open_rate: number;
-  click_rate: number;
   reply_rate: number;
 }
 
 interface DailyData {
   date: string;
   sent: number;
-  opened: number;
   replied: number;
 }
 
@@ -57,7 +52,7 @@ export default function CampaignDetail() {
   const [variants, setVariants] = useState<VariantPerformance[]>([]);
   const [dailyData, setDailyData] = useState<DailyData[]>([]);
   const [hourlyData, setHourlyData] = useState<HourlyData[]>([]);
-  const [totals, setTotals] = useState({ sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
+  const [totals, setTotals] = useState({ sent: 0, replied: 0, bounced: 0 });
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -100,8 +95,6 @@ export default function CampaignDetail() {
       // Set totals from campaign data
       setTotals({
         sent: campaignData.total_sent || 0,
-        opened: campaignData.total_opened || 0,
-        clicked: 0,
         replied: campaignData.total_replied || 0,
         bounced: campaignData.total_bounced || 0,
       });
@@ -117,7 +110,6 @@ export default function CampaignDetail() {
         const daily: DailyData[] = metricsData.map(m => ({
           date: format(new Date(m.date), 'MMM d'),
           sent: m.emails_sent || 0,
-          opened: m.emails_opened || 0,
           replied: m.emails_replied || 0,
         }));
         setDailyData(daily);
@@ -132,8 +124,6 @@ export default function CampaignDetail() {
       if (!variantsError && variantsData) {
         const variantsWithMetrics: VariantPerformance[] = variantsData.map(v => {
           const sent = v.total_sent || 0;
-          const opened = v.total_opened || 0;
-          const clicked = v.total_clicked || 0;
           const replied = v.total_replied || 0;
 
           return {
@@ -142,11 +132,7 @@ export default function CampaignDetail() {
             subject_line: v.subject_line || '',
             step_number: v.step_number,
             sent,
-            opened,
-            clicked,
             replied,
-            open_rate: v.open_rate || (sent > 0 ? (opened / sent) * 100 : 0),
-            click_rate: v.click_rate || (sent > 0 ? (clicked / sent) * 100 : 0),
             reply_rate: v.reply_rate || (sent > 0 ? (replied / sent) * 100 : 0),
           };
         });
@@ -213,7 +199,7 @@ export default function CampaignDetail() {
         ) : (
           <>
             {/* KPI Cards */}
-            <div className="grid gap-4 md:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-3">
               <Card>
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-2">
@@ -226,25 +212,8 @@ export default function CampaignDetail() {
               <Card>
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold">{totals.sent > 0 ? ((totals.opened / totals.sent) * 100).toFixed(1) : 0}%</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Open Rate</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4">
-                  <div className="flex items-center gap-2">
-                    <MousePointer className="h-4 w-4 text-chart-2" />
-                    <span className="text-2xl font-bold">{totals.sent > 0 ? ((totals.clicked / totals.sent) * 100).toFixed(1) : 0}%</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Click Rate</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4">
-                  <div className="flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4 text-green-500" />
-                    <span className="text-2xl font-bold text-green-500">{totals.sent > 0 ? ((totals.replied / totals.sent) * 100).toFixed(1) : 0}%</span>
+                    <MessageSquare className="h-4 w-4 text-success" />
+                    <span className="text-2xl font-bold text-success">{totals.sent > 0 ? ((totals.replied / totals.sent) * 100).toFixed(1) : 0}%</span>
                   </div>
                   <p className="text-xs text-muted-foreground">Reply Rate</p>
                 </CardContent>
@@ -320,11 +289,9 @@ export default function CampaignDetail() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="w-[40%]">Subject Line</TableHead>
+                            <TableHead className="w-[50%]">Subject Line</TableHead>
                             <TableHead>Step</TableHead>
                             <TableHead className="text-right">Sent</TableHead>
-                            <TableHead className="text-right">Open Rate</TableHead>
-                            <TableHead className="text-right">Click Rate</TableHead>
                             <TableHead className="text-right">Reply Rate</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -339,10 +306,8 @@ export default function CampaignDetail() {
                                 <Badge variant="outline">{v.step_number || 'N/A'}</Badge>
                               </TableCell>
                               <TableCell className="text-right font-mono">{v.sent}</TableCell>
-                              <TableCell className="text-right font-mono">{v.open_rate.toFixed(1)}%</TableCell>
-                              <TableCell className="text-right font-mono">{v.click_rate.toFixed(1)}%</TableCell>
                               <TableCell className="text-right">
-                                <span className={`font-mono ${idx === 0 && v.reply_rate > 0 ? 'text-green-500 font-semibold' : ''}`}>
+                                <span className={`font-mono ${idx === 0 && v.reply_rate > 0 ? 'text-success font-semibold' : ''}`}>
                                   {v.reply_rate.toFixed(1)}%
                                 </span>
                               </TableCell>

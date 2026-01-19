@@ -104,13 +104,13 @@ export default function EngagementReport() {
     dataAvailability
   } = data;
 
-  // Determine status styling
+  // Determine status styling using semantic tokens
   const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'outline' | 'destructive'; className: string }> = {
-    active: { variant: 'default', className: 'bg-green-500/20 text-green-600 border-green-500/30' },
-    contracted: { variant: 'secondary', className: 'bg-blue-500/20 text-blue-600 border-blue-500/30' },
-    paused: { variant: 'outline', className: 'bg-amber-500/20 text-amber-600 border-amber-500/30' },
+    active: { variant: 'default', className: 'bg-success/20 text-success border-success/30' },
+    contracted: { variant: 'secondary', className: 'bg-primary/20 text-primary border-primary/30' },
+    paused: { variant: 'outline', className: 'bg-warning/20 text-warning border-warning/30' },
     closed: { variant: 'secondary', className: 'bg-muted text-muted-foreground' },
-    transitioned: { variant: 'secondary', className: 'bg-purple-500/20 text-purple-600 border-purple-500/30' },
+    transitioned: { variant: 'secondary', className: 'bg-accent text-accent-foreground' },
   };
 
   const engagementStatus = statusConfig[engagement.status || 'active'] || statusConfig.active;

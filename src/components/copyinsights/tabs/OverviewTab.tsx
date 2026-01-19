@@ -88,14 +88,12 @@ export function OverviewTab({
   isBackfilling,
   isRecomputing,
 }: OverviewTabProps) {
-  // Calculate summary metrics
+  // Calculate summary metrics (removed open rate)
   const totalSent = subjectLines.reduce((sum, s) => sum + s.sent_count, 0);
   const totalReplies = subjectLines.reduce((sum, s) => sum + s.reply_count, 0);
-  const totalOpens = subjectLines.reduce((sum, s) => sum + (s.open_count || 0), 0);
   const totalPositive = subjectLines.reduce((sum, s) => sum + (s.positive_count || 0), 0);
   
   const avgReplyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
-  const avgOpenRate = totalSent > 0 ? (totalOpens / totalSent) * 100 : 0;
   const positiveRate = totalReplies > 0 ? (totalPositive / totalReplies) * 100 : 0;
 
   // Generate executive summary insights
@@ -232,21 +230,14 @@ export function OverviewTab({
         bottomLine={bottomLine}
       />
 
-      {/* Performance Summary Cards */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      {/* Performance Summary Cards - removed open rate */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-3">
         <MetricCard 
           title="Average Reply Rate" 
           value={`${avgReplyRate.toFixed(1)}%`}
           change={avgReplyRate > 3.43 ? `+${(avgReplyRate - 3.43).toFixed(1)}%` : `${(avgReplyRate - 3.43).toFixed(1)}%`}
           benchmark="3.43%"
           status={avgReplyRate >= 3.43 ? 'good' : 'warning'}
-        />
-        <MetricCard 
-          title="Average Open Rate" 
-          value={`${avgOpenRate.toFixed(1)}%`}
-          change={avgOpenRate > 27.7 ? `+${(avgOpenRate - 27.7).toFixed(1)}%` : `${(avgOpenRate - 27.7).toFixed(1)}%`}
-          benchmark="27.7%"
-          status={avgOpenRate >= 27.7 ? 'good' : 'warning'}
         />
         <MetricCard 
           title="Positive Reply %" 

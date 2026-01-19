@@ -81,7 +81,7 @@ export default function CampaignSummary() {
         ) : (
           <>
             {/* KPI Cards */}
-            <div className="grid gap-4 md:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-4">
               <Card>
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-2">
@@ -95,12 +95,6 @@ export default function CampaignSummary() {
                 <CardContent className="pt-4">
                   <span className="text-2xl font-bold">{metrics.delivery_rate.toFixed(1)}%</span>
                   <p className="text-xs text-muted-foreground">Delivery Rate</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4">
-                  <span className="text-2xl font-bold">{metrics.open_rate.toFixed(1)}%</span>
-                  <p className="text-xs text-muted-foreground">Open Rate</p>
                 </CardContent>
               </Card>
               <Card>
@@ -191,7 +185,6 @@ export default function CampaignSummary() {
                           <TableRow>
                             <TableHead>Subject Line</TableHead>
                             <TableHead className="text-right">Sent</TableHead>
-                            <TableHead className="text-right">Open %</TableHead>
                             <TableHead className="text-right">Reply %</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -200,7 +193,6 @@ export default function CampaignSummary() {
                             <TableRow key={v.id}>
                               <TableCell className="font-medium">{v.subject_line || v.name}</TableCell>
                               <TableCell className="text-right">{v.sent}</TableCell>
-                              <TableCell className="text-right">{v.open_rate.toFixed(1)}%</TableCell>
                               <TableCell className="text-right text-success">{v.reply_rate.toFixed(1)}%</TableCell>
                             </TableRow>
                           ))}
@@ -222,7 +214,6 @@ export default function CampaignSummary() {
                             <TableHead>Step</TableHead>
                             <TableHead>Type</TableHead>
                             <TableHead className="text-right">Sent</TableHead>
-                            <TableHead className="text-right">Open %</TableHead>
                             <TableHead className="text-right">Reply %</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -232,7 +223,6 @@ export default function CampaignSummary() {
                               <TableCell>Step {s.step_number}</TableCell>
                               <TableCell><Badge variant="outline">{s.step_type}</Badge></TableCell>
                               <TableCell className="text-right">{s.sent}</TableCell>
-                              <TableCell className="text-right">{s.open_rate.toFixed(1)}%</TableCell>
                               <TableCell className="text-right text-success">{s.reply_rate.toFixed(1)}%</TableCell>
                             </TableRow>
                           ))}
