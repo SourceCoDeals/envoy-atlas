@@ -282,32 +282,46 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
       };
 
       // 8. Variants with metrics
-      const variants: VariantPerformance[] = variantsData.map(v => ({
-        id: v.id,
-        name: v.subject_line || 'Variant',
-        subject_line: v.subject_line || '',
-        variant_type: 'email',
-        sent: v.total_sent || 0,
-        opened: v.total_opened || 0,
-        clicked: v.total_clicked || 0,
-        replied: v.total_replied || 0,
-        open_rate: v.open_rate || 0,
-        click_rate: v.click_rate || 0,
-        reply_rate: v.reply_rate || 0,
-      })).sort((a, b) => b.reply_rate - a.reply_rate);
+      // Note: Rate columns in DB are stored as decimals (0.0-1.0), convert to percentages for display
+      const variants: VariantPerformance[] = variantsData.map(v => {
+        const sent = v.total_sent || 0;
+        const opened = v.total_opened || 0;
+        const clicked = v.total_clicked || 0;
+        const replied = v.total_replied || 0;
+        return {
+          id: v.id,
+          name: v.subject_line || 'Variant',
+          subject_line: v.subject_line || '',
+          variant_type: 'email',
+          sent,
+          opened,
+          clicked,
+          replied,
+          // Calculate percentages from raw counts for accurate display
+          open_rate: sent > 0 ? (opened / sent) * 100 : 0,
+          click_rate: sent > 0 ? (clicked / sent) * 100 : 0,
+          reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
+        };
+      }).sort((a, b) => b.reply_rate - a.reply_rate);
 
       // 9. Sequence steps from variants with step_number
+      // Calculate rates from raw counts for accurate display
       const sequenceSteps: SequenceStepPerformance[] = variantsData
         .filter(v => v.step_number !== null)
-        .map(v => ({
-          step_number: v.step_number || 1,
-          step_type: 'email',
-          sent: v.total_sent || 0,
-          opened: v.total_opened || 0,
-          replied: v.total_replied || 0,
-          open_rate: v.open_rate || 0,
-          reply_rate: v.reply_rate || 0,
-        }))
+        .map(v => {
+          const sent = v.total_sent || 0;
+          const opened = v.total_opened || 0;
+          const replied = v.total_replied || 0;
+          return {
+            step_number: v.step_number || 1,
+            step_type: 'email',
+            sent,
+            opened,
+            replied,
+            open_rate: sent > 0 ? (opened / sent) * 100 : 0,
+            reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
+          };
+        })
         .sort((a, b) => a.step_number - b.step_number);
 
       // 10. Daily data for chart
