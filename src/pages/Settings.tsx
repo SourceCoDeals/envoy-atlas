@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useWorkspaceSettings } from '@/hooks/useWorkspaceSettings';
-import { useSyncData } from '@/hooks/useSyncData';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,8 +14,6 @@ import { InviteTeamMemberDialog } from '@/components/settings/InviteTeamMemberDi
 import { TeamMembersList } from '@/components/settings/TeamMembersList';
 import { TeamMembersSettings } from '@/components/settings/TeamMembersSettings';
 import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
-import { SyncStatusDashboard } from '@/components/settings/SyncStatusDashboard';
-import { SyncProgressBar } from '@/components/campaigns/SyncProgressBar';
 import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle } from 'lucide-react';
 
 export default function Settings() {
@@ -32,16 +29,6 @@ export default function Settings() {
     updateMemberRole,
     removeMember,
   } = useWorkspaceSettings();
-  
-  const { 
-    syncing, 
-    progress, 
-    elapsedTime, 
-    staleSyncs,
-    triggerSync, 
-    triggerPlatformSync,
-    resumeStaleSyncs,
-  } = useSyncData();
 
   const initialTab = searchParams.get('tab') || 'profile';
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -278,36 +265,9 @@ export default function Settings() {
           </TabsContent>
 
           {/* Connections Tab */}
-          <TabsContent value="connections" className="mt-6 space-y-6">
+          <TabsContent value="connections" className="mt-6">
             {currentWorkspace ? (
-              <>
-                {/* Sync Progress Panel */}
-                <SyncProgressBar 
-                  progress={progress} 
-                  isActive={syncing} 
-                  elapsedTime={elapsedTime}
-                  staleSyncs={staleSyncs}
-                  onResume={resumeStaleSyncs}
-                  onPlatformSync={triggerPlatformSync}
-                />
-                
-                {/* Trigger Sync Button */}
-                <div className="flex justify-end">
-                  <Button 
-                    onClick={() => triggerSync()} 
-                    disabled={syncing}
-                    size="sm"
-                  >
-                    {syncing ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : null}
-                    {syncing ? 'Syncing...' : 'Start Full Sync'}
-                  </Button>
-                </div>
-                
-                <SyncStatusDashboard />
-                <ConnectionsSection workspaceId={currentWorkspace.id} />
-              </>
+              <ConnectionsSection workspaceId={currentWorkspace.id} />
             ) : (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
