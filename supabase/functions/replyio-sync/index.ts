@@ -804,41 +804,66 @@ Deno.serve(async (req) => {
                 
                 for (const person of people) {
                   try {
-                    // Create/upsert company
+                    // Create/upsert company with proper conflict handling
                     let companyId: string | null = null;
                     const domain = extractDomain(person.email);
+                    const companyName = person.company || domain || 'Unknown';
                     
-                    if (person.company || domain) {
-                      const { data: companyData, error: companyError } = await supabase
+                    // Try to find existing company first
+                    if (domain) {
+                      const { data: existingByDomain } = await supabase
                         .from('companies')
-                        .upsert({
-                          engagement_id,
-                          name: person.company || domain || 'Unknown',
-                          domain: domain,
-                          website: domain ? `https://${domain}` : null,
-                          source: 'replyio',
-                        }, { onConflict: 'engagement_id,domain', ignoreDuplicates: false })
                         .select('id')
-                        .single();
+                        .eq('engagement_id', engagement_id)
+                        .eq('domain', domain)
+                        .maybeSingle();
                       
-                      if (!companyError && companyData) {
-                        companyId = companyData.id;
-                        progress.companies_synced++;
+                      if (existingByDomain) {
+                        companyId = existingByDomain.id;
                       }
                     }
                     
-                    // Create placeholder company if needed
+                    // If not found by domain, try by name
                     if (!companyId) {
-                      const { data: placeholderCompany } = await supabase
+                      const { data: existingByName } = await supabase
                         .from('companies')
-                        .upsert({
+                        .select('id')
+                        .eq('engagement_id', engagement_id)
+                        .eq('name', companyName)
+                        .maybeSingle();
+                      
+                      if (existingByName) {
+                        companyId = existingByName.id;
+                      }
+                    }
+                    
+                    // Create new company if not found
+                    if (!companyId) {
+                      const { data: newCompany, error: companyError } = await supabase
+                        .from('companies')
+                        .insert({
                           engagement_id,
-                          name: 'Unknown Company',
+                          name: companyName,
+                          domain: domain,
+                          website: domain ? `https://${domain}` : null,
                           source: 'replyio',
-                        }, { onConflict: 'engagement_id,name', ignoreDuplicates: true })
+                        })
                         .select('id')
                         .single();
-                      companyId = placeholderCompany?.id;
+                      
+                      if (!companyError && newCompany) {
+                        companyId = newCompany.id;
+                        progress.companies_synced++;
+                      } else if (companyError?.code === '23505') {
+                        // Duplicate - try to fetch again
+                        const { data: retryCompany } = await supabase
+                          .from('companies')
+                          .select('id')
+                          .eq('engagement_id', engagement_id)
+                          .or(`domain.eq.${domain},name.eq.${companyName}`)
+                          .maybeSingle();
+                        companyId = retryCompany?.id;
+                      }
                     }
                     
                     if (!companyId) continue;
