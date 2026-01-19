@@ -7,27 +7,27 @@ const corsHeaders = {
 
 interface FeatureWithMetrics {
   variant_id: string;
-  workspace_id: string;
-  platform: 'smartlead' | 'replyio';
   // Subject features
-  subject_is_question: boolean | null;
+  subject_format: string | null;
+  subject_punctuation: string | null;
+  subject_has_personalization: boolean | null;
   subject_has_number: boolean | null;
   subject_has_emoji: boolean | null;
-  subject_char_count: number | null;
   subject_word_count: number | null;
-  subject_personalization_count: number | null;
-  subject_capitalization_style: string | null;
+  subject_length: number | null;
+  subject_capitalization: string | null;
   subject_first_word_type: string | null;
   // Body features
   body_word_count: number | null;
   body_cta_type: string | null;
   body_cta_position: string | null;
-  body_tone: string | null;
-  body_has_link: boolean | null;
+  body_cta_strength: string | null;
+  tone: string | null;
   body_has_calendar_link: boolean | null;
-  body_has_proof: boolean | null;
+  body_has_bullets: boolean | null;
   body_question_count: number | null;
-  body_personalization_density: number | null;
+  body_you_i_ratio: number | null;
+  opening_line_type: string | null;
   // Metrics
   sent_count: number;
   replied_count: number;
@@ -36,21 +36,18 @@ interface FeatureWithMetrics {
 }
 
 interface ComputedPattern {
-  pattern_name: string;
   pattern_type: string;
-  pattern_description: string;
-  pattern_criteria: Record<string, any>;
-  sample_size: number;
-  reply_rate: number;
-  positive_rate: number;
-  open_rate: number;
-  reply_rate_lift: number;
-  positive_rate_lift: number;
-  confidence_level: 'low' | 'medium' | 'high';
+  pattern_value: string;
+  total_sent: number;
+  total_replied: number;
+  total_variants: number;
+  avg_reply_rate: number;
+  baseline_reply_rate: number;
+  lift_vs_baseline: number;
   p_value: number | null;
-  confidence_interval_lower: number;
-  confidence_interval_upper: number;
-  is_validated: boolean;
+  reply_rate_ci_lower: number;
+  reply_rate_ci_upper: number;
+  is_significant: boolean;
 }
 
 // Calculate two-proportion z-test p-value
@@ -103,12 +100,12 @@ function wilsonConfidenceInterval(
   if (total === 0) return { lower: 0, upper: 0 };
   
   const z = confidence === 0.95 ? 1.96 : 1.645;
-  const p = successes / total;
+  const pHat = successes / total;
   const n = total;
   
   const denominator = 1 + z * z / n;
-  const center = p + z * z / (2 * n);
-  const spread = z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n);
+  const center = pHat + z * z / (2 * n);
+  const spread = z * Math.sqrt((pHat * (1 - pHat) + z * z / (4 * n)) / n);
   
   return {
     lower: Math.max(0, (center - spread) / denominator) * 100,
@@ -116,44 +113,28 @@ function wilsonConfidenceInterval(
   };
 }
 
-function getConfidenceLevel(sampleSize: number): 'low' | 'medium' | 'high' {
-  if (sampleSize < 200) return 'low';
-  if (sampleSize < 500) return 'medium';
-  return 'high';
-}
-
 function computePatterns(
   features: FeatureWithMetrics[],
   baselineReplyRate: number,
-  baselinePositiveRate: number,
   totalSampleSize: number
 ): ComputedPattern[] {
   const patterns: ComputedPattern[] = [];
   
   // Helper to compute pattern stats
   const computePatternStats = (
-    name: string,
-    type: string,
-    description: string,
-    criteria: Record<string, any>,
+    patternType: string,
+    patternValue: string,
     matchingVariants: FeatureWithMetrics[]
-  ) => {
+  ): ComputedPattern | null => {
     const sampleSize = matchingVariants.reduce((sum, v) => sum + v.sent_count, 0);
     if (sampleSize < 50) return null; // Skip patterns with very small samples
     
     const totalReplies = matchingVariants.reduce((sum, v) => sum + v.replied_count, 0);
-    const totalPositive = matchingVariants.reduce((sum, v) => sum + v.positive_count, 0);
-    const totalOpened = matchingVariants.reduce((sum, v) => sum + v.opened_count, 0);
     
     const replyRate = sampleSize > 0 ? (totalReplies / sampleSize) * 100 : 0;
-    const positiveRate = sampleSize > 0 ? (totalPositive / sampleSize) * 100 : 0;
-    const openRate = sampleSize > 0 ? (totalOpened / sampleSize) * 100 : 0;
     
-    const replyLift = baselineReplyRate > 0 
+    const lift = baselineReplyRate > 0 
       ? ((replyRate - baselineReplyRate) / baselineReplyRate) * 100 
-      : 0;
-    const positiveLift = baselinePositiveRate > 0
-      ? ((positiveRate - baselinePositiveRate) / baselinePositiveRate) * 100
       : 0;
     
     // Calculate p-value comparing this pattern to baseline
@@ -165,249 +146,170 @@ function computePatterns(
     // Calculate confidence interval
     const ci = wilsonConfidenceInterval(totalReplies, sampleSize);
     
-    // Pattern is validated if p < 0.05 and meaningful sample size
-    const isValidated = pValue < 0.05 && sampleSize >= 200;
+    // Pattern is significant if p < 0.05 and meaningful sample size
+    const isSignificant = pValue < 0.05 && sampleSize >= 200;
     
     return {
-      pattern_name: name,
-      pattern_type: type,
-      pattern_description: description,
-      pattern_criteria: criteria,
-      sample_size: sampleSize,
-      reply_rate: replyRate,
-      positive_rate: positiveRate,
-      open_rate: openRate,
-      reply_rate_lift: replyLift,
-      positive_rate_lift: positiveLift,
-      confidence_level: getConfidenceLevel(sampleSize),
-      p_value: pValue,
-      confidence_interval_lower: ci.lower,
-      confidence_interval_upper: ci.upper,
-      is_validated: isValidated,
+      pattern_type: patternType,
+      pattern_value: patternValue,
+      total_sent: sampleSize,
+      total_replied: totalReplies,
+      total_variants: matchingVariants.length,
+      avg_reply_rate: Math.round(replyRate * 100) / 100,
+      baseline_reply_rate: Math.round(baselineReplyRate * 100) / 100,
+      lift_vs_baseline: Math.round(lift * 100) / 100,
+      p_value: Math.round(pValue * 10000) / 10000,
+      reply_rate_ci_lower: Math.round(ci.lower * 100) / 100,
+      reply_rate_ci_upper: Math.round(ci.upper * 100) / 100,
+      is_significant: isSignificant,
     };
   };
   
   // --- Subject Line Patterns ---
   
-  // Question format
-  const questionVariants = features.filter(f => f.subject_is_question === true);
-  const questionPattern = computePatternStats(
-    'Question Subject Lines',
-    'subject_format',
-    'Subject lines ending with a question mark',
-    { subject_is_question: true },
-    questionVariants
-  );
-  if (questionPattern) patterns.push(questionPattern);
+  // Subject format patterns
+  const subjectFormats = ['question', 'statement', 're_fwd', 'personalized'];
+  for (const format of subjectFormats) {
+    const variants = features.filter(f => f.subject_format === format);
+    const pattern = computePatternStats('subject_format', format, variants);
+    if (pattern) patterns.push(pattern);
+  }
   
-  // Non-question (statement) format
-  const statementVariants = features.filter(f => f.subject_is_question === false);
-  const statementPattern = computePatternStats(
-    'Statement Subject Lines',
-    'subject_format',
-    'Subject lines without question marks',
-    { subject_is_question: false },
-    statementVariants
-  );
-  if (statementPattern) patterns.push(statementPattern);
+  // Subject punctuation
+  const punctuations = ['question', 'exclamation', 'period', 'none'];
+  for (const punct of punctuations) {
+    const variants = features.filter(f => f.subject_punctuation === punct);
+    const pattern = computePatternStats('subject_punctuation', punct, variants);
+    if (pattern) patterns.push(pattern);
+  }
   
-  // Has number in subject
+  // Subject personalization
+  const persVariants = features.filter(f => f.subject_has_personalization === true);
+  const persPattern = computePatternStats('subject_personalization', 'personalized', persVariants);
+  if (persPattern) patterns.push(persPattern);
+  
+  const noPersVariants = features.filter(f => f.subject_has_personalization === false);
+  const noPersPattern = computePatternStats('subject_personalization', 'not_personalized', noPersVariants);
+  if (noPersPattern) patterns.push(noPersPattern);
+  
+  // Subject has number
   const numberVariants = features.filter(f => f.subject_has_number === true);
-  const numberPattern = computePatternStats(
-    'Numbers in Subject',
-    'subject_element',
-    'Subject lines containing numeric digits',
-    { subject_has_number: true },
-    numberVariants
-  );
+  const numberPattern = computePatternStats('subject_element', 'has_number', numberVariants);
   if (numberPattern) patterns.push(numberPattern);
   
-  // Has emoji in subject
+  // Subject has emoji
   const emojiVariants = features.filter(f => f.subject_has_emoji === true);
-  const emojiPattern = computePatternStats(
-    'Emoji in Subject',
-    'subject_element',
-    'Subject lines containing emoji characters',
-    { subject_has_emoji: true },
-    emojiVariants
-  );
+  const emojiPattern = computePatternStats('subject_element', 'has_emoji', emojiVariants);
   if (emojiPattern) patterns.push(emojiPattern);
   
-  // Subject length patterns
-  const shortSubjectVariants = features.filter(f => f.subject_char_count && f.subject_char_count <= 30);
-  const shortPattern = computePatternStats(
-    'Short Subject (≤30 chars)',
-    'subject_length',
-    'Very short subject lines under 30 characters',
-    { subject_char_count_max: 30 },
-    shortSubjectVariants
-  );
+  // Subject length buckets
+  const shortSubjectVariants = features.filter(f => f.subject_length && f.subject_length <= 30);
+  const shortPattern = computePatternStats('subject_length', 'short_<=30', shortSubjectVariants);
   if (shortPattern) patterns.push(shortPattern);
   
-  const mediumSubjectVariants = features.filter(f => 
-    f.subject_char_count && f.subject_char_count > 30 && f.subject_char_count <= 50
-  );
-  const mediumPattern = computePatternStats(
-    'Medium Subject (31-50 chars)',
-    'subject_length',
-    'Medium-length subject lines between 31-50 characters',
-    { subject_char_count_min: 31, subject_char_count_max: 50 },
-    mediumSubjectVariants
-  );
-  if (mediumPattern) patterns.push(mediumPattern);
+  const medSubjectVariants = features.filter(f => f.subject_length && f.subject_length > 30 && f.subject_length <= 50);
+  const medPattern = computePatternStats('subject_length', 'medium_31-50', medSubjectVariants);
+  if (medPattern) patterns.push(medPattern);
   
-  const longSubjectVariants = features.filter(f => f.subject_char_count && f.subject_char_count > 50);
-  const longPattern = computePatternStats(
-    'Long Subject (>50 chars)',
-    'subject_length',
-    'Longer subject lines over 50 characters',
-    { subject_char_count_min: 51 },
-    longSubjectVariants
-  );
+  const longSubjectVariants = features.filter(f => f.subject_length && f.subject_length > 50);
+  const longPattern = computePatternStats('subject_length', 'long_>50', longSubjectVariants);
   if (longPattern) patterns.push(longPattern);
   
-  // Personalization in subject
-  const personalizedSubjectVariants = features.filter(f => 
-    f.subject_personalization_count && f.subject_personalization_count > 0
-  );
-  const persSubjectPattern = computePatternStats(
-    'Personalized Subject',
-    'subject_personalization',
-    'Subject lines with merge tags ({{first_name}}, {{company}}, etc.)',
-    { subject_personalization_count_min: 1 },
-    personalizedSubjectVariants
-  );
-  if (persSubjectPattern) patterns.push(persSubjectPattern);
+  // First word type
+  const firstWordTypes = ['greeting', 're_fwd', 'question_word', 'number', 'personalization', 'other'];
+  for (const fwt of firstWordTypes) {
+    const variants = features.filter(f => f.subject_first_word_type === fwt);
+    const pattern = computePatternStats('subject_first_word', fwt, variants);
+    if (pattern) patterns.push(pattern);
+  }
+  
+  // Capitalization style
+  const capStyles = ['sentence_case', 'title_case', 'all_lower', 'all_caps', 'normal'];
+  for (const cap of capStyles) {
+    const variants = features.filter(f => f.subject_capitalization === cap);
+    const pattern = computePatternStats('subject_capitalization', cap, variants);
+    if (pattern) patterns.push(pattern);
+  }
   
   // --- Body Copy Patterns ---
   
-  // Body length patterns
+  // Body length buckets
   const shortBodyVariants = features.filter(f => f.body_word_count && f.body_word_count < 50);
-  const shortBodyPattern = computePatternStats(
-    'Short Body (<50 words)',
-    'body_length',
-    'Very concise email body under 50 words',
-    { body_word_count_max: 49 },
-    shortBodyVariants
-  );
+  const shortBodyPattern = computePatternStats('body_length', 'short_<50', shortBodyVariants);
   if (shortBodyPattern) patterns.push(shortBodyPattern);
   
-  const optimalBodyVariants = features.filter(f => 
-    f.body_word_count && f.body_word_count >= 50 && f.body_word_count <= 100
-  );
-  const optimalBodyPattern = computePatternStats(
-    'Optimal Body (50-100 words)',
-    'body_length',
-    'Email body in the recommended 50-100 word range',
-    { body_word_count_min: 50, body_word_count_max: 100 },
-    optimalBodyVariants
-  );
+  const optimalBodyVariants = features.filter(f => f.body_word_count && f.body_word_count >= 50 && f.body_word_count <= 100);
+  const optimalBodyPattern = computePatternStats('body_length', 'optimal_50-100', optimalBodyVariants);
   if (optimalBodyPattern) patterns.push(optimalBodyPattern);
   
   const longBodyVariants = features.filter(f => f.body_word_count && f.body_word_count > 100);
-  const longBodyPattern = computePatternStats(
-    'Long Body (>100 words)',
-    'body_length',
-    'Longer email body over 100 words',
-    { body_word_count_min: 101 },
-    longBodyVariants
-  );
+  const longBodyPattern = computePatternStats('body_length', 'long_>100', longBodyVariants);
   if (longBodyPattern) patterns.push(longBodyPattern);
   
   // CTA type patterns
-  const ctaTypes = ['soft', 'meeting', 'calendar', 'permission', 'binary'];
+  const ctaTypes = ['soft', 'direct', 'choice', 'meeting', 'value_first', 'none'];
   for (const ctaType of ctaTypes) {
-    const ctaVariants = features.filter(f => f.body_cta_type === ctaType);
-    const ctaPattern = computePatternStats(
-      `CTA: ${ctaType.charAt(0).toUpperCase() + ctaType.slice(1)}`,
-      'body_cta',
-      `Emails using "${ctaType}" call-to-action style`,
-      { body_cta_type: ctaType },
-      ctaVariants
-    );
-    if (ctaPattern) patterns.push(ctaPattern);
+    const variants = features.filter(f => f.body_cta_type === ctaType);
+    const pattern = computePatternStats('body_cta_type', ctaType, variants);
+    if (pattern) patterns.push(pattern);
   }
   
-  // Has link in body
-  const linkVariants = features.filter(f => f.body_has_link === true);
-  const linkPattern = computePatternStats(
-    'Contains Link',
-    'body_element',
-    'Emails containing hyperlinks in the body',
-    { body_has_link: true },
-    linkVariants
-  );
-  if (linkPattern) patterns.push(linkPattern);
+  // CTA position patterns
+  const ctaPositions = ['early', 'middle', 'end', 'none'];
+  for (const pos of ctaPositions) {
+    const variants = features.filter(f => f.body_cta_position === pos);
+    const pattern = computePatternStats('body_cta_position', pos, variants);
+    if (pattern) patterns.push(pattern);
+  }
   
-  const noLinkVariants = features.filter(f => f.body_has_link === false);
-  const noLinkPattern = computePatternStats(
-    'No Links',
-    'body_element',
-    'Emails without any hyperlinks in the body',
-    { body_has_link: false },
-    noLinkVariants
-  );
-  if (noLinkPattern) patterns.push(noLinkPattern);
-  
-  // Calendar link
-  const calendarVariants = features.filter(f => f.body_has_calendar_link === true);
-  const calendarPattern = computePatternStats(
-    'Has Calendar Link',
-    'body_element',
-    'Emails with embedded calendar/booking links',
-    { body_has_calendar_link: true },
-    calendarVariants
-  );
-  if (calendarPattern) patterns.push(calendarPattern);
-  
-  // Social proof
-  const proofVariants = features.filter(f => f.body_has_proof === true);
-  const proofPattern = computePatternStats(
-    'Contains Social Proof',
-    'body_element',
-    'Emails mentioning case studies, testimonials, or results',
-    { body_has_proof: true },
-    proofVariants
-  );
-  if (proofPattern) patterns.push(proofPattern);
-  
-  // Questions in body
-  const questionBodyVariants = features.filter(f => f.body_question_count && f.body_question_count >= 2);
-  const questionBodyPattern = computePatternStats(
-    'Multiple Questions in Body',
-    'body_engagement',
-    'Emails with 2+ questions in the body copy',
-    { body_question_count_min: 2 },
-    questionBodyVariants
-  );
-  if (questionBodyPattern) patterns.push(questionBodyPattern);
-  
-  // High personalization density
-  const highPersVariants = features.filter(f => f.body_personalization_density && f.body_personalization_density >= 0.1);
-  const highPersPattern = computePatternStats(
-    'High Personalization Density',
-    'body_personalization',
-    'Emails with 10%+ of content being personalized',
-    { body_personalization_density_min: 0.1 },
-    highPersVariants
-  );
-  if (highPersPattern) patterns.push(highPersPattern);
+  // CTA strength patterns
+  const ctaStrengths = ['soft', 'medium', 'strong', 'none'];
+  for (const strength of ctaStrengths) {
+    const variants = features.filter(f => f.body_cta_strength === strength);
+    const pattern = computePatternStats('body_cta_strength', strength, variants);
+    if (pattern) patterns.push(pattern);
+  }
   
   // Tone patterns
   const tones = ['professional', 'casual', 'formal', 'direct'];
   for (const tone of tones) {
-    const toneVariants = features.filter(f => f.body_tone === tone);
-    const tonePattern = computePatternStats(
-      `Tone: ${tone.charAt(0).toUpperCase() + tone.slice(1)}`,
-      'body_tone',
-      `Emails with ${tone} writing tone`,
-      { body_tone: tone },
-      toneVariants
-    );
-    if (tonePattern) patterns.push(tonePattern);
+    const variants = features.filter(f => f.tone === tone);
+    const pattern = computePatternStats('body_tone', tone, variants);
+    if (pattern) patterns.push(pattern);
   }
   
-  return patterns.sort((a, b) => b.reply_rate - a.reply_rate);
+  // Calendar link
+  const calendarVariants = features.filter(f => f.body_has_calendar_link === true);
+  const calendarPattern = computePatternStats('body_element', 'has_calendar_link', calendarVariants);
+  if (calendarPattern) patterns.push(calendarPattern);
+  
+  // Has bullets
+  const bulletVariants = features.filter(f => f.body_has_bullets === true);
+  const bulletPattern = computePatternStats('body_element', 'has_bullets', bulletVariants);
+  if (bulletPattern) patterns.push(bulletPattern);
+  
+  // Opening line type
+  const openingTypes = ['greeting', 'question', 'observation', 'compliment', 'direct_intro', 'personalized', 'other'];
+  for (const openType of openingTypes) {
+    const variants = features.filter(f => f.opening_line_type === openType);
+    const pattern = computePatternStats('opening_line_type', openType, variants);
+    if (pattern) patterns.push(pattern);
+  }
+  
+  // Question count in body
+  const noQuestionVariants = features.filter(f => !f.body_question_count || f.body_question_count === 0);
+  const noQPattern = computePatternStats('body_questions', 'none', noQuestionVariants);
+  if (noQPattern) patterns.push(noQPattern);
+  
+  const oneQuestionVariants = features.filter(f => f.body_question_count === 1);
+  const oneQPattern = computePatternStats('body_questions', 'one', oneQuestionVariants);
+  if (oneQPattern) patterns.push(oneQPattern);
+  
+  const multiQuestionVariants = features.filter(f => f.body_question_count && f.body_question_count >= 2);
+  const multiQPattern = computePatternStats('body_questions', 'multiple', multiQuestionVariants);
+  if (multiQPattern) patterns.push(multiQPattern);
+  
+  return patterns.sort((a, b) => b.avg_reply_rate - a.avg_reply_rate);
 }
 
 Deno.serve(async (req) => {
@@ -420,253 +322,136 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { workspace_id } = await req.json();
+    const { engagement_id } = await req.json();
     
-    if (!workspace_id) {
+    if (!engagement_id) {
       return new Response(
-        JSON.stringify({ error: "workspace_id is required" }),
+        JSON.stringify({ error: "engagement_id is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Computing patterns for workspace: ${workspace_id}`);
+    console.log(`Computing patterns for engagement: ${engagement_id}`);
 
-    // ============================================================
-    // FIXED: Query platform-specific feature tables instead of legacy
-    // ============================================================
-    const [{ data: slFeatures, error: slFeatErr }, { data: rioFeatures, error: rioFeatErr }] = await Promise.all([
-      supabase.from('smartlead_variant_features').select('*').eq('workspace_id', workspace_id),
-      supabase.from('replyio_variant_features').select('*').eq('workspace_id', workspace_id),
-    ]);
+    // Fetch features from unified table
+    const { data: features, error: featuresError } = await supabase
+      .from('campaign_variant_features')
+      .select('*')
+      .eq('engagement_id', engagement_id);
+    
+    if (featuresError) {
+      console.error('Error fetching features:', featuresError);
+      throw new Error(`Failed to fetch features: ${featuresError.message}`);
+    }
 
-    if (slFeatErr) console.error('Error fetching Smartlead features:', slFeatErr);
-    if (rioFeatErr) console.error('Error fetching Reply.io features:', rioFeatErr);
+    console.log(`Found ${features?.length || 0} variant features`);
 
-    const allFeatures = [
-      ...(slFeatures || []).map(f => ({ ...f, platform: 'smartlead' as const })),
-      ...(rioFeatures || []).map(f => ({ ...f, platform: 'replyio' as const })),
-    ];
-
-    console.log(`Found ${slFeatures?.length || 0} Smartlead features, ${rioFeatures?.length || 0} Reply.io features`);
-
-    if (allFeatures.length === 0) {
-      console.log('No features found for workspace');
+    if (!features || features.length === 0) {
       return new Response(
         JSON.stringify({ 
           success: true, 
-          message: 'No variant features to analyze',
+          message: 'No variant features to analyze. Run backfill-features first.',
           patterns_computed: 0 
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Get variant IDs by platform
-    const slVariantIds = (slFeatures || []).map(f => f.variant_id);
-    const rioVariantIds = (rioFeatures || []).map(f => f.variant_id);
+    // Get variant IDs to fetch metrics - batch to avoid URL too long error
+    const variantIds = features.map(f => f.variant_id);
+    const batchSize = 100;
+    const variantMetrics = new Map<string, { sent_count: number; opened_count: number; replied_count: number; positive_count: number }>();
 
-    // ============================================================
-    // FIXED: Query platform-specific metrics tables instead of legacy
-    // ============================================================
-    
-    // Get campaign IDs for Smartlead variants
-    const { data: slVariants } = await supabase
-      .from('smartlead_variants')
-      .select('id, campaign_id')
-      .in('id', slVariantIds.length > 0 ? slVariantIds : ['__none__']);
-    
-    const slCampaignIds = [...new Set((slVariants || []).map(v => v.campaign_id))];
-    const slVariantToCampaign = new Map((slVariants || []).map(v => [v.id, v.campaign_id]));
+    // Fetch variant metrics in batches
+    for (let i = 0; i < variantIds.length; i += batchSize) {
+      const batchIds = variantIds.slice(i, i + batchSize);
+      const { data: variants, error: variantsError } = await supabase
+        .from('campaign_variants')
+        .select('id, total_sent, total_opened, total_replied, positive_replies')
+        .in('id', batchIds);
+      
+      if (variantsError) {
+        console.error('Error fetching variant metrics batch:', variantsError);
+        continue;
+      }
 
-    // Get campaign IDs for Reply.io variants  
-    const { data: rioVariantsList } = await supabase
-      .from('replyio_variants')
-      .select('id, campaign_id')
-      .in('id', rioVariantIds.length > 0 ? rioVariantIds : ['__none__']);
-    
-    const rioCampaignIds = [...new Set((rioVariantsList || []).map(v => v.campaign_id))];
-    const rioVariantToCampaign = new Map((rioVariantsList || []).map(v => [v.id, v.campaign_id]));
-
-    // Fetch metrics from platform-specific tables (campaign-level since variant_id is NULL)
-    const [{ data: slMetrics }, { data: rioMetrics }] = await Promise.all([
-      supabase.from('smartlead_daily_metrics')
-        .select('campaign_id, sent_count, opened_count, replied_count, positive_reply_count')
-        .eq('workspace_id', workspace_id)
-        .in('campaign_id', slCampaignIds.length > 0 ? slCampaignIds : ['__none__']),
-      supabase.from('replyio_daily_metrics')
-        .select('campaign_id, sent_count, opened_count, replied_count, positive_reply_count')
-        .eq('workspace_id', workspace_id)
-        .in('campaign_id', rioCampaignIds.length > 0 ? rioCampaignIds : ['__none__']),
-    ]);
-
-    console.log(`Fetched ${slMetrics?.length || 0} Smartlead metric rows, ${rioMetrics?.length || 0} Reply.io metric rows`);
-
-    // Aggregate metrics by campaign_id (since variant_id is NULL, we use campaign metrics)
-    const slCampaignMetrics = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
-    (slMetrics || []).forEach(m => {
-      if (!m.campaign_id) return;
-      const existing = slCampaignMetrics.get(m.campaign_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
-      slCampaignMetrics.set(m.campaign_id, {
-        sent: existing.sent + (m.sent_count || 0),
-        opened: existing.opened + (m.opened_count || 0),
-        replied: existing.replied + (m.replied_count || 0),
-        positive: existing.positive + (m.positive_reply_count || 0),
+      (variants || []).forEach(v => {
+        variantMetrics.set(v.id, {
+          sent_count: v.total_sent || 0,
+          opened_count: v.total_opened || 0,
+          replied_count: v.total_replied || 0,
+          positive_count: v.positive_replies || 0,
+        });
       });
-    });
+    }
 
-    const rioCampaignMetrics = new Map<string, { sent: number; opened: number; replied: number; positive: number }>();
-    (rioMetrics || []).forEach(m => {
-      if (!m.campaign_id) return;
-      const existing = rioCampaignMetrics.get(m.campaign_id) || { sent: 0, opened: 0, replied: 0, positive: 0 };
-      rioCampaignMetrics.set(m.campaign_id, {
-        sent: existing.sent + (m.sent_count || 0),
-        opened: existing.opened + (m.opened_count || 0),
-        replied: existing.replied + (m.replied_count || 0),
-        positive: existing.positive + (m.positive_reply_count || 0),
-      });
-    });
+    console.log(`Fetched metrics for ${variantMetrics.size} variants`);
 
-    // Count variants per campaign to distribute metrics
-    const slVariantsPerCampaign = new Map<string, number>();
-    (slVariants || []).forEach(v => {
-      slVariantsPerCampaign.set(v.campaign_id, (slVariantsPerCampaign.get(v.campaign_id) || 0) + 1);
-    });
-
-    const rioVariantsPerCampaign = new Map<string, number>();
-    (rioVariantsList || []).forEach(v => {
-      rioVariantsPerCampaign.set(v.campaign_id, (rioVariantsPerCampaign.get(v.campaign_id) || 0) + 1);
-    });
-
-    // Combine features with metrics (distribute campaign metrics evenly across variants)
-    const featuresWithMetrics: FeatureWithMetrics[] = allFeatures
+    // Combine features with metrics
+    const featuresWithMetrics: FeatureWithMetrics[] = features
       .map(f => {
-        let m = { sent: 0, opened: 0, replied: 0, positive: 0 };
-        
-        if (f.platform === 'smartlead') {
-          const campaignId = slVariantToCampaign.get(f.variant_id);
-          if (campaignId) {
-            const campaignMetrics = slCampaignMetrics.get(campaignId);
-            const variantCount = slVariantsPerCampaign.get(campaignId) || 1;
-            if (campaignMetrics) {
-              // Distribute campaign metrics evenly across variants
-              m = {
-                sent: Math.round(campaignMetrics.sent / variantCount),
-                opened: Math.round(campaignMetrics.opened / variantCount),
-                replied: Math.round(campaignMetrics.replied / variantCount),
-                positive: Math.round(campaignMetrics.positive / variantCount),
-              };
-            }
-          }
-        } else if (f.platform === 'replyio') {
-          const campaignId = rioVariantToCampaign.get(f.variant_id);
-          if (campaignId) {
-            const campaignMetrics = rioCampaignMetrics.get(campaignId);
-            const variantCount = rioVariantsPerCampaign.get(campaignId) || 1;
-            if (campaignMetrics) {
-              m = {
-                sent: Math.round(campaignMetrics.sent / variantCount),
-                opened: Math.round(campaignMetrics.opened / variantCount),
-                replied: Math.round(campaignMetrics.replied / variantCount),
-                positive: Math.round(campaignMetrics.positive / variantCount),
-              };
-            }
-          }
-        }
-
+        const metrics = variantMetrics.get(f.variant_id) || {
+          sent_count: 0, opened_count: 0, replied_count: 0, positive_count: 0
+        };
         return {
-          variant_id: f.variant_id,
-          workspace_id: f.workspace_id,
-          platform: f.platform,
-          subject_is_question: f.subject_is_question,
-          subject_has_number: f.subject_has_number,
-          subject_has_emoji: f.subject_has_emoji,
-          subject_char_count: f.subject_char_count,
-          subject_word_count: f.subject_word_count,
-          subject_personalization_count: f.subject_personalization_count,
-          subject_capitalization_style: f.subject_capitalization_style,
-          subject_first_word_type: f.subject_first_word_type,
-          body_word_count: f.body_word_count,
-          body_cta_type: f.body_cta_type,
-          body_cta_position: f.body_cta_position,
-          body_tone: f.body_tone,
-          body_has_link: f.body_has_link,
-          body_has_calendar_link: f.body_has_calendar_link,
-          body_has_proof: f.body_has_proof,
-          body_question_count: f.body_question_count,
-          body_personalization_density: f.body_personalization_density,
-          sent_count: m.sent,
-          replied_count: m.replied,
-          positive_count: m.positive,
-          opened_count: m.opened,
+          ...f,
+          ...metrics,
         };
       })
-      .filter(f => f.sent_count > 0); // Only include variants with data
+      .filter(f => f.sent_count > 0); // Only include variants with metrics
+
+    console.log(`${featuresWithMetrics.length} variants have both features and metrics`);
 
     if (featuresWithMetrics.length === 0) {
-      console.log('No variants with metrics found');
       return new Response(
         JSON.stringify({ 
           success: true, 
-          message: 'No variants with send data to analyze',
-          patterns_computed: 0,
-          total_features: allFeatures.length,
+          message: 'No variants with both features and metrics found',
+          patterns_computed: 0 
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Calculate baseline rates
+    // Calculate baseline metrics
     const totalSent = featuresWithMetrics.reduce((sum, f) => sum + f.sent_count, 0);
     const totalReplied = featuresWithMetrics.reduce((sum, f) => sum + f.replied_count, 0);
-    const totalPositive = featuresWithMetrics.reduce((sum, f) => sum + f.positive_count, 0);
-    
     const baselineReplyRate = totalSent > 0 ? (totalReplied / totalSent) * 100 : 0;
-    const baselinePositiveRate = totalSent > 0 ? (totalPositive / totalSent) * 100 : 0;
 
-    console.log(`Baseline rates - Reply: ${baselineReplyRate.toFixed(2)}%, Positive: ${baselinePositiveRate.toFixed(2)}%`);
-    console.log(`Analyzing ${featuresWithMetrics.length} variants with ${totalSent} total sends`);
+    console.log(`Baseline: ${totalSent} sent, ${totalReplied} replied, ${baselineReplyRate.toFixed(2)}% reply rate`);
 
     // Compute patterns
-    const computedPatterns = computePatterns(
-      featuresWithMetrics, 
-      baselineReplyRate, 
-      baselinePositiveRate,
-      totalSent
-    );
+    const patterns = computePatterns(featuresWithMetrics, baselineReplyRate, totalSent);
 
-    console.log(`Computed ${computedPatterns.length} patterns`);
+    console.log(`Computed ${patterns.length} patterns`);
 
-    // Delete existing patterns for this workspace
+    // Delete existing patterns for this engagement
     const { error: deleteError } = await supabase
       .from('copy_patterns')
       .delete()
-      .eq('workspace_id', workspace_id);
-
+      .eq('engagement_id', engagement_id);
+    
     if (deleteError) {
-      console.error('Error deleting old patterns:', deleteError);
-      throw deleteError;
+      console.error('Error deleting existing patterns:', deleteError);
     }
 
     // Insert new patterns
-    if (computedPatterns.length > 0) {
-      const patternsToInsert = computedPatterns.map(p => ({
-        workspace_id,
-        pattern_name: p.pattern_name,
+    if (patterns.length > 0) {
+      const patternsToInsert = patterns.map(p => ({
+        engagement_id,
         pattern_type: p.pattern_type,
-        pattern_description: p.pattern_description,
-        pattern_criteria: p.pattern_criteria,
-        sample_size: p.sample_size,
-        reply_rate: p.reply_rate,
-        positive_rate: p.positive_rate,
-        open_rate: p.open_rate,
-        reply_rate_lift: p.reply_rate_lift,
-        positive_rate_lift: p.positive_rate_lift,
-        confidence_level: p.confidence_level,
+        pattern_value: p.pattern_value,
+        total_sent: p.total_sent,
+        total_replied: p.total_replied,
+        total_variants: p.total_variants,
+        avg_reply_rate: p.avg_reply_rate,
+        baseline_reply_rate: p.baseline_reply_rate,
+        lift_vs_baseline: p.lift_vs_baseline,
         p_value: p.p_value,
-        confidence_interval_lower: p.confidence_interval_lower,
-        confidence_interval_upper: p.confidence_interval_upper,
-        is_validated: p.is_validated,
-        last_computed: new Date().toISOString(),
+        reply_rate_ci_lower: p.reply_rate_ci_lower,
+        reply_rate_ci_upper: p.reply_rate_ci_upper,
+        is_significant: p.is_significant,
+        computed_at: new Date().toISOString(),
       }));
 
       const { error: insertError } = await supabase
@@ -675,34 +460,30 @@ Deno.serve(async (req) => {
 
       if (insertError) {
         console.error('Error inserting patterns:', insertError);
-        throw insertError;
+        throw new Error(`Failed to insert patterns: ${insertError.message}`);
       }
     }
 
-    // Log validated patterns
-    const validatedPatterns = computedPatterns.filter(p => p.is_validated);
-    console.log(`Found ${validatedPatterns.length} statistically validated patterns`);
-    validatedPatterns.forEach(p => {
-      console.log(`  ✓ ${p.pattern_name}: ${p.reply_rate.toFixed(2)}% reply rate (p=${p.p_value?.toFixed(4)})`);
-    });
+    // Get top patterns for response
+    const topPatterns = patterns
+      .filter(p => p.is_significant)
+      .slice(0, 5)
+      .map(p => ({
+        type: p.pattern_type,
+        value: p.pattern_value,
+        reply_rate: `${p.avg_reply_rate.toFixed(1)}%`,
+        lift: `${p.lift_vs_baseline > 0 ? '+' : ''}${p.lift_vs_baseline.toFixed(1)}%`,
+      }));
 
     return new Response(
       JSON.stringify({
         success: true,
-        patterns_computed: computedPatterns.length,
-        validated_patterns: validatedPatterns.length,
-        baseline_reply_rate: baselineReplyRate,
-        baseline_positive_rate: baselinePositiveRate,
+        patterns_computed: patterns.length,
+        validated_patterns: patterns.filter(p => p.is_significant).length,
+        baseline_reply_rate: `${baselineReplyRate.toFixed(2)}%`,
         total_variants_analyzed: featuresWithMetrics.length,
-        total_sends_analyzed: totalSent,
-        smartlead_features: slFeatures?.length || 0,
-        replyio_features: rioFeatures?.length || 0,
-        top_patterns: computedPatterns.slice(0, 5).map(p => ({
-          name: p.pattern_name,
-          reply_rate: p.reply_rate,
-          lift: p.reply_rate_lift,
-          is_validated: p.is_validated,
-        })),
+        total_sent: totalSent,
+        top_performing_patterns: topPatterns,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
