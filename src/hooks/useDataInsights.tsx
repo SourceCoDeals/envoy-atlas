@@ -104,9 +104,21 @@ export function useDataInsights() {
     setLoading(true);
 
     try {
-      // Use local benchmarks
+      // Use local benchmarks - COLD_CALLING_BENCHMARKS is an object, not an array
       const benchmarkMap: Record<string, Benchmark> = {};
-      COLD_CALLING_BENCHMARKS.forEach(b => { benchmarkMap[b.metric_key] = b as Benchmark; });
+      // Populate from the SDR metrics as example benchmarks
+      Object.entries(COLD_CALLING_BENCHMARKS.sdrMetrics).forEach(([key, value]) => {
+        const numValue = typeof value === 'object' ? (value as any).min ?? 0 : (value as number);
+        benchmarkMap[key] = {
+          metric_name: key,
+          metric_key: key,
+          benchmark_value: numValue,
+          benchmark_unit: '%',
+          benchmark_range_low: null,
+          benchmark_range_high: null,
+          description: null,
+        };
+      });
       setBenchmarks(benchmarkMap);
 
       // Get engagements for this client

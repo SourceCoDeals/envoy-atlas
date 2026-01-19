@@ -1,24 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 
 export interface EngagementDetails {
   id: string;
-  client_name: string;
-  engagement_name: string;
-  sponsor: string | null;
-  industry_focus: string | null;
-  geography: string | null;
+  name: string;
+  client_id: string;
+  description: string | null;
   status: string;
-  start_date: string;
+  start_date: string | null;
   end_date: string | null;
-  deal_lead: string | null;
-  associate_vp: string | null;
-  analyst: string | null;
-  meetings_target: number | null;
-  total_calls_target: number | null;
-  connect_rate_target: number | null;
-  meeting_rate_target: number | null;
+  meeting_goal: number | null;
+  target_list_size: number | null;
 }
 
 export interface KeyMetrics {
@@ -177,7 +170,7 @@ interface EngagementReportData {
   callDispositions: CallDisposition[];
   callOutcomes: CallOutcome[];
   recentActivity: ActivityItem[];
-  linkedCampaigns: { id: string; name: string; platform: 'smartlead' | 'replyio' }[];
+  linkedCampaigns: { id: string; name: string; platform: string }[];
   dataAvailability: DataAvailability;
 }
 
@@ -207,285 +200,104 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         .from('engagements')
         .select('*')
         .eq('id', engagementId)
-        .eq('workspace_id', currentWorkspace.id)
         .single();
 
       if (engError) throw engError;
       if (!engagement) throw new Error('Engagement not found');
 
-      // Fetch linked campaigns from both platforms in parallel
-      const [smartleadCampaigns, replyioCampaigns] = await Promise.all([
-        supabase
-          .from('smartlead_campaigns')
-          .select('id, name')
-          .eq('engagement_id', engagementId)
-          .eq('workspace_id', currentWorkspace.id),
-        supabase
-          .from('replyio_campaigns')
-          .select('id, name')
-          .eq('engagement_id', engagementId)
-          .eq('workspace_id', currentWorkspace.id),
-      ]);
+      // Fetch linked campaigns from unified campaigns table
+      const { data: campaigns } = await supabase
+        .from('campaigns')
+        .select('id, name, campaign_type')
+        .eq('engagement_id', engagementId);
 
-      const linkedCampaigns = [
-        ...(smartleadCampaigns.data || []).map(c => ({ ...c, platform: 'smartlead' as const })),
-        ...(replyioCampaigns.data || []).map(c => ({ ...c, platform: 'replyio' as const })),
-      ];
+      const linkedCampaigns = (campaigns || []).map(c => ({ 
+        id: c.id, 
+        name: c.name, 
+        platform: c.campaign_type 
+      }));
 
       const campaignIds = linkedCampaigns.map(c => c.id);
 
-      // Fetch infrastructure data (always fetch, not dependent on campaigns)
-      const [emailAccountsResult, sendingDomainsResult] = await Promise.all([
-        supabase
-          .from('email_accounts')
-          .select('email_address, daily_limit, health_score, is_active, warmup_enabled, sent_30d, bounce_rate')
-          .eq('workspace_id', currentWorkspace.id),
-        supabase
-          .from('sending_domains')
-          .select('domain, spf_valid, dkim_valid, dmarc_valid, bounce_rate, daily_volume_limit, daily_volume_used')
-          .eq('workspace_id', currentWorkspace.id),
+      // Fetch daily metrics for email data
+      let dailyMetricsQuery = supabase
+        .from('daily_metrics')
+        .select('*')
+        .eq('engagement_id', engagementId);
+
+      if (startDateStr) dailyMetricsQuery = dailyMetricsQuery.gte('date', startDateStr);
+      if (endDateStr) dailyMetricsQuery = dailyMetricsQuery.lte('date', endDateStr);
+
+      // Fetch call activities
+      let callsQuery = supabase
+        .from('call_activities')
+        .select('*')
+        .eq('engagement_id', engagementId);
+
+      if (startDateStr) callsQuery = callsQuery.gte('started_at', startDateStr);
+      if (endDateStr) callsQuery = callsQuery.lte('started_at', endDateStr);
+
+      // Fetch meetings
+      const meetingsQuery = supabase
+        .from('meetings')
+        .select('*')
+        .eq('engagement_id', engagementId);
+
+      const [dailyMetricsResult, callsResult, meetingsResult] = await Promise.all([
+        dailyMetricsQuery,
+        callsQuery,
+        meetingsQuery,
       ]);
 
-      const emailAccounts = emailAccountsResult.data || [];
-      const sendingDomains = sendingDomainsResult.data || [];
+      const dailyMetrics = dailyMetricsResult.data || [];
+      const calls = callsResult.data || [];
+      const meetings = meetingsResult.data || [];
 
-      // Calculate infrastructure metrics
-      const infrastructureMetrics = calculateInfrastructureMetrics(emailAccounts, sendingDomains);
+      // Calculate email metrics from daily_metrics
+      const emailTotals = dailyMetrics.reduce((acc, m) => ({
+        sent: acc.sent + (m.emails_sent || 0),
+        delivered: acc.delivered + (m.emails_delivered || 0),
+        opened: acc.opened + (m.emails_opened || 0),
+        clicked: acc.clicked + (m.emails_clicked || 0),
+        replied: acc.replied + (m.emails_replied || 0),
+        bounced: acc.bounced + (m.emails_bounced || 0),
+        positive: acc.positive + (m.positive_replies || 0),
+      }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
 
-      // If no campaigns linked, return empty data but with infrastructure
-      if (campaignIds.length === 0) {
-        setData({
-          engagement: engagement as EngagementDetails,
-          keyMetrics: getEmptyKeyMetrics(),
-          emailMetrics: getEmptyEmailMetrics(),
-          callingMetrics: getEmptyCallingMetrics(),
-          infrastructureMetrics,
-          funnel: [],
-          channelComparison: [],
-          trendData: [],
-          sequencePerformance: [],
-          callDispositions: [],
-          callOutcomes: [],
-          recentActivity: [],
-          linkedCampaigns,
-          dataAvailability: {
-            emailDailyMetrics: false,
-            emailCampaignFallback: false,
-            callingData: false,
-            infrastructureData: emailAccounts.length > 0,
-            syncInProgress: false,
-          },
-        });
-        setLoading(false);
-        return;
-      }
-
-      // Fetch email metrics from linked campaigns
-      let smartleadMetricsQuery = supabase
-        .from('smartlead_daily_metrics')
-        .select('*')
-        .in('campaign_id', campaignIds.filter(id => linkedCampaigns.find(c => c.id === id && c.platform === 'smartlead')))
-        .eq('workspace_id', currentWorkspace.id);
-
-      let replyioMetricsQuery = supabase
-        .from('replyio_daily_metrics')
-        .select('*')
-        .in('campaign_id', campaignIds.filter(id => linkedCampaigns.find(c => c.id === id && c.platform === 'replyio')))
-        .eq('workspace_id', currentWorkspace.id);
-
-      // Apply date filter if provided
-      if (startDateStr) {
-        smartleadMetricsQuery = smartleadMetricsQuery.gte('metric_date', startDateStr);
-        replyioMetricsQuery = replyioMetricsQuery.gte('metric_date', startDateStr);
-      }
-      if (endDateStr) {
-        smartleadMetricsQuery = smartleadMetricsQuery.lte('metric_date', endDateStr);
-        replyioMetricsQuery = replyioMetricsQuery.lte('metric_date', endDateStr);
-      }
-
-      // Fetch calling data for this engagement
-      // Note: We fetch all calls and filter client-side to avoid PostgREST ILIKE escaping issues
-      const clientNameLower = engagement.client_name.toLowerCase();
-      const engagementNameLower = engagement.engagement_name.toLowerCase();
-
-      // Build query - fetch in batches to avoid 1000 row limit
-      const fetchAllMatchingCalls = async () => {
-        const allCalls: any[] = [];
-        let offset = 0;
-        const batchSize = 1000;
-        let hasMore = true;
-        
-        while (hasMore) {
-          let query = supabase
-            .from('external_calls')
-            .select('*')
-            .eq('workspace_id', currentWorkspace.id)
-            .range(offset, offset + batchSize - 1);
-          
-          // Apply date filter if provided
-          if (startDateStr) query = query.gte('call_date', startDateStr);
-          if (endDateStr) query = query.lte('call_date', endDateStr);
-          
-          const { data: batch, error: batchError } = await query;
-          
-          if (batchError) throw batchError;
-          if (!batch || batch.length === 0) {
-            hasMore = false;
-          } else {
-            // Filter matches on the client side
-            const matches = batch.filter(call => {
-              const engName = (call.engagement_name || '').toLowerCase();
-              const callTitle = (call.call_title || '').toLowerCase();
-              return (
-                engName.includes(clientNameLower) ||
-                engName.includes(engagementNameLower) ||
-                callTitle.includes(clientNameLower)
-              );
-            });
-            allCalls.push(...matches);
-            offset += batchSize;
-            if (batch.length < batchSize) hasMore = false;
-          }
-        }
-        
-        return allCalls;
-      };
-
-      const [smartleadMetrics, replyioMetrics, matchingCalls] = await Promise.all([
-        smartleadMetricsQuery,
-        replyioMetricsQuery,
-        fetchAllMatchingCalls(),
-      ]);
-
-      // Aggregate email metrics with fallback logic
-      const allEmailMetrics = [...(smartleadMetrics.data || []), ...(replyioMetrics.data || [])];
-      const dailyMetricsTotal = allEmailMetrics.reduce((s, m) => s + (m.sent_count || 0), 0);
-      
-      let emailTotals;
-      let usingFallbackData = false;
-      
-      // If daily metrics are empty or have no data, try campaign-level fallback
-      if (allEmailMetrics.length === 0 || dailyMetricsTotal === 0) {
-        console.log('No daily metrics found, trying workspace-level aggregates...');
-        
-        // Try workspace-level daily metrics first (more reliable)
-        const smartleadCampaignIds = linkedCampaigns.filter(c => c.platform === 'smartlead').map(c => c.id);
-        const replyioCampaignIds = linkedCampaigns.filter(c => c.platform === 'replyio').map(c => c.id);
-        
-        // Fetch ALL daily metrics for linked campaigns (without date filter for totals)
-        const [slAllMetrics, rioAllMetrics] = await Promise.all([
-          smartleadCampaignIds.length > 0 
-            ? supabase.from('smartlead_daily_metrics')
-                .select('sent_count, opened_count, clicked_count, replied_count, bounced_count, positive_reply_count')
-                .in('campaign_id', smartleadCampaignIds)
-                .eq('workspace_id', currentWorkspace.id)
-            : Promise.resolve({ data: [] }),
-          replyioCampaignIds.length > 0
-            ? supabase.from('replyio_daily_metrics')
-                .select('sent_count, opened_count, clicked_count, replied_count, bounced_count, positive_reply_count')
-                .in('campaign_id', replyioCampaignIds)
-                .eq('workspace_id', currentWorkspace.id)
-            : Promise.resolve({ data: [] }),
-        ]);
-        
-        // Aggregate from daily_metrics tables
-        const slMetrics = slAllMetrics.data || [];
-        const rioMetrics = rioAllMetrics.data || [];
-        
-        const slTotals = slMetrics.reduce((acc, m) => ({
-          sent: acc.sent + (m.sent_count || 0),
-          opened: acc.opened + (m.opened_count || 0),
-          clicked: acc.clicked + (m.clicked_count || 0),
-          replied: acc.replied + (m.replied_count || 0),
-          bounced: acc.bounced + (m.bounced_count || 0),
-          positive: acc.positive + (m.positive_reply_count || 0),
-        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
-        
-        const rioTotals = rioMetrics.reduce((acc, m) => ({
-          sent: acc.sent + (m.sent_count || 0),
-          opened: acc.opened + (m.opened_count || 0),
-          clicked: acc.clicked + (m.clicked_count || 0),
-          replied: acc.replied + (m.replied_count || 0),
-          bounced: acc.bounced + (m.bounced_count || 0),
-          positive: acc.positive + (m.positive_reply_count || 0),
-        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
-        
-        emailTotals = {
-          sent: slTotals.sent + rioTotals.sent,
-          opened: slTotals.opened + rioTotals.opened,
-          clicked: slTotals.clicked + rioTotals.clicked,
-          replied: slTotals.replied + rioTotals.replied,
-          bounced: slTotals.bounced + rioTotals.bounced,
-          positive: slTotals.positive + rioTotals.positive,
-        };
-        
-        usingFallbackData = emailTotals.sent > 0;
-        console.log(`Daily metrics fallback: ${emailTotals.sent} sent, using fallback: ${usingFallbackData}`);
-      } else {
-        emailTotals = allEmailMetrics.reduce((acc, m) => ({
-          sent: acc.sent + (m.sent_count || 0),
-          opened: acc.opened + (m.opened_count || 0),
-          clicked: acc.clicked + (m.clicked_count || 0),
-          replied: acc.replied + (m.replied_count || 0),
-          bounced: acc.bounced + (m.bounced_count || 0),
-          positive: acc.positive + (m.positive_reply_count || 0),
-        }), { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 });
-      }
-
-      const delivered = emailTotals.sent - emailTotals.bounced;
+      const delivered = emailTotals.delivered || (emailTotals.sent - emailTotals.bounced);
 
       // Calculate calling metrics
-      const totalCalls = matchingCalls.length;
-      const connections = matchingCalls.filter(c => 
-        c.call_category && ['connection', 'conversation', 'interested', 'meeting', 'dm reached', 'positive', 'callback'].some(cat =>
-          c.call_category?.toLowerCase().includes(cat)
-        )
+      const totalCalls = calls.length;
+      const connections = calls.filter(c => 
+        (c.talk_duration || 0) > 60 || 
+        c.disposition?.toLowerCase().includes('connect')
       ).length;
-      const conversations = matchingCalls.filter(c =>
-        c.call_category && ['conversation', 'interested', 'meeting', 'positive', 'callback'].some(cat =>
-          c.call_category?.toLowerCase().includes(cat)
-        )
-      ).length;
-      // Count positive responses from both seller_interest_score AND positive categories
-      const dmConversations = matchingCalls.filter(c =>
-        (c.seller_interest_score || 0) >= 5 || 
-        (c.call_category && ['interested', 'positive', 'meeting', 'opportunity'].some(cat =>
-          c.call_category?.toLowerCase().includes(cat)
-        ))
-      ).length;
-      const voicemails = matchingCalls.filter(c =>
-        c.call_category && c.call_category.toLowerCase().includes('voicemail')
-      ).length;
-      const callMeetings = matchingCalls.filter(c =>
-        c.call_category && (c.call_category.toLowerCase().includes('meeting') || c.call_category.toLowerCase().includes('appointment'))
+      const conversations = calls.filter(c => (c.talk_duration || 0) >= 180).length;
+      const voicemails = calls.filter(c => c.voicemail_left).length;
+      const callMeetings = calls.filter(c =>
+        c.conversation_outcome?.toLowerCase().includes('meeting')
       ).length;
       const avgDuration = totalCalls > 0 
-        ? matchingCalls.reduce((sum, c) => sum + (c.duration || 0), 0) / totalCalls 
-        : 0;
-      const avgScore = totalCalls > 0
-        ? matchingCalls.filter(c => c.composite_score).reduce((sum, c) => sum + (c.composite_score || 0), 0) / 
-          matchingCalls.filter(c => c.composite_score).length || 0
+        ? calls.reduce((sum, c) => sum + (c.talk_duration || 0), 0) / totalCalls 
         : 0;
 
-      // Build key metrics - use actual unique companies from calls
-      const uniqueCompaniesFromCalls = new Set(matchingCalls.map(c => c.company_name).filter(Boolean)).size;
-      // NOTE: Email company data not available - only show actual call companies
-      // Removed: estimatedEmailCompanies estimation which used fake emailTotals.sent / 2
-      
+      // Build key metrics
+      const uniqueCompanies = new Set(calls.map(c => c.company_id).filter(Boolean)).size;
+      const uniqueContacts = new Set(calls.map(c => c.contact_id).filter(Boolean)).size;
+      const meetingsBooked = meetings.length;
+
       const keyMetrics: KeyMetrics = {
-        companiesContacted: uniqueCompaniesFromCalls, // Only actual unique companies from calls
-        contactsReached: new Set(matchingCalls.map(c => c.contact_name).filter(Boolean)).size + emailTotals.replied, // Only contacts who replied
+        companiesContacted: uniqueCompanies,
+        contactsReached: uniqueContacts + emailTotals.replied,
         totalTouchpoints: emailTotals.sent + totalCalls,
         emailTouchpoints: emailTotals.sent,
         callTouchpoints: totalCalls,
-        positiveResponses: emailTotals.positive + dmConversations,
-        // NOTE: meetingsScheduled only counts actual call meetings - email meetings require calendar integration
-        meetingsScheduled: callMeetings, // Removed fake: + Math.floor(emailTotals.positive * 0.3)
-        // NOTE: opportunities require CRM integration to track accurately
-        opportunities: 0, // Removed fake: Math.floor((callMeetings + emailTotals.positive * 0.3) * 0.35)
+        positiveResponses: emailTotals.positive + conversations,
+        meetingsScheduled: meetingsBooked,
+        opportunities: 0,
         responseRate: emailTotals.sent > 0 ? (emailTotals.replied / emailTotals.sent) * 100 : 0,
         meetingRate: (emailTotals.sent + totalCalls) > 0 
-          ? (callMeetings / (emailTotals.sent + totalCalls)) * 100 
+          ? (meetingsBooked / (emailTotals.sent + totalCalls)) * 100 
           : 0,
       };
 
@@ -504,8 +316,8 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         positiveRate: delivered > 0 ? (emailTotals.positive / delivered) * 100 : 0,
         bounced: emailTotals.bounced,
         bounceRate: emailTotals.sent > 0 ? (emailTotals.bounced / emailTotals.sent) * 100 : 0,
-        unsubscribed: 0, // Not tracked
-        meetings: 0, // Not tracked - requires calendar integration (removed fake: Math.floor(emailTotals.positive * 0.3))
+        unsubscribed: 0,
+        meetings: 0,
       };
 
       // Build calling metrics
@@ -515,27 +327,22 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         connectRate: totalCalls > 0 ? (connections / totalCalls) * 100 : 0,
         conversations,
         conversationRate: totalCalls > 0 ? (conversations / totalCalls) * 100 : 0,
-        dmConversations,
+        dmConversations: conversations,
         meetings: callMeetings,
         meetingRate: totalCalls > 0 ? (callMeetings / totalCalls) * 100 : 0,
         voicemails,
         voicemailRate: totalCalls > 0 ? (voicemails / totalCalls) * 100 : 0,
         avgDuration,
-        avgScore,
+        avgScore: 0,
       };
 
-      // Build funnel - calculate engaged from actual data (opens + connections)
-      const engagedCount = emailTotals.opened + connections;
-      const engagedPercentage = keyMetrics.companiesContacted > 0 
-        ? Math.round((engagedCount / keyMetrics.contactsReached) * 100) 
-        : 0;
-      
+      // Build funnel
       const funnel: FunnelStage[] = [
         { name: 'Contacted', count: keyMetrics.companiesContacted, percentage: 100 },
-        { name: 'Engaged', count: engagedCount, percentage: engagedPercentage },
+        { name: 'Engaged', count: emailTotals.opened + connections, percentage: keyMetrics.companiesContacted > 0 ? Math.round(((emailTotals.opened + connections) / keyMetrics.companiesContacted) * 100) : 0 },
         { name: 'Positive Response', count: keyMetrics.positiveResponses, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.positiveResponses / keyMetrics.companiesContacted) * 100) : 0 },
-        { name: 'Meeting', count: keyMetrics.meetingsScheduled, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.meetingsScheduled / keyMetrics.companiesContacted) * 100) : 0 },
-        { name: 'Opportunity', count: keyMetrics.opportunities, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.opportunities / keyMetrics.companiesContacted) * 100) : 0 },
+        { name: 'Meeting', count: meetingsBooked, percentage: keyMetrics.companiesContacted > 0 ? Math.round((meetingsBooked / keyMetrics.companiesContacted) * 100) : 0 },
+        { name: 'Opportunity', count: 0, percentage: 0 },
       ];
 
       // Build channel comparison
@@ -546,24 +353,24 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           engagementRate: emailMetrics.openRate,
           responseRate: emailMetrics.replyRate,
           positiveRate: emailMetrics.positiveRate,
-          meetings: emailMetrics.meetings,
-          meetingsPerHundred: emailTotals.sent > 0 ? (emailMetrics.meetings / emailTotals.sent) * 100 : 0,
+          meetings: 0,
+          meetingsPerHundred: 0,
         },
         {
           channel: 'Calling',
           attempts: totalCalls,
           engagementRate: callingMetrics.connectRate,
           responseRate: callingMetrics.conversationRate,
-          positiveRate: totalCalls > 0 ? (dmConversations / totalCalls) * 100 : 0,
+          positiveRate: totalCalls > 0 ? (conversations / totalCalls) * 100 : 0,
           meetings: callMeetings,
           meetingsPerHundred: totalCalls > 0 ? (callMeetings / totalCalls) * 100 : 0,
         },
       ];
 
-      // Build trend data (aggregate by week)
+      // Build trend data
       const trendMap = new Map<string, TrendDataPoint>();
-      allEmailMetrics.forEach(m => {
-        const date = new Date(m.metric_date);
+      dailyMetrics.forEach(m => {
+        const date = new Date(m.date);
         const weekStart = new Date(date);
         weekStart.setDate(date.getDate() - date.getDay());
         const weekKey = weekStart.toISOString().split('T')[0];
@@ -576,43 +383,21 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           responses: 0,
           meetings: 0,
         };
-        existing.emails += m.sent_count || 0;
-        existing.responses += m.replied_count || 0;
+        existing.emails += m.emails_sent || 0;
+        existing.calls += m.calls_made || 0;
+        existing.responses += m.emails_replied || 0;
+        existing.meetings += m.meetings_booked || 0;
         trendMap.set(weekKey, existing);
       });
 
-      matchingCalls.forEach(c => {
-        // Use call_date (actual date of call) not created_at (sync date)
-        const dateStr = c.call_date || c.created_at;
-        if (!dateStr) return;
-        const date = new Date(dateStr);
-        const weekStart = new Date(date);
-        weekStart.setDate(date.getDate() - date.getDay());
-        const weekKey = weekStart.toISOString().split('T')[0];
-        
-        const existing = trendMap.get(weekKey) || {
-          date: weekKey,
-          week: `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
-          emails: 0,
-          calls: 0,
-          responses: 0,
-          meetings: 0,
-        };
-        existing.calls += 1;
-        if (c.call_category?.toLowerCase().includes('meeting')) {
-          existing.meetings += 1;
-        }
-        trendMap.set(weekKey, existing);
-      });
-
-      const trendData = Array.from(trendMap.values()).sort((a, b) => 
-        new Date(a.date).getTime() - new Date(b.date).getTime()
-      ).slice(-12);
+      const trendData = Array.from(trendMap.values())
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .slice(-12);
 
       // Build call dispositions
       const dispositionCounts = new Map<string, number>();
-      matchingCalls.forEach(c => {
-        const category = normalizeCallCategory(c.call_category || 'Unknown');
+      calls.forEach(c => {
+        const category = normalizeCallCategory(c.disposition || 'Unknown');
         dispositionCounts.set(category, (dispositionCounts.get(category) || 0) + 1);
       });
       const callDispositions: CallDisposition[] = Array.from(dispositionCounts.entries())
@@ -623,39 +408,45 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         }))
         .sort((a, b) => b.count - a.count);
 
-      // Build call outcomes based on ACTUAL call categories only
-      // NOTE: Only 'Meeting Booked' and 'Interested' are tracked from actual data
-      // Other outcomes like 'Send Info', 'Not Interested', 'Call Back' require proper call disposition tracking
+      // Build call outcomes
       const callOutcomes: CallOutcome[] = [
         { outcome: 'Meeting Booked', count: callMeetings, percentage: totalCalls > 0 ? (callMeetings / totalCalls) * 100 : 0 },
-        { outcome: 'Interested', count: dmConversations - callMeetings, percentage: totalCalls > 0 ? ((dmConversations - callMeetings) / totalCalls) * 100 : 0 },
-        // These outcomes are NOT tracked - would require proper call disposition data
-        // Showing 0 instead of fake estimates
-        { outcome: 'Send Info', count: 0, percentage: 0 },
+        { outcome: 'Interested', count: conversations - callMeetings, percentage: totalCalls > 0 ? ((conversations - callMeetings) / totalCalls) * 100 : 0 },
         { outcome: 'Not Interested', count: 0, percentage: 0 },
-        { outcome: 'Call Back', count: 0, percentage: 0 },
+        { outcome: 'Call Back', count: calls.filter(c => c.callback_scheduled).length, percentage: 0 },
       ];
 
-      // Build recent activity (last 20 items) - use call_date for proper sorting
-      const recentActivity: ActivityItem[] = matchingCalls
-        .filter(c => c.call_date || c.created_at)
-        .sort((a, b) => {
-          const dateA = new Date(a.call_date || a.created_at!).getTime();
-          const dateB = new Date(b.call_date || b.created_at!).getTime();
-          return dateB - dateA;
-        })
+      // Build recent activity
+      const recentActivity: ActivityItem[] = calls
+        .filter(c => c.started_at)
+        .sort((a, b) => new Date(b.started_at!).getTime() - new Date(a.started_at!).getTime())
         .slice(0, 20)
         .map(c => ({
           id: c.id,
-          type: c.call_category?.toLowerCase().includes('connection') ? 'call_connected' as const : 'call_attempted' as const,
-          timestamp: c.call_date || c.created_at!,
-          company: c.company_name || 'Unknown',
-          contact: c.contact_name || 'Unknown',
-          details: c.call_category || 'Call',
-          sentiment: (c.seller_interest_score || 0) >= 7 ? 'positive' as const : 
-                     (c.seller_interest_score || 0) >= 4 ? 'neutral' as const : 
+          type: (c.talk_duration || 0) > 60 ? 'call_connected' as const : 'call_attempted' as const,
+          timestamp: c.started_at!,
+          company: c.to_name || 'Unknown',
+          contact: c.to_name || 'Unknown',
+          details: c.disposition || 'Call',
+          sentiment: (c.talk_duration || 0) >= 180 ? 'positive' as const : 
+                     (c.talk_duration || 0) >= 60 ? 'neutral' as const : 
                      'negative' as const,
         }));
+
+      // Infrastructure metrics - simplified since we don't have email_accounts/sending_domains tables
+      const infrastructureMetrics: InfrastructureMetrics = {
+        totalDomains: 0,
+        totalMailboxes: 0,
+        activeMailboxes: 0,
+        totalDailyCapacity: 0,
+        currentDailySending: 0,
+        utilizationRate: 0,
+        warmupCount: 0,
+        domainsWithFullAuth: 0,
+        avgHealthScore: 0,
+        avgBounceRate: 0,
+        domainBreakdown: [],
+      };
 
       setData({
         engagement: engagement as EngagementDetails,
@@ -666,17 +457,17 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         funnel,
         channelComparison,
         trendData,
-        sequencePerformance: [], // Would need sequence step data
+        sequencePerformance: [],
         callDispositions,
         callOutcomes,
         recentActivity,
         linkedCampaigns,
         dataAvailability: {
-          emailDailyMetrics: allEmailMetrics.length > 0 && !usingFallbackData,
-          emailCampaignFallback: usingFallbackData,
-          callingData: matchingCalls.length > 0,
-          infrastructureData: emailAccounts.length > 0,
-          syncInProgress: false, // Could check api_connections sync_status
+          emailDailyMetrics: dailyMetrics.length > 0,
+          emailCampaignFallback: false,
+          callingData: calls.length > 0,
+          infrastructureData: false,
+          syncInProgress: false,
         },
       });
 
@@ -691,90 +482,8 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
   return { data, loading, error, refetch: fetchReportData };
 }
 
-function calculateInfrastructureMetrics(
-  emailAccounts: any[],
-  sendingDomains: any[]
-): InfrastructureMetrics {
-  // Build domain map from email accounts
-  const domainMap = new Map<string, DomainBreakdown>();
-  
-  emailAccounts.forEach(acc => {
-    const domain = acc.email_address?.split('@')[1];
-    if (!domain) return;
-    
-    if (!domainMap.has(domain)) {
-      const domainData = sendingDomains.find(d => d.domain === domain);
-      domainMap.set(domain, {
-        domain,
-        mailboxCount: 0,
-        dailyCapacity: 0,
-        spfValid: domainData?.spf_valid ?? null,
-        dkimValid: domainData?.dkim_valid ?? null,
-        dmarcValid: domainData?.dmarc_valid ?? null,
-        bounceRate: domainData?.bounce_rate || 0,
-        healthScore: 0,
-        warmupCount: 0,
-      });
-    }
-    
-    const d = domainMap.get(domain)!;
-    d.mailboxCount++;
-    d.dailyCapacity += acc.daily_limit || 0;
-    d.healthScore += (acc.health_score || 0) * 100;
-    if (acc.warmup_enabled) d.warmupCount++;
-  });
-
-  // Calculate averages for each domain
-  domainMap.forEach((d) => {
-    if (d.mailboxCount > 0) {
-      d.healthScore = Math.round(d.healthScore / d.mailboxCount);
-    }
-  });
-
-  const domainBreakdown = Array.from(domainMap.values())
-    .sort((a, b) => b.mailboxCount - a.mailboxCount);
-
-  // Calculate totals
-  const totalMailboxes = emailAccounts.length;
-  const activeMailboxes = emailAccounts.filter(a => a.is_active).length;
-  const totalDailyCapacity = emailAccounts.reduce((sum, a) => sum + (a.daily_limit || 0), 0);
-  const totalSent30d = emailAccounts.reduce((sum, a) => sum + (a.sent_30d || 0), 0);
-  const currentDailySending = Math.round(totalSent30d / 30);
-  const utilizationRate = totalDailyCapacity > 0 ? (currentDailySending / totalDailyCapacity) * 100 : 0;
-  const warmupCount = emailAccounts.filter(a => a.warmup_enabled).length;
-  
-  const domainsWithFullAuth = domainBreakdown.filter(
-    d => d.spfValid === true && d.dkimValid === true && d.dmarcValid === true
-  ).length;
-
-  const healthScores = emailAccounts.map(a => (a.health_score || 0) * 100).filter(h => h > 0);
-  const avgHealthScore = healthScores.length > 0 
-    ? Math.round(healthScores.reduce((a, b) => a + b, 0) / healthScores.length)
-    : 0;
-
-  const bounceRates = emailAccounts.map(a => a.bounce_rate || 0).filter(b => b > 0);
-  const avgBounceRate = bounceRates.length > 0
-    ? bounceRates.reduce((a, b) => a + b, 0) / bounceRates.length
-    : 0;
-
-  return {
-    totalDomains: domainBreakdown.length,
-    totalMailboxes,
-    activeMailboxes,
-    totalDailyCapacity,
-    currentDailySending,
-    utilizationRate,
-    warmupCount,
-    domainsWithFullAuth,
-    avgHealthScore,
-    avgBounceRate,
-    domainBreakdown,
-  };
-}
-
 function normalizeCallCategory(category: string): string {
   const lower = category.toLowerCase();
-  // Remove duration suffixes like "- 12 seconds"
   const normalized = lower.replace(/\s*-\s*\d+\s*seconds?/i, '').trim();
   
   if (normalized.includes('voicemail') || normalized.includes('vm')) return 'Voicemail';
@@ -790,56 +499,4 @@ function normalizeCallCategory(category: string): string {
   if (normalized.includes('not interested') || normalized.includes('dnc')) return 'Not Interested';
   if (normalized.includes('busy')) return 'Busy';
   return category ? category.split(' - ')[0].trim() : 'Other';
-}
-
-function getEmptyKeyMetrics(): KeyMetrics {
-  return {
-    companiesContacted: 0,
-    contactsReached: 0,
-    totalTouchpoints: 0,
-    emailTouchpoints: 0,
-    callTouchpoints: 0,
-    positiveResponses: 0,
-    meetingsScheduled: 0,
-    opportunities: 0,
-    responseRate: 0,
-    meetingRate: 0,
-  };
-}
-
-function getEmptyEmailMetrics(): EmailMetrics {
-  return {
-    sent: 0,
-    delivered: 0,
-    deliveryRate: 0,
-    opened: 0,
-    openRate: 0,
-    clicked: 0,
-    clickRate: 0,
-    replied: 0,
-    replyRate: 0,
-    positiveReplies: 0,
-    positiveRate: 0,
-    bounced: 0,
-    bounceRate: 0,
-    unsubscribed: 0,
-    meetings: 0,
-  };
-}
-
-function getEmptyCallingMetrics(): CallingMetrics {
-  return {
-    totalCalls: 0,
-    connections: 0,
-    connectRate: 0,
-    conversations: 0,
-    conversationRate: 0,
-    dmConversations: 0,
-    meetings: 0,
-    meetingRate: 0,
-    voicemails: 0,
-    voicemailRate: 0,
-    avgDuration: 0,
-    avgScore: 0,
-  };
 }
