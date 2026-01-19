@@ -184,33 +184,55 @@ export default function EngagementDashboard() {
 
   const fetchEngagementMetrics = async (engagementList: Engagement[]) => {
     try {
+      const engagementIds = engagementList.map(e => e.id);
+      
+      // Fetch all call activities in a single query
+      const { data: allCalls } = await supabase
+        .from('call_activities')
+        .select('engagement_id, disposition, talk_duration, conversation_outcome')
+        .in('engagement_id', engagementIds);
+
+      // Fetch all meetings in a single query
+      const { data: allMeetings } = await supabase
+        .from('meetings')
+        .select('id, engagement_id')
+        .in('engagement_id', engagementIds);
+
       const metricsMap: Record<string, EngagementMetrics> = {};
       
+      // Initialize all engagements with zero metrics
       for (const eng of engagementList) {
-        const { data: callData } = await supabase
-          .from('call_activities')
-          .select('disposition, talk_duration, conversation_outcome')
-          .eq('engagement_id', eng.id);
-
-        const { data: meetingsData } = await supabase
-          .from('meetings')
-          .select('id')
-          .eq('engagement_id', eng.id);
-
-        const calls = callData || [];
-        const totalCalls = calls.length;
-        const conversations = calls.filter(c => (c.talk_duration || 0) > 30).length;
-        const interestedLeads = calls.filter(c => 
-          c.disposition?.toLowerCase().includes('interested') ||
-          c.conversation_outcome?.toLowerCase().includes('interested')
-        ).length;
-
         metricsMap[eng.id] = {
-          totalCalls,
-          interestedLeads,
-          conversations,
-          meetingsSet: meetingsData?.length || 0,
+          totalCalls: 0,
+          interestedLeads: 0,
+          conversations: 0,
+          meetingsSet: 0,
         };
+      }
+
+      // Aggregate call data
+      for (const call of (allCalls || [])) {
+        const m = metricsMap[call.engagement_id];
+        if (m) {
+          m.totalCalls++;
+          if ((call.talk_duration || 0) > 30) {
+            m.conversations++;
+          }
+          if (
+            call.disposition?.toLowerCase().includes('interested') ||
+            call.conversation_outcome?.toLowerCase().includes('interested')
+          ) {
+            m.interestedLeads++;
+          }
+        }
+      }
+
+      // Aggregate meetings data
+      for (const meeting of (allMeetings || [])) {
+        const m = metricsMap[meeting.engagement_id];
+        if (m) {
+          m.meetingsSet++;
+        }
       }
       
       setEngagementMetrics(metricsMap);
