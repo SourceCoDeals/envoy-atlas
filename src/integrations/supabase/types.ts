@@ -2370,6 +2370,75 @@ export type Database = {
           },
         ]
       }
+      isp_deliverability: {
+        Row: {
+          bounced_count: number | null
+          campaign_id: string | null
+          clicked_count: number | null
+          created_at: string | null
+          delivered_count: number | null
+          engagement_id: string | null
+          hard_bounce_count: number | null
+          id: string
+          isp_name: string
+          metric_date: string
+          opened_count: number | null
+          replied_count: number | null
+          sent_count: number | null
+          soft_bounce_count: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          bounced_count?: number | null
+          campaign_id?: string | null
+          clicked_count?: number | null
+          created_at?: string | null
+          delivered_count?: number | null
+          engagement_id?: string | null
+          hard_bounce_count?: number | null
+          id?: string
+          isp_name: string
+          metric_date: string
+          opened_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          soft_bounce_count?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          bounced_count?: number | null
+          campaign_id?: string | null
+          clicked_count?: number | null
+          created_at?: string | null
+          delivered_count?: number | null
+          engagement_id?: string | null
+          hard_bounce_count?: number | null
+          id?: string
+          isp_name?: string
+          metric_date?: string
+          opened_count?: number | null
+          replied_count?: number | null
+          sent_count?: number | null
+          soft_bounce_count?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "isp_deliverability_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "isp_deliverability_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_categories: {
         Row: {
           color: string | null
@@ -3307,14 +3376,22 @@ export type Database = {
       }
       variant_decay_tracking: {
         Row: {
+          bounce_rate: number | null
           created_at: string | null
           cumulative_replies: number | null
           cumulative_reply_rate: number | null
           cumulative_sends: number | null
           decay_from_peak: number | null
           decay_severity: string | null
+          decline_severity: string | null
           id: string
+          is_declining: boolean | null
+          open_rate: number | null
+          open_rate_change: number | null
+          positive_rate: number | null
+          positive_rate_change: number | null
           replies_this_week: number | null
+          reply_rate_change: number | null
           reply_rate_this_week: number | null
           sends_this_week: number | null
           variant_id: string
@@ -3323,14 +3400,22 @@ export type Database = {
           week_start: string
         }
         Insert: {
+          bounce_rate?: number | null
           created_at?: string | null
           cumulative_replies?: number | null
           cumulative_reply_rate?: number | null
           cumulative_sends?: number | null
           decay_from_peak?: number | null
           decay_severity?: string | null
+          decline_severity?: string | null
           id?: string
+          is_declining?: boolean | null
+          open_rate?: number | null
+          open_rate_change?: number | null
+          positive_rate?: number | null
+          positive_rate_change?: number | null
           replies_this_week?: number | null
+          reply_rate_change?: number | null
           reply_rate_this_week?: number | null
           sends_this_week?: number | null
           variant_id: string
@@ -3339,14 +3424,22 @@ export type Database = {
           week_start: string
         }
         Update: {
+          bounce_rate?: number | null
           created_at?: string | null
           cumulative_replies?: number | null
           cumulative_reply_rate?: number | null
           cumulative_sends?: number | null
           decay_from_peak?: number | null
           decay_severity?: string | null
+          decline_severity?: string | null
           id?: string
+          is_declining?: boolean | null
+          open_rate?: number | null
+          open_rate_change?: number | null
+          positive_rate?: number | null
+          positive_rate_change?: number | null
           replies_this_week?: number | null
+          reply_rate_change?: number | null
           reply_rate_this_week?: number | null
           sends_this_week?: number | null
           variant_id?: string
@@ -3507,6 +3600,7 @@ export type Database = {
         Args: { confidence?: number; successes: number; total: number }
         Returns: number
       }
+      classify_email_isp: { Args: { email_address: string }; Returns: string }
       decrypt_api_key: { Args: { encrypted_value: string }; Returns: string }
       encrypt_api_key: { Args: { key_value: string }; Returns: string }
       get_client_id_from_engagement: {
@@ -3533,6 +3627,17 @@ export type Database = {
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
+      }
+      get_variant_weekly_stats: {
+        Args: { p_variant_id: string }
+        Returns: {
+          bounced: number
+          opened: number
+          positive: number
+          replied: number
+          sent: number
+          week_start: string
+        }[]
       }
       has_role: {
         Args: {
