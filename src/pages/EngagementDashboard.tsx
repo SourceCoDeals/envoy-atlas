@@ -2,11 +2,11 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
@@ -16,15 +16,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -36,15 +27,14 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
-  Plus, Building2, Loader2, Pencil, Trash2, ChevronDown, ChevronRight,
-  Phone, Target, TrendingUp, Users, Link as LinkIcon, BarChart3, Wand2, Check, X, Archive
+  Plus, Building2, Loader2, Pencil, Trash2,
+  Phone, Target, BarChart3, Wand2, Check, X, Archive, DollarSign
 } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import { LinkedCampaignsList, LinkedCampaign } from '@/components/engagements/LinkedCampaignsList';
-import { LinkCampaignsDialog, UnlinkedCampaign } from '@/components/engagements/LinkCampaignsDialog';
+import { EngagementForm, EngagementFormData } from '@/components/engagements/EngagementForm';
 
-// Updated interface to match the new unified schema
+// Updated interface to match the new unified schema with team assignments
 interface Engagement {
   id: string;
   client_id: string;
@@ -55,42 +45,46 @@ interface Engagement {
   end_date: string | null;
   meeting_goal: number | null;
   target_list_size: number | null;
+  sponsor_name: string | null;
+  portfolio_company: string | null;
+  fee_schedule: string | null;
+  monthly_retainer: number | null;
+  is_platform: boolean | null;
+  deal_lead_id: string | null;
+  associate_id: string | null;
+  analyst_id: string | null;
+  analyst_2_id: string | null;
+  research_lead_id: string | null;
+  research_mid_id: string | null;
 }
 
 interface EngagementMetrics {
   totalCalls: number;
-  avgScore: number;
   interestedLeads: number;
   conversations: number;
   meetingsSet: number;
 }
 
-interface CampaignSummary {
-  clientProject: string;
-  totalCalls: number;
-  avgScore: number;
-  interestedLeads: number;
-}
+const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
+  active: { label: 'Live', variant: 'default' },
+  contracted: { label: 'Contracted', variant: 'outline' },
+  paused: { label: 'Paused', variant: 'secondary' },
+  transitioned: { label: 'Transitioned', variant: 'secondary' },
+  closed: { label: 'Complete', variant: 'secondary' },
+};
 
 export default function EngagementDashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
+  const { teamMembers, getTeamMemberById, getTeamMemberName } = useTeamMembers();
   const [loading, setLoading] = useState(true);
   const [engagements, setEngagements] = useState<Engagement[]>([]);
-  const [campaignSummaries, setCampaignSummaries] = useState<CampaignSummary[]>([]);
   const [engagementMetrics, setEngagementMetrics] = useState<Record<string, EngagementMetrics>>({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'active' | 'closed'>('active');
-  // Campaign linking state
-  const [linkedCampaigns, setLinkedCampaigns] = useState<Record<string, LinkedCampaign[]>>({});
-  const [unlinkedCampaigns, setUnlinkedCampaigns] = useState<UnlinkedCampaign[]>([]);
-  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-  const [linkingEngagementId, setLinkingEngagementId] = useState<string | null>(null);
-  const [unlinkingCampaign, setUnlinkingCampaign] = useState<string | null>(null);
 
   // Auto-pair state
   const [autoPairDialogOpen, setAutoPairDialogOpen] = useState(false);
@@ -103,7 +97,7 @@ export default function EngagementDashboard() {
     details: { engagement: string; campaigns: string[] }[];
   } | null>(null);
 
-  const emptyForm = {
+  const emptyForm: EngagementFormData = {
     name: '',
     description: '',
     status: 'active',
@@ -111,9 +105,20 @@ export default function EngagementDashboard() {
     end_date: '',
     meeting_goal: 20,
     target_list_size: 500,
+    sponsor_name: '',
+    portfolio_company: '',
+    fee_schedule: '',
+    monthly_retainer: null,
+    is_platform: true,
+    deal_lead_id: null,
+    associate_id: null,
+    analyst_id: null,
+    analyst_2_id: null,
+    research_lead_id: null,
+    research_mid_id: null,
   };
 
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, setFormData] = useState<EngagementFormData>(emptyForm);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -124,8 +129,6 @@ export default function EngagementDashboard() {
   useEffect(() => {
     if (currentWorkspace?.id) {
       fetchEngagements();
-      fetchCampaignSummaries();
-      fetchAllCampaigns();
     }
   }, [currentWorkspace?.id]);
 
@@ -152,6 +155,17 @@ export default function EngagementDashboard() {
         end_date: d.end_date,
         meeting_goal: d.meeting_goal,
         target_list_size: d.target_list_size,
+        sponsor_name: d.sponsor_name,
+        portfolio_company: d.portfolio_company,
+        fee_schedule: d.fee_schedule,
+        monthly_retainer: d.monthly_retainer,
+        is_platform: d.is_platform,
+        deal_lead_id: d.deal_lead_id,
+        associate_id: d.associate_id,
+        analyst_id: d.analyst_id,
+        analyst_2_id: d.analyst_2_id,
+        research_lead_id: d.research_lead_id,
+        research_mid_id: d.research_mid_id,
       }));
       
       setEngagements(mappedEngagements);
@@ -169,19 +183,15 @@ export default function EngagementDashboard() {
   };
 
   const fetchEngagementMetrics = async (engagementList: Engagement[]) => {
-    if (!currentWorkspace?.id) return;
-
     try {
       const metricsMap: Record<string, EngagementMetrics> = {};
       
       for (const eng of engagementList) {
-        // Get call activities for this engagement
         const { data: callData } = await supabase
           .from('call_activities')
-          .select('disposition, talk_duration, conversation_outcome, to_name')
+          .select('disposition, talk_duration, conversation_outcome')
           .eq('engagement_id', eng.id);
 
-        // Get meetings for this engagement
         const { data: meetingsData } = await supabase
           .from('meetings')
           .select('id')
@@ -189,11 +199,7 @@ export default function EngagementDashboard() {
 
         const calls = callData || [];
         const totalCalls = calls.length;
-        
-        // Count conversations (calls with talk time)
         const conversations = calls.filter(c => (c.talk_duration || 0) > 30).length;
-        
-        // Interested leads based on disposition
         const interestedLeads = calls.filter(c => 
           c.disposition?.toLowerCase().includes('interested') ||
           c.conversation_outcome?.toLowerCase().includes('interested')
@@ -201,7 +207,6 @@ export default function EngagementDashboard() {
 
         metricsMap[eng.id] = {
           totalCalls,
-          avgScore: 0, // Scores not tracked in call_activities
           interestedLeads,
           conversations,
           meetingsSet: meetingsData?.length || 0,
@@ -211,202 +216,6 @@ export default function EngagementDashboard() {
       setEngagementMetrics(metricsMap);
     } catch (err) {
       console.error('Error fetching engagement metrics:', err);
-    }
-  };
-
-  // Fetch all campaigns from unified campaigns table
-  const fetchAllCampaigns = useCallback(async () => {
-    if (!currentWorkspace?.id) return;
-
-    try {
-      // Get engagement IDs for this workspace
-      const { data: engagementsData } = await supabase
-        .from('engagements')
-        .select('id')
-        .eq('client_id', currentWorkspace.id);
-
-      const engagementIds = (engagementsData || []).map(e => e.id);
-
-      if (engagementIds.length === 0) {
-        setLinkedCampaigns({});
-        setUnlinkedCampaigns([]);
-        return;
-      }
-
-      // Fetch campaigns from unified campaigns table
-      const { data: campaignsData } = await supabase
-        .from('campaigns')
-        .select('id, name, status, engagement_id, total_sent, total_opened, total_replied, campaign_type')
-        .in('engagement_id', engagementIds);
-
-      // Fetch unlinked campaigns (campaigns where engagement_id is null but data_source belongs to workspace)
-      const { data: dataSources } = await supabase
-        .from('data_sources')
-        .select('id')
-        .limit(100);
-
-      const dataSourceIds = (dataSources || []).map(d => d.id);
-
-      const { data: unlinkedCampaignsData } = await supabase
-        .from('campaigns')
-        .select('id, name, status, total_sent, campaign_type')
-        .is('engagement_id', null)
-        .in('data_source_id', dataSourceIds);
-
-      // Process campaigns into linked map
-      const linkedMap: Record<string, LinkedCampaign[]> = {};
-
-      (campaignsData || []).forEach((c) => {
-        const campaign: LinkedCampaign = {
-          id: c.id,
-          name: c.name,
-          platform: c.campaign_type === 'email' ? 'smartlead' : 'replyio',
-          status: c.status || 'active',
-          totalSent: c.total_sent || 0,
-          totalOpened: c.total_opened || 0,
-          totalReplied: c.total_replied || 0,
-          totalPositive: 0,
-        };
-
-        if (c.engagement_id) {
-          if (!linkedMap[c.engagement_id]) linkedMap[c.engagement_id] = [];
-          linkedMap[c.engagement_id].push(campaign);
-        }
-      });
-
-      // Process unlinked campaigns
-      const unlinked: UnlinkedCampaign[] = (unlinkedCampaignsData || []).map(c => ({
-        id: c.id,
-        name: c.name,
-        platform: c.campaign_type === 'email' ? 'smartlead' : 'replyio',
-        status: c.status || 'active',
-        totalSent: c.total_sent || 0,
-      }));
-
-      setLinkedCampaigns(linkedMap);
-      setUnlinkedCampaigns(unlinked);
-    } catch (err) {
-      console.error('Error fetching campaigns:', err);
-    }
-  }, [currentWorkspace?.id]);
-
-  const fetchCampaignSummaries = async () => {
-    if (!currentWorkspace?.id) return;
-
-    try {
-      // Get engagement IDs for this workspace
-      const { data: engagementsData } = await supabase
-        .from('engagements')
-        .select('id, name')
-        .eq('client_id', currentWorkspace.id);
-
-      if (!engagementsData || engagementsData.length === 0) {
-        setCampaignSummaries([]);
-        return;
-      }
-
-      const engagementIds = engagementsData.map(e => e.id);
-
-      // Get call activities for these engagements
-      const { data: callData } = await supabase
-        .from('call_activities')
-        .select('engagement_id, disposition, talk_duration, conversation_outcome')
-        .in('engagement_id', engagementIds);
-
-      // Group by engagement
-      const grouped: Record<string, { calls: number; interested: number }> = {};
-      
-      engagementsData.forEach(eng => {
-        grouped[eng.name] = { calls: 0, interested: 0 };
-      });
-
-      (callData || []).forEach(call => {
-        const engagement = engagementsData.find(e => e.id === call.engagement_id);
-        if (engagement) {
-          grouped[engagement.name].calls++;
-          if (call.disposition?.toLowerCase().includes('interested') ||
-              call.conversation_outcome?.toLowerCase().includes('interested')) {
-            grouped[engagement.name].interested++;
-          }
-        }
-      });
-
-      const summaries: CampaignSummary[] = Object.entries(grouped)
-        .map(([clientProject, data]) => ({
-          clientProject,
-          totalCalls: data.calls,
-          avgScore: 0,
-          interestedLeads: data.interested,
-        }))
-        .sort((a, b) => b.totalCalls - a.totalCalls)
-        .slice(0, 25);
-
-      setCampaignSummaries(summaries);
-    } catch (err) {
-      console.error('Error fetching campaign summaries:', err);
-    }
-  };
-
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  // Open link campaigns dialog
-  const openLinkDialog = (engagementId: string) => {
-    setLinkingEngagementId(engagementId);
-    setLinkDialogOpen(true);
-  };
-
-  // Handle linking campaigns to engagement
-  const handleLinkCampaigns = async (campaigns: { id: string; platform: 'smartlead' | 'replyio' }[]) => {
-    if (!linkingEngagementId) return;
-
-    try {
-      const campaignIds = campaigns.map(c => c.id);
-
-      if (campaignIds.length > 0) {
-        const { error } = await supabase
-          .from('campaigns')
-          .update({ engagement_id: linkingEngagementId })
-          .in('id', campaignIds);
-
-        if (error) throw error;
-      }
-
-      toast.success(`Linked ${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''}`);
-      fetchAllCampaigns();
-    } catch (err) {
-      console.error('Error linking campaigns:', err);
-      toast.error('Failed to link campaigns');
-      throw err;
-    }
-  };
-
-  // Handle unlinking a campaign from engagement
-  const handleUnlinkCampaign = async (campaignId: string, _platform: 'smartlead' | 'replyio') => {
-    setUnlinkingCampaign(campaignId);
-    try {
-      const { error } = await supabase
-        .from('campaigns')
-        .update({ engagement_id: null })
-        .eq('id', campaignId);
-
-      if (error) throw error;
-      toast.success('Campaign unlinked');
-      fetchAllCampaigns();
-    } catch (err) {
-      console.error('Error unlinking campaign:', err);
-      toast.error('Failed to unlink campaign');
-    } finally {
-      setUnlinkingCampaign(null);
     }
   };
 
@@ -426,6 +235,17 @@ export default function EngagementDashboard() {
       end_date: engagement.end_date || '',
       meeting_goal: engagement.meeting_goal || 20,
       target_list_size: engagement.target_list_size || 500,
+      sponsor_name: engagement.sponsor_name || '',
+      portfolio_company: engagement.portfolio_company || '',
+      fee_schedule: engagement.fee_schedule || '',
+      monthly_retainer: engagement.monthly_retainer,
+      is_platform: engagement.is_platform ?? true,
+      deal_lead_id: engagement.deal_lead_id,
+      associate_id: engagement.associate_id,
+      analyst_id: engagement.analyst_id,
+      analyst_2_id: engagement.analyst_2_id,
+      research_lead_id: engagement.research_lead_id,
+      research_mid_id: engagement.research_mid_id,
     });
     setDialogOpen(true);
   };
@@ -439,18 +259,31 @@ export default function EngagementDashboard() {
 
     setCreating(true);
     try {
+      const payload = {
+        name: formData.name,
+        description: formData.description || null,
+        status: formData.status,
+        start_date: formData.start_date || null,
+        end_date: formData.end_date || null,
+        meeting_goal: formData.meeting_goal,
+        target_list_size: formData.target_list_size,
+        sponsor_name: formData.sponsor_name || null,
+        portfolio_company: formData.portfolio_company || null,
+        fee_schedule: formData.fee_schedule || null,
+        monthly_retainer: formData.monthly_retainer,
+        is_platform: formData.is_platform,
+        deal_lead_id: formData.deal_lead_id,
+        associate_id: formData.associate_id,
+        analyst_id: formData.analyst_id,
+        analyst_2_id: formData.analyst_2_id,
+        research_lead_id: formData.research_lead_id,
+        research_mid_id: formData.research_mid_id,
+      };
+
       if (editingId) {
         const { error } = await supabase
           .from('engagements')
-          .update({
-            name: formData.name,
-            description: formData.description || null,
-            status: formData.status,
-            start_date: formData.start_date || null,
-            end_date: formData.end_date || null,
-            meeting_goal: formData.meeting_goal,
-            target_list_size: formData.target_list_size,
-          })
+          .update(payload)
           .eq('id', editingId);
 
         if (error) throw error;
@@ -458,13 +291,7 @@ export default function EngagementDashboard() {
       } else {
         const { error } = await supabase.from('engagements').insert({
           client_id: currentWorkspace.id,
-          name: formData.name,
-          description: formData.description || null,
-          status: formData.status,
-          start_date: formData.start_date || null,
-          end_date: formData.end_date || null,
-          meeting_goal: formData.meeting_goal,
-          target_list_size: formData.target_list_size,
+          ...payload,
         });
 
         if (error) throw error;
@@ -495,6 +322,28 @@ export default function EngagementDashboard() {
     }
   };
 
+  // Toggle engagement status
+  const handleToggleStatus = async (engagementId: string, currentStatus: string) => {
+    const isActive = ['active', 'contracted', 'paused'].includes(currentStatus);
+    const newStatus = isActive ? 'closed' : 'active';
+    try {
+      const { error } = await supabase
+        .from('engagements')
+        .update({ status: newStatus })
+        .eq('id', engagementId);
+
+      if (error) throw error;
+      
+      setEngagements(prev => 
+        prev.map(e => e.id === engagementId ? { ...e, status: newStatus } : e)
+      );
+      toast.success(`Engagement marked as ${newStatus === 'closed' ? 'complete' : 'live'}`);
+    } catch (err) {
+      console.error('Error updating status:', err);
+      toast.error('Failed to update status');
+    }
+  };
+
   // Handle auto-pairing campaigns
   const handleAutoPair = async () => {
     if (!currentWorkspace?.id) return;
@@ -522,9 +371,7 @@ export default function EngagementDashboard() {
 
       if (data.engagementsCreated > 0 || data.campaignsLinked > 0) {
         toast.success(`Created ${data.engagementsCreated} engagements, linked ${data.campaignsLinked} campaigns`);
-        // Refresh data
         fetchEngagements();
-        fetchAllCampaigns();
       } else {
         toast.info('No new matches found to auto-pair');
       }
@@ -536,51 +383,51 @@ export default function EngagementDashboard() {
     }
   };
 
-  // Toggle engagement status
-  const handleToggleStatus = async (engagementId: string, currentStatus: string) => {
-    const newStatus = currentStatus === 'active' ? 'closed' : 'active';
-    try {
-      const { error } = await supabase
-        .from('engagements')
-        .update({ status: newStatus })
-        .eq('id', engagementId);
-
-      if (error) throw error;
-      
-      setEngagements(prev => 
-        prev.map(e => e.id === engagementId ? { ...e, status: newStatus } : e)
-      );
-      toast.success(`Engagement marked as ${newStatus}`);
-    } catch (err) {
-      console.error('Error updating status:', err);
-      toast.error('Failed to update status');
-    }
-  };
-
   // Filter engagements by active tab
   const filteredEngagements = useMemo(() => {
     return engagements.filter(e => {
       const status = e.status || 'active';
-      return activeTab === 'active' ? status === 'active' : status === 'closed';
+      const isActive = ['active', 'contracted', 'paused'].includes(status);
+      return activeTab === 'active' ? isActive : !isActive;
     });
   }, [engagements, activeTab]);
 
   // Count by status
   const statusCounts = useMemo(() => {
-    const active = engagements.filter(e => (e.status || 'active') === 'active').length;
-    const closed = engagements.filter(e => e.status === 'closed').length;
+    const active = engagements.filter(e => {
+      const status = e.status || 'active';
+      return ['active', 'contracted', 'paused'].includes(status);
+    }).length;
+    const closed = engagements.length - active;
     return { active, closed };
   }, [engagements]);
 
+  // Calculate totals
   const totals = useMemo(() => {
-    return campaignSummaries.reduce(
-      (acc, c) => ({
-        calls: acc.calls + c.totalCalls,
-        interested: acc.interested + c.interestedLeads,
+    return Object.values(engagementMetrics).reduce(
+      (acc, m) => ({
+        calls: acc.calls + m.totalCalls,
+        interested: acc.interested + m.interestedLeads,
+        meetings: acc.meetings + m.meetingsSet,
       }),
-      { calls: 0, interested: 0 }
+      { calls: 0, interested: 0, meetings: 0 }
     );
-  }, [campaignSummaries]);
+  }, [engagementMetrics]);
+
+  const totalRetainer = useMemo(() => {
+    return engagements
+      .filter(e => ['active', 'contracted', 'paused'].includes(e.status || 'active'))
+      .reduce((sum, e) => sum + (e.monthly_retainer || 0), 0);
+  }, [engagements]);
+
+  // Helper to get initials
+  const getInitials = (id: string | null) => {
+    const member = getTeamMemberById(id);
+    if (!member) return null;
+    const first = member.first_name?.[0] || '';
+    const last = member.last_name?.[0] || '';
+    return (first + last).toUpperCase() || null;
+  };
 
   if (authLoading) {
     return (
@@ -605,7 +452,7 @@ export default function EngagementDashboard() {
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setAutoPairDialogOpen(true)}>
               <Wand2 className="mr-2 h-4 w-4" />
-              Auto-Pair Campaigns
+              Auto-Pair
             </Button>
             <Button onClick={openCreate}>
               <Plus className="mr-2 h-4 w-4" />
@@ -614,15 +461,14 @@ export default function EngagementDashboard() {
           </div>
         </div>
 
-
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Engagements</CardTitle>
+              <CardTitle className="text-sm font-medium">Active Engagements</CardTitle>
               <Building2 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{engagements.length}</div>
+              <div className="text-2xl font-bold">{statusCounts.active}</div>
             </CardContent>
           </Card>
 
@@ -638,22 +484,22 @@ export default function EngagementDashboard() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Interested Leads</CardTitle>
+              <CardTitle className="text-sm font-medium">Meetings Set</CardTitle>
               <Target className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{totals.interested.toLocaleString()}</div>
+              <div className="text-2xl font-bold">{totals.meetings.toLocaleString()}</div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Linked Campaigns</CardTitle>
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Monthly Retainer</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {Object.values(linkedCampaigns).reduce((sum, campaigns) => sum + campaigns.length, 0)}
+                ${totalRetainer.toLocaleString()}
               </div>
             </CardContent>
           </Card>
@@ -701,81 +547,107 @@ export default function EngagementDashboard() {
                 )}
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[40px]"></TableHead>
-                    <TableHead>Engagement</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Calls</TableHead>
-                    <TableHead className="text-right">Conversations</TableHead>
-                    <TableHead className="text-right">Interested</TableHead>
-                    <TableHead className="text-right">Meetings</TableHead>
-                    <TableHead className="text-right">Campaigns</TableHead>
-                    <TableHead className="w-[100px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredEngagements.map((engagement) => {
-                    const metrics = engagementMetrics[engagement.id] || {
-                      totalCalls: 0,
-                      avgScore: 0,
-                      interestedLeads: 0,
-                      conversations: 0,
-                      meetingsSet: 0,
-                    };
-                    const campaigns = linkedCampaigns[engagement.id] || [];
-                    const isExpanded = expandedRows.has(engagement.id);
-                    const currentStatus = engagement.status || 'active';
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Sponsor</TableHead>
+                      <TableHead>Client</TableHead>
+                      <TableHead>Start</TableHead>
+                      <TableHead>Deal Lead</TableHead>
+                      <TableHead>Analysts</TableHead>
+                      <TableHead>Research</TableHead>
+                      <TableHead className="text-right">Retainer</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="w-[80px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredEngagements.map((engagement) => {
+                      const currentStatus = engagement.status || 'active';
+                      const statusConfig = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.active;
+                      const dealLead = getTeamMemberById(engagement.deal_lead_id);
+                      const analyst1 = getTeamMemberById(engagement.analyst_id);
+                      const analyst2 = getTeamMemberById(engagement.analyst_2_id);
+                      const researchLead = getTeamMemberById(engagement.research_lead_id);
+                      const researchMid = getTeamMemberById(engagement.research_mid_id);
 
-                    return (
-                      <>
+                      return (
                         <TableRow key={engagement.id} className="hover:bg-muted/50">
-                          <TableCell 
-                            className="cursor-pointer"
-                            onClick={() => toggleRow(engagement.id)}
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4" />
+                          <TableCell>
+                            <Badge 
+                              variant={statusConfig.variant}
+                              className="cursor-pointer hover:opacity-80 transition-opacity"
+                              onClick={() => handleToggleStatus(engagement.id, currentStatus)}
+                            >
+                              {statusConfig.label}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {engagement.sponsor_name || engagement.name}
+                          </TableCell>
+                          <TableCell>
+                            {engagement.portfolio_company || '—'}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {engagement.start_date 
+                              ? new Date(engagement.start_date).toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  year: '2-digit' 
+                                })
+                              : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {dealLead ? (
+                              <span className="text-sm">{getTeamMemberName(dealLead)}</span>
                             ) : (
-                              <ChevronRight className="h-4 w-4" />
+                              <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
-                          <TableCell 
-                            className="cursor-pointer"
-                            onClick={() => toggleRow(engagement.id)}
-                          >
-                            <div>
-                              <div className="font-medium">{engagement.name}</div>
-                              {engagement.description && (
-                                <div className="text-sm text-muted-foreground line-clamp-1">
-                                  {engagement.description}
-                                </div>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              {analyst1 && (
+                                <Badge variant="outline" className="text-xs">
+                                  {getInitials(engagement.analyst_id)}
+                                </Badge>
+                              )}
+                              {analyst2 && (
+                                <Badge variant="outline" className="text-xs">
+                                  {getInitials(engagement.analyst_2_id)}
+                                </Badge>
+                              )}
+                              {!analyst1 && !analyst2 && (
+                                <span className="text-muted-foreground">—</span>
                               )}
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge 
-                              variant={currentStatus === 'active' ? 'default' : 'secondary'}
-                              className="cursor-pointer hover:opacity-80 transition-opacity"
-                              onClick={() => handleToggleStatus(engagement.id, currentStatus)}
-                            >
-                              {currentStatus}
-                            </Badge>
+                            <div className="flex gap-1">
+                              {researchLead && (
+                                <Badge variant="outline" className="text-xs">
+                                  {getInitials(engagement.research_lead_id)}
+                                </Badge>
+                              )}
+                              {researchMid && (
+                                <Badge variant="outline" className="text-xs">
+                                  {getInitials(engagement.research_mid_id)}
+                                </Badge>
+                              )}
+                              {!researchLead && !researchMid && (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </div>
                           </TableCell>
-                          <TableCell className="text-right">{metrics.totalCalls}</TableCell>
-                          <TableCell className="text-right">{metrics.conversations}</TableCell>
-                          <TableCell className="text-right">{metrics.interestedLeads}</TableCell>
-                          <TableCell className="text-right">{metrics.meetingsSet}</TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openLinkDialog(engagement.id)}
-                            >
-                              <LinkIcon className="h-4 w-4 mr-1" />
-                              {campaigns.length}
-                            </Button>
+                            {engagement.monthly_retainer 
+                              ? `$${engagement.monthly_retainer.toLocaleString()}`
+                              : '—'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={engagement.is_platform ? 'default' : 'secondary'}>
+                              {engagement.is_platform ? 'Platform' : 'Add-on'}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
@@ -796,29 +668,18 @@ export default function EngagementDashboard() {
                             </div>
                           </TableCell>
                         </TableRow>
-                        {isExpanded && campaigns.length > 0 && (
-                          <TableRow>
-                            <TableCell colSpan={9} className="bg-muted/30 p-4">
-                              <LinkedCampaignsList
-                                campaigns={campaigns}
-                                onUnlink={handleUnlinkCampaign}
-                                unlinking={unlinkingCampaign}
-                              />
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
 
         {/* Create/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingId ? 'Edit Engagement' : 'Create Engagement'}</DialogTitle>
               <DialogDescription>
@@ -826,90 +687,17 @@ export default function EngagementDashboard() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Engagement Name *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., Q1 Outreach Campaign"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Brief description"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="start_date">Start Date</Label>
-                  <Input
-                    id="start_date"
-                    type="date"
-                    value={formData.start_date}
-                    onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="end_date">End Date</Label>
-                  <Input
-                    id="end_date"
-                    type="date"
-                    value={formData.end_date}
-                    onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="meeting_goal">Meeting Goal</Label>
-                  <Input
-                    id="meeting_goal"
-                    type="number"
-                    value={formData.meeting_goal}
-                    onChange={(e) => setFormData({ ...formData, meeting_goal: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="target_list_size">Target List Size</Label>
-                  <Input
-                    id="target_list_size"
-                    type="number"
-                    value={formData.target_list_size}
-                    onChange={(e) => setFormData({ ...formData, target_list_size: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleSave} disabled={creating}>
-                  {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {editingId ? 'Update' : 'Create'}
-                </Button>
-              </div>
-            </div>
+            <EngagementForm
+              formData={formData}
+              onChange={setFormData}
+              onSave={handleSave}
+              onCancel={() => setDialogOpen(false)}
+              saving={creating}
+              isEdit={!!editingId}
+              teamMembers={teamMembers}
+            />
           </DialogContent>
         </Dialog>
-
-        {/* Link Campaigns Dialog */}
-        <LinkCampaignsDialog
-          open={linkDialogOpen}
-          onOpenChange={setLinkDialogOpen}
-          campaigns={unlinkedCampaigns}
-          onLink={handleLinkCampaigns}
-          engagementName={engagements.find(e => e.id === linkingEngagementId)?.name || ''}
-        />
 
         {/* Auto-Pair Dialog */}
         <Dialog open={autoPairDialogOpen} onOpenChange={setAutoPairDialogOpen}>
@@ -945,15 +733,8 @@ export default function EngagementDashboard() {
                       <X className="h-4 w-4 mt-0.5 text-muted-foreground" />
                       Skips SourceCo campaigns (internal)
                     </li>
-                    <li className="flex items-start gap-2">
-                      <X className="h-4 w-4 mt-0.5 text-muted-foreground" />
-                      Skips campaigns with unidentifiable clients
-                    </li>
                   </ul>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  This will create new engagements and link all matching campaigns immediately.
-                </p>
               </div>
             )}
 
@@ -967,7 +748,6 @@ export default function EngagementDashboard() {
             {autoPairResults && (
               <ScrollArea className="max-h-[400px]">
                 <div className="space-y-4">
-                  {/* Summary */}
                   <div className="grid grid-cols-3 gap-4">
                     <div className="rounded-lg border p-4 text-center">
                       <div className="text-2xl font-bold text-green-600">{autoPairResults.engagementsCreated}</div>
@@ -983,7 +763,6 @@ export default function EngagementDashboard() {
                     </div>
                   </div>
 
-                  {/* Details */}
                   {autoPairResults.details.length > 0 && (
                     <div className="space-y-2">
                       <h4 className="font-medium">Engagements & Campaigns:</h4>
@@ -999,28 +778,6 @@ export default function EngagementDashboard() {
                             </div>
                           </div>
                         ))}
-                        {autoPairResults.details.length > 20 && (
-                          <p className="text-sm text-muted-foreground">
-                            ...and {autoPairResults.details.length - 20} more
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Skipped */}
-                  {autoPairResults.skippedReasons.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-muted-foreground">Skipped ({autoPairResults.skippedReasons.length}):</h4>
-                      <div className="text-xs text-muted-foreground space-y-1 max-h-32 overflow-y-auto">
-                        {autoPairResults.skippedReasons.slice(0, 10).map((s, i) => (
-                          <div key={i} className="truncate">
-                            {s.name}: {s.reason}
-                          </div>
-                        ))}
-                        {autoPairResults.skippedReasons.length > 10 && (
-                          <div>...and {autoPairResults.skippedReasons.length - 10} more</div>
-                        )}
                       </div>
                     </div>
                   )}
