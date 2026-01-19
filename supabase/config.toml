@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.classify-replies]
 verify_jwt = false
+
+[functions.backfill-enrollment]
+verify_jwt = false

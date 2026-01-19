@@ -756,7 +756,8 @@ Deno.serve(async (req) => {
                     
                     if (!companyId) continue;
                     
-                    // Upsert contact
+                    // Upsert contact with enrolled_at date
+                    const enrolledAt = person.addedAt || person.createdAt || person.created || person.added_at || null;
                     const { error: contactError } = await supabase
                       .from('contacts')
                       .upsert({
@@ -768,6 +769,7 @@ Deno.serve(async (req) => {
                         phone: person.phone || person.phoneNumber || null,
                         linkedin_url: person.linkedInUrl || person.linkedin || null,
                         title: person.title || person.jobTitle || person.job_title || null,
+                        enrolled_at: enrolledAt,
                         source: 'replyio',
                       }, { onConflict: 'engagement_id,email' });
                     

@@ -76,6 +76,7 @@ interface SmartleadLead {
   custom_fields?: Record<string, any>;
   lead_status?: string;
   email_status?: string;
+  created_at?: string; // When lead was enrolled in campaign
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -724,7 +725,8 @@ serve(async (req) => {
                     
                     if (!companyId) continue;
                     
-                    // Upsert contact
+                    // Upsert contact with enrolled_at date
+                    const enrolledAt = (lead as any).created_at || null;
                     const { error: contactError } = await supabase
                       .from('contacts')
                       .upsert({
@@ -737,6 +739,7 @@ serve(async (req) => {
                         linkedin_url: lead.linkedin_profile || null,
                         title: lead.custom_fields?.title || lead.custom_fields?.job_title || null,
                         email_status: lead.email_status || null,
+                        enrolled_at: enrolledAt,
                         source: 'smartlead',
                       }, { onConflict: 'engagement_id,email' });
                     
