@@ -176,8 +176,12 @@ export interface LinkedCampaignWithStats {
   name: string;
   platform: string;
   status: string | null;
+  enrolled: number;
   sent: number;
+  replied: number;
   replyRate: number;
+  positiveReplies: number;
+  positiveRate: number;
 }
 
 interface EngagementReportData {
@@ -234,7 +238,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       // Fetch linked campaigns from unified campaigns table with stats and settings
       const { data: campaigns } = await supabase
         .from('campaigns')
-        .select('id, name, campaign_type, status, total_sent, reply_rate, settings')
+        .select('id, name, campaign_type, status, total_sent, total_replied, reply_rate, positive_replies, positive_rate, settings')
         .eq('engagement_id', engagementId)
         .order('total_sent', { ascending: false });
 
@@ -244,14 +248,21 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         platform: c.campaign_type 
       }));
 
-      const linkedCampaignsWithStats: LinkedCampaignWithStats[] = (campaigns || []).map(c => ({
-        id: c.id,
-        name: c.name,
-        platform: c.campaign_type,
-        status: c.status,
-        sent: c.total_sent || 0,
-        replyRate: c.reply_rate || 0,
-      }));
+      const linkedCampaignsWithStats: LinkedCampaignWithStats[] = (campaigns || []).map(c => {
+        const settings = c.settings as Record<string, number> | null;
+        return {
+          id: c.id,
+          name: c.name,
+          platform: c.campaign_type,
+          status: c.status,
+          enrolled: settings?.total_leads || c.total_sent || 0,
+          sent: c.total_sent || 0,
+          replied: c.total_replied || 0,
+          replyRate: c.reply_rate || 0,
+          positiveReplies: c.positive_replies || 0,
+          positiveRate: c.positive_rate || 0,
+        };
+      });
 
       const campaignIds = linkedCampaigns.map(c => c.id);
 
