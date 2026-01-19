@@ -1820,6 +1820,66 @@ export type Database = {
           },
         ]
       }
+      enrollment_snapshots: {
+        Row: {
+          blocked: number | null
+          campaign_id: string | null
+          completed: number | null
+          created_at: string | null
+          date: string
+          engagement_id: string | null
+          id: string
+          in_progress: number | null
+          not_started: number | null
+          paused: number | null
+          total_leads: number | null
+          unsubscribed: number | null
+        }
+        Insert: {
+          blocked?: number | null
+          campaign_id?: string | null
+          completed?: number | null
+          created_at?: string | null
+          date: string
+          engagement_id?: string | null
+          id?: string
+          in_progress?: number | null
+          not_started?: number | null
+          paused?: number | null
+          total_leads?: number | null
+          unsubscribed?: number | null
+        }
+        Update: {
+          blocked?: number | null
+          campaign_id?: string | null
+          completed?: number | null
+          created_at?: string | null
+          date?: string
+          engagement_id?: string | null
+          id?: string
+          in_progress?: number | null
+          not_started?: number | null
+          paused?: number | null
+          total_leads?: number | null
+          unsubscribed?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enrollment_snapshots_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "enrollment_snapshots_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       experiment_variants: {
         Row: {
           campaign_variant_id: string | null

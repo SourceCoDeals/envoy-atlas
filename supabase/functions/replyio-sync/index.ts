@@ -562,7 +562,23 @@ Deno.serve(async (req) => {
               const totalBounced = Number(seqDetails.bouncesCount ?? stats.bouncesCount ?? stats.bounced ?? 0);
               const totalPositive = Number(stats.interestedContacts ?? stats.interested ?? 0);
               
-              console.log(`  Metrics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
+              // Extract enrollment stats for tracking
+              const totalPeople = Number(seqDetails.peopleCount ?? stats.peopleCount ?? 0);
+              const activePeople = Number(seqDetails.activeContactsCount ?? stats.activeContactsCount ?? 0);
+              const finishedPeople = Number(seqDetails.finishedContactsCount ?? stats.finishedContactsCount ?? 0);
+              const notStarted = Math.max(0, totalPeople - activePeople - finishedPeople);
+              
+              const enrollmentSettings = {
+                total_leads: totalPeople,
+                not_started: notStarted,
+                in_progress: activePeople,
+                completed: finishedPeople,
+                blocked: 0,
+                paused: 0,
+                unsubscribed: 0,
+              };
+              
+              console.log(`  Metrics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}, leads=${totalPeople}`);
               
               // Update campaign totals with proper error handling
               // Note: Rate columns use NUMERIC(5,4) so values must be decimals 0.0-1.0, not percentages
@@ -578,7 +594,33 @@ Deno.serve(async (req) => {
                 bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
                 positive_rate: totalReplied > 0 && totalPositive > 0 ? Math.min(0.9999, totalPositive / totalReplied) : null,
                 last_synced_at: new Date().toISOString(),
+                settings: enrollmentSettings,
               }).eq('id', campaignId);
+              
+              // Store enrollment snapshot for tracking trends
+              if (enrollmentSettings.total_leads > 0 || enrollmentSettings.not_started > 0) {
+                // Get actual engagement_id for the campaign
+                const { data: campaignRecord } = await supabase
+                  .from('campaigns')
+                  .select('engagement_id')
+                  .eq('id', campaignId)
+                  .single();
+                const actualEngagementIdForSnapshot = campaignRecord?.engagement_id || engagement_id;
+                
+                await supabase.from('enrollment_snapshots').upsert({
+                  campaign_id: campaignId,
+                  engagement_id: actualEngagementIdForSnapshot,
+                  date: today,
+                  total_leads: enrollmentSettings.total_leads,
+                  not_started: enrollmentSettings.not_started,
+                  in_progress: enrollmentSettings.in_progress,
+                  completed: enrollmentSettings.completed,
+                  blocked: 0,
+                  paused: 0,
+                  unsubscribed: 0,
+                }, { onConflict: 'campaign_id,date' });
+                console.log(`  Enrollment snapshot: total=${enrollmentSettings.total_leads}, backlog=${enrollmentSettings.not_started}`);
+              }
               
               if (updateError) {
                 console.error(`  Failed to update campaign totals:`, updateError.message);

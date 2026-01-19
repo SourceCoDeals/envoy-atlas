@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { startOfWeek, format, parseISO } from 'date-fns';
 
 export interface EngagementDetails {
   id: string;
@@ -144,6 +145,24 @@ export interface InfrastructureMetrics {
   domainBreakdown: DomainBreakdown[];
 }
 
+// New enrollment tracking interfaces
+export interface EnrollmentMetrics {
+  totalLeads: number;
+  notStarted: number;  // This is the BACKLOG
+  inProgress: number;
+  completed: number;
+  blocked: number;
+  backlogRate: number; // notStarted / totalLeads * 100
+}
+
+export interface WeeklyEnrollmentTrend {
+  weekStart: string;
+  weekLabel: string;
+  newLeadsEnrolled: number;
+  cumulativeTotal: number;
+  backlog: number;
+}
+
 interface DataAvailability {
   emailDailyMetrics: boolean;
   emailCampaignFallback: boolean;
@@ -167,6 +186,8 @@ interface EngagementReportData {
   emailMetrics: EmailMetrics;
   callingMetrics: CallingMetrics;
   infrastructureMetrics: InfrastructureMetrics;
+  enrollmentMetrics: EnrollmentMetrics;
+  weeklyEnrollmentTrend: WeeklyEnrollmentTrend[];
   funnel: FunnelStage[];
   channelComparison: ChannelComparison[];
   trendData: TrendDataPoint[];
@@ -210,10 +231,10 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       if (engError) throw engError;
       if (!engagement) throw new Error('Engagement not found');
 
-      // Fetch linked campaigns from unified campaigns table with stats
+      // Fetch linked campaigns from unified campaigns table with stats and settings
       const { data: campaigns } = await supabase
         .from('campaigns')
-        .select('id, name, campaign_type, status, total_sent, reply_rate')
+        .select('id, name, campaign_type, status, total_sent, reply_rate, settings')
         .eq('engagement_id', engagementId)
         .order('total_sent', { ascending: false });
 
@@ -233,6 +254,13 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       }));
 
       const campaignIds = linkedCampaigns.map(c => c.id);
+
+      // Fetch enrollment snapshots for weekly trend
+      const { data: enrollmentSnapshots } = await supabase
+        .from('enrollment_snapshots')
+        .select('*')
+        .eq('engagement_id', engagementId)
+        .order('date', { ascending: true });
 
       // Fetch daily metrics for email data
       let dailyMetricsQuery = supabase
@@ -457,12 +485,80 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         domainBreakdown: [],
       };
 
+      // Calculate enrollment metrics from campaign settings
+      const enrollmentTotals = (campaigns || []).reduce((acc, c) => {
+        const settings = c.settings as Record<string, number> | null;
+        return {
+          totalLeads: acc.totalLeads + (settings?.total_leads || 0),
+          notStarted: acc.notStarted + (settings?.not_started || 0),
+          inProgress: acc.inProgress + (settings?.in_progress || 0),
+          completed: acc.completed + (settings?.completed || 0),
+          blocked: acc.blocked + (settings?.blocked || 0),
+        };
+      }, { totalLeads: 0, notStarted: 0, inProgress: 0, completed: 0, blocked: 0 });
+
+      const enrollmentMetrics: EnrollmentMetrics = {
+        totalLeads: enrollmentTotals.totalLeads,
+        notStarted: enrollmentTotals.notStarted,
+        inProgress: enrollmentTotals.inProgress,
+        completed: enrollmentTotals.completed,
+        blocked: enrollmentTotals.blocked,
+        backlogRate: enrollmentTotals.totalLeads > 0 
+          ? (enrollmentTotals.notStarted / enrollmentTotals.totalLeads) * 100 
+          : 0,
+      };
+
+      // Calculate weekly enrollment trends from snapshots
+      const weeklyEnrollmentTrend: WeeklyEnrollmentTrend[] = [];
+      const snapshots = enrollmentSnapshots || [];
+      
+      if (snapshots.length > 0) {
+        // Group snapshots by week
+        const weeklyMap = new Map<string, { total: number; backlog: number; date: string }>();
+        
+        snapshots.forEach((s: any) => {
+          const snapshotDate = parseISO(s.date);
+          const weekStart = startOfWeek(snapshotDate, { weekStartsOn: 1 });
+          const weekKey = format(weekStart, 'yyyy-MM-dd');
+          
+          const existing = weeklyMap.get(weekKey);
+          // Use the latest values for that week (or accumulate if multiple campaigns)
+          weeklyMap.set(weekKey, {
+            total: (existing?.total || 0) + (s.total_leads || 0),
+            backlog: (existing?.backlog || 0) + (s.not_started || 0),
+            date: weekKey,
+          });
+        });
+
+        // Convert to array and calculate weekly changes
+        const sortedWeeks = Array.from(weeklyMap.entries())
+          .sort(([a], [b]) => a.localeCompare(b));
+
+        let previousTotal = 0;
+        sortedWeeks.forEach(([weekKey, data], index) => {
+          const weekStart = parseISO(weekKey);
+          const newLeads = index === 0 ? data.total : Math.max(0, data.total - previousTotal);
+          
+          weeklyEnrollmentTrend.push({
+            weekStart: weekKey,
+            weekLabel: `Week of ${format(weekStart, 'MMM d')}`,
+            newLeadsEnrolled: newLeads,
+            cumulativeTotal: data.total,
+            backlog: data.backlog,
+          });
+          
+          previousTotal = data.total;
+        });
+      }
+
       setData({
         engagement: engagement as EngagementDetails,
         keyMetrics,
         emailMetrics,
         callingMetrics,
         infrastructureMetrics,
+        enrollmentMetrics,
+        weeklyEnrollmentTrend,
         funnel,
         channelComparison,
         trendData,
