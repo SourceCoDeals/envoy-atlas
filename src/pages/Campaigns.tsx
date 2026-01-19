@@ -2,14 +2,12 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useCampaigns } from '@/hooks/useCampaigns';
-import { useSyncData } from '@/hooks/useSyncData';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useDataHealth } from '@/hooks/useDataHealth';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfolioOverview';
 import { EnhancedCampaignTable } from '@/components/campaigns/EnhancedCampaignTable';
-import { SyncProgressBar } from '@/components/campaigns/SyncProgressBar';
 import { AutoLinkPreviewModal } from '@/components/campaigns/AutoLinkPreviewModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,15 +26,6 @@ export default function Campaigns() {
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { campaigns, loading, error, refetch } = useCampaigns();
-  const { 
-    syncing, 
-    progress, 
-    elapsedTime, 
-    staleSyncs,
-    triggerSync, 
-    triggerPlatformSync,
-    resumeStaleSyncs,
-  } = useSyncData();
   const { health: dataHealth } = useDataHealth();
   const [tierFilter, setTierFilter] = useState('all');
   const [engagementFilter, setEngagementFilter] = useState('all');
@@ -61,9 +50,9 @@ export default function Campaigns() {
     fetchEngagements();
   }, [currentWorkspace?.id]);
 
-  const handleRefresh = async () => {
-    await triggerSync();
+  const handleRefresh = () => {
     refetch();
+    toast.info('Refreshed campaign data. For a full sync, go to Settings → Connections.');
   };
 
   useEffect(() => {
@@ -117,24 +106,14 @@ export default function Campaigns() {
                 variant="outline" 
                 size="sm" 
                 onClick={handleRefresh} 
-                disabled={loading || syncing}
+                disabled={loading}
               >
-                <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-                {syncing ? 'Syncing...' : 'Refresh Data'}
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh Data
               </Button>
             </div>
           )}
         </div>
-
-        {/* Sync Progress Bar */}
-        <SyncProgressBar 
-          progress={progress} 
-          isActive={syncing} 
-          elapsedTime={elapsedTime}
-          staleSyncs={staleSyncs}
-          onResume={resumeStaleSyncs}
-          onPlatformSync={triggerPlatformSync}
-        />
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
