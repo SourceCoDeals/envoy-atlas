@@ -11,10 +11,11 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import type { InfrastructureMetrics, DomainBreakdown, EnrollmentMetrics, WeeklyEnrollmentTrend } from '@/hooks/useEngagementReport';
+import type { InfrastructureMetrics, DomainBreakdown, EnrollmentMetrics, WeeklyEnrollmentTrend, WeeklyPerformance } from '@/hooks/useEngagementReport';
 import { DataAvailabilityWarning } from './DataAvailabilityWarning';
 import { DataErrorFlag } from '@/components/ui/data-error-flag';
 import { SentimentAnalysisNotAvailable } from '@/components/ui/data-status-banner';
+import { WeeklyPerformanceBreakdown } from './WeeklyPerformanceBreakdown';
 
 interface DataAvailability {
   emailDailyMetrics: boolean;
@@ -43,12 +44,13 @@ interface EmailReportTabProps {
     infrastructureMetrics: InfrastructureMetrics;
     enrollmentMetrics?: EnrollmentMetrics;
     weeklyEnrollmentTrend?: WeeklyEnrollmentTrend[];
+    weeklyPerformance?: WeeklyPerformance[];
     dataAvailability?: DataAvailability;
   };
 }
 
 export function EmailReportTab({ data }: EmailReportTabProps) {
-  const { emailMetrics, linkedCampaigns, infrastructureMetrics, enrollmentMetrics, weeklyEnrollmentTrend, dataAvailability } = data;
+  const { emailMetrics, linkedCampaigns, infrastructureMetrics, enrollmentMetrics, weeklyEnrollmentTrend, weeklyPerformance, dataAvailability } = data;
   const [domainsExpanded, setDomainsExpanded] = useState(false);
 
   // Default infrastructure metrics if not available
@@ -242,6 +244,11 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
             </ResponsiveContainer>
           </CardContent>
         </Card>
+      )}
+
+      {/* Week-by-Week Performance Breakdown */}
+      {weeklyPerformance && weeklyPerformance.length > 0 && (
+        <WeeklyPerformanceBreakdown weeklyData={weeklyPerformance} />
       )}
 
       {/* Data Availability Warning */}

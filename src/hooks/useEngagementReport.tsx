@@ -82,6 +82,15 @@ export interface TrendDataPoint {
   meetings: number;
 }
 
+export interface WeeklyPerformance {
+  weekLabel: string;
+  weekStart: string;
+  sent: number;
+  replied: number;
+  positiveReplies: number;
+  bounced: number;
+}
+
 export interface SequencePerformance {
   id: string;
   name: string;
@@ -196,6 +205,7 @@ interface EngagementReportData {
   infrastructureMetrics: InfrastructureMetrics;
   enrollmentMetrics: EnrollmentMetrics;
   weeklyEnrollmentTrend: WeeklyEnrollmentTrend[];
+  weeklyPerformance: WeeklyPerformance[];
   funnel: FunnelStage[];
   channelComparison: ChannelComparison[];
   trendData: TrendDataPoint[];
@@ -476,15 +486,19 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
 
       // Build trend data
       const trendMap = new Map<string, TrendDataPoint>();
+      const weeklyPerfMap = new Map<string, { sent: number; replied: number; positive: number; bounced: number; weekLabel: string }>();
+      
       dailyMetrics.forEach(m => {
         const date = new Date(m.date);
         const weekStart = new Date(date);
         weekStart.setDate(date.getDate() - date.getDay());
         const weekKey = weekStart.toISOString().split('T')[0];
+        const weekLabel = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
         
+        // Build trend data
         const existing = trendMap.get(weekKey) || {
           date: weekKey,
-          week: `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+          week: weekLabel,
           emails: 0,
           calls: 0,
           responses: 0,
@@ -495,11 +509,37 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         existing.responses += m.emails_replied || 0;
         existing.meetings += m.meetings_booked || 0;
         trendMap.set(weekKey, existing);
+        
+        // Build weekly performance data
+        const existingPerf = weeklyPerfMap.get(weekKey) || {
+          sent: 0,
+          replied: 0,
+          positive: 0,
+          bounced: 0,
+          weekLabel,
+        };
+        existingPerf.sent += m.emails_sent || 0;
+        existingPerf.replied += m.emails_replied || 0;
+        existingPerf.positive += m.positive_replies || 0;
+        existingPerf.bounced += m.emails_bounced || 0;
+        weeklyPerfMap.set(weekKey, existingPerf);
       });
 
       const trendData = Array.from(trendMap.values())
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
         .slice(-12);
+
+      // Build weekly performance array
+      const weeklyPerformance: WeeklyPerformance[] = Array.from(weeklyPerfMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([weekStart, data]) => ({
+          weekStart,
+          weekLabel: data.weekLabel,
+          sent: data.sent,
+          replied: data.replied,
+          positiveReplies: data.positive,
+          bounced: data.bounced,
+        }));
 
       // Build call dispositions
       const dispositionCounts = new Map<string, number>();
@@ -629,6 +669,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         infrastructureMetrics,
         enrollmentMetrics,
         weeklyEnrollmentTrend,
+        weeklyPerformance,
         funnel,
         channelComparison,
         trendData,
