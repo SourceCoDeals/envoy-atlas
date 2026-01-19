@@ -42,6 +42,7 @@ interface KPICardProps {
     type: DataErrorType;
     tooltip?: string;
   };
+  benchmarkElement?: React.ReactNode;
 }
 
 export function KPICard({
@@ -60,6 +61,7 @@ export function KPICard({
   onClick,
   actionLabel,
   dataFlag,
+  benchmarkElement,
 }: KPICardProps) {
   const formatValue = (val: number) => {
     switch (format) {
@@ -175,6 +177,13 @@ export function KPICard({
             <div className={cn("flex items-center gap-1 text-xs", expectedStatus.color)}>
               <AlertTriangle className="h-3 w-3" />
               <span>{expectedStatus.label}</span>
+            </div>
+          )}
+
+          {/* Benchmark Indicator */}
+          {benchmarkElement && (
+            <div className="mt-1">
+              {benchmarkElement}
             </div>
           )}
 

@@ -99,7 +99,7 @@ export function useContacts(filters: ContactFilters = {}) {
 
       let query = supabase
         .from('contacts')
-        .select('*', { count: 'exact' })
+        .select('*, companies!contacts_company_id_fkey(name, industry, address_city, address_state)', { count: 'exact' })
         .in('engagement_id', engagementIds)
         .order('last_contacted_at', { ascending: false, nullsFirst: false });
 
@@ -115,26 +115,32 @@ export function useContacts(filters: ContactFilters = {}) {
 
       if (fetchError) throw fetchError;
 
-      setContacts((data || []).map(d => ({
-        ...d,
-        phone_number: d.phone,
-        company: null, // Would need join to companies table
-        industry: null,
-        location: null,
-        contact_status: 'new' as ContactStatus,
-        seller_interest_score: null,
-        seller_interest_summary: null,
-        tags: [],
-        last_contact_at: d.last_contacted_at,
-        do_not_call: d.do_not_call || false,
-        do_not_email: d.do_not_email || false,
-        do_not_contact: d.do_not_contact || false,
-        total_emails_sent: d.total_emails_sent || 0,
-        total_emails_opened: d.total_emails_opened || 0,
-        total_emails_replied: d.total_emails_replied || 0,
-        total_calls: d.total_calls || 0,
-        total_conversations: d.total_conversations || 0,
-      })));
+      setContacts((data || []).map(d => {
+        const company = d.companies as { name?: string; industry?: string; address_city?: string; address_state?: string } | null;
+        const location = company?.address_city && company?.address_state 
+          ? `${company.address_city}, ${company.address_state}` 
+          : company?.address_city || company?.address_state || null;
+        return {
+          ...d,
+          phone_number: d.phone,
+          company: company?.name || null,
+          industry: company?.industry || null,
+          location,
+          contact_status: 'new' as ContactStatus,
+          seller_interest_score: null,
+          seller_interest_summary: null,
+          tags: [],
+          last_contact_at: d.last_contacted_at,
+          do_not_call: d.do_not_call || false,
+          do_not_email: d.do_not_email || false,
+          do_not_contact: d.do_not_contact || false,
+          total_emails_sent: d.total_emails_sent || 0,
+          total_emails_opened: d.total_emails_opened || 0,
+          total_emails_replied: d.total_emails_replied || 0,
+          total_calls: d.total_calls || 0,
+          total_conversations: d.total_conversations || 0,
+        };
+      }));
       setTotalCount(count || 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch contacts');
