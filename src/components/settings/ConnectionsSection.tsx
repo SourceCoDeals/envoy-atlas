@@ -165,11 +165,24 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         throw new Error(`No ${platform} connection found. Please connect first.`);
       }
 
+      // Get the first engagement for this client (workspaceId is client_id)
+      const { data: engagements, error: engErr } = await supabase
+        .from("engagements")
+        .select("id")
+        .eq("client_id", workspaceId)
+        .limit(1);
+      
+      if (engErr || !engagements?.length) {
+        throw new Error("No engagement found. Please create an engagement first.");
+      }
+      const engagementId = engagements[0].id;
+
       const token = await getAccessToken();
       const functionName = `${platform}-sync`;
       const res = await supabase.functions.invoke(functionName, {
         body: {
-          client_id: workspaceId, // workspaceId is actually the client_id
+          client_id: workspaceId,
+          engagement_id: engagementId,
           data_source_id: dataSource.id,
           reset: options.reset,
           full_backfill: options.fullBackfill,
