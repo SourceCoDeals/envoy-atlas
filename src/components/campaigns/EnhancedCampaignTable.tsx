@@ -138,9 +138,8 @@ export function EnhancedCampaignTable({
   const campaignsWithScores: CampaignWithScore[] = useMemo(() => {
     return campaigns.map(campaign => {
       const tier = calculateCampaignScore(campaign);
-      // NOTE: Positive rate is not tracked in basic campaign metrics
-      // Would require message_events sentiment analysis - showing 0
-      const actualPositiveRate = 0;
+      // Use actual positive_rate from campaign data (synced from platform)
+      const actualPositiveRate = campaign.positive_rate || 0;
       // Meetings are not tracked from email campaigns - requires calendar integration
       const actualMeetings = 0;
       // Check if campaign has any actual metrics data
