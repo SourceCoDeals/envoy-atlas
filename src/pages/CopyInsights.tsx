@@ -367,10 +367,17 @@ export default function CopyInsights() {
         open={saveDialogOpen}
         onOpenChange={setSaveDialogOpen}
         variantData={saveVariantData ? {
+          title: saveVariantData.subject_line,
           subject_line: saveVariantData.subject_line,
-          body_preview: saveVariantData.body_preview,
-          source_variant_id: saveVariantData.source_variant_id,
-          performance: saveVariantData.performance,
+          body_html: saveVariantData.body_preview || undefined,
+          body_plain: saveVariantData.body_preview || undefined,
+          variant_id: saveVariantData.source_variant_id || undefined,
+          performance: saveVariantData.performance ? {
+            sent_count: saveVariantData.performance.sent_count,
+            reply_rate: saveVariantData.performance.reply_rate,
+            positive_rate: saveVariantData.performance.positive_rate,
+            open_rate: undefined,
+          } : undefined,
         } : null}
       />
     </DashboardLayout>

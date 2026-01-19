@@ -12,8 +12,8 @@ import { ProspectStrategyTab } from '@/components/datainsights/ProspectStrategyT
 import { GatekeeperTrackingTab } from '@/components/datainsights/GatekeeperTrackingTab';
 import { WrongNumberTrackingTab } from '@/components/datainsights/WrongNumberTrackingTab';
 import { Loader2, Activity, Users, Target, Compass, UserCheck, PhoneOff, Filter } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { COLD_CALLING_BENCHMARKS } from '@/lib/coldCallingBenchmarks';
 import {
   useExternalCalls,
   filterCalls,
@@ -42,7 +42,6 @@ export default function DataInsights() {
   const { currentWorkspace } = useWorkspace();
   const { calls, analysts, loading: callsLoading, totalCount } = useExternalCalls();
   
-  const [benchmarks, setBenchmarks] = useState<Record<string, Benchmark>>({});
   const [dateRange, setDateRange] = useState<DateRangeOption>('last_month');
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>('all');
 
@@ -50,14 +49,29 @@ export default function DataInsights() {
     if (!authLoading && !user) navigate('/auth');
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    const fetchBenchmarks = async () => {
-      const { data } = await supabase.from('cold_calling_benchmarks').select('*');
-      const benchmarkMap: Record<string, Benchmark> = {};
-      data?.forEach(b => { benchmarkMap[b.metric_key] = b; });
-      setBenchmarks(benchmarkMap);
-    };
-    fetchBenchmarks();
+  // Build benchmarks from local constants
+  const benchmarks = useMemo(() => {
+    const benchmarkMap: Record<string, Benchmark> = {};
+    const sdrMetrics = COLD_CALLING_BENCHMARKS.sdrMetrics;
+    
+    // Map SDR metrics to benchmark format
+    if (sdrMetrics) {
+      Object.entries(sdrMetrics).forEach(([key, value]) => {
+        if (typeof value === 'number') {
+          benchmarkMap[key] = {
+            metric_name: key.replace(/_/g, ' '),
+            metric_key: key,
+            benchmark_value: value,
+            benchmark_unit: key.includes('rate') ? '%' : 'count',
+            benchmark_range_low: null,
+            benchmark_range_high: null,
+            description: null,
+          };
+        }
+      });
+    }
+    
+    return benchmarkMap;
   }, []);
 
   // Compute all metrics from filtered calls
@@ -73,8 +87,6 @@ export default function DataInsights() {
       let date: string | null = null;
       if (call.date_time) {
         date = new Date(call.date_time).toISOString().split('T')[0];
-      } else if (call.call_date) {
-        date = call.call_date;
       }
       
       if (date) {
@@ -120,13 +132,9 @@ export default function DataInsights() {
 
     // Engagement Metrics
     const connectRate = totalDials > 0 ? (totalConnects / totalDials) * 100 : 0;
-    const scoredCalls = filtered.filter(c => c.objection_handling_score != null);
-    const avgObjHandling = scoredCalls.length
-      ? scoredCalls.reduce((sum, s) => sum + (s.objection_handling_score || 0), 0) / scoredCalls.length
-      : 0;
-    const callsWithDuration = filtered.filter(c => c.duration != null && c.duration > 0);
+    const callsWithDuration = filtered.filter(c => c.talk_duration != null && c.talk_duration > 0);
     const avgDuration = callsWithDuration.length
-      ? callsWithDuration.reduce((sum, c) => sum + (c.duration || 0), 0) / callsWithDuration.length
+      ? callsWithDuration.reduce((sum, c) => sum + (c.talk_duration || 0), 0) / callsWithDuration.length
       : 0;
 
     const durationBuckets = [
@@ -138,7 +146,7 @@ export default function DataInsights() {
     ];
     const durationDistribution = durationBuckets.map(bucket => ({
       range: bucket.range,
-      count: callsWithDuration.filter(c => (c.duration || 0) >= bucket.min && (c.duration || 0) < bucket.max).length
+      count: callsWithDuration.filter(c => (c.talk_duration || 0) >= bucket.min && (c.talk_duration || 0) < bucket.max).length
     }));
 
     const connectTrend = Array.from(dateMap.entries())
@@ -154,10 +162,10 @@ export default function DataInsights() {
 
     const engagementMetrics = {
       connectRate: Math.round(connectRate * 10) / 10,
-      decisionMakerConnectRate: 0, // Not tracked - would require contact title matching
+      decisionMakerConnectRate: 0,
       meaningfulConversationRate: Math.round(meaningfulRate * 10) / 10,
       avgCallDuration: Math.round(avgDuration),
-      objectionHandlingRate: Math.round(avgObjHandling * 10) / 10,
+      objectionHandlingRate: 0,
       connectTrend,
       durationDistribution,
       dayHourHeatmap: [],
@@ -195,13 +203,7 @@ export default function DataInsights() {
     // Prospect/Rep Metrics
     const repMap = new Map<string, { calls: number; connects: number; meetings: number }>();
     filtered.forEach(call => {
-      let rep = call.rep_name;
-      if (!rep && call.host_email) {
-        rep = call.host_email.replace('@sourcecodeals.com', '').split('.').map((s: string) =>
-          s.charAt(0).toUpperCase() + s.slice(1)
-        ).join(' ');
-      }
-      rep = rep || 'Unknown';
+      let rep = call.caller_name || 'Unknown';
       if (rep.includes('Salesforce') || rep === 'Unknown') return;
 
       const existing = repMap.get(rep) || { calls: 0, connects: 0, meetings: 0 };
@@ -216,60 +218,27 @@ export default function DataInsights() {
       .sort((a, b) => b.calls - a.calls)
       .slice(0, 10);
 
-    const painPointMap = new Map<string, number>();
-    filtered.forEach(call => {
-      const concerns = call.key_concerns as string[] | null;
-      concerns?.forEach(concern => {
-        if (concern) painPointMap.set(concern, (painPointMap.get(concern) || 0) + 1);
-      });
-      if (call.target_pain_points && typeof call.target_pain_points === 'string') {
-        painPointMap.set(call.target_pain_points, (painPointMap.get(call.target_pain_points) || 0) + 1);
-      }
-    });
-    const topPainPoints = Array.from(painPointMap.entries())
-      .map(([painPoint, count]) => ({ painPoint, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-
-    const openingMap = new Map<string, { success: number; total: number }>();
-    filtered.forEach(call => {
-      const type = call.opening_type || 'Standard';
-      const existing = openingMap.get(type) || { success: 0, total: 0 };
-      existing.total += 1;
-      if (isMeeting(call)) existing.success += 1;
-      openingMap.set(type, existing);
-    });
-    const openingTypeEffectiveness = Array.from(openingMap.entries())
-      .filter(([type]) => type !== 'Standard' || openingMap.size === 1)
-      .map(([type, data]) => ({
-        type,
-        successRate: data.total > 0 ? Math.round((data.success / data.total) * 100) : 0,
-        count: data.total
-      }));
-
     const prospectMetrics = {
       industryBreakdown,
-      openingTypeEffectiveness: openingTypeEffectiveness.length > 0 ? openingTypeEffectiveness : [
+      openingTypeEffectiveness: [
         { type: 'Standard', successRate: highInterest > 0 ? Math.round((highInterest / totalDials) * 100) : 0, count: totalDials }
       ],
-      topPainPoints,
+      topPainPoints: [],
       pendingFollowUps: 0
     };
 
     // Gatekeeper Metrics
     const gatekeeperCalls = filtered.filter(c => {
-      const category = (c.call_category || '').toLowerCase();
-      return category.includes('gatekeeper') ||
-        category === 'receptionist' ||
-        ((c.seller_interest_score || 0) < 3 && c.transcript_text && (c.duration || 0) > 30);
+      const disposition = (c.disposition || '').toLowerCase();
+      return disposition.includes('gatekeeper') || disposition === 'receptionist';
     });
-    const transferred = gatekeeperCalls.filter(c => (c.seller_interest_score || 0) >= 3).length;
-    const blocked = gatekeeperCalls.filter(c => (c.seller_interest_score || 0) < 2).length;
+    const transferred = gatekeeperCalls.filter(c => isConnection(c)).length;
+    const blocked = gatekeeperCalls.filter(c => !isConnection(c)).length;
     const info = gatekeeperCalls.length - transferred - blocked;
 
     const gatekeeperOutcomes = [
       { outcome: 'Transferred', count: transferred, percentage: gatekeeperCalls.length > 0 ? Math.round((transferred / gatekeeperCalls.length) * 100) : 0 },
-      { outcome: 'Got Info', count: info, percentage: gatekeeperCalls.length > 0 ? Math.round((info / gatekeeperCalls.length) * 100) : 0 },
+      { outcome: 'Got Info', count: Math.max(0, info), percentage: gatekeeperCalls.length > 0 ? Math.round((Math.max(0, info) / gatekeeperCalls.length) * 100) : 0 },
       { outcome: 'Blocked', count: blocked, percentage: gatekeeperCalls.length > 0 ? Math.round((blocked / gatekeeperCalls.length) * 100) : 0 },
     ].filter(o => o.count > 0);
 
@@ -284,13 +253,13 @@ export default function DataInsights() {
 
     // Wrong Number Metrics
     const wrongNumbers = filtered.filter(c =>
-      ((c.seller_interest_score || 0) <= 1 && (c.duration || 0) < 30) ||
-      c.call_title?.toLowerCase().includes('wrong')
+      (c.talk_duration || 0) < 30 && 
+      (c.disposition?.toLowerCase().includes('wrong') || c.call_title?.toLowerCase().includes('wrong'))
     );
 
     const sourceMap = new Map<string, { wrong: number; total: number }>();
     filtered.forEach(call => {
-      const source = call.rep_name || call.host_email || 'Unknown';
+      const source = call.caller_name || 'Unknown';
       const existing = sourceMap.get(source) || { wrong: 0, total: 0 };
       existing.total += 1;
       if (wrongNumbers.some(w => w.id === call.id)) existing.wrong += 1;
