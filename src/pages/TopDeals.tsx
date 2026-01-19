@@ -33,24 +33,15 @@ import {
 
 interface Deal {
   id: string;
-  company_name: string;
-  contact_name: string | null;
-  contact_title: string | null;
+  project_name: string;
   industry: string | null;
-  location: string | null;
+  geography: string | null;
   revenue: number | null;
-  employees: number | null;
-  seller_interest_score: number | null;
-  seller_interest_summary: string | null;
-  timeline_to_sell: string | null;
-  motivation_factors: string[] | null;
-  valuation_expectations: string | null;
-  buyer_preferences: string | null;
-  total_deal_score: number;
-  status: string;
-  last_contact_at: string | null;
-  next_action: string | null;
-  next_action_date: string | null;
+  ebitda: number | null;
+  asking_price: number | null;
+  stage: string;
+  business_description: string | null;
+  created_at: string;
 }
 
 export default function TopDeals() {
@@ -78,11 +69,25 @@ export default function TopDeals() {
     setLoading(true);
 
     try {
+      // Get engagements for this workspace
+      const { data: engagements } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id);
+
+      const engagementIds = engagements?.map(e => e.id) || [];
+      if (engagementIds.length === 0) {
+        setDeals([]);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch deals from the deals table
       const { data, error } = await supabase
-        .from('calling_deals')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id)
-        .order('total_deal_score', { ascending: false })
+        .from('deals')
+        .select('id, project_name, industry, geography, revenue, ebitda, asking_price, stage, business_description, created_at')
+        .in('engagement_id', engagementIds)
+        .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
@@ -94,17 +99,15 @@ export default function TopDeals() {
     }
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-success';
-    if (score >= 60) return 'text-chart-4';
-    if (score >= 40) return 'text-chart-2';
+  const getScoreColor = (stage: string) => {
+    if (stage === 'closed' || stage === 'won') return 'text-green-600';
+    if (stage === 'active' || stage === 'negotiation') return 'text-yellow-600';
     return 'text-muted-foreground';
   };
 
-  const getScoreBg = (score: number) => {
-    if (score >= 80) return 'bg-success/10 border-success/30';
-    if (score >= 60) return 'bg-chart-4/10 border-chart-4/30';
-    if (score >= 40) return 'bg-chart-2/10 border-chart-2/30';
+  const getScoreBg = (stage: string) => {
+    if (stage === 'closed' || stage === 'won') return 'bg-green-500/10 border-green-500/30';
+    if (stage === 'active' || stage === 'negotiation') return 'bg-yellow-500/10 border-yellow-500/30';
     return 'bg-muted/10 border-muted/30';
   };
 
@@ -113,15 +116,6 @@ export default function TopDeals() {
     if (revenue >= 1000000) return `$${(revenue / 1000000).toFixed(1)}M`;
     if (revenue >= 1000) return `$${(revenue / 1000).toFixed(0)}K`;
     return `$${revenue}`;
-  };
-
-  const getInterestLabel = (score: number | null) => {
-    if (!score) return 'Unknown';
-    if (score >= 9) return 'Very High';
-    if (score >= 7) return 'High';
-    if (score >= 5) return 'Medium';
-    if (score >= 3) return 'Low';
-    return 'Very Low';
   };
 
   if (authLoading) {
@@ -140,27 +134,27 @@ export default function TopDeals() {
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Top Deals</h1>
-          <p className="text-muted-foreground">Best opportunities ranked by size + motivation</p>
+          <p className="text-muted-foreground">Best opportunities ranked by size + stage</p>
         </div>
 
         {/* Score Legend */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Deal Score Formula (0-100)</CardTitle>
+            <CardTitle className="text-sm font-medium">Deal Stages</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-chart-1" />
-                <span>Company Size: 0-40 pts</span>
+                <span>Revenue/EBITDA</span>
               </div>
               <div className="flex items-center gap-2">
                 <Heart className="h-4 w-4 text-chart-2" />
-                <span>Seller Motivation: 0-40 pts</span>
+                <span>Deal Stage</span>
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-chart-3" />
-                <span>Timeline: 0-20 pts</span>
+                <span>Timeline</span>
               </div>
             </div>
           </CardContent>
@@ -184,7 +178,7 @@ export default function TopDeals() {
               </div>
               <h2 className="text-xl font-semibold mb-2">No Deals Yet</h2>
               <p className="text-muted-foreground text-center max-w-md">
-                Deals are created from calls where AI detects seller interest. Keep dialing!
+                Deals are created from calls where opportunities are detected. Keep dialing!
               </p>
             </CardContent>
           </Card>
@@ -193,7 +187,7 @@ export default function TopDeals() {
             {deals.map((deal, index) => (
               <Card
                 key={deal.id}
-                className={`hover:border-primary/50 transition-colors cursor-pointer ${getScoreBg(deal.total_deal_score)}`}
+                className={`hover:border-primary/50 transition-colors cursor-pointer ${getScoreBg(deal.stage)}`}
                 onClick={() => setSelectedDeal(deal)}
               >
                 <CardContent className="py-4">
@@ -210,28 +204,22 @@ export default function TopDeals() {
                     {/* Company Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold truncate">{deal.company_name}</h3>
-                        <Badge variant="outline" className="text-xs">
-                          {deal.status}
+                        <h3 className="font-semibold truncate">{deal.project_name}</h3>
+                        <Badge variant="outline" className="text-xs capitalize">
+                          {deal.stage}
                         </Badge>
                       </div>
                       <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-                        {deal.contact_name && (
-                          <span className="flex items-center gap-1">
-                            <Users className="h-3 w-3" />
-                            {deal.contact_name}
-                          </span>
-                        )}
                         {deal.industry && (
                           <span className="flex items-center gap-1">
                             <Building2 className="h-3 w-3" />
                             {deal.industry}
                           </span>
                         )}
-                        {deal.location && (
+                        {deal.geography && (
                           <span className="flex items-center gap-1">
                             <MapPin className="h-3 w-3" />
-                            {deal.location}
+                            {deal.geography}
                           </span>
                         )}
                       </div>
@@ -244,21 +232,13 @@ export default function TopDeals() {
                         <p className="text-xs text-muted-foreground">Revenue</p>
                       </div>
                       <div className="text-center">
-                        <p className="font-medium">{deal.seller_interest_score || '-'}/10</p>
-                        <p className="text-xs text-muted-foreground">Interest</p>
+                        <p className="font-medium">{formatRevenue(deal.ebitda)}</p>
+                        <p className="text-xs text-muted-foreground">EBITDA</p>
                       </div>
                       <div className="text-center">
-                        <p className="font-medium">{deal.timeline_to_sell || 'TBD'}</p>
-                        <p className="text-xs text-muted-foreground">Timeline</p>
+                        <p className="font-medium">{formatRevenue(deal.asking_price)}</p>
+                        <p className="text-xs text-muted-foreground">Asking</p>
                       </div>
-                    </div>
-
-                    {/* Score */}
-                    <div className="flex-shrink-0 text-right">
-                      <p className={`text-2xl font-bold ${getScoreColor(deal.total_deal_score)}`}>
-                        {deal.total_deal_score}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Deal Score</p>
                     </div>
 
                     <ChevronRight className="h-5 w-5 text-muted-foreground" />
@@ -277,9 +257,9 @@ export default function TopDeals() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  {selectedDeal.company_name}
-                  <Badge className={getScoreBg(selectedDeal.total_deal_score)}>
-                    Score: {selectedDeal.total_deal_score}
+                  {selectedDeal.project_name}
+                  <Badge className={getScoreBg(selectedDeal.stage)} variant="outline">
+                    {selectedDeal.stage}
                   </Badge>
                 </DialogTitle>
               </DialogHeader>
@@ -287,15 +267,15 @@ export default function TopDeals() {
               <div className="space-y-6 py-4">
                 {/* Company Info */}
                 <div>
-                  <h4 className="font-medium mb-2">Company Information</h4>
+                  <h4 className="font-medium mb-2">Deal Information</h4>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="flex items-center gap-2">
                       <DollarSign className="h-4 w-4 text-muted-foreground" />
                       <span>Revenue: {formatRevenue(selectedDeal.revenue)}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-muted-foreground" />
-                      <span>Employees: {selectedDeal.employees || 'N/A'}</span>
+                      <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      <span>EBITDA: {formatRevenue(selectedDeal.ebitda)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -303,62 +283,16 @@ export default function TopDeals() {
                     </div>
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <span>Location: {selectedDeal.location || 'N/A'}</span>
+                      <span>Location: {selectedDeal.geography || 'N/A'}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Seller Profile */}
-                <div>
-                  <h4 className="font-medium mb-2">Seller Profile</h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-accent/50">
-                      <span>Interest Level</span>
-                      <div className="flex items-center gap-2">
-                        <Progress value={(selectedDeal.seller_interest_score || 0) * 10} className="w-24 h-2" />
-                        <Badge variant="outline">
-                          {selectedDeal.seller_interest_score}/10 - {getInterestLabel(selectedDeal.seller_interest_score)}
-                        </Badge>
-                      </div>
-                    </div>
-                    {selectedDeal.seller_interest_summary && (
-                      <p className="text-sm text-muted-foreground">{selectedDeal.seller_interest_summary}</p>
-                    )}
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div className="p-3 rounded-lg bg-accent/30">
-                        <p className="font-medium">Timeline</p>
-                        <p className="text-muted-foreground">{selectedDeal.timeline_to_sell || 'Not discussed'}</p>
-                      </div>
-                      <div className="p-3 rounded-lg bg-accent/30">
-                        <p className="font-medium">Valuation Expectations</p>
-                        <p className="text-muted-foreground">{selectedDeal.valuation_expectations || 'Not discussed'}</p>
-                      </div>
-                      <div className="p-3 rounded-lg bg-accent/30">
-                        <p className="font-medium">Buyer Preferences</p>
-                        <p className="text-muted-foreground">{selectedDeal.buyer_preferences || 'Not discussed'}</p>
-                      </div>
-                      <div className="p-3 rounded-lg bg-accent/30">
-                        <p className="font-medium">Motivation</p>
-                        <p className="text-muted-foreground">
-                          {selectedDeal.motivation_factors?.join(', ') || 'Not identified'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Next Action */}
-                {selectedDeal.next_action && (
-                  <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/10 border border-primary/30">
-                    <Calendar className="h-5 w-5 text-primary" />
-                    <div>
-                      <p className="font-medium">{selectedDeal.next_action}</p>
-                      {selectedDeal.next_action_date && (
-                        <p className="text-sm text-muted-foreground">
-                          {new Date(selectedDeal.next_action_date).toLocaleDateString()}
-                        </p>
-                      )}
-                    </div>
+                {/* Description */}
+                {selectedDeal.business_description && (
+                  <div>
+                    <h4 className="font-medium mb-2">Business Description</h4>
+                    <p className="text-sm text-muted-foreground">{selectedDeal.business_description}</p>
                   </div>
                 )}
 

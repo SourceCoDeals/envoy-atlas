@@ -90,9 +90,9 @@ export default function TrainingQueue() {
 
   const handleToggleComplete = (assignmentId: string, completed: boolean) => {
     if (completed) {
-      markComplete.mutate({ assignmentId });
+      markComplete.mutate();
     } else {
-      markIncomplete.mutate(assignmentId);
+      markIncomplete.mutate();
     }
   };
 
