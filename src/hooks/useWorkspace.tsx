@@ -3,20 +3,22 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Database } from '@/integrations/supabase/types';
 
-type Workspace = Database['public']['Tables']['workspaces']['Row'];
-type AppRole = Database['public']['Enums']['app_role'];
+type Client = Database['public']['Tables']['clients']['Row'];
 
-interface WorkspaceWithRole extends Workspace {
-  role: AppRole;
+interface ClientWithRole extends Client {
+  role: string;
 }
 
+// Alias for backward compatibility with existing components
+export type WorkspaceWithRole = ClientWithRole;
+
 interface WorkspaceContextType {
-  workspaces: WorkspaceWithRole[];
-  currentWorkspace: WorkspaceWithRole | null;
-  setCurrentWorkspace: (workspace: WorkspaceWithRole | null) => void;
+  workspaces: ClientWithRole[];
+  currentWorkspace: ClientWithRole | null;
+  setCurrentWorkspace: (workspace: ClientWithRole | null) => void;
   loading: boolean;
-  userRole: AppRole | null;
-  createWorkspace: (name: string) => Promise<{ error: Error | null; workspace?: Workspace }>;
+  userRole: string | null;
+  createWorkspace: (name: string) => Promise<{ error: Error | null; workspace?: Client }>;
   refetch: () => Promise<void>;
 }
 
@@ -24,8 +26,8 @@ const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefin
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [workspaces, setWorkspaces] = useState<WorkspaceWithRole[]>([]);
-  const [currentWorkspace, setCurrentWorkspace] = useState<WorkspaceWithRole | null>(null);
+  const [workspaces, setWorkspaces] = useState<ClientWithRole[]>([]);
+  const [currentWorkspace, setCurrentWorkspace] = useState<ClientWithRole | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchWorkspaces = async () => {
@@ -39,44 +41,39 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const { data: members, error } = await supabase
-        .from('workspace_members')
+        .from('client_members')
         .select(`
           role,
-          workspace:workspaces(*)
+          client:clients(*)
         `)
         .eq('user_id', user.id);
 
       if (error) throw error;
 
-      const workspacesWithRoles: WorkspaceWithRole[] = (members || [])
-        .filter(m => m.workspace)
+      const clientsWithRoles: ClientWithRole[] = (members || [])
+        .filter(m => m.client)
         .map(m => ({
-          ...(m.workspace as Workspace),
-          role: m.role,
+          ...(m.client as Client),
+          role: m.role || 'viewer',
         }));
 
-      setWorkspaces(workspacesWithRoles);
+      setWorkspaces(clientsWithRoles);
 
-      // Set current workspace from localStorage, but always prefer the canonical workspace (slug === 'sourceco')
-      // because duplicate workspaces can be created during onboarding/testing.
+      // Set current workspace from localStorage or first available
       const storedWorkspaceId = localStorage.getItem('currentWorkspaceId');
-      const storedWorkspace = workspacesWithRoles.find(w => w.id === storedWorkspaceId);
-      const canonicalWorkspace = workspacesWithRoles.find(w => w.slug === 'sourceco');
-
-      if (canonicalWorkspace) {
-        setCurrentWorkspace(canonicalWorkspace);
-        localStorage.setItem('currentWorkspaceId', canonicalWorkspace.id);
-      } else if (storedWorkspace) {
+      const storedWorkspace = clientsWithRoles.find(w => w.id === storedWorkspaceId);
+      
+      if (storedWorkspace) {
         setCurrentWorkspace(storedWorkspace);
       } else {
-        const firstWorkspace = workspacesWithRoles[0];
+        const firstWorkspace = clientsWithRoles[0];
         if (firstWorkspace) {
           setCurrentWorkspace(firstWorkspace);
           localStorage.setItem('currentWorkspaceId', firstWorkspace.id);
         }
       }
     } catch (err) {
-      console.error('Error fetching workspaces:', err);
+      console.error('Error fetching clients:', err);
     } finally {
       setLoading(false);
     }
@@ -86,7 +83,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     fetchWorkspaces();
   }, [user?.id]);
 
-  const handleSetCurrentWorkspace = (workspace: WorkspaceWithRole | null) => {
+  const handleSetCurrentWorkspace = (workspace: ClientWithRole | null) => {
     setCurrentWorkspace(workspace);
     if (workspace) {
       localStorage.setItem('currentWorkspaceId', workspace.id);
@@ -95,13 +92,28 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const createWorkspace = async (name: string): Promise<{ error: Error | null; workspace?: Workspace }> => {
+  const createWorkspace = async (name: string): Promise<{ error: Error | null; workspace?: Client }> => {
     try {
-      const { data, error } = await supabase.rpc('create_workspace', { _name: name });
+      // Generate a slug from the name
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      
+      const { data, error } = await supabase
+        .from('clients')
+        .insert({ name, slug })
+        .select()
+        .single();
+        
       if (error) throw error;
       
+      // Add the current user as admin
+      if (data && user) {
+        await supabase
+          .from('client_members')
+          .insert({ client_id: data.id, user_id: user.id, role: 'admin' });
+      }
+      
       await fetchWorkspaces();
-      return { error: null, workspace: data as Workspace };
+      return { error: null, workspace: data };
     } catch (err) {
       return { error: err as Error };
     }
