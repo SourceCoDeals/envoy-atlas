@@ -1,5 +1,13 @@
-// State of Cold Calling 2025 - Industry Benchmarks and Best Practices
-// Based on analysis of 10M+ calls and 2025 industry research
+/**
+ * INDUSTRY BENCHMARKS - NOT USER DATA
+ * 
+ * State of Cold Calling 2025 - Industry Benchmarks and Best Practices
+ * Based on published research and analysis of 10M+ calls across the industry.
+ * 
+ * These values are used for COMPARISON purposes only - they represent
+ * industry-wide standards, not fake performance data or sample metrics.
+ * All actual user performance data comes from the database.
+ */
 
 export const COLD_CALLING_BENCHMARKS = {
   // Core Success Metrics
