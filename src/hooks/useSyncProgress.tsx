@@ -33,20 +33,21 @@ export interface RetryQueueItem {
 export function useSyncProgress() {
   const { currentWorkspace } = useWorkspace();
 
-  // Get active/recent sync progress
-  const { data: activeSync, isLoading: loadingActive, refetch: refetchActive } = useQuery({
+  // Get active/recent sync progress for all data sources
+  const { data: activeSyncs, isLoading: loadingActive, refetch: refetchActive } = useQuery({
     queryKey: ['sync-progress-active', currentWorkspace?.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sync_progress')
-        .select('*')
+        .select(`
+          *,
+          data_sources!sync_progress_data_source_id_fkey(source_type, name)
+        `)
         .eq('status', 'running')
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('started_at', { ascending: false });
 
       if (error) throw error;
-      return data as SyncProgressItem | null;
+      return (data || []) as (SyncProgressItem & { data_sources: { source_type: string; name: string } | null })[];
     },
     enabled: !!currentWorkspace?.id,
     refetchInterval: 2000, // Poll every 2 seconds when there's an active sync
@@ -85,17 +86,31 @@ export function useSyncProgress() {
     enabled: !!currentWorkspace?.id,
   });
 
+  // For backward compatibility, expose first active sync as activeSync
+  const activeSync = activeSyncs && activeSyncs.length > 0 ? activeSyncs[0] : null;
+  
   const progressPercent = activeSync
     ? activeSync.total_campaigns > 0
       ? Math.round((activeSync.processed_campaigns / activeSync.total_campaigns) * 100)
       : 0
     : null;
+  
+  // Calculate combined progress across all active syncs
+  const combinedProgress = activeSyncs && activeSyncs.length > 0
+    ? activeSyncs.reduce((acc, sync) => ({
+        totalCampaigns: acc.totalCampaigns + (sync.total_campaigns || 0),
+        processedCampaigns: acc.processedCampaigns + (sync.processed_campaigns || 0),
+        recordsSynced: acc.recordsSynced + (sync.records_synced || 0),
+      }), { totalCampaigns: 0, processedCampaigns: 0, recordsSynced: 0 })
+    : null;
 
   return {
     activeSync,
+    activeSyncs: activeSyncs || [],
     recentSyncs: recentSyncs || [],
     pendingRetries: pendingRetries || [],
     progressPercent,
+    combinedProgress,
     isLoading: loadingActive || loadingRecent || loadingRetries,
     refetch: refetchActive,
   };

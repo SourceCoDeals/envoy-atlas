@@ -39,7 +39,7 @@ const statusConfig = {
 };
 
 export function SyncProgressCard() {
-  const { activeSync, recentSyncs, pendingRetries, progressPercent, isLoading } = useSyncProgress();
+  const { activeSyncs, recentSyncs, pendingRetries, isLoading } = useSyncProgress();
 
   if (isLoading) {
     return (
@@ -56,54 +56,70 @@ export function SyncProgressCard() {
     );
   }
 
+  const hasActiveSyncs = activeSyncs && activeSyncs.length > 0;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
           Sync Progress
-          {activeSync && (
+          {hasActiveSyncs && (
             <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400">
               <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              Active
+              {activeSyncs.length} Active
             </Badge>
           )}
         </CardTitle>
         <CardDescription>Real-time data synchronization status</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Active Sync */}
-        {activeSync ? (
-          <div className="space-y-3 p-4 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                <span className="font-medium">Sync in progress</span>
-              </div>
-              <span className="text-sm text-muted-foreground">
-                {progressPercent}%
-              </span>
-            </div>
-            <Progress value={progressPercent || 0} className="h-2" />
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>
-                Campaign {activeSync.processed_campaigns} of {activeSync.total_campaigns}
-              </span>
-              {activeSync.current_campaign_name && (
-                <span className="truncate max-w-[200px]">
-                  {activeSync.current_campaign_name}
-                </span>
-              )}
-            </div>
-            {activeSync.current_phase && (
-              <Badge variant="secondary" className="text-xs">
-                Phase: {activeSync.current_phase}
-              </Badge>
-            )}
-            {activeSync.records_synced > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {activeSync.records_synced.toLocaleString()} records synced
-              </p>
-            )}
+        {/* Active Syncs */}
+        {hasActiveSyncs ? (
+          <div className="space-y-3">
+            {activeSyncs.map((sync) => {
+              const progressPercent = sync.total_campaigns > 0
+                ? Math.round((sync.processed_campaigns / sync.total_campaigns) * 100)
+                : 0;
+              const platformName = sync.data_sources?.name || sync.data_sources?.source_type || 'Unknown';
+              
+              return (
+                <div 
+                  key={sync.id}
+                  className="space-y-3 p-4 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                      <span className="font-medium">{platformName}</span>
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      {progressPercent}%
+                    </span>
+                  </div>
+                  <Progress value={progressPercent} className="h-2" />
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>
+                      Campaign {sync.processed_campaigns} of {sync.total_campaigns}
+                    </span>
+                    {sync.current_campaign_name && (
+                      <span className="truncate max-w-[200px]">
+                        {sync.current_campaign_name}
+                      </span>
+                    )}
+                  </div>
+                  {sync.current_phase && (
+                    <Badge variant="secondary" className="text-xs">
+                      Phase: {sync.current_phase}
+                    </Badge>
+                  )}
+                  {sync.records_synced > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {sync.records_synced.toLocaleString()} records synced
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="text-sm text-muted-foreground text-center py-4">
@@ -168,7 +184,7 @@ export function SyncProgressCard() {
           </div>
         )}
 
-        {!activeSync && recentSyncs.length === 0 && pendingRetries.length === 0 && (
+        {!hasActiveSyncs && recentSyncs.length === 0 && pendingRetries.length === 0 && (
           <div className="text-sm text-muted-foreground text-center py-4">
             No sync history yet
           </div>
@@ -180,19 +196,23 @@ export function SyncProgressCard() {
 
 // Compact inline progress indicator for headers
 export function SyncProgressIndicator() {
-  const { activeSync, progressPercent } = useSyncProgress();
+  const { activeSyncs, combinedProgress } = useSyncProgress();
 
-  if (!activeSync) return null;
+  if (!activeSyncs || activeSyncs.length === 0) return null;
+  
+  const progressPercent = combinedProgress && combinedProgress.totalCampaigns > 0
+    ? Math.round((combinedProgress.processedCampaigns / combinedProgress.totalCampaigns) * 100)
+    : 0;
 
   return (
     <div className="flex items-center gap-2 text-sm">
       <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
       <span className="text-muted-foreground">
-        Syncing ({progressPercent}%)
+        Syncing {activeSyncs.length > 1 ? `(${activeSyncs.length} sources)` : ''} ({progressPercent}%)
       </span>
-      {activeSync.current_phase && (
+      {activeSyncs.length === 1 && activeSyncs[0].current_phase && (
         <Badge variant="secondary" className="text-xs">
-          {activeSync.current_phase}
+          {activeSyncs[0].current_phase}
         </Badge>
       )}
     </div>

@@ -554,6 +554,54 @@ Deno.serve(async (req) => {
 
     const startTime = Date.now();
     const isTimeBudgetExceeded = () => (Date.now() - startTime) > TIME_BUDGET_MS;
+    
+    // ============================================
+    // SYNC PROGRESS TRACKING
+    // ============================================
+    let progressId: string | null = null;
+    if (batch_number === 1) {
+      try {
+        const { data: progressRecord } = await supabase
+          .from('sync_progress')
+          .insert({
+            data_source_id: data_source_id,
+            engagement_id: engagement_id,
+            status: 'running',
+            current_phase: 'initializing',
+          })
+          .select('id')
+          .single();
+        progressId = progressRecord?.id;
+        console.log('Created sync_progress record:', progressId);
+      } catch (e) {
+        console.log('Could not create sync progress record:', (e as Error).message);
+      }
+    } else {
+      // Get existing progress record for continuation
+      const { data: existingProgress } = await supabase
+        .from('sync_progress')
+        .select('id')
+        .eq('data_source_id', data_source_id)
+        .eq('status', 'running')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      progressId = existingProgress?.id || null;
+      if (progressId) console.log('Using existing sync_progress record:', progressId);
+    }
+    
+    // Helper to update sync progress
+    async function updateSyncProgress(updates: Record<string, any>) {
+      if (!progressId) return;
+      try {
+        await supabase.from('sync_progress').update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        }).eq('id', progressId);
+      } catch (e) {
+        console.log('Could not update sync progress:', (e as Error).message);
+      }
+    }
 
     // ============================================
     // PHASE 0: Fetch Email Accounts (once per sync)
@@ -707,14 +755,26 @@ Deno.serve(async (req) => {
             batch_number: batch_number,
           },
         }).eq('id', data_source_id);
+        
+        // Update sync progress with total campaigns
+        await updateSyncProgress({
+          total_campaigns: allSequences.length,
+          processed_campaigns: 0,
+          current_phase: 'sequences',
+        });
       } else {
         console.log(`Using cached sequence list: ${allSequences.length} sequences`);
+        // Ensure sync progress reflects cached total
+        await updateSyncProgress({
+          total_campaigns: allSequences.length,
+          current_phase: 'sequences',
+        });
       }
 
       let startIndex = reset ? 0 : (existingConfig.sequence_index || 0);
 
       for (let i = startIndex; i < allSequences.length; i++) {
-        // Heartbeat every 5 sequences
+        // Heartbeat every 5 sequences - update data_sources and sync_progress
         if (i > 0 && i % 5 === 0) {
           await supabase.from('data_sources').update({
             additional_config: { 
@@ -727,6 +787,13 @@ Deno.serve(async (req) => {
             },
             updated_at: new Date().toISOString(),
           }).eq('id', data_source_id);
+          
+          // Update sync progress
+          await updateSyncProgress({
+            processed_campaigns: i,
+            current_campaign_name: allSequences[i]?.name || null,
+            records_synced: progress.sequences_synced + progress.people_synced + progress.email_activities_synced,
+          });
         }
         
         if (isTimeBudgetExceeded()) {
@@ -1466,6 +1533,17 @@ Deno.serve(async (req) => {
     // ============================================
     console.log('=== Reply.io sync complete ===');
     console.log(`Final: ${progress.sequences_synced} sequences, ${progress.metrics_created} metrics, ${progress.variants_synced} variants, ${progress.people_synced} people, ${progress.companies_synced} companies, ${progress.email_accounts_synced} email accounts, ${progress.email_activities_synced} email activities, ${progress.message_threads_synced} message threads`);
+    
+    // Mark sync progress as completed
+    await updateSyncProgress({
+      status: 'completed',
+      processed_campaigns: progress.sequences_synced,
+      records_synced: progress.sequences_synced + progress.people_synced + progress.email_activities_synced,
+      current_phase: 'complete',
+      current_campaign_name: null,
+      completed_at: new Date().toISOString(),
+      errors: progress.errors,
+    });
     
     await supabase.from('data_sources').update({
       last_sync_status: 'success',
