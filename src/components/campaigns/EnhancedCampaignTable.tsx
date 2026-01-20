@@ -9,9 +9,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
 import { CampaignWithMetrics, MetricsStatus } from '@/hooks/useCampaigns';
 import { calculateCampaignScore, CampaignTier, ConfidenceLevel } from './CampaignPortfolioOverview';
+import { CampaignHealthBadge } from './CampaignHealthBadge';
 import { useDataHealth } from '@/hooks/useDataHealth';
 import { useCampaignLinking } from '@/hooks/useCampaignLinking';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Briefcase, Loader2 } from 'lucide-react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Star, CheckCircle, AlertTriangle, XCircle, HelpCircle, Circle, Briefcase, Loader2, Heart } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface Engagement {
@@ -29,7 +30,7 @@ interface EnhancedCampaignTableProps {
   onCampaignUpdated?: () => void;
 }
 
-type SortField = 'name' | 'score' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
+type SortField = 'name' | 'score' | 'health' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
 type SortDirection = 'asc' | 'desc';
 
 interface CampaignWithScore extends CampaignWithMetrics {
@@ -441,6 +442,7 @@ export function EnhancedCampaignTable({
               </TableHead>
               <SortableHeader field="name" className="min-w-[200px]">Campaign</SortableHeader>
               <SortableHeader field="engagement_name" className="min-w-[120px]">Engagement</SortableHeader>
+              <TableHead className="w-[70px] text-center">Health</TableHead>
               <SortableHeader field="score" className="w-[70px] text-center">Score</SortableHeader>
               <TableHead className="w-[90px] text-center">Tier</TableHead>
               <SortableHeader field="confidence" className="w-[60px] text-center">Conf</SortableHeader>
@@ -457,7 +459,7 @@ export function EnhancedCampaignTable({
           <TableBody>
             {filteredAndSortedCampaigns.length === 0 ? (
             <TableRow>
-                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                   No campaigns match your filters
                 </TableCell>
               </TableRow>
@@ -560,6 +562,17 @@ export function EnhancedCampaignTable({
                         ))}
                       </SelectContent>
                     </Select>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <CampaignHealthBadge 
+                      campaign={{
+                        bounce_rate: campaign.bounce_rate || 0,
+                        reply_rate: campaign.reply_rate || 0,
+                        positive_rate: campaign.positive_rate || 0,
+                        total_sent: campaign.total_sent || 0,
+                      }}
+                      size="sm"
+                    />
                   </TableCell>
                   <TableCell className="text-center">
                     <TooltipProvider>

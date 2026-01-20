@@ -244,6 +244,53 @@ export type Database = {
           },
         ]
       }
+      campaign_alerts: {
+        Row: {
+          campaign_id: string | null
+          created_at: string | null
+          details: Json | null
+          id: string
+          is_resolved: boolean | null
+          message: string
+          resolved_at: string | null
+          severity: string
+          type: string
+          updated_at: string | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          is_resolved?: boolean | null
+          message: string
+          resolved_at?: string | null
+          severity?: string
+          type: string
+          updated_at?: string | null
+        }
+        Update: {
+          campaign_id?: string | null
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          is_resolved?: boolean | null
+          message?: string
+          resolved_at?: string | null
+          severity?: string
+          type?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_alerts_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_email_accounts: {
         Row: {
           campaign_id: string | null
