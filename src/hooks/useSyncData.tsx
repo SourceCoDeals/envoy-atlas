@@ -366,7 +366,7 @@ export function useSyncData() {
           reset: shouldReset,
           auto_continue: true,
           // Enable comprehensive sync options
-          sync_leads: true,
+          sync_leads: false, // Disabled for quick sync - leads pagination is slow
           sync_people: true,
           sync_email_accounts: true,
           sync_lead_categories: true,
@@ -466,7 +466,7 @@ export function useSyncData() {
                 reset: options.reset ?? true,
                 auto_continue: true,
                 // Enable comprehensive sync options
-                sync_leads: true,
+                sync_leads: false, // Disabled for quick sync - leads pagination is slow
                 sync_people: true,
                 sync_email_accounts: true,
                 sync_lead_categories: true,
