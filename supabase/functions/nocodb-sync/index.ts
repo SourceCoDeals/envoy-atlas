@@ -166,6 +166,98 @@ function mapNocoDBRecord(record: Record<string, any>, workspaceId: string): Reco
   return mapped;
 }
 
+// Map NocoDB record to call_activities table for unified analytics
+function mapToCallActivity(record: Record<string, any>, engagementId: string, companyId: string, contactId: string): Record<string, any> {
+  // Determine disposition from category
+  const category = (record.call_category || '').toLowerCase();
+  let disposition = 'no_answer';
+  let conversationOutcome = 'no_answer';
+  
+  if (category.includes('connect') || category.includes('conversation')) {
+    disposition = 'connected';
+    conversationOutcome = 'connected';
+  } else if (category.includes('voicemail') || category.includes('vm')) {
+    disposition = 'voicemail';
+    conversationOutcome = 'voicemail';
+  } else if (category.includes('meeting') || category.includes('booked')) {
+    disposition = 'connected';
+    conversationOutcome = 'meeting_booked';
+  } else if (category.includes('interested') && !category.includes('not interested')) {
+    disposition = 'connected';
+    conversationOutcome = 'interested';
+  } else if (category.includes('not interested') || category.includes('ni')) {
+    disposition = 'connected';
+    conversationOutcome = 'not_interested';
+  } else if (category.includes('gatekeeper') || category.includes('gk')) {
+    disposition = 'connected';
+    conversationOutcome = 'gatekeeper';
+  } else if (category.includes('callback')) {
+    disposition = 'connected';
+    conversationOutcome = 'callback';
+  }
+  
+  // Calculate talk_duration only for connected calls
+  const durationSeconds = record.duration || 0;
+  const talkDuration = disposition === 'connected' ? durationSeconds : null;
+  
+  // Check if this was a DM conversation (decision maker)
+  const isDmConversation = 
+    record.decision_maker_score >= 7 || 
+    category.includes('dm') ||
+    category.includes('owner') ||
+    conversationOutcome === 'meeting_booked' ||
+    conversationOutcome === 'interested';
+  
+  return {
+    engagement_id: engagementId,
+    company_id: companyId,
+    contact_id: contactId,
+    external_id: `nocodb_${record.nocodb_row_id}`,
+    nocodb_row_id: record.nocodb_row_id,
+    source: 'nocodb',
+    
+    // Caller info
+    caller_name: record.rep_name || record.host_email,
+    
+    // Contact info
+    to_name: record.contact_name,
+    to_phone: record.to_number || '',
+    
+    // Disposition and outcome
+    disposition,
+    conversation_outcome: conversationOutcome,
+    is_dm_conversation: isDmConversation,
+    
+    // Duration
+    duration_seconds: durationSeconds,
+    talk_duration: talkDuration,
+    
+    // Voicemail
+    voicemail_left: disposition === 'voicemail',
+    
+    // Callback
+    callback_scheduled: conversationOutcome === 'callback' || category.includes('callback'),
+    
+    // AI Scores
+    seller_interest_score: record.seller_interest_score,
+    quality_of_conversation_score: record.quality_of_conversation_score,
+    objection_handling_score: record.objection_handling_score,
+    script_adherence_score: record.script_adherence_score,
+    value_proposition_score: record.value_proposition_score,
+    composite_score: record.composite_score,
+    
+    // Call content
+    notes: record.call_summary,
+    recording_url: record.phoneburner_recording_url,
+    transcription: record.transcript_text,
+    call_summary: record.call_summary,
+    
+    // Timestamps
+    started_at: record.date_time,
+    synced_at: new Date().toISOString(),
+  };
+}
+
 function extractContactInfo(record: Record<string, any>): { name: string; company: string | null; email: string } | null {
   const contactName = record.contact_name || "";
   const companyName = record.company_name || "";
