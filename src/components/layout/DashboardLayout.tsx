@@ -86,7 +86,6 @@ const emailExperimentNavItems: NavItem[] = [
 // Calling channel navigation - 9 pages from requirements
 const callingMainNavItems: NavItem[] = [
   { title: 'Caller Dashboard', href: '/calling', icon: LayoutDashboard },
-  { title: 'Phone Burner', href: '/calling/phoneburner', icon: Phone },
   { title: 'Team', href: '/calling/team', icon: Users },
   { title: 'Top Deals', href: '/calling/deals', icon: BarChart3 },
   { title: 'Top Calls', href: '/calling/top-calls', icon: PhoneCall },

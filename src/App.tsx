@@ -52,7 +52,7 @@ import ContactDetail from "./pages/ContactDetail";
 import ContactsSearch from "./pages/ContactsSearch";
 import Team from "./pages/Team";
 import PhoneBurnerCallback from "./pages/PhoneBurnerCallback";
-import PhoneBurnerDashboard from "./pages/PhoneBurnerDashboard";
+
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -101,7 +101,7 @@ const App = () => (
 
                   {/* Calling routes - New 9 pages from requirements */}
                   <Route path="/calling" element={<CallerDashboard />} />
-                  <Route path="/calling/phoneburner" element={<PhoneBurnerDashboard />} />
+                  
                   <Route path="/calling/deals" element={<TopDeals />} />
                   <Route path="/calling/top-calls" element={<TopCallsWeek />} />
                   <Route path="/calling/insights" element={<DataInsights />} />
