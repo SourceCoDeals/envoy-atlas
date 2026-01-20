@@ -102,6 +102,12 @@ interface RepPerformanceEnhanced {
   avgDuration: number;
   avgOverallScore: number | null;
   avgQuestionsCovered: number | null;
+  avgScriptAdherence: number | null;
+  avgQuestionAdherence: number | null;
+  avgObjectionHandling: number | null;
+  avgSellerInterest: number | null;
+  avgConversationQuality: number | null;
+  avgValueProposition: number | null;
   positiveInterestCount: number;
   needsCoachingCount: number;
   connections: number;
@@ -392,6 +398,12 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
           avgDuration: avgNumber(repCalls.map(c => c.duration_seconds)),
           avgOverallScore: avg(repCalls.map(c => c.composite_score)),
           avgQuestionsCovered: avg(repCalls.map(c => c.questions_covered_count)),
+          avgScriptAdherence: avg(repCalls.map(c => c.script_adherence_score)),
+          avgQuestionAdherence: avg(repCalls.map(c => c.script_adherence_score)), // fallback
+          avgObjectionHandling: avg(repCalls.map(c => c.objection_handling_score)),
+          avgSellerInterest: avg(repCalls.map(c => c.seller_interest_score)),
+          avgConversationQuality: avg(repCalls.map(c => c.quality_of_conversation_score)),
+          avgValueProposition: avg(repCalls.map(c => c.value_proposition_score)),
           positiveInterestCount: repCalls.filter(c => isPositiveInterest(c.interest_in_selling, config)).length,
           needsCoachingCount: repCalls.filter(c => needsCoachingReview({
             overall_quality_score: c.composite_score,
