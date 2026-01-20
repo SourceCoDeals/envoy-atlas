@@ -1,25 +1,11 @@
-import { useState } from "react";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { useTeam, RepProfile } from "@/hooks/useTeam";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useState, useMemo } from 'react';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
 import {
   Table,
   TableBody,
@@ -27,105 +13,101 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from '@/components/ui/table';
+import { useEnhancedCallingAnalytics, DateRange } from '@/hooks/useEnhancedCallingAnalytics';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
+import { 
+  formatScore, 
+  formatCallingDuration, 
+  getScoreStatus, 
+  getScoreStatusColor,
+  needsCoachingReview 
+} from '@/lib/callingConfig';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Plus,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-  UserPlus,
   Users,
-  Briefcase,
-} from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-
-const ROLES = [
-  { value: "admin", label: "Admin" },
-  { value: "manager", label: "Manager" },
-  { value: "rep", label: "Rep" },
-  { value: "analyst", label: "Analyst" },
-  { value: "viewer", label: "Viewer" },
-];
+  Star,
+  TrendingUp,
+  AlertTriangle,
+  Phone,
+  Clock,
+  Target,
+  Filter,
+  BarChart3,
+  Award,
+} from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
 
 export default function Team() {
-  const {
-    repProfiles,
-    isLoadingReps,
-    engagements,
-    createRep,
-    updateRep,
-    deleteRep,
-    assignToEngagement,
-    removeAssignment,
-    getRepAssignments,
-  } = useTeam();
+  const [dateRange, setDateRange] = useState<DateRange>('30d');
+  const { data, isLoading } = useEnhancedCallingAnalytics(dateRange);
+  const { config } = useCallingConfig();
 
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [editingRep, setEditingRep] = useState<RepProfile | null>(null);
-  const [assigningRep, setAssigningRep] = useState<RepProfile | null>(null);
-  const [formData, setFormData] = useState({
-    first_name: "",
-    last_name: "",
-    email: "",
-    role: "rep",
-    is_active: true,
-  });
+  // Calculate coaching flags from config thresholds
+  const coachingFlags = useMemo(() => {
+    if (!data?.repPerformance) return [];
+    
+    return data.repPerformance.filter(rep => {
+      // Flag reps with avg scores below thresholds
+      return (
+        (rep.avgOverallScore != null && rep.avgOverallScore < config.coachingAlertOverallQuality) ||
+        rep.needsCoachingCount > 0
+      );
+    }).map(rep => ({
+      rep: rep.rep,
+      avgOverallScore: rep.avgOverallScore,
+      avgQuestionsCovered: rep.avgQuestionsCovered,
+      needsCoachingCount: rep.needsCoachingCount,
+      issues: [
+        rep.avgOverallScore != null && rep.avgOverallScore < config.coachingAlertOverallQuality
+          ? `Avg Overall Quality ${formatScore(rep.avgOverallScore, config)} < ${config.coachingAlertOverallQuality}`
+          : null,
+        rep.needsCoachingCount > 0
+          ? `${rep.needsCoachingCount} calls need review`
+          : null,
+      ].filter(Boolean),
+    }));
+  }, [data?.repPerformance, config]);
 
-  const resetForm = () => {
-    setFormData({
-      first_name: "",
-      last_name: "",
-      email: "",
-      role: "rep",
-      is_active: true,
-    });
-  };
+  // Prepare chart data for score comparison
+  const scoreComparisonData = useMemo(() => {
+    if (!data?.repPerformance) return [];
+    return data.repPerformance.slice(0, 10).map(rep => ({
+      name: rep.rep.split('@')[0],
+      'Overall Quality': rep.avgOverallScore ?? 0,
+      'Avg Duration (min)': Math.round((rep.avgDuration || 0) / 60 * 10) / 10,
+      'Positive Interest': rep.positiveInterestCount,
+    }));
+  }, [data?.repPerformance]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingRep) {
-      updateRep.mutate();
-      setEditingRep(null);
-    } else {
-      createRep.mutate();
-    }
-    resetForm();
-    setIsAddOpen(false);
-  };
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Team</h1>
+            <p className="text-muted-foreground">Rep performance and coaching</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-28" />
+            ))}
+          </div>
+          <Skeleton className="h-96" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
-  const handleEdit = (rep: RepProfile) => {
-    setEditingRep(rep);
-    setFormData({
-      first_name: rep.first_name || "",
-      last_name: rep.last_name || "",
-      email: rep.email || "",
-      role: rep.role || "rep",
-      is_active: rep.is_active,
-    });
-    setIsAddOpen(true);
-  };
-
-  const handleDelete = async (id: string) => {
-    if (confirm("Remove this team member?")) {
-      deleteRep.mutate();
-    }
-  };
-
-  const handleAssign = async (engagementId: string) => {
-    if (!assigningRep) return;
-    assignToEngagement.mutate();
-    setAssigningRep(null);
-  };
-
-  const activeReps = repProfiles.filter((r) => r.is_active);
-  const inactiveReps = repProfiles.filter((r) => !r.is_active);
+  const topPerformer = data?.repPerformance[0];
 
   return (
     <DashboardLayout>
@@ -133,317 +115,265 @@ export default function Team() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Team</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Team</h1>
             <p className="text-muted-foreground">
-              Manage team members and client assignments
+              Rep performance metrics and coaching insights
             </p>
           </div>
-          <Dialog open={isAddOpen} onOpenChange={(open) => {
-            setIsAddOpen(open);
-            if (!open) {
-              setEditingRep(null);
-              resetForm();
-            }
-          }}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Team Member
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>
-                  {editingRep ? "Edit Team Member" : "Add Team Member"}
-                </DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>First Name</Label>
-                    <Input
-                      value={formData.first_name}
-                      onChange={(e) =>
-                        setFormData({ ...formData, first_name: e.target.value })
-                      }
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Last Name</Label>
-                    <Input
-                      value={formData.last_name}
-                      onChange={(e) =>
-                        setFormData({ ...formData, last_name: e.target.value })
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) =>
-                      setFormData({ ...formData, email: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Role</Label>
-                  <Select
-                    value={formData.role}
-                    onValueChange={(v) => setFormData({ ...formData, role: v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ROLES.map((r) => (
-                        <SelectItem key={r.value} value={r.value}>
-                          {r.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={formData.is_active}
-                    onCheckedChange={(v) =>
-                      setFormData({ ...formData, is_active: v })
-                    }
-                  />
-                  <Label>Active</Label>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setIsAddOpen(false);
-                      setEditingRep(null);
-                      resetForm();
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit">
-                    {editingRep ? "Save" : "Add"}
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7d">7 days</SelectItem>
+                <SelectItem value="14d">14 days</SelectItem>
+                <SelectItem value="30d">30 days</SelectItem>
+                <SelectItem value="90d">90 days</SelectItem>
+                <SelectItem value="all">All time</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
+        {/* Summary Cards */}
+        <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Active Members
+                Team Members
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-primary" />
-                <span className="text-2xl font-bold">{activeReps.length}</span>
+                <span className="text-2xl font-bold">{data?.repPerformance.length || 0}</span>
               </div>
             </CardContent>
           </Card>
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Inactive
+                Top Performer
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-muted-foreground" />
-                <span className="text-2xl font-bold">{inactiveReps.length}</span>
+                <Award className="h-5 w-5 text-yellow-500" />
+                <span className="text-lg font-bold truncate">
+                  {topPerformer?.rep.split('@')[0] || '-'}
+                </span>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Score: {formatScore(topPerformer?.avgOverallScore, config)}
+              </p>
             </CardContent>
           </Card>
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Client Engagements
+                Avg Team Score
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
-                <Briefcase className="h-5 w-5 text-primary" />
-                <span className="text-2xl font-bold">{engagements.length}</span>
+                <Star className="h-5 w-5 text-primary" />
+                <span className="text-2xl font-bold">
+                  {formatScore(data?.avgScores.overallQuality, config)}
+                </span>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Needs Coaching
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                <span className="text-2xl font-bold">{coachingFlags.length}</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Below threshold ({config.coachingAlertOverallQuality})
+              </p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Team Table */}
+        {/* Rep Performance Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Team Members</CardTitle>
+            <CardTitle>Rep Performance Table</CardTitle>
+            <CardDescription>
+              Performance metrics by representative
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            {isLoadingReps ? (
-              <div className="text-center py-8 text-muted-foreground">Loading...</div>
-            ) : repProfiles.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No team members yet</p>
-                <Button
-                  variant="outline"
-                  className="mt-4"
-                  onClick={() => setIsAddOpen(true)}
-                >
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Add First Member
-                </Button>
-              </div>
-            ) : (
+            {data?.repPerformance && data.repPerformance.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Clients</TableHead>
+                    <TableHead>Rep (Host Email)</TableHead>
+                    <TableHead>Total Calls</TableHead>
+                    <TableHead>Avg Duration</TableHead>
+                    <TableHead>Avg Overall Score</TableHead>
+                    <TableHead>Avg Question Coverage</TableHead>
+                    <TableHead>Calls with Interest</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {repProfiles.map((rep) => {
-                    const assignments = getRepAssignments(rep.id);
+                  {data.repPerformance.map((rep, index) => {
+                    const status = getScoreStatus(rep.avgOverallScore, config.overallQualityThresholds);
+                    const needsCoaching = rep.avgOverallScore != null && 
+                      rep.avgOverallScore < config.coachingAlertOverallQuality;
+                    
                     return (
-                      <TableRow key={rep.id}>
+                      <TableRow key={rep.rep}>
                         <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-8 w-8">
-                              <AvatarFallback>
-                                {(rep.first_name?.[0] || "") +
-                                  (rep.last_name?.[0] || "")}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="font-medium">
-                              {rep.first_name} {rep.last_name}
-                            </span>
+                          <div className="flex items-center gap-2">
+                            {index === 0 && <Award className="h-4 w-4 text-yellow-500" />}
+                            <span className="font-medium">{rep.rep.split('@')[0]}</span>
                           </div>
+                          <span className="text-xs text-muted-foreground">{rep.rep}</span>
                         </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {rep.email || "-"}
-                        </TableCell>
+                        <TableCell>{rep.totalCalls}</TableCell>
+                        <TableCell>{formatCallingDuration(rep.avgDuration)}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="capitalize">
-                            {rep.role || "rep"}
+                          <Badge className={getScoreStatusColor(status)}>
+                            {formatScore(rep.avgOverallScore, config)}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {assignments.length === 0 ? (
-                              <span className="text-muted-foreground text-sm">-</span>
-                            ) : (
-                              assignments.map((a) => (
-                                <Badge
-                                  key={a.id}
-                                  variant="secondary"
-                                  className="text-xs cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
-                                  onClick={() => removeAssignment.mutate()}
-                                  title="Click to remove"
-                                >
-                                  {a.engagement_id}
-                                </Badge>
-                              ))
+                          {rep.avgQuestionsCovered != null 
+                            ? `${rep.avgQuestionsCovered.toFixed(1)} / ${config.questionCoverageTotal}`
+                            : '-'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span>{rep.positiveInterestCount}</span>
+                            {rep.positiveInterestCount > 0 && (
+                              <TrendingUp className="h-4 w-4 text-green-500" />
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-5 w-5 p-0"
-                              onClick={() => setAssigningRep(rep)}
-                            >
-                              <Plus className="h-3 w-3" />
-                            </Button>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            variant={rep.is_active ? "default" : "secondary"}
-                          >
-                            {rep.is_active ? "Active" : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleEdit(rep)}>
-                                <Pencil className="h-4 w-4 mr-2" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDelete(rep.id)}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Remove
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          {needsCoaching ? (
+                            <Badge variant="destructive" className="flex items-center gap-1 w-fit">
+                              <AlertTriangle className="h-3 w-3" />
+                              Coaching
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-green-600">
+                              On Track
+                            </Badge>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
                   })}
                 </TableBody>
               </Table>
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No rep performance data available</p>
+              </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Assign to Client Dialog */}
-        <Dialog open={!!assigningRep} onOpenChange={() => setAssigningRep(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                Assign {assigningRep?.first_name} to Client
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              {engagements.length === 0 ? (
-                <p className="text-muted-foreground">No engagements available</p>
-              ) : (
-                <div className="space-y-2">
-                  {engagements.map((eng: any) => {
-                    const isAssigned = getRepAssignments(assigningRep?.id || "").some(
-                      (a) => a.engagement_id === eng.id
-                    );
-                    return (
-                      <Button
-                        key={eng.id}
-                        variant={isAssigned ? "secondary" : "outline"}
-                        className="w-full justify-start"
-                        disabled={isAssigned}
-                        onClick={() => handleAssign(eng.id)}
-                      >
-                        <Briefcase className="h-4 w-4 mr-2" />
-                        {eng.name || eng.id}
-                        {isAssigned && (
-                          <Badge className="ml-auto" variant="outline">
-                            Assigned
-                          </Badge>
-                        )}
-                      </Button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
+        {/* Score Comparison Chart */}
+        {scoreComparisonData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                Score Comparison by Rep
+              </CardTitle>
+              <CardDescription>
+                Comparing average scores across all 12 dimensions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={scoreComparisonData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <Legend />
+                    <Bar dataKey="Overall Quality" fill="hsl(var(--primary))" />
+                    <Bar dataKey="Positive Interest" fill="hsl(var(--chart-2))" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Coaching Flags */}
+        {coachingFlags.length > 0 && (
+          <Card className="border-amber-500/30 bg-amber-500/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                Coaching Flags
+              </CardTitle>
+              <CardDescription>
+                Reps with scores below configured thresholds
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {coachingFlags.map((flag) => (
+                  <div
+                    key={flag.rep}
+                    className="flex items-start justify-between p-4 rounded-lg border border-amber-200 bg-background"
+                  >
+                    <div>
+                      <p className="font-medium">{flag.rep.split('@')[0]}</p>
+                      <ul className="text-sm text-muted-foreground mt-1 space-y-1">
+                        {flag.issues.map((issue, idx) => (
+                          <li key={idx} className="flex items-center gap-2">
+                            <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            {issue}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <Button variant="outline" size="sm">
+                      Review Calls
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg text-sm">
+                <p className="font-medium mb-1">Coaching Thresholds (from Settings):</p>
+                <ul className="text-muted-foreground grid grid-cols-2 gap-1">
+                  <li>• Overall Quality Alert: &lt; {config.coachingAlertOverallQuality}</li>
+                  <li>• Script Adherence Alert: &lt; {config.coachingAlertScriptAdherence}</li>
+                  <li>• Question Adherence Alert: &lt; {config.coachingAlertQuestionAdherence}</li>
+                  <li>• Objection Handling Alert: &lt; {config.coachingAlertObjectionHandling}</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </DashboardLayout>
   );
