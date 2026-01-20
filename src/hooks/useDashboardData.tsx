@@ -221,10 +221,10 @@ export function useDashboardData(dateRange?: DateRange) {
 
       setTrendData(trend);
 
-      // Fetch campaigns for top performers
+      // Fetch campaigns for top performers - include positive_replies
       const { data: campaigns } = await supabase
         .from('campaigns')
-        .select('id, name, total_sent, total_replied')
+        .select('id, name, total_sent, total_replied, positive_replies')
         .in('engagement_id', engagementIds);
 
       if (campaigns && campaigns.length > 0) {
@@ -233,7 +233,7 @@ export function useDashboardData(dateRange?: DateRange) {
           name: c.name,
           sent: c.total_sent || 0,
           replyRate: (c.total_sent || 0) > 0 ? ((c.total_replied || 0) / (c.total_sent || 0)) * 100 : 0,
-          positiveRate: 0,
+          positiveRate: (c.total_replied || 0) > 0 ? ((c.positive_replies || 0) / (c.total_replied || 0)) * 100 : 0,
         }));
 
         setTopCampaigns(
@@ -242,6 +242,21 @@ export function useDashboardData(dateRange?: DateRange) {
             .sort((a, b) => b.replyRate - a.replyRate)
             .slice(0, 5)
         );
+      }
+
+      // Fetch hourly metrics for time heatmap
+      const { data: hourlyMetricsData } = await supabase
+        .from('hourly_metrics')
+        .select('*')
+        .in('engagement_id', engagementIds);
+
+      if (hourlyMetricsData && hourlyMetricsData.length > 0) {
+        const timeDataPoints: TimeData[] = hourlyMetricsData.map((h: any) => ({
+          day: h.day_of_week || 0,
+          hour: h.hour_of_day || 0,
+          value: h.emails_replied || h.emails_sent || 0,
+        }));
+        setTimeData(timeDataPoints);
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);

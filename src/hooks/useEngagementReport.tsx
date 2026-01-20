@@ -256,6 +256,17 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         .eq('engagement_id', engagementId)
         .order('total_sent', { ascending: false });
 
+      // Fetch campaign variants for sequence performance
+      const campaignIds = (campaigns || []).map(c => c.id);
+      let variantsData: any[] = [];
+      if (campaignIds.length > 0) {
+        const { data: variants } = await supabase
+          .from('campaign_variants')
+          .select('id, campaign_id, subject_line, step_number, total_sent, total_replied, positive_replies, reply_rate')
+          .in('campaign_id', campaignIds);
+        variantsData = variants || [];
+      }
+
       const linkedCampaigns = (campaigns || []).map(c => ({ 
         id: c.id, 
         name: c.name, 
@@ -277,8 +288,6 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           positiveRate: c.positive_rate || 0,
         };
       });
-
-      const campaignIds = linkedCampaigns.map(c => c.id);
 
       // Fetch enrollment snapshots for weekly trend
       const { data: enrollmentSnapshots } = await supabase
@@ -816,7 +825,15 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         funnel,
         channelComparison,
         trendData,
-        sequencePerformance: [],
+        sequencePerformance: variantsData.map((v: any) => ({
+          id: v.id,
+          name: v.subject_line || `Step ${v.step_number || 1}`,
+          step: v.step_number || 1,
+          stepName: `Step ${v.step_number || 1}`,
+          sent: v.total_sent || 0,
+          replyRate: v.reply_rate || ((v.total_sent || 0) > 0 ? ((v.total_replied || 0) / (v.total_sent || 0)) * 100 : 0),
+          positiveReplies: v.positive_replies || 0,
+        })).sort((a: any, b: any) => a.step - b.step),
         callDispositions,
         callOutcomes,
         recentActivity,

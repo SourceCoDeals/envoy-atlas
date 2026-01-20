@@ -124,10 +124,10 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
 
       if (contactsError) throw contactsError;
 
-      // Fetch email activities for engagement metrics
+      // Fetch email activities for engagement metrics - include reply_category
       const { data: activitiesData, error: activitiesError } = await supabase
         .from('email_activities')
-        .select('contact_id, sent, opened, replied, reply_sentiment')
+        .select('contact_id, sent, opened, replied, reply_sentiment, reply_category')
         .in('engagement_id', engagementIds);
 
       if (activitiesError) throw activitiesError;
@@ -225,8 +225,16 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
       const activities = activitiesByContact.get(contact.id) || [];
       const wasSent = activities.some(a => a.sent);
       const hasReply = activities.some(a => a.replied);
-      const hasPositive = activities.some(a => a.reply_sentiment === 'positive' || a.reply_sentiment === 'interested');
-      const hasMeeting = activities.some(a => a.reply_sentiment === 'meeting');
+      // Check reply_sentiment for 'positive' OR reply_category for 'interested'/'meeting_request'
+      const hasPositive = activities.some(a => 
+        a.reply_sentiment === 'positive' || 
+        a.reply_category === 'interested' || 
+        a.reply_category === 'meeting_request'
+      );
+      const hasMeeting = activities.some(a => 
+        a.reply_category === 'meeting_request' || 
+        a.reply_sentiment === 'meeting'
+      );
 
       if (wasSent) contacted++;
       if (hasReply) replied++;
@@ -264,7 +272,12 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
       const activities = activitiesByContact.get(contact.id) || [];
       const wasSent = activities.some(a => a.sent);
       const hasReply = activities.some(a => a.replied);
-      const hasPositive = activities.some(a => a.reply_sentiment === 'positive');
+      // Check reply_sentiment for 'positive' OR reply_category for 'interested'/'meeting_request'
+      const hasPositive = activities.some(a => 
+        a.reply_sentiment === 'positive' || 
+        a.reply_category === 'interested' || 
+        a.reply_category === 'meeting_request'
+      );
 
       if (wasSent) contacted++;
       if (hasReply) replied++;

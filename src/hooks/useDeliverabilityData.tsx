@@ -130,10 +130,18 @@ export function useDeliverabilityData() {
         return;
       }
 
+      // Fetch email accounts for mailbox and domain data
+      const { data: emailAccountsData } = await supabase
+        .from('email_accounts')
+        .select('*')
+        .in('engagement_id', engagementIds);
+
+      const emailAccounts = emailAccountsData || [];
+
       // Fetch campaign bounce data from campaigns table
       const { data: campaignsData } = await supabase
         .from('campaigns')
-        .select('id, name, total_sent, total_bounced, campaign_type')
+        .select('id, name, total_sent, total_bounced, total_replied, campaign_type')
         .in('engagement_id', engagementIds);
 
       // Process campaign bounces
@@ -154,24 +162,110 @@ export function useDeliverabilityData() {
       const totalBounced = bounceData.reduce((sum, c) => sum + c.bounces, 0);
       const avgBounceRate = totalSent > 0 ? (totalBounced / totalSent) * 100 : 0;
 
+      // Build mailboxes list from email_accounts
+      const mailboxesList: MailboxHealth[] = emailAccounts.map((a: any) => {
+        const email = a.from_email || '';
+        const domain = email.split('@')[1] || 'unknown';
+        return {
+          id: a.id,
+          email,
+          domain,
+          isActive: a.is_active || false,
+          healthScore: a.warmup_reputation || 0,
+          warmupEnabled: a.warmup_enabled || false,
+          warmupPercentage: a.warmup_reputation || 0,
+          warmupStatus: a.warmup_status || 'unknown',
+          dailyLimit: a.message_per_day || 0,
+          bounceRate: 0,
+          replyRate: 0,
+          spamComplaintRate: 0,
+          sent30d: a.daily_sent_count || 0,
+          accountStatus: a.is_active ? 'active' : 'inactive',
+          platform: 'email',
+        };
+      });
+
+      // Build domains list from email_accounts
+      const domainMap = new Map<string, {
+        mailboxCount: number;
+        activeMailboxes: number;
+        totalDailyCapacity: number;
+        warmingUpCount: number;
+        healthScores: number[];
+      }>();
+
+      emailAccounts.forEach((a: any) => {
+        const email = a.from_email || '';
+        const domain = email.split('@')[1] || 'unknown';
+        
+        const existing = domainMap.get(domain) || {
+          mailboxCount: 0,
+          activeMailboxes: 0,
+          totalDailyCapacity: 0,
+          warmingUpCount: 0,
+          healthScores: [],
+        };
+
+        existing.mailboxCount += 1;
+        if (a.is_active) existing.activeMailboxes += 1;
+        existing.totalDailyCapacity += a.message_per_day || 0;
+        if (a.warmup_enabled) existing.warmingUpCount += 1;
+        if (a.warmup_reputation !== null) existing.healthScores.push(a.warmup_reputation);
+        
+        domainMap.set(domain, existing);
+      });
+
+      const domainsList: DomainHealth[] = Array.from(domainMap.entries()).map(([domain, data]) => ({
+        domain,
+        mailboxCount: data.mailboxCount,
+        activeMailboxes: data.activeMailboxes,
+        totalDailyCapacity: data.totalDailyCapacity,
+        avgHealthScore: data.healthScores.length > 0 
+          ? data.healthScores.reduce((a, b) => a + b, 0) / data.healthScores.length 
+          : 0,
+        avgWarmupPercentage: 0,
+        warmingUpCount: data.warmingUpCount,
+        avgBounceRate: 0,
+        avgReplyRate: 0,
+        spfValid: false,
+        dkimValid: false,
+        dmarcValid: false,
+        isBulkSender: false,
+        blacklistStatus: 'clean',
+        googlePostmasterReputation: null,
+        domainStatus: 'active',
+      }));
+
+      // Calculate total replied for reply rate
+      const totalReplied = (campaignsData || []).reduce((sum, c) => sum + (c.total_replied || 0), 0);
+      const avgReplyRate = totalSent > 0 ? (totalReplied / totalSent) * 100 : 0;
+
+      // Calculate health scores
+      const allHealthScores = emailAccounts
+        .filter((a: any) => a.warmup_reputation !== null)
+        .map((a: any) => a.warmup_reputation);
+      const avgHealthScore = allHealthScores.length > 0 
+        ? allHealthScores.reduce((a: number, b: number) => a + b, 0) / allHealthScores.length 
+        : 0;
+
       setStats({
-        totalMailboxes: 0,
-        activeMailboxes: 0,
-        totalDomains: 0,
-        totalDailyCapacity: 0,
+        totalMailboxes: emailAccounts.length,
+        activeMailboxes: emailAccounts.filter((a: any) => a.is_active).length,
+        totalDomains: domainMap.size,
+        totalDailyCapacity: emailAccounts.reduce((sum: number, a: any) => sum + (a.message_per_day || 0), 0),
         totalSent30d: totalSent,
         avgBounceRate,
-        avgReplyRate: 0,
-        avgHealthScore: 100 - avgBounceRate,
-        warmingUpCount: 0,
-        domainsWithFullAuth: 0,
+        avgReplyRate,
+        avgHealthScore,
+        warmingUpCount: emailAccounts.filter((a: any) => a.warmup_enabled).length,
+        domainsWithFullAuth: 0, // Would need sending_domains table for auth validation
         blacklistedDomains: 0,
         criticalAlerts: 0,
         warningAlerts: 0,
       });
       
-      setMailboxes([]);
-      setDomains([]);
+      setMailboxes(mailboxesList);
+      setDomains(domainsList);
       setAlerts([]);
       setCampaignBounces(bounceData);
       

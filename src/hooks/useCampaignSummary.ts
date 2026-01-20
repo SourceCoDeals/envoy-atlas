@@ -152,23 +152,26 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
         engagement_id: campaignData.engagement_id || null,
       };
 
-      // 2. Fetch all related data in parallel
+      // 2. Fetch all related data in parallel - including email_accounts for infrastructure
       const [
         variantsResult,
         dailyMetricsResult,
         emailActivitiesResult,
         contactsResult,
+        emailAccountsResult,
       ] = await Promise.all([
         supabase.from('campaign_variants').select('*').eq('campaign_id', campaignId),
         supabase.from('daily_metrics').select('*').eq('campaign_id', campaignId),
         supabase.from('email_activities').select('id, bounced, bounce_type, replied, reply_category, reply_text, sent_at, contact_id').eq('campaign_id', campaignId).limit(5000),
         supabase.from('contacts').select('id, email').eq('engagement_id', campaignData.engagement_id).limit(5000),
+        supabase.from('email_accounts').select('*').eq('engagement_id', campaignData.engagement_id),
       ]);
 
       const variantsData = variantsResult.data || [];
       const dailyMetricsData = dailyMetricsResult.data || [];
       const emailActivities = emailActivitiesResult.data || [];
       const contactsData = contactsResult.data || [];
+      const emailAccountsData = emailAccountsResult.data || [];
 
       // 3. Calculate metrics from campaign data or daily metrics
       let total_sent = campaignData.total_sent || 0;
@@ -205,12 +208,57 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
         positive_rate: total_sent > 0 ? (total_positive_replies / total_sent) * 100 : 0,
       };
 
-      // 4. Build infrastructure data (placeholder - would need data_sources info)
+      // 4. Build infrastructure data from email_accounts
+      const inboxes: InboxHealth[] = emailAccountsData.map((a: any) => ({
+        id: a.id,
+        email: a.from_email || '',
+        daily_limit: a.message_per_day || 0,
+        health_score: a.warmup_reputation || null,
+        warmup_enabled: a.warmup_enabled || false,
+        is_active: a.is_active || false,
+        sent_today: a.daily_sent_count || 0,
+      }));
+
+      // Build domains from email accounts
+      const domainMap = new Map<string, {
+        inbox_count: number;
+        spf_valid: boolean | null;
+        dkim_valid: boolean | null;
+        dmarc_valid: boolean | null;
+        total_bounces: number;
+        total_sent: number;
+      }>();
+
+      emailAccountsData.forEach((a: any) => {
+        const email = a.from_email || '';
+        const domain = email.split('@')[1] || 'unknown';
+        
+        const existing = domainMap.get(domain) || {
+          inbox_count: 0,
+          spf_valid: null,
+          dkim_valid: null,
+          dmarc_valid: null,
+          total_bounces: 0,
+          total_sent: 0,
+        };
+        existing.inbox_count += 1;
+        domainMap.set(domain, existing);
+      });
+
+      const domains: DomainHealth[] = Array.from(domainMap.entries()).map(([domain, data]) => ({
+        domain,
+        spf_valid: data.spf_valid,
+        dkim_valid: data.dkim_valid,
+        dmarc_valid: data.dmarc_valid,
+        inbox_count: data.inbox_count,
+        bounce_rate: data.total_sent > 0 ? (data.total_bounces / data.total_sent) * 100 : 0,
+      }));
+
       const infrastructure = {
-        inboxes: [] as InboxHealth[],
-        domains: [] as DomainHealth[],
-        total_daily_capacity: 0,
-        warmup_count: 0,
+        inboxes,
+        domains,
+        total_daily_capacity: emailAccountsData.reduce((sum: number, a: any) => sum + (a.message_per_day || 0), 0),
+        warmup_count: emailAccountsData.filter((a: any) => a.warmup_enabled).length,
       };
 
       // 5. Build bounce analysis from email_activities
