@@ -62,7 +62,7 @@ function formatElapsedTime(seconds: number): string {
 export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
-  const { progress, staleSyncs, elapsedTime } = useSyncData();
+  const { progress, staleSyncs, elapsedTime, forceResetStuckSyncs } = useSyncData();
 
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -237,14 +237,15 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     const platformProgress = platform === "smartlead" ? progress.smartlead : 
                              platform === "replyio" ? progress.replyio : undefined;
     
-    const isSyncingNow = source?.last_sync_status === "syncing" || 
-                         isSyncing[platform] || 
-                         (platformProgress?.status === "syncing" || platformProgress?.status === "in_progress");
+    // Only consider actively syncing if status is 'running' and NOT stale
+    const isActivelyRunning = platformProgress?.status === 'running' && !platformProgress?.isStale;
+    const isSyncingNow = isSyncing[platform] || isActivelyRunning;
     
-    const isStale = staleSyncs.includes(platform);
+    // Stale = running but no updates for 5+ minutes (from useSyncData)
+    const isStale = platformProgress?.isStale || staleSyncs.includes(platform);
     const hasProgress = platformProgress && platformProgress.total > 0;
     const progressPercent = hasProgress ? Math.round((platformProgress.current / platformProgress.total) * 100) : 0;
-    const isIncomplete = hasProgress && platformProgress.current < platformProgress.total;
+    const isIncomplete = hasProgress && platformProgress.current < platformProgress.total && !isStale;
 
     return (
       <Card className={isConnected ? "border-success/30" : ""}>
@@ -346,7 +347,27 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
               {/* Action Buttons */}
               <div className="flex gap-2 pt-1">
-                {isStale || isIncomplete ? (
+                {isStale ? (
+                  <>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 text-xs flex-1"
+                      onClick={() => handleSync(platform, { reset: false })}
+                    >
+                      <Play className="h-3 w-3 mr-1" />
+                      Resume
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => forceResetStuckSyncs()}
+                    >
+                      Reset
+                    </Button>
+                  </>
+                ) : isIncomplete ? (
                   <Button
                     variant="default"
                     size="sm"
@@ -385,6 +406,13 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               {isSyncingNow && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   ✓ Sync will continue automatically in background batches
+                </p>
+              )}
+
+              {/* Stale warning */}
+              {isStale && !isSyncingNow && (
+                <p className="text-xs text-warning flex items-center gap-1">
+                  ⚠ Sync appears stuck. Click Resume to continue or Reset to start fresh.
                 </p>
               )}
             </>

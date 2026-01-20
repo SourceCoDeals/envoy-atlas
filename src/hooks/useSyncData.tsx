@@ -3,17 +3,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
 
-interface PlatformProgress {
-  current: number;
-  total: number;
-  status: string;
-  lastSyncAt?: string;
-  isStale?: boolean;
-}
-
-interface SyncProgress {
-  smartlead?: PlatformProgress;
-  replyio?: PlatformProgress;
+interface SyncProgressRow {
+  id: string;
+  data_source_id: string | null;
+  status: 'running' | 'completed' | 'failed' | 'partial';
+  total_campaigns: number;
+  processed_campaigns: number;
+  current_phase: string | null;
+  records_synced: number;
+  updated_at: string;
+  started_at: string;
 }
 
 interface DataSourceInfo {
@@ -21,12 +20,25 @@ interface DataSourceInfo {
   source_type: string;
   last_sync_status: string | null;
   last_sync_at: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  additional_config: any;
+}
+
+interface PlatformProgress {
+  current: number;
+  total: number;
+  status: string;
+  lastSyncAt?: string;
+  isStale?: boolean;
+  recordsSynced?: number;
+  currentPhase?: string;
+}
+
+interface SyncProgress {
+  smartlead?: PlatformProgress;
+  replyio?: PlatformProgress;
 }
 
 const POLL_INTERVAL = 3000; // 3 seconds
-const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes - consider partial sync "stale" after this
+const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes - consider sync "stale" after this
 
 export function useSyncData() {
   const { currentWorkspace } = useWorkspace();
@@ -39,91 +51,148 @@ export function useSyncData() {
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const elapsedRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Detect if a sync is "stale" (partial status but hasn't progressed in 5+ minutes)
-  const isStalePartialSync = useCallback((ds: DataSourceInfo): boolean => {
-    if (!ds.last_sync_status || ds.last_sync_status !== 'partial') return false;
-    if (!ds.last_sync_at) return false;
-    
-    const lastSync = new Date(ds.last_sync_at).getTime();
+  // Detect if a sync_progress row is "stale" (running but not updated in 5+ minutes)
+  const isStaleSync = useCallback((updatedAt: string): boolean => {
+    const lastUpdate = new Date(updatedAt).getTime();
     const now = Date.now();
-    return (now - lastSync) > STALE_THRESHOLD_MS;
+    return (now - lastUpdate) > STALE_THRESHOLD_MS;
   }, []);
 
-  // Fetch sync progress from database
+  // Fetch sync progress from sync_progress table (single source of truth)
   const fetchProgress = useCallback(async () => {
     if (!currentWorkspace?.id) return null;
 
+    // Get data sources to map source_type
     const { data: dataSources } = await supabase
       .from('data_sources')
-      .select('id, source_type, last_sync_status, last_sync_at, additional_config')
+      .select('id, source_type, last_sync_status, last_sync_at')
       .in('source_type', ['smartlead', 'replyio'])
       .eq('status', 'active');
 
-    if (dataSources) {
-      const newProgress: SyncProgress = {};
-      const stale: string[] = [];
-      
-      dataSources.forEach((ds: DataSourceInfo) => {
-        const config = ds.additional_config as Record<string, unknown> | null;
-        const status = ds.last_sync_status || 'idle';
-        const isStale = isStalePartialSync(ds);
-        
-        if (isStale) {
-          stale.push(ds.source_type);
-        }
-        
-        if (ds.source_type === 'smartlead' && config) {
-          const total = (config.total_campaigns as number) ?? 0;
-          const isComplete = status === 'success' || config.completed === true;
-          const current = isComplete ? total : ((config.campaign_index as number) ?? 0);
-          newProgress.smartlead = { 
-            current, 
-            total, 
-            status,
-            lastSyncAt: ds.last_sync_at || undefined,
-            isStale,
-          };
-        } else if (ds.source_type === 'replyio' && config) {
-          const total = (config.total_sequences as number) ?? 0;
-          const isComplete = status === 'success' || config.completed === true;
-          const current = isComplete ? total : ((config.sequence_index as number) ?? 0);
-          newProgress.replyio = { 
-            current, 
-            total, 
-            status,
-            lastSyncAt: ds.last_sync_at || undefined,
-            isStale,
-          };
-        }
-      });
-      
-      setProgress(newProgress);
-      setStaleSyncs(stale);
-      return newProgress;
+    if (!dataSources || dataSources.length === 0) {
+      setProgress({});
+      setStaleSyncs([]);
+      return null;
     }
-    return null;
-  }, [currentWorkspace?.id, isStalePartialSync]);
 
-  // Check if sync is still in progress
+    // Build a map of data_source_id -> source_type
+    const dsMap = new Map<string, string>();
+    const dsLastSync = new Map<string, string | null>();
+    dataSources.forEach((ds: DataSourceInfo) => {
+      dsMap.set(ds.id, ds.source_type);
+      dsLastSync.set(ds.source_type, ds.last_sync_at);
+    });
+
+    // Fetch running sync_progress rows
+    const { data: runningProgress } = await supabase
+      .from('sync_progress')
+      .select('*')
+      .eq('status', 'running')
+      .order('started_at', { ascending: false });
+
+    // Fetch most recent completed/partial/failed sync_progress for each data source
+    const { data: recentProgress } = await supabase
+      .from('sync_progress')
+      .select('*')
+      .in('status', ['completed', 'partial', 'failed'])
+      .order('started_at', { ascending: false })
+      .limit(20);
+
+    const newProgress: SyncProgress = {};
+    const stale: string[] = [];
+
+    // Process running syncs first
+    if (runningProgress && runningProgress.length > 0) {
+      for (const sp of runningProgress as SyncProgressRow[]) {
+        const sourceType = sp.data_source_id ? dsMap.get(sp.data_source_id) : null;
+        if (!sourceType) continue;
+
+        const isStale = isStaleSync(sp.updated_at);
+        if (isStale) {
+          stale.push(sourceType);
+        }
+
+        const platformProgress: PlatformProgress = {
+          current: sp.processed_campaigns || 0,
+          total: sp.total_campaigns || 0,
+          status: isStale ? 'stale' : 'running',
+          lastSyncAt: sp.updated_at,
+          isStale,
+          recordsSynced: sp.records_synced || 0,
+          currentPhase: sp.current_phase || undefined,
+        };
+
+        if (sourceType === 'smartlead') {
+          newProgress.smartlead = platformProgress;
+        } else if (sourceType === 'replyio') {
+          newProgress.replyio = platformProgress;
+        }
+      }
+    }
+
+    // Fill in from recent completed syncs for platforms without running syncs
+    if (recentProgress && recentProgress.length > 0) {
+      for (const sp of recentProgress as SyncProgressRow[]) {
+        const sourceType = sp.data_source_id ? dsMap.get(sp.data_source_id) : null;
+        if (!sourceType) continue;
+
+        // Skip if we already have a running sync for this platform
+        if (sourceType === 'smartlead' && newProgress.smartlead) continue;
+        if (sourceType === 'replyio' && newProgress.replyio) continue;
+
+        const platformProgress: PlatformProgress = {
+          current: sp.processed_campaigns || 0,
+          total: sp.total_campaigns || 0,
+          status: sp.status,
+          lastSyncAt: dsLastSync.get(sourceType) || sp.updated_at,
+          isStale: false,
+          recordsSynced: sp.records_synced || 0,
+        };
+
+        if (sourceType === 'smartlead' && !newProgress.smartlead) {
+          newProgress.smartlead = platformProgress;
+        } else if (sourceType === 'replyio' && !newProgress.replyio) {
+          newProgress.replyio = platformProgress;
+        }
+      }
+    }
+
+    // If we still don't have progress for a platform, create empty progress
+    for (const ds of dataSources) {
+      if (ds.source_type === 'smartlead' && !newProgress.smartlead) {
+        newProgress.smartlead = {
+          current: 0,
+          total: 0,
+          status: 'idle',
+          lastSyncAt: ds.last_sync_at || undefined,
+          isStale: false,
+        };
+      } else if (ds.source_type === 'replyio' && !newProgress.replyio) {
+        newProgress.replyio = {
+          current: 0,
+          total: 0,
+          status: 'idle',
+          lastSyncAt: ds.last_sync_at || undefined,
+          isStale: false,
+        };
+      }
+    }
+
+    setProgress(newProgress);
+    setStaleSyncs(stale);
+    return newProgress;
+  }, [currentWorkspace?.id, isStaleSync]);
+
+  // Check if sync is still in progress (and not stale)
   const isSyncInProgress = useCallback((prog: SyncProgress) => {
     const slProgress = prog.smartlead;
     const rioProgress = prog.replyio;
     
-    // Check if actively syncing (status = syncing/in_progress)
-    const slSyncing = slProgress?.status === 'syncing' || slProgress?.status === 'in_progress';
-    const rioSyncing = rioProgress?.status === 'syncing' || rioProgress?.status === 'in_progress';
+    // Check if actively syncing (status = running and NOT stale)
+    const slSyncing = slProgress?.status === 'running' && !slProgress.isStale;
+    const rioSyncing = rioProgress?.status === 'running' && !rioProgress.isStale;
     
-    // Check if incomplete but NOT stale (still actively progressing)
-    const slIncomplete = slProgress && slProgress.total > 0 && 
-      slProgress.current < slProgress.total && 
-      slProgress.status !== 'error' &&
-      !slProgress.isStale;
-    const rioIncomplete = rioProgress && rioProgress.total > 0 && 
-      rioProgress.current < rioProgress.total && 
-      rioProgress.status !== 'error' &&
-      !rioProgress.isStale;
-    
-    return slIncomplete || rioIncomplete || slSyncing || rioSyncing;
+    return slSyncing || rioSyncing;
   }, []);
 
   // Start polling when sync begins
@@ -141,7 +210,7 @@ export function useSyncData() {
         const hasStale = staleSyncs.length > 0;
         if (hasStale) {
           toast.warning('Sync interrupted', {
-            description: `${staleSyncs.join(', ')} sync appears stuck. Use "Resume Sync" to continue.`
+            description: `${staleSyncs.join(', ')} sync appears stuck. Use "Resume" to continue.`
           });
         } else {
           toast.success('Sync complete!', {
@@ -214,7 +283,7 @@ export function useSyncData() {
   const getDataSources = async (): Promise<DataSourceInfo[]> => {
     const { data } = await supabase
       .from('data_sources')
-      .select('id, source_type, last_sync_status, last_sync_at, additional_config')
+      .select('id, source_type, last_sync_status, last_sync_at')
       .in('source_type', ['smartlead', 'replyio'])
       .eq('status', 'active');
     
@@ -232,6 +301,28 @@ export function useSyncData() {
       .single();
     
     return data?.id || null;
+  };
+
+  // Force reset stuck syncs
+  const forceResetStuckSyncs = async () => {
+    if (!currentWorkspace?.id) return;
+
+    try {
+      const { error } = await supabase.functions.invoke('sync-reset', {
+        body: { stale_threshold_minutes: 5 }
+      });
+
+      if (error) throw error;
+
+      toast.success('Stuck syncs reset', {
+        description: 'You can now Resume or start a new sync'
+      });
+
+      await fetchProgress();
+    } catch (err) {
+      console.error('Force reset error:', err);
+      toast.error('Failed to reset stuck syncs');
+    }
   };
 
   // Trigger sync for a specific platform
@@ -418,6 +509,7 @@ export function useSyncData() {
     triggerSync,
     triggerPlatformSync,
     resumeStaleSyncs,
+    forceResetStuckSyncs,
     fetchProgress,
   };
 }
