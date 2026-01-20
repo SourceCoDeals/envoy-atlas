@@ -49,6 +49,7 @@ import {
   Phone,
   PhoneCall,
   Users,
+  Brain,
 } from 'lucide-react';
 import { HelpButton } from '@/components/onboarding';
 import { ChatPanel } from '@/components/copyinsights/ChatPanel';
@@ -90,6 +91,7 @@ const callingMainNavItems: NavItem[] = [
   { title: 'Top Deals', href: '/calling/deals', icon: BarChart3 },
   { title: 'Top Calls', href: '/calling/top-calls', icon: PhoneCall },
   { title: 'Data Insights', href: '/calling/insights', icon: PieChart },
+  { title: 'Call Insights', href: '/calling/call-insights', icon: Brain },
   { title: 'Call Library', href: '/calling/library', icon: Library },
   { title: 'Call Information', href: '/calling/information', icon: FileText },
   { title: 'AI Summary', href: '/calling/ai-summary', icon: Sparkles },
