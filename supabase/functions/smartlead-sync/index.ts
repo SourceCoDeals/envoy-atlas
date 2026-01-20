@@ -15,9 +15,10 @@ const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 // SmartLead Rate Limit: 10 requests per 2 seconds = 5 req/s
 // Using 250ms delay = 4 req/s to stay safely within limits
 const RATE_LIMIT_DELAY = 250;
-// Increased from 55s to 120s for more processing per batch
-const TIME_BUDGET_MS = 120000;
-const MAX_BATCHES = 100;
+// Increased time budget for full processing - edge functions can run up to 400s
+const TIME_BUDGET_MS = 300000;
+// Remove practical batch limit - allow full sync to complete
+const MAX_BATCHES = 1000;
 const CONTINUATION_RETRIES = 3;
 
 // ============================================

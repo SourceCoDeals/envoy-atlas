@@ -16,9 +16,10 @@ const REPLYIO_V3_URL = 'https://api.reply.io/v3';
 // Reply.io Rate Limit: 10 seconds between API calls (strict!), 15,000 requests/month
 const RATE_LIMIT_DELAY_LIST = 3000;
 const RATE_LIMIT_DELAY_STATS = 10500;
-// Increased from 50s to 120s for more processing per batch
-const TIME_BUDGET_MS = 120000;
-const MAX_BATCHES = 250;
+// Increased time budget for full processing - edge functions can run up to 400s  
+const TIME_BUDGET_MS = 300000;
+// Remove practical batch limit - allow full sync to complete
+const MAX_BATCHES = 1000;
 const CONTINUATION_RETRIES = 3;
 
 function mapSequenceStatus(status: string): string {
