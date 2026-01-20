@@ -62,7 +62,7 @@ function formatElapsedTime(seconds: number): string {
 export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
-  const { progress, staleSyncs, elapsedTime, triggerPlatformSync } = useSyncData();
+  const { progress, staleSyncs, elapsedTime } = useSyncData();
 
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -352,7 +352,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     size="sm"
                     className="h-7 text-xs flex-1"
                     disabled={isSyncingNow}
-                    onClick={() => triggerPlatformSync(platform as "smartlead" | "replyio", { resume: true })}
+                    onClick={() => handleSync(platform, { reset: false })}
                   >
                     <Play className="h-3 w-3 mr-1" />
                     Resume
