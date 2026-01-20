@@ -16,11 +16,12 @@ export function useCampaignLinking() {
   const [updating, setUpdating] = useState<string | null>(null);
 
   /**
-   * Updates the engagement_id for a single campaign
+   * Updates the engagement_id for a single campaign and redistributes contacts
    */
   const updateCampaignEngagement = useCallback(async (
     campaignId: string,
-    engagementId: string | null
+    engagementId: string | null,
+    oldEngagementId?: string | null
   ): Promise<boolean> => {
     setUpdating(campaignId);
     try {
@@ -30,6 +31,22 @@ export function useCampaignLinking() {
         .eq('id', campaignId);
 
       if (error) throw error;
+
+      // Redistribute contacts if moving to a new engagement
+      if (engagementId && oldEngagementId && engagementId !== oldEngagementId) {
+        try {
+          await supabase.functions.invoke('redistribute-contacts', {
+            body: {
+              campaign_id: campaignId,
+              new_engagement_id: engagementId,
+              old_engagement_id: oldEngagementId,
+            },
+          });
+        } catch (redistributeErr) {
+          console.warn('Contact redistribution failed:', redistributeErr);
+          // Don't fail the whole operation, just warn
+        }
+      }
       
       toast.success(engagementId ? 'Campaign linked successfully' : 'Campaign unlinked');
       return true;
