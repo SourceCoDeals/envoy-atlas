@@ -277,6 +277,131 @@ export type Database = {
           },
         ]
       }
+      calling_metrics_config: {
+        Row: {
+          call_duration_max_optimal: number | null
+          call_duration_min_optimal: number | null
+          call_duration_too_long: number | null
+          call_duration_too_short: number | null
+          client_id: string
+          coaching_alert_objection_handling: number | null
+          coaching_alert_overall_quality: number | null
+          coaching_alert_question_adherence: number | null
+          coaching_alert_script_adherence: number | null
+          conversation_quality_thresholds: Json | null
+          created_at: string | null
+          hot_lead_interest_score: number | null
+          hot_lead_requires_interest_yes: boolean | null
+          id: string
+          interest_values_negative: Json | null
+          interest_values_positive: Json | null
+          next_steps_clarity_thresholds: Json | null
+          objection_handling_thresholds: Json | null
+          objection_resolution_good_threshold: number | null
+          objection_resolution_warning_threshold: number | null
+          overall_quality_thresholds: Json | null
+          personal_insights_thresholds: Json | null
+          question_adherence_thresholds: Json | null
+          question_coverage_good_threshold: number | null
+          question_coverage_total: number | null
+          question_coverage_warning_threshold: number | null
+          rapport_building_thresholds: Json | null
+          scores_decimal_places: number | null
+          script_adherence_thresholds: Json | null
+          seller_interest_thresholds: Json | null
+          show_score_justifications: boolean | null
+          top_calls_min_score: number | null
+          updated_at: string | null
+          valuation_discussion_thresholds: Json | null
+          value_proposition_thresholds: Json | null
+          worst_calls_max_score: number | null
+        }
+        Insert: {
+          call_duration_max_optimal?: number | null
+          call_duration_min_optimal?: number | null
+          call_duration_too_long?: number | null
+          call_duration_too_short?: number | null
+          client_id: string
+          coaching_alert_objection_handling?: number | null
+          coaching_alert_overall_quality?: number | null
+          coaching_alert_question_adherence?: number | null
+          coaching_alert_script_adherence?: number | null
+          conversation_quality_thresholds?: Json | null
+          created_at?: string | null
+          hot_lead_interest_score?: number | null
+          hot_lead_requires_interest_yes?: boolean | null
+          id?: string
+          interest_values_negative?: Json | null
+          interest_values_positive?: Json | null
+          next_steps_clarity_thresholds?: Json | null
+          objection_handling_thresholds?: Json | null
+          objection_resolution_good_threshold?: number | null
+          objection_resolution_warning_threshold?: number | null
+          overall_quality_thresholds?: Json | null
+          personal_insights_thresholds?: Json | null
+          question_adherence_thresholds?: Json | null
+          question_coverage_good_threshold?: number | null
+          question_coverage_total?: number | null
+          question_coverage_warning_threshold?: number | null
+          rapport_building_thresholds?: Json | null
+          scores_decimal_places?: number | null
+          script_adherence_thresholds?: Json | null
+          seller_interest_thresholds?: Json | null
+          show_score_justifications?: boolean | null
+          top_calls_min_score?: number | null
+          updated_at?: string | null
+          valuation_discussion_thresholds?: Json | null
+          value_proposition_thresholds?: Json | null
+          worst_calls_max_score?: number | null
+        }
+        Update: {
+          call_duration_max_optimal?: number | null
+          call_duration_min_optimal?: number | null
+          call_duration_too_long?: number | null
+          call_duration_too_short?: number | null
+          client_id?: string
+          coaching_alert_objection_handling?: number | null
+          coaching_alert_overall_quality?: number | null
+          coaching_alert_question_adherence?: number | null
+          coaching_alert_script_adherence?: number | null
+          conversation_quality_thresholds?: Json | null
+          created_at?: string | null
+          hot_lead_interest_score?: number | null
+          hot_lead_requires_interest_yes?: boolean | null
+          id?: string
+          interest_values_negative?: Json | null
+          interest_values_positive?: Json | null
+          next_steps_clarity_thresholds?: Json | null
+          objection_handling_thresholds?: Json | null
+          objection_resolution_good_threshold?: number | null
+          objection_resolution_warning_threshold?: number | null
+          overall_quality_thresholds?: Json | null
+          personal_insights_thresholds?: Json | null
+          question_adherence_thresholds?: Json | null
+          question_coverage_good_threshold?: number | null
+          question_coverage_total?: number | null
+          question_coverage_warning_threshold?: number | null
+          rapport_building_thresholds?: Json | null
+          scores_decimal_places?: number | null
+          script_adherence_thresholds?: Json | null
+          seller_interest_thresholds?: Json | null
+          show_score_justifications?: boolean | null
+          top_calls_min_score?: number | null
+          updated_at?: string | null
+          valuation_discussion_thresholds?: Json | null
+          value_proposition_thresholds?: Json | null
+          worst_calls_max_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calling_metrics_config_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: true
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_alerts: {
         Row: {
           campaign_id: string | null
