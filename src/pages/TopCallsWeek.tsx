@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
-import { useWorkspace } from '@/hooks/useWorkspace';
+import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useEnhancedCallingAnalytics, DateRange } from '@/hooks/useEnhancedCallingAnalytics';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
+import { formatScore, formatCallingDuration, getScoreStatus, getScoreStatusColor } from '@/lib/callingConfig';
 import {
   Trophy,
   Play,
@@ -15,128 +17,15 @@ import {
   Phone,
   User,
   Zap,
+  Filter,
+  Flame,
 } from 'lucide-react';
-
-interface TopCall {
-  id: string;
-  call_id: string;
-  quality_score: number;
-  rep_name: string;
-  contact_name: string;
-  company_name: string;
-  duration_seconds: number;
-  call_date: string;
-  outcome: string;
-  key_techniques: string[];
-  why_it_worked: string;
-}
-
-interface PatternInsight {
-  category: string;
-  insight: string;
-  frequency: string;
-}
+import { format } from 'date-fns';
 
 export default function TopCallsWeek() {
-  const { currentWorkspace } = useWorkspace();
-  const [loading, setLoading] = useState(true);
-  const [topCalls, setTopCalls] = useState<TopCall[]>([]);
-  const [patterns, setPatterns] = useState<PatternInsight[]>([]);
-
-  useEffect(() => {
-    if (currentWorkspace?.id) {
-      fetchTopCalls();
-    }
-  }, [currentWorkspace?.id]);
-
-  const fetchTopCalls = async () => {
-    if (!currentWorkspace?.id) return;
-    setLoading(true);
-
-    try {
-      // Get engagements for this workspace
-      const { data: engagements } = await supabase
-        .from('engagements')
-        .select('id')
-        .eq('client_id', currentWorkspace.id);
-
-      const engagementIds = engagements?.map(e => e.id) || [];
-      if (engagementIds.length === 0) {
-        setTopCalls([]);
-        setLoading(false);
-        return;
-      }
-
-      // Fetch top calls by talk duration (proxy for quality)
-      const { data: calls, error } = await supabase
-        .from('call_activities')
-        .select('id, to_name, to_phone, caller_name, talk_duration, conversation_outcome, started_at, notes, transcription')
-        .in('engagement_id', engagementIds)
-        .not('transcription', 'is', null)
-        .order('talk_duration', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-
-      // Transform data
-      const topCallsData: TopCall[] = (calls || []).map((c) => {
-        const durationScore = Math.min(100, (c.talk_duration || 0) / 3);
-        const hasOutcome = c.conversation_outcome?.toLowerCase().includes('meeting') || 
-                          c.conversation_outcome?.toLowerCase().includes('interested');
-        const qualityScore = durationScore + (hasOutcome ? 20 : 0);
-
-        return {
-          id: c.id,
-          call_id: c.id,
-          quality_score: Math.min(100, qualityScore),
-          rep_name: c.caller_name || 'Unknown',
-          contact_name: c.to_name || c.to_phone || 'Unknown',
-          company_name: 'Company',
-          duration_seconds: c.talk_duration || 0,
-          call_date: c.started_at || '',
-          outcome: c.conversation_outcome || 'Connection',
-          key_techniques: [
-            (c.talk_duration || 0) > 180 ? 'Long conversation' : null,
-            hasOutcome ? 'Positive outcome' : null,
-            c.transcription ? 'Transcribed' : null,
-          ].filter(Boolean) as string[],
-          why_it_worked: c.notes || 'High overall quality call',
-        };
-      });
-
-      setTopCalls(topCallsData);
-
-      // Generate pattern insights
-      const longCalls = calls?.filter(c => (c.talk_duration || 0) > 180) || [];
-      const positiveCalls = calls?.filter(c => 
-        c.conversation_outcome?.toLowerCase().includes('meeting') ||
-        c.conversation_outcome?.toLowerCase().includes('interested')
-      ) || [];
-
-      setPatterns([
-        {
-          category: 'Call Duration',
-          insight: 'Longer calls correlate with better outcomes',
-          frequency: `${longCalls.length}/${calls?.length || 0} top calls`,
-        },
-        {
-          category: 'Positive Outcomes',
-          insight: 'Meeting-setters have above average duration',
-          frequency: `${positiveCalls.length}/${calls?.length || 0} top calls`,
-        },
-      ]);
-    } catch (err) {
-      console.error('Error fetching top calls:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 85) return 'text-green-600';
-    if (score >= 70) return 'text-yellow-600';
-    return 'text-orange-600';
-  };
+  const [dateRange, setDateRange] = useState<DateRange>('7d');
+  const { data, isLoading } = useEnhancedCallingAnalytics(dateRange);
+  const { config } = useCallingConfig();
 
   const getRankIcon = (index: number) => {
     if (index === 0) return <Trophy className="h-5 w-5 text-yellow-500" />;
@@ -145,24 +34,59 @@ export default function TopCallsWeek() {
     return <span className="text-muted-foreground font-medium">{index + 1}</span>;
   };
 
+  // Generate pattern insights from top calls
+  const patterns = data?.topCalls.length ? [
+    {
+      category: 'High Scores',
+      insight: `Top calls average ${formatScore(
+        data.topCalls.reduce((sum, c) => sum + (c.composite_score || 0), 0) / data.topCalls.length,
+        config
+      )} overall score`,
+      frequency: `${data.topCalls.length} calls`,
+    },
+    {
+      category: 'Duration',
+      insight: 'Longer conversations correlate with higher scores',
+      frequency: `Avg ${formatCallingDuration(
+        data.topCalls.reduce((sum, c) => sum + (c.talk_duration || 0), 0) / data.topCalls.length
+      )}`,
+    },
+    {
+      category: 'Hot Leads',
+      insight: `${data.hotLeads.length} hot leads identified`,
+      frequency: `Interest ≥ ${config.hotLeadInterestScore}`,
+    },
+  ] : [];
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Top Calls This Week</h1>
-          <p className="text-muted-foreground">Best performing calls for learning and recognition</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Top Calls</h1>
+            <p className="text-muted-foreground">Best performing calls for learning and recognition</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7d">This Week</SelectItem>
+                <SelectItem value="14d">2 Weeks</SelectItem>
+                <SelectItem value="30d">This Month</SelectItem>
+                <SelectItem value="90d">Quarter</SelectItem>
+                <SelectItem value="all">All Time</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        {loading ? (
-          <div className="space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <Card key={i}>
-                <CardContent className="pt-6">
-                  <div className="h-24 w-full bg-muted animate-pulse rounded" />
-                </CardContent>
-              </Card>
-            ))}
+        {isLoading ? (
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : (
           <div className="grid gap-6 lg:grid-cols-3">
@@ -174,76 +98,88 @@ export default function TopCallsWeek() {
                     <Trophy className="h-5 w-5 text-yellow-500" />
                     Top 10 Leaderboard
                   </CardTitle>
-                  <CardDescription>Ranked by call quality score</CardDescription>
+                  <CardDescription>
+                    Ranked by overall score (threshold: ≥ {config.topCallsMinScore})
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {topCalls.length > 0 ? (
-                    topCalls.map((call, index) => (
-                      <div
-                        key={call.id}
-                        className={`flex items-center gap-4 p-3 rounded-lg border transition-colors hover:border-primary/50 ${
-                          index < 3 ? 'bg-accent/30' : ''
-                        }`}
-                      >
-                        {/* Rank */}
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-background flex items-center justify-center">
-                          {getRankIcon(index)}
-                        </div>
-
-                        {/* Call Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium truncate">{call.contact_name}</p>
-                            <Badge variant="outline" className="text-xs">
-                              {call.outcome}
-                            </Badge>
+                  {data?.topCalls && data.topCalls.length > 0 ? (
+                    data.topCalls.slice(0, 10).map((call, index) => {
+                      const status = getScoreStatus(call.composite_score, config.overallQualityThresholds);
+                      return (
+                        <div
+                          key={call.id}
+                          className={`flex items-center gap-4 p-3 rounded-lg border transition-colors hover:border-primary/50 ${
+                            index < 3 ? 'bg-accent/30' : ''
+                          }`}
+                        >
+                          {/* Rank */}
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-background flex items-center justify-center">
+                            {getRankIcon(index)}
                           </div>
-                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <User className="h-3 w-3" />
-                              {call.rep_name}
-                            </span>
-                            <span>
-                              {Math.floor(call.duration_seconds / 60)}:{(call.duration_seconds % 60).toString().padStart(2, '0')} min
-                            </span>
+
+                          {/* Call Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium truncate">{call.to_name || call.to_phone || 'Unknown'}</p>
+                              {call.is_dm_conversation && (
+                                <Badge variant="secondary" className="text-xs">DM</Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <User className="h-3 w-3" />
+                                {call.caller_name?.split('@')[0] || 'Unknown'}
+                              </span>
+                              <span>
+                                {formatCallingDuration(call.talk_duration)}
+                              </span>
+                              {call.started_at && (
+                                <span>
+                                  {format(new Date(call.started_at), 'MMM d')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Score */}
+                          <div className="text-right">
+                            <p className={`text-xl font-bold ${getScoreStatusColor(status)}`}>
+                              {formatScore(call.composite_score, config)}
+                            </p>
+                            <p className="text-xs text-muted-foreground">Score</p>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex gap-1">
+                            {call.recording_url && (
+                              <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
+                                <a href={call.recording_url} target="_blank" rel="noopener noreferrer">
+                                  <Play className="h-4 w-4" />
+                                </a>
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <FileText className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
-
-                        {/* Score */}
-                        <div className="text-right">
-                          <p className={`text-xl font-bold ${getScoreColor(call.quality_score)}`}>
-                            {Math.round(call.quality_score)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Score</p>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <Play className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <FileText className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <BookOpen className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
                       <Phone className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p>No scored calls this week</p>
-                      <p className="text-sm">Complete calls to see the leaderboard</p>
+                      <p>No top calls this period</p>
+                      <p className="text-sm">Calls with score ≥ {config.topCallsMinScore} will appear here</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
             </div>
 
-            {/* Pattern Analysis */}
+            {/* Sidebar */}
             <div className="space-y-4">
+              {/* Pattern Analysis */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -267,6 +203,7 @@ export default function TopCallsWeek() {
                 </CardContent>
               </Card>
 
+              {/* Training Module CTA */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Create Training</CardTitle>
@@ -284,7 +221,7 @@ export default function TopCallsWeek() {
               </Card>
 
               {/* Call of the Week Highlight */}
-              {topCalls.length > 0 && (
+              {data?.topCalls && data.topCalls.length > 0 && (
                 <Card className="border-yellow-500/30 bg-yellow-500/5">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-lg">
@@ -294,22 +231,54 @@ export default function TopCallsWeek() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      <p className="font-medium">{topCalls[0].contact_name}</p>
+                      <p className="font-medium">{data.topCalls[0].to_name || data.topCalls[0].to_phone}</p>
                       <p className="text-sm text-muted-foreground">
-                        Rep: {topCalls[0].rep_name}
+                        Rep: {data.topCalls[0].caller_name?.split('@')[0]}
                       </p>
-                      <p className="text-sm">{topCalls[0].why_it_worked}</p>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {topCalls[0].key_techniques.map((technique, i) => (
-                          <Badge key={i} variant="secondary" className="text-xs">
-                            {technique}
-                          </Badge>
-                        ))}
+                      <div className="flex items-center gap-2">
+                        <Badge className={getScoreStatusColor(getScoreStatus(data.topCalls[0].composite_score, config.overallQualityThresholds))}>
+                          Score: {formatScore(data.topCalls[0].composite_score, config)}
+                        </Badge>
+                        <Badge variant="outline">
+                          {formatCallingDuration(data.topCalls[0].talk_duration)}
+                        </Badge>
                       </div>
-                      <Button variant="outline" className="w-full mt-3">
-                        <Play className="h-4 w-4 mr-2" />
-                        Listen to Call
-                      </Button>
+                      {data.topCalls[0].recording_url && (
+                        <Button variant="outline" className="w-full mt-3" asChild>
+                          <a href={data.topCalls[0].recording_url} target="_blank" rel="noopener noreferrer">
+                            <Play className="h-4 w-4 mr-2" />
+                            Listen to Call
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Hot Leads */}
+              {data?.hotLeads && data.hotLeads.length > 0 && (
+                <Card className="border-orange-500/30 bg-orange-500/5">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Flame className="h-5 w-5 text-orange-500" />
+                      Hot Leads ({data.hotLeads.length})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      Interest score ≥ {config.hotLeadInterestScore}
+                      {config.hotLeadRequiresInterestYes && ' + positive interest'}
+                    </p>
+                    <div className="space-y-2">
+                      {data.hotLeads.slice(0, 3).map(lead => (
+                        <div key={lead.id} className="flex items-center justify-between text-sm">
+                          <span className="truncate">{lead.to_name || lead.to_phone}</span>
+                          <Badge variant="outline" className="text-orange-500">
+                            {formatScore(lead.seller_interest_score, config)}
+                          </Badge>
+                        </div>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>
