@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       call_activities: {
         Row: {
+          call_summary: string | null
           callback_datetime: string | null
           callback_notes: string | null
           callback_scheduled: boolean | null
@@ -24,6 +25,7 @@ export type Database = {
           caller_user_id: string | null
           campaign_id: string | null
           company_id: string
+          composite_score: number | null
           contact_id: string
           conversation_outcome: string | null
           created_at: string | null
@@ -34,12 +36,20 @@ export type Database = {
           engagement_id: string
           external_id: string | null
           id: string
+          is_dm_conversation: boolean | null
+          nocodb_row_id: string | null
           notes: string | null
+          objection_handling_score: number | null
+          objections_list: string[] | null
+          quality_of_conversation_score: number | null
           raw_data: Json | null
           recording_duration: number | null
           recording_url: string | null
           ring_duration: number | null
           scheduled_at: string | null
+          script_adherence_score: number | null
+          seller_interest_score: number | null
+          source: string | null
           started_at: string | null
           synced_at: string | null
           talk_duration: number | null
@@ -47,10 +57,12 @@ export type Database = {
           to_phone: string
           transcription: string | null
           updated_at: string | null
+          value_proposition_score: number | null
           voicemail_left: boolean | null
           voicemail_template: string | null
         }
         Insert: {
+          call_summary?: string | null
           callback_datetime?: string | null
           callback_notes?: string | null
           callback_scheduled?: boolean | null
@@ -59,6 +71,7 @@ export type Database = {
           caller_user_id?: string | null
           campaign_id?: string | null
           company_id: string
+          composite_score?: number | null
           contact_id: string
           conversation_outcome?: string | null
           created_at?: string | null
@@ -69,12 +82,20 @@ export type Database = {
           engagement_id: string
           external_id?: string | null
           id?: string
+          is_dm_conversation?: boolean | null
+          nocodb_row_id?: string | null
           notes?: string | null
+          objection_handling_score?: number | null
+          objections_list?: string[] | null
+          quality_of_conversation_score?: number | null
           raw_data?: Json | null
           recording_duration?: number | null
           recording_url?: string | null
           ring_duration?: number | null
           scheduled_at?: string | null
+          script_adherence_score?: number | null
+          seller_interest_score?: number | null
+          source?: string | null
           started_at?: string | null
           synced_at?: string | null
           talk_duration?: number | null
@@ -82,10 +103,12 @@ export type Database = {
           to_phone: string
           transcription?: string | null
           updated_at?: string | null
+          value_proposition_score?: number | null
           voicemail_left?: boolean | null
           voicemail_template?: string | null
         }
         Update: {
+          call_summary?: string | null
           callback_datetime?: string | null
           callback_notes?: string | null
           callback_scheduled?: boolean | null
@@ -94,6 +117,7 @@ export type Database = {
           caller_user_id?: string | null
           campaign_id?: string | null
           company_id?: string
+          composite_score?: number | null
           contact_id?: string
           conversation_outcome?: string | null
           created_at?: string | null
@@ -104,12 +128,20 @@ export type Database = {
           engagement_id?: string
           external_id?: string | null
           id?: string
+          is_dm_conversation?: boolean | null
+          nocodb_row_id?: string | null
           notes?: string | null
+          objection_handling_score?: number | null
+          objections_list?: string[] | null
+          quality_of_conversation_score?: number | null
           raw_data?: Json | null
           recording_duration?: number | null
           recording_url?: string | null
           ring_duration?: number | null
           scheduled_at?: string | null
+          script_adherence_score?: number | null
+          seller_interest_score?: number | null
+          source?: string | null
           started_at?: string | null
           synced_at?: string | null
           talk_duration?: number | null
@@ -117,6 +149,7 @@ export type Database = {
           to_phone?: string
           transcription?: string | null
           updated_at?: string | null
+          value_proposition_score?: number | null
           voicemail_left?: boolean | null
           voicemail_template?: string | null
         }
@@ -1365,6 +1398,86 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "copy_patterns_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_calling_metrics: {
+        Row: {
+          avg_call_duration_seconds: number | null
+          avg_composite_score: number | null
+          avg_interest_score: number | null
+          avg_quality_score: number | null
+          caller_name: string | null
+          connect_rate: number | null
+          connections: number | null
+          conversation_rate: number | null
+          conversations: number | null
+          created_at: string | null
+          date: string
+          dm_conversations: number | null
+          engagement_id: string | null
+          id: string
+          meeting_rate: number | null
+          meetings_booked: number | null
+          total_dials: number | null
+          total_talk_time_seconds: number | null
+          updated_at: string | null
+          voicemail_rate: number | null
+          voicemails_left: number | null
+        }
+        Insert: {
+          avg_call_duration_seconds?: number | null
+          avg_composite_score?: number | null
+          avg_interest_score?: number | null
+          avg_quality_score?: number | null
+          caller_name?: string | null
+          connect_rate?: number | null
+          connections?: number | null
+          conversation_rate?: number | null
+          conversations?: number | null
+          created_at?: string | null
+          date: string
+          dm_conversations?: number | null
+          engagement_id?: string | null
+          id?: string
+          meeting_rate?: number | null
+          meetings_booked?: number | null
+          total_dials?: number | null
+          total_talk_time_seconds?: number | null
+          updated_at?: string | null
+          voicemail_rate?: number | null
+          voicemails_left?: number | null
+        }
+        Update: {
+          avg_call_duration_seconds?: number | null
+          avg_composite_score?: number | null
+          avg_interest_score?: number | null
+          avg_quality_score?: number | null
+          caller_name?: string | null
+          connect_rate?: number | null
+          connections?: number | null
+          conversation_rate?: number | null
+          conversations?: number | null
+          created_at?: string | null
+          date?: string
+          dm_conversations?: number | null
+          engagement_id?: string | null
+          id?: string
+          meeting_rate?: number | null
+          meetings_booked?: number | null
+          total_dials?: number | null
+          total_talk_time_seconds?: number | null
+          updated_at?: string | null
+          voicemail_rate?: number | null
+          voicemails_left?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_calling_metrics_engagement_id_fkey"
             columns: ["engagement_id"]
             isOneToOne: false
             referencedRelation: "engagements"

@@ -16,7 +16,8 @@ import { TeamMembersSettings } from '@/components/settings/TeamMembersSettings';
 import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
 import { SyncStatusPanel } from '@/components/settings/SyncStatusPanel';
 import { SyncProgressCard } from '@/components/dashboard/SyncProgressCard';
-import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle } from 'lucide-react';
+import { MetricsReferenceSection } from '@/components/settings/MetricsReferenceSection';
+import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle, Calculator } from 'lucide-react';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -53,7 +54,7 @@ export default function Settings() {
   // Update tab when URL changes
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam && ['profile', 'workspace', 'team', 'connections', 'security'].includes(tabParam)) {
+    if (tabParam && ['profile', 'workspace', 'team', 'connections', 'security', 'metrics'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [searchParams]);
@@ -102,7 +103,7 @@ export default function Settings() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               <span className="hidden sm:inline">Profile</span>
@@ -122,6 +123,10 @@ export default function Settings() {
             <TabsTrigger value="connections" className="flex items-center gap-2">
               <Plug className="h-4 w-4" />
               <span className="hidden sm:inline">Connections</span>
+            </TabsTrigger>
+            <TabsTrigger value="metrics" className="flex items-center gap-2">
+              <Calculator className="h-4 w-4" />
+              <span className="hidden sm:inline">Metrics</span>
             </TabsTrigger>
             <TabsTrigger value="security" className="flex items-center gap-2">
               <Shield className="h-4 w-4" />
@@ -278,6 +283,11 @@ export default function Settings() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          {/* Metrics Reference Tab */}
+          <TabsContent value="metrics" className="mt-6">
+            <MetricsReferenceSection />
           </TabsContent>
 
           {/* Security Tab */}
