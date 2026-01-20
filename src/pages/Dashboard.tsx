@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { useSyncData } from '@/hooks/useSyncData';
+import { useDataFreshness } from '@/hooks/useDataFreshness';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { TimeHeatmap } from '@/components/dashboard/TimeHeatmap';
 import { SystemHealthScore, calculateSystemHealth } from '@/components/dashboard/SystemHealthScore';
@@ -15,6 +16,7 @@ import { ActionQueue, generateActionItems } from '@/components/dashboard/ActionQ
 import { KPICard, getKPIStatus } from '@/components/dashboard/KPICard';
 import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/components/dashboard/DateRangeFilter';
 import { ExecutiveSummary } from '@/components/copyinsights/ExecutiveSummary';
+import { DataFreshness } from '@/components/ui/data-freshness';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 // DataErrorFlag imported but only used for specific flagged metrics
@@ -51,6 +53,7 @@ export default function Dashboard() {
   const dateRange = getDateRange(dateRangeOption);
   const { loading: dataLoading, hasData, stats, trendData, topCampaigns, timeData, refetch } = useDashboardData(dateRange);
   const { syncing, triggerSync } = useSyncData();
+  const { data: freshnessData } = useDataFreshness();
 
   const handleRefresh = async () => {
     await triggerSync();
@@ -178,11 +181,19 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
-            <p className="text-muted-foreground">
-              Strategic command center for your outbound program
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
+              <p className="text-muted-foreground">
+                Strategic command center for your outbound program
+              </p>
+            </div>
+            {freshnessData && (
+              <DataFreshness 
+                lastSyncAt={freshnessData.lastSyncAt} 
+                status={freshnessData.status}
+              />
+            )}
           </div>
           {hasData && (
             <div className="flex gap-2">

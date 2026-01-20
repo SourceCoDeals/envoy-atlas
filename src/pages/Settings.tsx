@@ -14,6 +14,7 @@ import { InviteTeamMemberDialog } from '@/components/settings/InviteTeamMemberDi
 import { TeamMembersList } from '@/components/settings/TeamMembersList';
 import { TeamMembersSettings } from '@/components/settings/TeamMembersSettings';
 import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
+import { SyncStatusPanel } from '@/components/settings/SyncStatusPanel';
 import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle } from 'lucide-react';
 
 export default function Settings() {
@@ -262,9 +263,12 @@ export default function Settings() {
           </TabsContent>
 
           {/* Connections Tab */}
-          <TabsContent value="connections" className="mt-6">
+          <TabsContent value="connections" className="mt-6 space-y-6">
             {currentWorkspace ? (
-              <ConnectionsSection workspaceId={currentWorkspace.id} />
+              <>
+                <SyncStatusPanel />
+                <ConnectionsSection workspaceId={currentWorkspace.id} />
+              </>
             ) : (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
