@@ -19,7 +19,49 @@ interface ReplyioWebhookEvent {
   bounceReason?: string;
   clickedUrl?: string;
   finishReason?: string;
+  status?: string;
   [key: string]: any;
+}
+
+// Category mapping for Reply.io - maps finish reasons/statuses to standardized categories
+const REPLYIO_CATEGORY_MAP: Record<string, { category: string; sentiment: string }> = {
+  'interested': { category: 'interested', sentiment: 'positive' },
+  'meeting_booked': { category: 'meeting_request', sentiment: 'positive' },
+  'meeting booked': { category: 'meeting_request', sentiment: 'positive' },
+  'not_interested': { category: 'not_interested', sentiment: 'negative' },
+  'not interested': { category: 'not_interested', sentiment: 'negative' },
+  'out_of_office': { category: 'out_of_office', sentiment: 'neutral' },
+  'ooo': { category: 'out_of_office', sentiment: 'neutral' },
+  'unsubscribed': { category: 'unsubscribe', sentiment: 'negative' },
+  'autoreplied': { category: 'auto_reply', sentiment: 'neutral' },
+  'bounced': { category: 'bounce', sentiment: 'neutral' },
+  'wrong_person': { category: 'wrong_person', sentiment: 'neutral' },
+  'referral': { category: 'referral', sentiment: 'positive' },
+};
+
+function mapReplyioCategory(status: string | null | undefined): { 
+  reply_category: string | null; 
+  reply_sentiment: string | null 
+} {
+  if (!status) return { reply_category: null, reply_sentiment: null };
+  const mapped = REPLYIO_CATEGORY_MAP[status.toLowerCase()];
+  if (mapped) return { reply_category: mapped.category, reply_sentiment: mapped.sentiment };
+  
+  // Fallback inference based on keywords
+  const lower = status.toLowerCase();
+  if (lower.includes('interested') && !lower.includes('not')) {
+    return { reply_category: 'interested', reply_sentiment: 'positive' };
+  }
+  if (lower.includes('meeting') || lower.includes('booked') || lower.includes('schedule')) {
+    return { reply_category: 'meeting_request', reply_sentiment: 'positive' };
+  }
+  if (lower.includes('not interested') || lower.includes('unsubscribe') || lower.includes('remove')) {
+    return { reply_category: 'not_interested', reply_sentiment: 'negative' };
+  }
+  if (lower.includes('ooo') || lower.includes('out of office') || lower.includes('vacation')) {
+    return { reply_category: 'out_of_office', reply_sentiment: 'neutral' };
+  }
+  return { reply_category: 'neutral', reply_sentiment: 'neutral' };
 }
 
 Deno.serve(async (req) => {
@@ -321,11 +363,16 @@ async function processEmailReply(
   const contactInfo = await getOrCreateContact(supabase, engagementId, email);
   if (!contactInfo) return;
 
+  // Map category from finish reason or status
+  const mapped = mapReplyioCategory(event.finishReason || event.status);
+
   await supabase.from('email_activities')
     .update({
       replied: true,
       replied_at: event.timestamp || new Date().toISOString(),
       reply_text: event.replyText || null,
+      reply_category: mapped.reply_category,
+      reply_sentiment: mapped.reply_sentiment,
     })
     .eq('engagement_id', engagementId)
     .eq('campaign_id', campaignId)
