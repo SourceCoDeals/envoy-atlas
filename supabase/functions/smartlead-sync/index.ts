@@ -14,7 +14,7 @@ const corsHeaders = {
 const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 // SmartLead Rate Limit: 10 requests per 2 seconds = 5 req/s
 // Using 250ms delay = 4 req/s to stay safely within limits
-const RATE_LIMIT_DELAY = 250;
+const RATE_LIMIT_DELAY = 350;  // Safer margin for SmartLead's 10 req/2s limit
 // Increased time budget for full processing - edge functions can run up to 400s
 const TIME_BUDGET_MS = 300000;
 // Remove practical batch limit - allow full sync to complete
@@ -158,6 +158,51 @@ interface SmartleadMessageHistory {
   to_email?: string;
 }
 
+// SmartLead category to our category mapping
+const SMARTLEAD_CATEGORY_MAP: Record<string, { category: string; sentiment: string; is_positive: boolean }> = {
+  'Interested': { category: 'interested', sentiment: 'positive', is_positive: true },
+  'Meeting Booked': { category: 'meeting_request', sentiment: 'positive', is_positive: true },
+  'Meeting Scheduled': { category: 'meeting_request', sentiment: 'positive', is_positive: true },
+  'Positive': { category: 'interested', sentiment: 'positive', is_positive: true },
+  'Not Interested': { category: 'not_interested', sentiment: 'negative', is_positive: false },
+  'Out of Office': { category: 'out_of_office', sentiment: 'neutral', is_positive: false },
+  'OOO': { category: 'out_of_office', sentiment: 'neutral', is_positive: false },
+  'Wrong Person': { category: 'referral', sentiment: 'neutral', is_positive: false },
+  'Unsubscribed': { category: 'unsubscribe', sentiment: 'negative', is_positive: false },
+  'Do Not Contact': { category: 'unsubscribe', sentiment: 'negative', is_positive: false },
+  'Neutral': { category: 'neutral', sentiment: 'neutral', is_positive: false },
+  'Question': { category: 'question', sentiment: 'neutral', is_positive: false },
+  'Not Now': { category: 'not_now', sentiment: 'neutral', is_positive: false },
+};
+
+function mapSmartleadCategory(leadCategory: string | null | undefined): { 
+  reply_category: string | null; 
+  reply_sentiment: string | null; 
+  is_positive: boolean;
+} {
+  if (!leadCategory) return { reply_category: null, reply_sentiment: null, is_positive: false };
+  
+  const mapped = SMARTLEAD_CATEGORY_MAP[leadCategory];
+  if (mapped) {
+    return {
+      reply_category: mapped.category,
+      reply_sentiment: mapped.sentiment,
+      is_positive: mapped.is_positive,
+    };
+  }
+  
+  // Fallback: try to infer from category name
+  const lower = leadCategory.toLowerCase();
+  if (lower.includes('interested') && !lower.includes('not')) {
+    return { reply_category: 'interested', reply_sentiment: 'positive', is_positive: true };
+  }
+  if (lower.includes('meeting') || lower.includes('booked') || lower.includes('scheduled')) {
+    return { reply_category: 'meeting_request', reply_sentiment: 'positive', is_positive: true };
+  }
+  
+  return { reply_category: 'neutral', reply_sentiment: 'neutral', is_positive: false };
+}
+
 interface SmartleadStatistic {
   id: number | string;
   lead_id: number;
@@ -195,8 +240,14 @@ async function smartleadRequest(endpoint: string, apiKey: string, method = 'GET'
       const response = await fetch(url, options);
       
       if (response.status === 429) {
-        console.log(`Rate limited, waiting ${(i + 1) * 2} seconds...`);
-        await delay((i + 1) * 2000);
+        // Check for Retry-After header
+        const retryAfter = response.headers.get('Retry-After');
+        const waitMs = retryAfter 
+          ? parseInt(retryAfter) * 1000 
+          : Math.min(30000, (i + 1) * 3000);  // Exponential backoff, max 30s
+        
+        console.log(`Rate limited (429), waiting ${waitMs}ms before retry ${i + 1}/${retries}...`);
+        await delay(waitMs);
         continue;
       }
       
@@ -374,6 +425,131 @@ async function triggerAnalysis(
       console.error('Failed to trigger classify-replies:', e);
     }
   }
+}
+
+// Aggregate metrics from email_activities to campaign_variants
+async function aggregateVariantMetrics(
+  supabase: any,
+  campaignDbId: string,
+  engagementId: string
+) {
+  console.log(`  Aggregating variant metrics for campaign ${campaignDbId}...`);
+  
+  // Get all email activities for this campaign grouped by step
+  const { data: activities } = await supabase
+    .from('email_activities')
+    .select('step_number, sent, opened, replied, reply_category')
+    .eq('campaign_id', campaignDbId);
+  
+  if (!activities || activities.length === 0) return;
+  
+  // Aggregate by step_number
+  const stepMetrics = new Map<number, { 
+    sent: number; 
+    opened: number; 
+    replied: number; 
+    positive: number;
+  }>();
+  
+  for (const activity of activities) {
+    const step = activity.step_number || 1;
+    const current = stepMetrics.get(step) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+    
+    if (activity.sent) current.sent++;
+    if (activity.opened) current.opened++;
+    if (activity.replied) current.replied++;
+    if (activity.reply_category === 'meeting_request' || activity.reply_category === 'interested') {
+      current.positive++;
+    }
+    
+    stepMetrics.set(step, current);
+  }
+  
+  // Update each variant with its metrics
+  for (const [stepNumber, metrics] of stepMetrics) {
+    const delivered = metrics.sent; // Simplified - could subtract bounces
+    
+    await supabase
+      .from('campaign_variants')
+      .update({
+        total_sent: metrics.sent,
+        total_opened: metrics.opened,
+        total_replied: metrics.replied,
+        positive_replies: metrics.positive,
+        open_rate: delivered > 0 ? (metrics.opened / delivered) * 100 : null,
+        reply_rate: delivered > 0 ? (metrics.replied / delivered) * 100 : null,
+        positive_reply_rate: delivered > 0 ? (metrics.positive / delivered) * 100 : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('campaign_id', campaignDbId)
+      .eq('step_number', stepNumber);
+  }
+  
+  console.log(`  Updated metrics for ${stepMetrics.size} variants`);
+}
+
+// Update campaign and daily_metrics with positive reply counts
+async function aggregatePositiveReplies(
+  supabase: any,
+  campaignDbId: string
+) {
+  console.log(`  Aggregating positive replies for campaign ${campaignDbId}...`);
+  
+  // Count total positive replies
+  const { count: totalPositive } = await supabase
+    .from('email_activities')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignDbId)
+    .in('reply_category', ['meeting_request', 'interested']);
+  
+  // Count total replies
+  const { count: totalReplied } = await supabase
+    .from('email_activities')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignDbId)
+    .eq('replied', true);
+  
+  // Count total sent
+  const { count: totalSent } = await supabase
+    .from('email_activities')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignDbId)
+    .eq('sent', true);
+  
+  // Update campaign totals
+  const delivered = totalSent || 0;
+  await supabase.from('campaigns').update({
+    positive_replies: totalPositive || 0,
+    total_replied: totalReplied || 0,
+    positive_rate: delivered > 0 ? ((totalPositive || 0) / delivered) * 100 : 0,
+    reply_rate: delivered > 0 ? ((totalReplied || 0) / delivered) * 100 : 0,
+    updated_at: new Date().toISOString(),
+  }).eq('id', campaignDbId);
+  
+  // Get positive replies grouped by date
+  const { data: positiveByDate } = await supabase
+    .from('email_activities')
+    .select('replied_at')
+    .eq('campaign_id', campaignDbId)
+    .in('reply_category', ['meeting_request', 'interested'])
+    .not('replied_at', 'is', null);
+  
+  // Group by date
+  const dateGroups = new Map<string, number>();
+  for (const activity of positiveByDate || []) {
+    const date = new Date(activity.replied_at).toISOString().split('T')[0];
+    dateGroups.set(date, (dateGroups.get(date) || 0) + 1);
+  }
+  
+  // Update daily_metrics
+  for (const [date, count] of dateGroups) {
+    await supabase.from('daily_metrics').update({
+      positive_replies: count,
+      updated_at: new Date().toISOString(),
+    }).eq('campaign_id', campaignDbId).eq('date', date);
+  }
+  
+  console.log(`  Campaign positive: ${totalPositive}, updated ${dateGroups.size} daily records`);
 }
 
 serve(async (req) => {
@@ -1268,13 +1444,53 @@ serve(async (req) => {
                     const email = stat.email;
                     if (!email) continue;
                     
-                    // Get contact for this email
-                    const { data: contact } = await supabase
+                    // Get contact for this email - or create on-the-fly if missing
+                    let contact = null;
+                    const { data: existingContact } = await supabase
                       .from('contacts')
                       .select('id, company_id')
                       .eq('engagement_id', activeEngagementId)
                       .eq('email', email)
                       .single();
+                    
+                    contact = existingContact;
+                    
+                    // Create contact if doesn't exist
+                    if (!contact) {
+                      const domain = extractDomain(email);
+                      let companyId = null;
+                      
+                      // Try to find existing company by domain
+                      if (domain) {
+                        const { data: existingCompany } = await supabase
+                          .from('companies')
+                          .select('id')
+                          .eq('engagement_id', activeEngagementId)
+                          .eq('domain', domain)
+                          .maybeSingle();
+                        companyId = existingCompany?.id;
+                      }
+                      
+                      // Create minimal contact
+                      const { data: newContact, error: contactError } = await supabase
+                        .from('contacts')
+                        .insert({
+                          engagement_id: activeEngagementId,
+                          email: email,
+                          company_id: companyId,
+                          source: 'smartlead',
+                        })
+                        .select('id, company_id')
+                        .single();
+                      
+                      if (contactError) {
+                        console.error(`  Failed to create contact for ${email}:`, contactError.message);
+                        continue;
+                      }
+                      
+                      contact = newContact;
+                      progress.leads_synced++;
+                    }
                     
                     if (!contact) continue;
                     
@@ -1282,6 +1498,9 @@ serve(async (req) => {
                     const categoryId = stat.lead_category_id 
                       ? categoryMap.get(String(stat.lead_category_id)) 
                       : null;
+                    
+                    // Get mapped category from SmartLead's lead_category for replies
+                    const mappedCategory = mapSmartleadCategory(stat.lead_category);
                     
                     const { error: activityError } = await supabase
                       .from('email_activities')
@@ -1307,6 +1526,9 @@ serve(async (req) => {
                         step_number: stat.seq_number || null,
                         lead_category: stat.lead_category || null,
                         category_id: categoryId,
+                        // Map reply category and sentiment from SmartLead's classification
+                        reply_category: stat.reply_time ? mappedCategory.reply_category : null,
+                        reply_sentiment: stat.reply_time ? mappedCategory.reply_sentiment : null,
                       }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
                     
                     if (!activityError) {
@@ -1365,6 +1587,10 @@ serve(async (req) => {
             } catch (e) {
               console.log(`  Statistics not available for ${campaign.name}:`, (e as Error).message);
             }
+            
+            // After statistics sync, aggregate variant metrics and positive replies
+            await aggregateVariantMetrics(supabase, campaignDbId, activeEngagementId);
+            await aggregatePositiveReplies(supabase, campaignDbId);
           }
 
           // NOTE: Leads are now synced FIRST in PRIORITY 1 section above
