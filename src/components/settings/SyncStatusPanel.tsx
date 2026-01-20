@@ -40,12 +40,14 @@ export function SyncStatusPanel() {
   });
 
   const handleSync = async (source: DataSource) => {
+    if (!currentWorkspace?.id) return;
+
     setSyncingId(source.id);
     try {
-      const syncEndpoint = source.source_type === 'smartlead' 
-        ? 'smartlead-sync' 
-        : source.source_type === 'replyio' 
-        ? 'replyio-sync' 
+      const syncEndpoint = source.source_type === 'smartlead'
+        ? 'smartlead-sync'
+        : source.source_type === 'replyio'
+        ? 'replyio-sync'
         : null;
 
       if (!syncEndpoint) {
@@ -53,18 +55,43 @@ export function SyncStatusPanel() {
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke(syncEndpoint, {
-        body: { data_source_id: source.id },
+      const { data: engagement } = await supabase
+        .from('engagements')
+        .select('id')
+        .eq('client_id', currentWorkspace.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!engagement?.id) {
+        toast.error('No engagement found for this workspace');
+        return;
+      }
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error('Not authenticated');
+
+      const { error } = await supabase.functions.invoke(syncEndpoint, {
+        body: {
+          client_id: currentWorkspace.id,
+          engagement_id: engagement.id,
+          data_source_id: source.id,
+          reset: false,
+          full_backfill: false,
+          auto_continue: true,
+        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (error) throw error;
 
       toast.success(`Sync started for ${source.name}`);
-      // Refetch after a short delay to show updated status
-      setTimeout(() => refetch(), 2000);
+      setTimeout(() => refetch(), 1500);
     } catch (err: any) {
       console.error('Sync error:', err);
-      toast.error(`Sync failed: ${err.message}`);
+      toast.error(`Sync failed: ${err.message || 'Unknown error'}`);
     } finally {
       setSyncingId(null);
     }
@@ -157,8 +184,9 @@ export function SyncStatusPanel() {
                 <Button 
                   variant="outline" 
                   size="sm"
+                  type="button"
                   onClick={() => handleSync(source)}
-                  disabled={syncingId !== null}
+                  disabled={syncingId === source.id}
                 >
                   <RefreshCw className={cn("h-4 w-4 mr-1", syncingId === source.id && "animate-spin")} />
                   {syncingId === source.id ? 'Syncing...' : 'Sync Now'}
