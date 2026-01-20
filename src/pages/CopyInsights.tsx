@@ -23,7 +23,10 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
+import { DataFreshness } from '@/components/ui/data-freshness';
+import { ConfidenceBadge } from '@/components/ui/confidence-badge';
 import { useCopyAnalytics, type SubjectLineAnalysis } from '@/hooks/useCopyAnalytics';
+import { useDataFreshness } from '@/hooks/useDataFreshness';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -42,6 +45,7 @@ export default function CopyInsights() {
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { subjectLines, bodyCopy, patterns, discoveredPatterns, topPerformers, recommendations, loading, error } = useCopyAnalytics();
+  const { data: freshnessData } = useDataFreshness();
   const [activeTab, setActiveTab] = useState('overview');
   const [isRecomputing, setIsRecomputing] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
@@ -154,11 +158,14 @@ export default function CopyInsights() {
 
   // Auth not required - public read access enabled
 
-  // Calculate baseline reply rate
-  const baselineReplyRate = useMemo(() => {
+  // Calculate baseline reply rate and total sample size
+  const { baselineReplyRate, totalSampleSize } = useMemo(() => {
     const totalSent = subjectLines.reduce((sum, s) => sum + s.sent_count, 0);
     const totalReplies = subjectLines.reduce((sum, s) => sum + s.reply_count, 0);
-    return totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
+    return {
+      baselineReplyRate: totalSent > 0 ? (totalReplies / totalSent) * 100 : 0,
+      totalSampleSize: totalSent,
+    };
   }, [subjectLines]);
 
   if (authLoading) {
@@ -193,14 +200,25 @@ export default function CopyInsights() {
                 The Message Laboratory – Turn opinions into data
               </p>
             </div>
-            <DataHealthIndicator 
-              status={hasData ? (patterns.length > 0 ? 'healthy' : 'degraded') : 'empty'} 
-              tooltip={hasData 
-                ? (patterns.length > 0 
-                  ? `${subjectLines.length} variants, ${patterns.length} patterns` 
-                  : `${subjectLines.length} variants but no patterns computed`) 
-                : 'No copy data. Sync campaigns first.'}
-            />
+            <div className="flex items-center gap-2">
+              <DataHealthIndicator 
+                status={hasData ? (patterns.length > 0 ? 'healthy' : 'degraded') : 'empty'} 
+                tooltip={hasData 
+                  ? (patterns.length > 0 
+                    ? `${subjectLines.length} variants, ${patterns.length} patterns` 
+                    : `${subjectLines.length} variants but no patterns computed`) 
+                  : 'No copy data. Sync campaigns first.'}
+              />
+              {hasData && totalSampleSize > 0 && (
+                <ConfidenceBadge sampleSize={totalSampleSize} />
+              )}
+              {freshnessData && (
+                <DataFreshness 
+                  lastSyncAt={freshnessData.lastSyncAt} 
+                  status={freshnessData.status}
+                />
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <TooltipProvider>
