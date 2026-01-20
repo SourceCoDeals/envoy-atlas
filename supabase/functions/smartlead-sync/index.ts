@@ -607,12 +607,28 @@ serve(async (req) => {
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
-      const { data: { user }, error: authError } = await createClient(
-        supabaseUrl, anonKey,
-        { global: { headers: { Authorization: authHeader } } }
-      ).auth.getUser();
-
+      // Create a user-authenticated client to verify membership
+      const userClient = createClient(supabaseUrl, anonKey, { 
+        global: { headers: { Authorization: authHeader } } 
+      });
+      
+      const { data: { user }, error: authError } = await userClient.auth.getUser();
       if (authError || !user) throw new Error('Unauthorized');
+      
+      // Verify user has access to this client using the user-authenticated client
+      const { data: membership } = await userClient
+        .from('client_members')
+        .select('role')
+        .eq('client_id', client_id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      if (!membership) {
+        console.error(`User ${user.id} has no membership for client ${client_id}`);
+        throw new Error('Access denied to client');
+      }
+      
+      console.log(`User ${user.id} has ${membership.role} access to client`);
     } else {
       console.log(`Internal continuation batch ${batch_number} - using service role auth`);
     }
@@ -637,14 +653,6 @@ serve(async (req) => {
     }
 
     console.log(`Starting batch ${batch_number}, phase=${current_phase}, auto_continue=${auto_continue}`);
-
-    // Verify user has access to this client (skip for internal continuations)
-    if (!internal_continuation) {
-      const { data: membership } = await supabase
-        .from('client_members').select('role')
-        .eq('client_id', client_id).single();
-      if (!membership) throw new Error('Access denied to client');
-    }
 
     // Get data source (with API key)
     const { data: dataSource, error: dsError } = await supabase
@@ -1248,7 +1256,7 @@ serve(async (req) => {
             };
 
             // Update campaign with totals and enrollment settings
-            await supabase.from('campaigns').update({
+            const { error: updateError } = await supabase.from('campaigns').update({
               total_sent: totalSent,
               total_opened: totalOpened,
               total_replied: totalReplied,
@@ -1259,6 +1267,12 @@ serve(async (req) => {
               bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
               settings: enrollmentSettings,
             }).eq('id', campaignDbId);
+            
+            if (updateError) {
+              console.error(`  Campaign update FAILED for ${campaign.name}: ${updateError.message}`);
+            } else {
+              console.log(`  Campaign metrics saved: sent=${totalSent}, replied=${totalReplied}`);
+            }
 
             // Store enrollment snapshot for tracking trends
             if (enrollmentSettings.total_leads > 0 || enrollmentSettings.not_started > 0) {
