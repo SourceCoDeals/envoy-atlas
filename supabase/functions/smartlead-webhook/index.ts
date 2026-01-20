@@ -5,6 +5,55 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-smartlead-signature',
 };
 
+// SmartLead category to standardized reply_category/sentiment mapping
+const SMARTLEAD_CATEGORY_MAP: Record<string, { category: string; sentiment: string }> = {
+  'Interested': { category: 'interested', sentiment: 'positive' },
+  'Meeting Booked': { category: 'meeting_request', sentiment: 'positive' },
+  'Meeting Scheduled': { category: 'meeting_request', sentiment: 'positive' },
+  'Positive': { category: 'interested', sentiment: 'positive' },
+  'Not Interested': { category: 'not_interested', sentiment: 'negative' },
+  'Out of Office': { category: 'out_of_office', sentiment: 'neutral' },
+  'OOO': { category: 'out_of_office', sentiment: 'neutral' },
+  'Wrong Person': { category: 'referral', sentiment: 'neutral' },
+  'Unsubscribed': { category: 'unsubscribe', sentiment: 'negative' },
+  'Do Not Contact': { category: 'unsubscribe', sentiment: 'negative' },
+  'Neutral': { category: 'neutral', sentiment: 'neutral' },
+  'Question': { category: 'question', sentiment: 'neutral' },
+  'Not Now': { category: 'not_now', sentiment: 'neutral' },
+  'Bad Timing': { category: 'not_now', sentiment: 'neutral' },
+  'Referral': { category: 'referral', sentiment: 'positive' },
+  'Auto Reply': { category: 'auto_reply', sentiment: 'neutral' },
+};
+
+function mapSmartleadCategory(name: string | null | undefined): { reply_category: string | null; reply_sentiment: string | null } {
+  if (!name) return { reply_category: null, reply_sentiment: null };
+  
+  const mapped = SMARTLEAD_CATEGORY_MAP[name];
+  if (mapped) {
+    return { reply_category: mapped.category, reply_sentiment: mapped.sentiment };
+  }
+  
+  // Fallback inference for unknown categories
+  const lower = name.toLowerCase();
+  if (lower.includes('interested') && !lower.includes('not')) {
+    return { reply_category: 'interested', reply_sentiment: 'positive' };
+  }
+  if (lower.includes('meeting') || lower.includes('booked') || lower.includes('call')) {
+    return { reply_category: 'meeting_request', reply_sentiment: 'positive' };
+  }
+  if (lower.includes('not interested') || lower.includes('pass') || lower.includes('decline')) {
+    return { reply_category: 'not_interested', reply_sentiment: 'negative' };
+  }
+  if (lower.includes('ooo') || lower.includes('out of office') || lower.includes('vacation')) {
+    return { reply_category: 'out_of_office', reply_sentiment: 'neutral' };
+  }
+  if (lower.includes('unsubscribe') || lower.includes('remove') || lower.includes('stop')) {
+    return { reply_category: 'unsubscribe', reply_sentiment: 'negative' };
+  }
+  
+  return { reply_category: 'neutral', reply_sentiment: 'neutral' };
+}
+
 interface SmartleadWebhookEvent {
   event_type: string;
   campaign_id?: number;
@@ -388,11 +437,17 @@ async function processEmailReply(
   const contactInfo = await getOrCreateContact(supabase, engagementId, event.email);
   if (!contactInfo) return;
 
+  // Map category if provided in the reply event
+  const mapped = mapSmartleadCategory(event.category_name);
+
   await supabase.from('email_activities')
     .update({
       replied: true,
       replied_at: event.event_timestamp || new Date().toISOString(),
       reply_text: event.reply_text || null,
+      lead_category: event.category_name || null,
+      reply_category: mapped.reply_category,
+      reply_sentiment: mapped.reply_sentiment,
     })
     .eq('engagement_id', engagementId)
     .eq('campaign_id', campaignId)
@@ -418,24 +473,31 @@ async function processEmailReply(
   // Update hourly metrics with atomic increment
   await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_replied');
 
-  // Trigger reply classification
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  
-  try {
-    await fetch(`${supabaseUrl}/functions/v1/classify-replies`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({ engagement_id: engagementId, batch_size: 10 }),
-    });
-  } catch (e) {
-    console.log('Failed to trigger classify-replies:', e);
+  // Trigger reply classification (for AI analysis of reply text if category not provided)
+  if (!event.category_name && event.reply_text) {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    
+    try {
+      await fetch(`${supabaseUrl}/functions/v1/classify-replies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({ engagement_id: engagementId, batch_size: 10 }),
+      });
+    } catch (e) {
+      console.log('Failed to trigger classify-replies:', e);
+    }
   }
 
-  console.log('Processed EMAIL_REPLY for', event.email);
+  // Update positive reply counts if this is a positive category
+  if (mapped.reply_sentiment === 'positive') {
+    await updatePositiveReplyCounts(supabase, engagementId, campaignId, event.event_timestamp);
+  }
+
+  console.log('Processed EMAIL_REPLY for', event.email, '→ category:', mapped.reply_category);
 }
 
 async function processEmailBounce(
@@ -518,14 +580,87 @@ async function processCategoryUpdate(
   const contactInfo = await getOrCreateContact(supabase, engagementId, event.email);
   if (!contactInfo) return;
 
-  // Update email activity with category
+  // Map the category to standardized reply_category/sentiment
+  const mapped = mapSmartleadCategory(event.category_name);
+  const wasPositive = mapped.reply_sentiment === 'positive';
+
+  // Update email activity with category and sentiment
   await supabase.from('email_activities')
     .update({
       lead_category: event.category_name || null,
+      reply_category: mapped.reply_category,
+      reply_sentiment: mapped.reply_sentiment,
+      is_interested: wasPositive,
     })
     .eq('engagement_id', engagementId)
     .eq('campaign_id', campaignId)
     .eq('contact_id', contactInfo.contactId);
 
-  console.log('Processed LEAD_CATEGORY_UPDATED for', event.email);
+  // Update contact interest status
+  if (wasPositive) {
+    await supabase.from('contacts')
+      .update({ is_interested: true })
+      .eq('id', contactInfo.contactId);
+  }
+
+  // Update positive reply counts if this is a positive category
+  if (wasPositive) {
+    await updatePositiveReplyCounts(supabase, engagementId, campaignId, event.event_timestamp);
+  }
+
+  console.log('Processed LEAD_CATEGORY_UPDATED for', event.email, '→', mapped.reply_category, '(positive:', wasPositive, ')');
+}
+
+// Helper function to update positive reply counts across tables
+async function updatePositiveReplyCounts(
+  supabase: any,
+  engagementId: string,
+  campaignId: string,
+  eventTimestamp?: string
+) {
+  try {
+    // Count positive replies for this campaign from email_activities
+    const { count: positiveCount } = await supabase
+      .from('email_activities')
+      .select('*', { count: 'exact', head: true })
+      .eq('engagement_id', engagementId)
+      .eq('campaign_id', campaignId)
+      .in('reply_category', ['meeting_request', 'interested']);
+
+    // Update campaign positive_replies count
+    await supabase.from('campaigns')
+      .update({ 
+        positive_replies: positiveCount || 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', campaignId);
+
+    // Update daily_metrics for today
+    const today = eventTimestamp 
+      ? new Date(eventTimestamp).toISOString().split('T')[0] 
+      : new Date().toISOString().split('T')[0];
+
+    // Get positive count for today
+    const { count: todayPositiveCount } = await supabase
+      .from('email_activities')
+      .select('*', { count: 'exact', head: true })
+      .eq('engagement_id', engagementId)
+      .eq('campaign_id', campaignId)
+      .in('reply_category', ['meeting_request', 'interested'])
+      .gte('replied_at', `${today}T00:00:00Z`)
+      .lt('replied_at', `${today}T23:59:59Z`);
+
+    // Upsert daily_metrics with positive count
+    await supabase.from('daily_metrics')
+      .upsert({
+        engagement_id: engagementId,
+        campaign_id: campaignId,
+        date: today,
+        positive_replies: todayPositiveCount || 0,
+      }, { onConflict: 'engagement_id,campaign_id,date' });
+
+    console.log(`Updated positive reply counts: campaign=${positiveCount}, today=${todayPositiveCount}`);
+  } catch (error) {
+    console.error('Error updating positive reply counts:', error);
+  }
 }
