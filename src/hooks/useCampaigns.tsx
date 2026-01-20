@@ -89,10 +89,10 @@ export function useCampaigns() {
 
       const campaignIds = allCampaigns.map(c => c.id);
 
-      // Fetch daily metrics aggregated per campaign
+      // Fetch daily metrics aggregated per campaign - including positive_replies
       const { data: dailyData } = await supabase
         .from('daily_metrics')
-        .select('campaign_id, emails_sent, emails_opened, emails_clicked, emails_replied, emails_bounced')
+        .select('campaign_id, emails_sent, emails_opened, emails_clicked, emails_replied, emails_bounced, positive_replies')
         .in('campaign_id', campaignIds);
 
       // Build daily aggregation map
@@ -102,6 +102,7 @@ export function useCampaigns() {
         total_clicked: number;
         total_replied: number;
         total_bounced: number;
+        positive_replies: number;
       }>();
 
       (dailyData || []).forEach(row => {
@@ -112,6 +113,7 @@ export function useCampaigns() {
           existing.total_clicked += row.emails_clicked || 0;
           existing.total_replied += row.emails_replied || 0;
           existing.total_bounced += row.emails_bounced || 0;
+          existing.positive_replies += row.positive_replies || 0;
         } else {
           dailyAggregateMap.set(row.campaign_id, {
             total_sent: row.emails_sent || 0,
@@ -119,6 +121,7 @@ export function useCampaigns() {
             total_clicked: row.emails_clicked || 0,
             total_replied: row.emails_replied || 0,
             total_bounced: row.emails_bounced || 0,
+            positive_replies: row.positive_replies || 0,
           });
         }
       });
@@ -149,7 +152,7 @@ export function useCampaigns() {
           total_sent = dailyAggregate!.total_sent;
           total_replied = dailyAggregate!.total_replied;
           total_bounced = dailyAggregate!.total_bounced;
-          positive_replies = 0; // Not aggregated from daily yet
+          positive_replies = dailyAggregate!.positive_replies;
           metricsStatus = 'partial';
           metricsSource = 'daily';
         } else {

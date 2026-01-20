@@ -96,14 +96,34 @@ export function useCopyInsights() {
 
         if (varError) throw varError;
 
-        // Fetch variant features for word count etc.
+        // Fetch variant features for word count and other analysis
         const variantIds = (variants || []).map(v => v.id);
         
         let features: any[] = [];
         if (variantIds.length > 0) {
           const { data: featData } = await supabase
             .from('campaign_variant_features')
-            .select('variant_id, body_word_count, tone, opening_line_type')
+            .select(`
+              variant_id,
+              subject_word_count,
+              subject_length,
+              subject_has_personalization,
+              subject_first_word_type,
+              subject_format,
+              body_word_count,
+              body_paragraph_count,
+              body_cta_type,
+              body_cta_strength,
+              body_has_personalization,
+              body_personalization_count,
+              body_question_count,
+              tone,
+              opening_line_type,
+              opening_line_text,
+              you_we_ratio,
+              personalization_level,
+              hook_type
+            `)
             .in('variant_id', variantIds);
           features = featData || [];
         }

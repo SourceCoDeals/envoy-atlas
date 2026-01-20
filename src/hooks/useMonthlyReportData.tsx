@@ -206,10 +206,10 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
         });
         setWeeklyBreakdown(weeklyData);
 
-        // Fetch campaigns from unified campaigns table
+        // Fetch campaigns from unified campaigns table - include positive_replies
         const { data: campaigns } = await supabase
           .from('campaigns')
-          .select('id, name, status, total_sent, total_opened, total_replied, total_bounced')
+          .select('id, name, status, total_sent, total_opened, total_replied, total_bounced, positive_replies')
           .in('engagement_id', engagementIds);
 
         const campPerf: CampaignPerformance[] = (campaigns || [])
@@ -217,6 +217,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
             const sent = c.total_sent || 0;
             const replied = c.total_replied || 0;
             const bounced = c.total_bounced || 0;
+            const positiveReplies = c.positive_replies || 0;
             return {
               id: c.id,
               name: c.name,
@@ -224,10 +225,10 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
               sent,
               delivered: sent - bounced,
               replied,
-              positiveReplies: 0, // Not tracked at campaign level
+              positiveReplies,
               bounced,
               replyRate: sent > 0 ? (replied / sent) * 100 : 0,
-              positiveRate: 0,
+              positiveRate: sent > 0 ? (positiveReplies / sent) * 100 : 0,
               bounceRate: sent > 0 ? (bounced / sent) * 100 : 0,
             };
           })
@@ -235,16 +236,31 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
           .sort((a, b) => b.replyRate - a.replyRate);
         setCampaignPerformance(campPerf);
 
-        // Infrastructure stats - simplified since we don't have those tables
+        // Fetch email accounts for infrastructure stats
+        const { data: emailAccountsData } = await supabase
+          .from('email_accounts')
+          .select('*')
+          .in('engagement_id', engagementIds);
+
+        const emailAccounts = emailAccountsData || [];
+        
+        // Calculate domains from email accounts
+        const domainSet = new Set<string>();
+        emailAccounts.forEach((a: any) => {
+          const email = a.from_email || '';
+          const domain = email.split('@')[1];
+          if (domain) domainSet.add(domain);
+        });
+
         setInfrastructure({
-          totalDomains: 0,
-          domainsWithSpf: 0,
+          totalDomains: domainSet.size,
+          domainsWithSpf: 0, // Would need sending_domains table
           domainsWithDkim: 0,
           domainsWithDmarc: 0,
-          totalMailboxes: 0,
-          activeMailboxes: 0,
-          totalDailyCapacity: 0,
-          warmupEnabled: 0,
+          totalMailboxes: emailAccounts.length,
+          activeMailboxes: emailAccounts.filter((a: any) => a.is_active).length,
+          totalDailyCapacity: emailAccounts.reduce((sum: number, a: any) => sum + (a.message_per_day || 0), 0),
+          warmupEnabled: emailAccounts.filter((a: any) => a.warmup_enabled).length,
         });
 
       } catch (error) {
