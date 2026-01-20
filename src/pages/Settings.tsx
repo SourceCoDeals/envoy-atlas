@@ -17,7 +17,8 @@ import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
 import { SyncStatusPanel } from '@/components/settings/SyncStatusPanel';
 import { SyncProgressCard } from '@/components/dashboard/SyncProgressCard';
 import { MetricsReferenceSection } from '@/components/settings/MetricsReferenceSection';
-import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle, Calculator } from 'lucide-react';
+import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle, Calculator, Phone } from 'lucide-react';
+import { CallingMetricsSettings } from '@/components/settings/CallingMetricsSettings';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -54,7 +55,7 @@ export default function Settings() {
   // Update tab when URL changes
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam && ['profile', 'workspace', 'team', 'connections', 'security', 'metrics'].includes(tabParam)) {
+    if (tabParam && ['profile', 'workspace', 'team', 'team-members', 'connections', 'security', 'metrics', 'calling'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [searchParams]);
@@ -103,7 +104,7 @@ export default function Settings() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="flex flex-wrap gap-1">
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               <span className="hidden sm:inline">Profile</span>
@@ -123,6 +124,10 @@ export default function Settings() {
             <TabsTrigger value="connections" className="flex items-center gap-2">
               <Plug className="h-4 w-4" />
               <span className="hidden sm:inline">Connections</span>
+            </TabsTrigger>
+            <TabsTrigger value="calling" className="flex items-center gap-2">
+              <Phone className="h-4 w-4" />
+              <span className="hidden sm:inline">Calling</span>
             </TabsTrigger>
             <TabsTrigger value="metrics" className="flex items-center gap-2">
               <Calculator className="h-4 w-4" />
@@ -276,6 +281,19 @@ export default function Settings() {
                 <SyncStatusPanel />
                 <ConnectionsSection workspaceId={currentWorkspace.id} />
               </>
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  No workspace selected
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Calling Metrics Tab */}
+          <TabsContent value="calling" className="mt-6">
+            {currentWorkspace ? (
+              <CallingMetricsSettings />
             ) : (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
