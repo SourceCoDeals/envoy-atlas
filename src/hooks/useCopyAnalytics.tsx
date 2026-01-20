@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
 
 // Subject line analysis patterns
 export type PersonalizationType = 'none' | 'first_name' | 'company' | 'title' | 'industry' | 'trigger';
@@ -319,6 +320,9 @@ export function useCopyAnalytics(): CopyAnalyticsData {
           
           const persType = detectPersonalizationType(subjectLine);
           
+          // Use delivered as denominator for engagement rates
+          const delivered = v.total_sent; // No bounced data per variant available here
+          
           return {
             variant_id: v.id,
             campaign_id: v.campaign_id,
@@ -333,9 +337,9 @@ export function useCopyAnalytics(): CopyAnalyticsData {
             positive_count: v.positive_replies,
             meeting_count: 0,
             
-            open_rate: v.total_sent > 0 ? (v.total_opened / v.total_sent) * 100 : 0,
-            reply_rate: v.total_sent > 0 ? (v.total_replied / v.total_sent) * 100 : 0,
-            positive_rate: v.total_sent > 0 ? (v.positive_replies / v.total_sent) * 100 : 0,
+            open_rate: calculateRate(v.total_opened, delivered),
+            reply_rate: calculateRate(v.total_replied, delivered),
+            positive_rate: calculateRate(v.positive_replies, delivered),
             
             personalization_type: persType,
             format_type: detectFormatType(subjectLine),
@@ -373,6 +377,9 @@ export function useCopyAnalytics(): CopyAnalyticsData {
           const tone = feat?.tone ?? 'professional';
           const readingGrade = feat?.body_reading_grade ?? 8;
           
+          // Use delivered as denominator for engagement rates
+          const delivered = v.total_sent; // No bounced data per variant available here
+          
           return {
             variant_id: v.id,
             campaign_name: v.campaign_name,
@@ -384,8 +391,8 @@ export function useCopyAnalytics(): CopyAnalyticsData {
             sent_count: v.total_sent,
             reply_count: v.total_replied,
             positive_count: v.positive_replies,
-            reply_rate: v.total_sent > 0 ? (v.total_replied / v.total_sent) * 100 : 0,
-            positive_rate: v.total_sent > 0 ? (v.positive_replies / v.total_sent) * 100 : 0,
+            reply_rate: calculateRate(v.total_replied, delivered),
+            positive_rate: calculateRate(v.positive_replies, delivered),
             
             word_count: wordCount,
             personalization_depth: detectPersonalizationDepth([]),

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { supabase } from '@/integrations/supabase/client';
 import { startOfMonth, endOfMonth, subMonths, format, endOfWeek, eachWeekOfInterval } from 'date-fns';
+import { calculateRate } from '@/lib/metrics';
 
 export interface MonthlyMetrics {
   sent: number;
@@ -218,18 +219,19 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
             const replied = c.total_replied || 0;
             const bounced = c.total_bounced || 0;
             const positiveReplies = c.positive_replies || 0;
+            const delivered = sent - bounced;
             return {
               id: c.id,
               name: c.name,
               status: c.status || 'unknown',
               sent,
-              delivered: sent - bounced,
+              delivered,
               replied,
               positiveReplies,
               bounced,
-              replyRate: sent > 0 ? (replied / sent) * 100 : 0,
-              positiveRate: sent > 0 ? (positiveReplies / sent) * 100 : 0,
-              bounceRate: sent > 0 ? (bounced / sent) * 100 : 0,
+              replyRate: calculateRate(replied, delivered),
+              positiveRate: calculateRate(positiveReplies, delivered),
+              bounceRate: calculateRate(bounced, sent), // Bounce rate uses sent
             };
           })
           .filter(c => c.sent > 0)

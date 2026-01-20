@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
 
 interface DashboardStats {
   totalSent: number;
@@ -199,13 +200,13 @@ export function useDashboardData(dateRange?: DateRange) {
         totalPositive: totals.positive,
         totalSpam: 0,
         totalDelivered: delivered,
-        openRate: totals.sent > 0 ? (totals.opened / totals.sent) * 100 : 0,
-        clickRate: totals.sent > 0 ? (totals.clicked / totals.sent) * 100 : 0,
-        replyRate: totals.sent > 0 ? (totals.replied / totals.sent) * 100 : 0,
-        bounceRate: totals.sent > 0 ? (totals.bounced / totals.sent) * 100 : 0,
-        positiveRate: totals.sent > 0 ? (totals.positive / totals.sent) * 100 : 0,
+        openRate: calculateRate(totals.opened, delivered),
+        clickRate: calculateRate(totals.clicked, delivered),
+        replyRate: calculateRate(totals.replied, delivered),
+        bounceRate: calculateRate(totals.bounced, totals.sent), // Bounce rate uses sent
+        positiveRate: calculateRate(totals.positive, delivered),
         spamRate: 0,
-        deliveredRate: totals.sent > 0 ? (delivered / totals.sent) * 100 : 0,
+        deliveredRate: calculateRate(delivered, totals.sent),
       });
 
       // Build trend data
@@ -228,13 +229,18 @@ export function useDashboardData(dateRange?: DateRange) {
         .in('engagement_id', engagementIds);
 
       if (campaigns && campaigns.length > 0) {
-        const campaignStats = campaigns.map(c => ({
-          id: c.id,
-          name: c.name,
-          sent: c.total_sent || 0,
-          replyRate: (c.total_sent || 0) > 0 ? ((c.total_replied || 0) / (c.total_sent || 0)) * 100 : 0,
-          positiveRate: (c.total_replied || 0) > 0 ? ((c.positive_replies || 0) / (c.total_replied || 0)) * 100 : 0,
-        }));
+        const campaignStats = campaigns.map(c => {
+          const sent = c.total_sent || 0;
+          // Note: We don't have bounced per campaign here, so estimate delivered as sent
+          const delivered = sent; // Could fetch total_bounced if needed
+          return {
+            id: c.id,
+            name: c.name,
+            sent,
+            replyRate: calculateRate(c.total_replied, delivered),
+            positiveRate: calculateRate(c.positive_replies, delivered),
+          };
+        });
 
         setTopCampaigns(
           campaignStats
