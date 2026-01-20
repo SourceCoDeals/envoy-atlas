@@ -655,6 +655,7 @@ export type Database = {
           is_archived: boolean | null
           last_synced_at: string | null
           max_leads_per_day: number | null
+          metrics_hash: string | null
           min_time_between_emails: number | null
           name: string
           open_rate: number | null
@@ -694,6 +695,7 @@ export type Database = {
           is_archived?: boolean | null
           last_synced_at?: string | null
           max_leads_per_day?: number | null
+          metrics_hash?: string | null
           min_time_between_emails?: number | null
           name: string
           open_rate?: number | null
@@ -733,6 +735,7 @@ export type Database = {
           is_archived?: boolean | null
           last_synced_at?: string | null
           max_leads_per_day?: number | null
+          metrics_hash?: string | null
           min_time_between_emails?: number | null
           name?: string
           open_rate?: number | null
