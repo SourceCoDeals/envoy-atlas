@@ -1,20 +1,24 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useContactDetail, ContactStatus } from '@/hooks/useContacts';
+import { useContactDetail } from '@/hooks/useContacts';
 import { ContactTimeline } from './ContactTimeline';
 import { ContactEmailHistory } from './ContactEmailHistory';
 import { ContactCallHistory } from './ContactCallHistory';
 import { ContactNotes } from './ContactNotes';
-import { Mail, Phone, MapPin, Building2, Briefcase, Clock, Star, PhoneOff, MailX } from 'lucide-react';
+import { Mail, Clock, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { formatCallDuration } from '@/lib/metrics';
 
-const STATUS_OPTIONS: { value: ContactStatus; label: string }[] = [
+const STATUS_OPTIONS = [
   { value: 'new', label: 'New' },
+  { value: 'working', label: 'Working' },
   { value: 'contacted', label: 'Contacted' },
-  { value: 'interested', label: 'Interested' },
+  { value: 'qualified', label: 'Qualified' },
   { value: 'meeting_set', label: 'Meeting Set' },
+  { value: 'nurture', label: 'Nurture' },
   { value: 'disqualified', label: 'Disqualified' },
   { value: 'do_not_contact', label: 'Do Not Contact' },
 ];
@@ -32,7 +36,7 @@ export function ContactDetailModal({ contactId, open, onClose }: ContactDetailMo
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -42,54 +46,27 @@ export function ContactDetailModal({ contactId, open, onClose }: ContactDetailMo
             Contact not found
           </div>
         ) : (
-          <>
-            <DialogHeader>
+          <div className="flex flex-col">
+            {/* Header */}
+            <div className="p-6 pb-4">
               <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4">
-                  {/* Avatar placeholder */}
-                  <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center text-2xl font-bold text-primary">
-                    {(contact.first_name?.[0] || contact.email[0]).toUpperCase()}
+                <div className="flex items-center gap-3">
+                  {/* Avatar */}
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-lg font-semibold text-primary border-2 border-primary/20">
+                    {(contact.first_name?.[0] || contact.email?.[0] || 'C').toUpperCase()}
                   </div>
                   <div>
-                    <DialogTitle className="text-2xl">
+                    <h2 className="text-lg font-semibold">
                       {contact.first_name || contact.last_name 
                         ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim()
-                        : contact.email}
-                    </DialogTitle>
-                    <div className="flex items-center gap-2 mt-1 text-muted-foreground">
-                      {contact.title && (
-                        <span className="flex items-center gap-1">
-                          <Briefcase className="h-4 w-4" />
-                          {contact.title}
-                        </span>
-                      )}
-                      {contact.company && (
-                        <span className="flex items-center gap-1">
-                          <Building2 className="h-4 w-4" />
-                          {contact.company}
-                        </span>
-                      )}
-                    </div>
+                        : contact.company || contact.email}
+                    </h2>
                   </div>
                 </div>
+                
                 <div className="flex items-center gap-2">
-                  {contact.do_not_call && (
-                    <Badge variant="destructive" className="flex items-center gap-1">
-                      <PhoneOff className="h-3 w-3" />
-                      DNC
-                    </Badge>
-                  )}
-                  {contact.do_not_email && (
-                    <Badge variant="destructive" className="flex items-center gap-1">
-                      <MailX className="h-3 w-3" />
-                      DNE
-                    </Badge>
-                  )}
-                  <Select 
-                    value={contact.contact_status}
-                    onValueChange={(value) => {/* TODO: Update status */}}
-                  >
-                    <SelectTrigger className="w-[150px]">
+                  <Select defaultValue={contact.contact_status || 'new'}>
+                    <SelectTrigger className="w-[120px] h-8 text-sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -100,122 +77,110 @@ export function ContactDetailModal({ contactId, open, onClose }: ContactDetailMo
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
-            </DialogHeader>
-
-            {/* Contact Info Bar */}
-            <div className="flex flex-wrap gap-4 text-sm border-b pb-4">
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <Mail className="h-4 w-4" />
-                <a href={`mailto:${contact.email}`} className="hover:underline">{contact.email}</a>
-              </div>
-              {contact.phone_number && (
-                <div className="flex items-center gap-1 text-muted-foreground">
-                  <Phone className="h-4 w-4" />
-                  <a href={`tel:${contact.phone_number}`} className="hover:underline">{contact.phone_number}</a>
+              
+              {/* Email */}
+              {contact.email && (
+                <div className="flex items-center gap-1.5 mt-2 text-sm text-muted-foreground">
+                  <Mail className="h-4 w-4" />
+                  <a href={`mailto:${contact.email}`} className="hover:underline">
+                    {contact.email}
+                  </a>
                 </div>
-              )}
-              {contact.location && (
-                <div className="flex items-center gap-1 text-muted-foreground">
-                  <MapPin className="h-4 w-4" />
-                  {contact.location}
-                </div>
-              )}
-              {contact.industry && (
-                <Badge variant="outline">{contact.industry}</Badge>
               )}
             </div>
 
-            {/* Seller Interest Score */}
-            {contact.seller_interest_score && (
-              <div className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Star className="h-5 w-5 text-yellow-500 fill-yellow-500" />
-                  <span className="text-2xl font-bold">{contact.seller_interest_score}</span>
-                  <span className="text-muted-foreground">/10 Seller Interest</span>
-                </div>
-                {contact.seller_interest_summary && (
-                  <p className="text-sm text-muted-foreground flex-1">
-                    {contact.seller_interest_summary}
-                  </p>
-                )}
+            {/* Metrics Bar */}
+            <div className="px-6 pb-4">
+              <div className="grid grid-cols-5 gap-3">
+                <MetricCard 
+                  label="Emails Sent" 
+                  value={engagement?.emails_sent ?? 0} 
+                />
+                <MetricCard 
+                  label="Replies" 
+                  value={engagement?.emails_replied ?? 0}
+                />
+                <MetricCard 
+                  label="Total Calls" 
+                  value={engagement?.total_calls ?? 0}
+                />
+                <MetricCard 
+                  label="Connects" 
+                  value={engagement?.calls_connected ?? 0}
+                />
+                <MetricCard 
+                  label="Talk Time" 
+                  value={formatCallDuration(engagement?.total_talk_time_seconds ?? 0)}
+                  isTime
+                />
               </div>
-            )}
-
-            {/* Engagement Summary Cards */}
-            {engagement && (
-              <div className="grid grid-cols-5 gap-4">
-                <Card>
-                  <CardContent className="pt-4 text-center">
-                    <div className="text-2xl font-bold">{engagement.emails_sent}</div>
-                    <div className="text-xs text-muted-foreground">Emails Sent</div>
-                    {engagement.emails_sent > 0 && (
-                      <div className="text-xs text-green-500 mt-1">
-                        {Math.round((engagement.emails_opened / engagement.emails_sent) * 100)}% opened
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4 text-center">
-                    <div className="text-2xl font-bold">{engagement.emails_replied}</div>
-                    <div className="text-xs text-muted-foreground">Replies</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4 text-center">
-                    <div className="text-2xl font-bold">{engagement.total_calls}</div>
-                    <div className="text-xs text-muted-foreground">Total Calls</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4 text-center">
-                    <div className="text-2xl font-bold">{engagement.calls_connected}</div>
-                    <div className="text-xs text-muted-foreground">Connects</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4 text-center">
-                    <div className="text-2xl font-bold flex items-center justify-center gap-1">
-                      <Clock className="h-4 w-4" />
-                      {Math.floor(engagement.total_talk_time_seconds / 60)}m
-                    </div>
-                    <div className="text-xs text-muted-foreground">Talk Time</div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
+            </div>
 
             {/* Tabs */}
-            <Tabs defaultValue="timeline" className="mt-4">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                <TabsTrigger value="emails">Emails</TabsTrigger>
-                <TabsTrigger value="calls">Calls</TabsTrigger>
-                <TabsTrigger value="notes">Notes & Tags</TabsTrigger>
+            <Tabs defaultValue="timeline" className="flex-1">
+              <TabsList className="grid w-full grid-cols-4 rounded-none border-t border-b bg-muted/30 h-12">
+                <TabsTrigger value="timeline" className="rounded-none data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
+                  Timeline
+                </TabsTrigger>
+                <TabsTrigger value="emails" className="rounded-none data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
+                  Emails
+                </TabsTrigger>
+                <TabsTrigger value="calls" className="rounded-none data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
+                  Calls
+                </TabsTrigger>
+                <TabsTrigger value="notes" className="rounded-none data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
+                  Notes & Tags
+                </TabsTrigger>
               </TabsList>
-              <TabsContent value="timeline" className="mt-4">
-                <ContactTimeline contactId={contactId} />
-              </TabsContent>
-              <TabsContent value="emails" className="mt-4">
-                <ContactEmailHistory contactId={contactId} />
-              </TabsContent>
-              <TabsContent value="calls" className="mt-4">
-                <ContactCallHistory contactId={contactId} />
-              </TabsContent>
-              <TabsContent value="notes" className="mt-4">
-                <ContactNotes 
-                  notes={notes} 
-                  tags={contact.tags}
-                  onAddNote={addNote}
-                  onDeleteNote={deleteNote}
-                />
-              </TabsContent>
+              
+              <div className="max-h-[300px] overflow-y-auto">
+                <TabsContent value="timeline" className="m-0 p-4">
+                  <ContactTimeline contactId={contactId} />
+                </TabsContent>
+                <TabsContent value="emails" className="m-0 p-4">
+                  <ContactEmailHistory contactId={contactId} />
+                </TabsContent>
+                <TabsContent value="calls" className="m-0 p-4">
+                  <ContactCallHistory contactId={contactId} />
+                </TabsContent>
+                <TabsContent value="notes" className="m-0 p-4">
+                  <ContactNotes 
+                    notes={notes} 
+                    tags={contact.tags || []}
+                    onAddNote={addNote}
+                    onDeleteNote={deleteNote}
+                  />
+                </TabsContent>
+              </div>
             </Tabs>
-          </>
+          </div>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface MetricCardProps {
+  label: string;
+  value: number | string;
+  isTime?: boolean;
+}
+
+function MetricCard({ label, value, isTime }: MetricCardProps) {
+  return (
+    <Card className="border bg-muted/30">
+      <CardContent className="p-3 text-center">
+        <div className="text-xl font-bold flex items-center justify-center gap-1">
+          {isTime && <Clock className="h-4 w-4 text-muted-foreground" />}
+          {value}
+        </div>
+        <div className="text-xs text-muted-foreground">{label}</div>
+      </CardContent>
+    </Card>
   );
 }
