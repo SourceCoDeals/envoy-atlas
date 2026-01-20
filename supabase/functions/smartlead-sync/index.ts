@@ -305,6 +305,7 @@ function extractDomain(email: string): string | null {
 
 // Self-continuation for next batch with exponential backoff retry
 // Uses service role key to avoid user JWT expiration issues
+// CRITICAL: Include both 'apikey' and 'Authorization' headers for gateway compatibility
 async function triggerNextBatch(
   supabaseUrl: string,
   serviceKey: string,
@@ -316,12 +317,16 @@ async function triggerNextBatch(
 ) {
   console.log(`Triggering next batch (${batchNumber}, phase=${phase}) via self-continuation...`);
   
+  // Get anon key from environment for apikey header
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+  
   for (let attempt = 0; attempt < CONTINUATION_RETRIES; attempt++) {
     try {
       const response = await fetch(`${supabaseUrl}/functions/v1/smartlead-sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'apikey': anonKey, // Required by Supabase gateway
           'Authorization': `Bearer ${serviceKey}`,
         },
         body: JSON.stringify({
@@ -341,7 +346,9 @@ async function triggerNextBatch(
         return;
       }
       
-      console.warn(`Continuation attempt ${attempt + 1} failed with status: ${response.status}`);
+      // Log more details on failure
+      const errorText = await response.text().catch(() => 'unable to read response body');
+      console.warn(`Continuation attempt ${attempt + 1} failed - status: ${response.status}, body: ${errorText}`);
     } catch (error) {
       console.error(`Continuation attempt ${attempt + 1} error:`, error);
     }
