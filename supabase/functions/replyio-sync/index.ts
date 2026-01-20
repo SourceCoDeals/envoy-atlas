@@ -53,6 +53,57 @@ function extractPersonalizationVars(content: string): string[] {
   return Array.from(vars);
 }
 
+// Reply.io category to our category mapping
+const REPLYIO_CATEGORY_MAP: Record<string, { category: string; sentiment: string; is_positive: boolean }> = {
+  'Interested': { category: 'interested', sentiment: 'positive', is_positive: true },
+  'Meeting Booked': { category: 'meeting_request', sentiment: 'positive', is_positive: true },
+  'MeetingBooked': { category: 'meeting_request', sentiment: 'positive', is_positive: true },
+  'Positive': { category: 'interested', sentiment: 'positive', is_positive: true },
+  'Not Interested': { category: 'not_interested', sentiment: 'negative', is_positive: false },
+  'NotInterested': { category: 'not_interested', sentiment: 'negative', is_positive: false },
+  'Out of Office': { category: 'out_of_office', sentiment: 'neutral', is_positive: false },
+  'OOO': { category: 'out_of_office', sentiment: 'neutral', is_positive: false },
+  'Auto-reply': { category: 'out_of_office', sentiment: 'neutral', is_positive: false },
+  'Referral': { category: 'referral', sentiment: 'neutral', is_positive: false },
+  'Unsubscribed': { category: 'unsubscribe', sentiment: 'negative', is_positive: false },
+  'OptedOut': { category: 'unsubscribe', sentiment: 'negative', is_positive: false },
+  'Neutral': { category: 'neutral', sentiment: 'neutral', is_positive: false },
+  'Question': { category: 'question', sentiment: 'neutral', is_positive: false },
+};
+
+function mapReplyioCategory(category: string | null | undefined, isInterested?: boolean | null): { 
+  reply_category: string | null; 
+  reply_sentiment: string | null; 
+  is_positive: boolean;
+} {
+  // If explicitly marked as interested, use that
+  if (isInterested === true) {
+    return { reply_category: 'interested', reply_sentiment: 'positive', is_positive: true };
+  }
+  
+  if (!category) return { reply_category: null, reply_sentiment: null, is_positive: false };
+  
+  const mapped = REPLYIO_CATEGORY_MAP[category];
+  if (mapped) {
+    return {
+      reply_category: mapped.category,
+      reply_sentiment: mapped.sentiment,
+      is_positive: mapped.is_positive,
+    };
+  }
+  
+  // Fallback: try to infer from category name
+  const lower = category.toLowerCase();
+  if (lower.includes('interested') && !lower.includes('not')) {
+    return { reply_category: 'interested', reply_sentiment: 'positive', is_positive: true };
+  }
+  if (lower.includes('meeting') || lower.includes('booked')) {
+    return { reply_category: 'meeting_request', reply_sentiment: 'positive', is_positive: true };
+  }
+  
+  return { reply_category: 'neutral', reply_sentiment: 'neutral', is_positive: false };
+}
+
 // Extract domain from email
 function extractDomain(email: string): string | null {
   if (!email || !email.includes('@')) return null;
@@ -87,8 +138,14 @@ async function replyioRequest(
       const response = await fetch(url, fetchOptions);
       
       if (response.status === 429) {
-        console.log(`Rate limited, waiting ${(attempt + 1) * 10} seconds...`);
-        await delay(10000 * (attempt + 1));
+        // Improved rate limiting with exponential backoff
+        const retryAfter = response.headers.get('Retry-After');
+        const waitMs = retryAfter 
+          ? parseInt(retryAfter) * 1000 
+          : Math.min(60000, 10000 * (attempt + 1));  // Exponential backoff, max 60s
+        
+        console.log(`Rate limited (429), waiting ${waitMs}ms before retry ${attempt + 1}/${retries}...`);
+        await delay(waitMs);
         continue;
       }
       
@@ -232,6 +289,131 @@ async function triggerAnalysis(
       console.error('Failed to trigger classify-replies:', error);
     }
   }
+}
+
+// Aggregate metrics from email_activities to campaign_variants
+async function aggregateVariantMetrics(
+  supabase: any,
+  campaignDbId: string,
+  engagementId: string
+) {
+  console.log(`  Aggregating variant metrics for campaign ${campaignDbId}...`);
+  
+  // Get all email activities for this campaign grouped by step
+  const { data: activities } = await supabase
+    .from('email_activities')
+    .select('step_number, sent, opened, replied, reply_category')
+    .eq('campaign_id', campaignDbId);
+  
+  if (!activities || activities.length === 0) return;
+  
+  // Aggregate by step_number
+  const stepMetrics = new Map<number, { 
+    sent: number; 
+    opened: number; 
+    replied: number; 
+    positive: number;
+  }>();
+  
+  for (const activity of activities) {
+    const step = activity.step_number || 1;
+    const current = stepMetrics.get(step) || { sent: 0, opened: 0, replied: 0, positive: 0 };
+    
+    if (activity.sent) current.sent++;
+    if (activity.opened) current.opened++;
+    if (activity.replied) current.replied++;
+    if (activity.reply_category === 'meeting_request' || activity.reply_category === 'interested') {
+      current.positive++;
+    }
+    
+    stepMetrics.set(step, current);
+  }
+  
+  // Update each variant with its metrics
+  for (const [stepNumber, metrics] of stepMetrics) {
+    const delivered = metrics.sent;
+    
+    await supabase
+      .from('campaign_variants')
+      .update({
+        total_sent: metrics.sent,
+        total_opened: metrics.opened,
+        total_replied: metrics.replied,
+        positive_replies: metrics.positive,
+        open_rate: delivered > 0 ? (metrics.opened / delivered) * 100 : null,
+        reply_rate: delivered > 0 ? (metrics.replied / delivered) * 100 : null,
+        positive_reply_rate: delivered > 0 ? (metrics.positive / delivered) * 100 : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('campaign_id', campaignDbId)
+      .eq('step_number', stepNumber);
+  }
+  
+  console.log(`  Updated metrics for ${stepMetrics.size} variants`);
+}
+
+// Update campaign and daily_metrics with positive reply counts
+async function aggregatePositiveReplies(
+  supabase: any,
+  campaignDbId: string
+) {
+  console.log(`  Aggregating positive replies for campaign ${campaignDbId}...`);
+  
+  // Count total positive replies
+  const { count: totalPositive } = await supabase
+    .from('email_activities')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignDbId)
+    .in('reply_category', ['meeting_request', 'interested']);
+  
+  // Count total replies
+  const { count: totalReplied } = await supabase
+    .from('email_activities')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignDbId)
+    .eq('replied', true);
+  
+  // Count total sent
+  const { count: totalSent } = await supabase
+    .from('email_activities')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignDbId)
+    .eq('sent', true);
+  
+  // Update campaign totals
+  const delivered = totalSent || 0;
+  await supabase.from('campaigns').update({
+    positive_replies: totalPositive || 0,
+    total_replied: totalReplied || 0,
+    positive_rate: delivered > 0 ? ((totalPositive || 0) / delivered) * 100 : 0,
+    reply_rate: delivered > 0 ? ((totalReplied || 0) / delivered) * 100 : 0,
+    updated_at: new Date().toISOString(),
+  }).eq('id', campaignDbId);
+  
+  // Get positive replies grouped by date
+  const { data: positiveByDate } = await supabase
+    .from('email_activities')
+    .select('replied_at')
+    .eq('campaign_id', campaignDbId)
+    .in('reply_category', ['meeting_request', 'interested'])
+    .not('replied_at', 'is', null);
+  
+  // Group by date
+  const dateGroups = new Map<string, number>();
+  for (const activity of positiveByDate || []) {
+    const date = new Date(activity.replied_at).toISOString().split('T')[0];
+    dateGroups.set(date, (dateGroups.get(date) || 0) + 1);
+  }
+  
+  // Update daily_metrics
+  for (const [date, count] of dateGroups) {
+    await supabase.from('daily_metrics').update({
+      positive_replies: count,
+      updated_at: new Date().toISOString(),
+    }).eq('campaign_id', campaignDbId).eq('date', date);
+  }
+  
+  console.log(`  Campaign positive: ${totalPositive}, updated ${dateGroups.size} daily records`);
 }
 
 // Strip HTML and return plain text
@@ -1097,13 +1279,53 @@ Deno.serve(async (req) => {
                     const email = event.email || event.to || event.personEmail;
                     if (!email) continue;
                     
-                    // Get contact for this email
-                    const { data: contact } = await supabase
+                    // Get contact for this email - or create on-the-fly if missing
+                    let contact = null;
+                    const { data: existingContact } = await supabase
                       .from('contacts')
                       .select('id, company_id')
                       .eq('engagement_id', engagement_id)
                       .eq('email', email)
                       .single();
+                    
+                    contact = existingContact;
+                    
+                    // Create contact if doesn't exist
+                    if (!contact) {
+                      const domain = extractDomain(email);
+                      let companyId = null;
+                      
+                      // Try to find existing company by domain
+                      if (domain) {
+                        const { data: existingCompany } = await supabase
+                          .from('companies')
+                          .select('id')
+                          .eq('engagement_id', engagement_id)
+                          .eq('domain', domain)
+                          .maybeSingle();
+                        companyId = existingCompany?.id;
+                      }
+                      
+                      // Create minimal contact
+                      const { data: newContact, error: contactError } = await supabase
+                        .from('contacts')
+                        .insert({
+                          engagement_id,
+                          email: email,
+                          company_id: companyId,
+                          source: 'replyio',
+                        })
+                        .select('id, company_id')
+                        .single();
+                      
+                      if (contactError) {
+                        console.error(`  Failed to create contact for ${email}:`, contactError.message);
+                        continue;
+                      }
+                      
+                      contact = newContact;
+                      progress.people_synced++;
+                    }
                     
                     if (!contact) continue;
                     
@@ -1111,6 +1333,12 @@ Deno.serve(async (req) => {
                     const bounceType = event.bounceType || event.bounce_type || 
                       (event.isHardBounce ? 'hard' : event.isSoftBounce ? 'soft' : null);
                     const bounceReason = event.bounceReason || event.bounce_reason || event.errorMessage || null;
+                    
+                    // Map category from Reply.io data
+                    const eventCategory = event.category || event.replyCategory || event.personCategory || null;
+                    const isInterested = event.isInterested ?? event.interested ?? null;
+                    const mappedCategory = mapReplyioCategory(eventCategory, isInterested);
+                    const hasReplied = event.replied ?? event.eventType === 'replied';
                     
                     const { error: activityError } = await supabase
                       .from('email_activities')
@@ -1134,11 +1362,13 @@ Deno.serve(async (req) => {
                         clicked: event.clicked ?? event.eventType === 'clicked',
                         first_clicked_at: event.clickedAt || event.clicked_at ? new Date(event.clickedAt || event.clicked_at).toISOString() : null,
                         click_count: event.clickCount || event.clicksCount || 0,
-                        replied: event.replied ?? event.eventType === 'replied',
+                        replied: hasReplied,
                         replied_at: event.repliedAt || event.replied_at ? new Date(event.repliedAt || event.replied_at).toISOString() : null,
                         reply_text: event.replyText || event.reply || event.replyBody || null,
-                        reply_sentiment: event.sentiment || event.replySentiment || null,
-                        is_interested: event.isInterested ?? event.interested ?? null,
+                        // Use mapped category and sentiment
+                        reply_category: hasReplied ? mappedCategory.reply_category : null,
+                        reply_sentiment: hasReplied ? (event.sentiment || event.replySentiment || mappedCategory.reply_sentiment) : null,
+                        is_interested: isInterested,
                         bounced: event.bounced ?? event.eventType === 'bounced',
                         bounced_at: event.bouncedAt || event.bounced_at ? new Date(event.bouncedAt || event.bounced_at).toISOString() : null,
                         bounce_type: bounceType,
@@ -1218,6 +1448,10 @@ Deno.serve(async (req) => {
             } catch (e) {
               console.log(`  Email events not available for ${sequence.name}`);
             }
+            
+            // After email activities sync, aggregate variant metrics and positive replies
+            await aggregateVariantMetrics(supabase, campaignId, engagement_id);
+            await aggregatePositiveReplies(supabase, campaignId);
           }
 
         } catch (e) {
