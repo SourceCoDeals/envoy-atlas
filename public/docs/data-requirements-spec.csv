@@ -1,0 +1,119 @@
+Platform,Endpoint,Source Field,Data Type,DB Table,DB Column,Required,Category,Notes
+SmartLead,GET /campaigns,id,number,campaigns,external_id,Yes,Campaign Core,Cast to string
+SmartLead,GET /campaigns,name,string,campaigns,name,Yes,Campaign Core,
+SmartLead,GET /campaigns,status,string,campaigns,status,Yes,Campaign Core,Lowercase: active/paused/drafted/completed
+SmartLead,GET /campaigns,created_at,datetime,campaigns,started_at,Yes,Campaign Core,
+SmartLead,GET /campaigns,scheduler_cron_value,string,campaigns,schedule_config.scheduler_cron_value,No,Campaign Config,
+SmartLead,GET /campaigns,min_time_btwn_emails,number,campaigns,min_time_between_emails,No,Campaign Config,
+SmartLead,GET /campaigns,max_leads_per_day,number,campaigns,max_leads_per_day,No,Campaign Config,
+SmartLead,GET /campaigns,timezone,string,campaigns,timezone,No,Campaign Config,
+SmartLead,GET /campaigns,user_id,number,campaigns,owner_id,No,Campaign Config,Cast to string
+SmartLead,GET /campaigns,client_id,number,campaigns,team_id,No,Campaign Config,Cast to string
+SmartLead,GET /campaigns,track_settings,object,campaigns,track_settings,No,Campaign Config,JSON object
+SmartLead,GET /campaigns,stop_lead_settings,object,campaigns,stop_lead_settings,No,Campaign Config,JSON object
+SmartLead,GET /campaigns/{id}/analytics,sent_count,number,campaigns,total_sent,Yes,Analytics Core,Primary metric
+SmartLead,GET /campaigns/{id}/analytics,reply_count,number,campaigns,total_replied,Yes,Analytics Core,Critical metric
+SmartLead,GET /campaigns/{id}/analytics,bounce_count,number,campaigns,total_bounced,Yes,Analytics Core,
+SmartLead,GET /campaigns/{id}/analytics,unique_open_count,number,campaigns,total_opened,No,Analytics Core,De-emphasized per data policy
+SmartLead,GET /campaigns/{id}/analytics,unsubscribe_count,number,campaigns,total_unsubscribed,No,Analytics Core,
+SmartLead,GET /campaigns/{id}/analytics,total_count,number,enrollment_snapshots,total_leads,No,Enrollment Tracking,
+SmartLead,GET /campaigns/{id}/analytics,campaign_lead_stats.notStarted,number,enrollment_snapshots,not_started,No,Enrollment Tracking,
+SmartLead,GET /campaigns/{id}/analytics,campaign_lead_stats.inprogress,number,enrollment_snapshots,in_progress,No,Enrollment Tracking,
+SmartLead,GET /campaigns/{id}/analytics,campaign_lead_stats.completed,number,enrollment_snapshots,completed,No,Enrollment Tracking,
+SmartLead,GET /campaigns/{id}/analytics,campaign_lead_stats.blocked,number,enrollment_snapshots,blocked,No,Enrollment Tracking,
+SmartLead,GET /campaigns/{id}/analytics,campaign_lead_stats.paused,number,enrollment_snapshots,paused,No,Enrollment Tracking,
+SmartLead,GET /campaigns/{id}/analytics-by-date,date,string,daily_metrics,date,Yes,Daily Metrics,YYYY-MM-DD format
+SmartLead,GET /campaigns/{id}/analytics-by-date,sent_count,number,daily_metrics,emails_sent,Yes,Daily Metrics,
+SmartLead,GET /campaigns/{id}/analytics-by-date,reply_count,number,daily_metrics,emails_replied,Yes,Daily Metrics,
+SmartLead,GET /campaigns/{id}/analytics-by-date,bounce_count,number,daily_metrics,emails_bounced,Yes,Daily Metrics,
+SmartLead,GET /campaigns/{id}/analytics-by-date,open_count,number,daily_metrics,emails_opened,No,Daily Metrics,De-emphasized
+SmartLead,GET /campaigns/{id}/sequences,seq_id,number,campaign_variants,external_id,Yes,Variants,Cast to string
+SmartLead,GET /campaigns/{id}/sequences,seq_number,number,campaign_variants,step_number,Yes,Variants,
+SmartLead,GET /campaigns/{id}/sequences,subject,string,campaign_variants,subject_line,Yes,Variants,
+SmartLead,GET /campaigns/{id}/sequences,email_body,string,campaign_variants,body_html,Yes,Variants,
+SmartLead,GET /campaigns/{id}/sequences,seq_delay_details.delay_in_days,number,campaign_variants,delay_days,No,Variants,
+SmartLead,GET /campaigns/{id}/sequences,variant_label,string,campaign_variants,variant_label,No,Variants,A/B test variant
+SmartLead,GET /campaigns/{id}/sequences,send_as_reply,boolean,campaign_variants,send_as_reply,No,Variants,
+SmartLead,GET /leads/fetch-categories,id,number/string,lead_categories,external_id,Yes,Categories,
+SmartLead,GET /leads/fetch-categories,name,string,lead_categories,name,Yes,Categories,
+SmartLead,GET /leads/fetch-categories,color,string,lead_categories,color,No,Categories,
+SmartLead,GET /leads/fetch-categories,is_positive,boolean,lead_categories,is_positive,No,Categories,Inferred if missing
+SmartLead,GET /leads/fetch-categories,is_meeting,boolean,lead_categories,is_meeting,No,Categories,Inferred if missing
+SmartLead,GET /campaigns/{id}/leads,id,number,contacts,external_lead_id,Yes,Leads,Disabled by default
+SmartLead,GET /campaigns/{id}/leads,email,string,contacts,email,Yes,Leads,
+SmartLead,GET /campaigns/{id}/leads,first_name,string,contacts,first_name,No,Leads,
+SmartLead,GET /campaigns/{id}/leads,last_name,string,contacts,last_name,No,Leads,
+SmartLead,GET /campaigns/{id}/leads,company_name,string,companies,name,No,Leads,Creates company record
+SmartLead,GET /campaigns/{id}/leads,phone_number,string,contacts,phone,No,Leads,
+SmartLead,GET /campaigns/{id}/leads,linkedin_profile,string,contacts,linkedin_url,No,Leads,
+SmartLead,GET /campaigns/{id}/leads,lead_category,string,contacts,-,No,Leads,Maps via lead_categories
+SmartLead,GET /email-accounts,id,number,email_accounts,external_id,Yes,Infrastructure,
+SmartLead,GET /email-accounts,from_email,string,email_accounts,from_email,Yes,Infrastructure,
+SmartLead,GET /email-accounts,from_name,string,email_accounts,from_name,No,Infrastructure,
+SmartLead,GET /email-accounts,message_per_day,number,email_accounts,message_per_day,No,Infrastructure,
+SmartLead,GET /email-accounts,daily_sent_count,number,email_accounts,daily_sent_count,No,Infrastructure,
+SmartLead,GET /email-accounts,warmup_enabled,boolean,email_accounts,warmup_enabled,No,Infrastructure,
+SmartLead,GET /email-accounts,warmup_details.warmup_reputation,number,email_accounts,warmup_reputation,No,Infrastructure,
+Reply.io,GET /v3/sequences,id,number,campaigns,external_id,Yes,Campaign Core,
+Reply.io,GET /v3/sequences,name,string,campaigns,name,Yes,Campaign Core,
+Reply.io,GET /v3/sequences,status,string,campaigns,status,Yes,Campaign Core,Maps via statusMap
+Reply.io,GET /v3/sequences,ownerId,number,campaigns,owner_id,No,Campaign Core,
+Reply.io,GET /v3/sequences,teamId,number,campaigns,team_id,No,Campaign Core,
+Reply.io,GET /v3/sequences,isArchived,boolean,campaigns,is_archived,No,Campaign Core,
+Reply.io,GET /v3/sequences/{id}/steps,id,number,campaign_variants,external_id,Yes,Variants,
+Reply.io,GET /v3/sequences/{id}/steps,order,number,campaign_variants,step_number,Yes,Variants,
+Reply.io,GET /v3/sequences/{id}/steps,subject,string,campaign_variants,subject_line,Yes,Variants,
+Reply.io,GET /v3/sequences/{id}/steps,body,string,campaign_variants,body_html,Yes,Variants,
+Reply.io,GET /v3/sequences/{id}/steps,waitDays,number,campaign_variants,delay_days,No,Variants,
+Reply.io,GET /v3/sequences/{id}/statistics,sent,number,campaigns,total_sent,Yes,Analytics Core,
+Reply.io,GET /v3/sequences/{id}/statistics,replied,number,campaigns,total_replied,Yes,Analytics Core,Critical metric
+Reply.io,GET /v3/sequences/{id}/statistics,bounced,number,campaigns,total_bounced,Yes,Analytics Core,
+Reply.io,GET /v3/sequences/{id}/statistics,interested,number,campaigns,positive_replies,Yes,Analytics Core,
+Reply.io,GET /v3/sequences/{id}/statistics,opened,number,campaigns,total_opened,No,Analytics Core,De-emphasized
+Reply.io,GET /v3/emailAccounts,id,number,email_accounts,external_id,Yes,Infrastructure,
+Reply.io,GET /v3/emailAccounts,email,string,email_accounts,from_email,Yes,Infrastructure,
+Reply.io,GET /v3/emailAccounts,name,string,email_accounts,from_name,No,Infrastructure,
+Reply.io,GET /v3/emailAccounts,dailyLimit,number,email_accounts,message_per_day,No,Infrastructure,
+Reply.io,GET /v3/emailAccounts,sentToday,number,email_accounts,daily_sent_count,No,Infrastructure,
+Reply.io,GET /v3/emailAccounts,warmupEnabled,boolean,email_accounts,warmup_enabled,No,Infrastructure,
+Reply.io,GET /v3/emailAccounts,isActive,boolean,email_accounts,is_active,No,Infrastructure,
+Reply.io,GET /v3/statistics,sequencesCount,number,data_sources,additional_config,No,Global Stats,Account-wide
+Reply.io,GET /v3/statistics,peopleCount,number,data_sources,additional_config,No,Global Stats,
+Reply.io,GET /v3/statistics,repliesCount,number,data_sources,additional_config,No,Global Stats,
+Reply.io,GET /v3/statistics,bouncesCount,number,data_sources,additional_config,No,Global Stats,
+Reply.io,GET /v3/people,id,number,contacts,external_lead_id,Yes,Leads,
+Reply.io,GET /v3/people,email,string,contacts,email,Yes,Leads,
+Reply.io,GET /v3/people,firstName,string,contacts,first_name,No,Leads,
+Reply.io,GET /v3/people,lastName,string,contacts,last_name,No,Leads,
+Reply.io,GET /v3/people,company,string,companies,name,No,Leads,
+Reply.io,GET /v3/people,title,string,contacts,title,No,Leads,
+Reply.io,GET /v3/people,isInterested,boolean,contacts,is_interested,No,Leads,
+Reply.io,GET /v3/people,addedAt,datetime,contacts,enrolled_at,No,Leads,
+PhoneBurner,GET /members,user_id,number,profiles,external_id,Yes,Team,
+PhoneBurner,GET /members,first_name,string,profiles,first_name,No,Team,
+PhoneBurner,GET /members,last_name,string,profiles,last_name,No,Team,
+PhoneBurner,GET /contacts,contact_user_id,number,contacts,external_lead_id,Yes,Contacts,
+PhoneBurner,GET /contacts,first_name,string,contacts,first_name,No,Contacts,
+PhoneBurner,GET /contacts,last_name,string,contacts,last_name,No,Contacts,
+PhoneBurner,GET /contacts,company,string,companies,name,No,Contacts,
+PhoneBurner,GET /contacts,phone,string,contacts,phone,No,Contacts,
+PhoneBurner,GET /dialsession,dialsession_id,number,call_sessions,external_id,Yes,Calling,
+PhoneBurner,GET /dialsession,start_when,datetime,call_sessions,started_at,Yes,Calling,
+PhoneBurner,GET /dialsession,end_when,datetime,call_sessions,ended_at,No,Calling,
+PhoneBurner,GET /dialsession,member_id,number,call_sessions,caller_user_id,No,Calling,
+PhoneBurner,GET /contacts/{id}/activities,activity_id,number,call_activities,external_id,Yes,Call Activities,
+PhoneBurner,GET /contacts/{id}/activities,activity,string,call_activities,disposition,Yes,Call Activities,
+PhoneBurner,GET /contacts/{id}/activities,date,datetime,call_activities,started_at,Yes,Call Activities,
+PhoneBurner,GET /contacts/{id}/activities,duration,number,call_activities,duration_seconds,No,Call Activities,
+Webhook,POST /smartlead-webhook,EMAIL_SENT,event,email_activities,sent,Yes,Events,
+Webhook,POST /smartlead-webhook,REPLY,event,email_activities,replied,Yes,Events,
+Webhook,POST /smartlead-webhook,BOUNCE,event,email_activities,bounced,Yes,Events,
+Webhook,POST /replyio-webhook,email.sent,event,email_activities,sent,Yes,Events,
+Webhook,POST /replyio-webhook,email.replied,event,email_activities,replied,Yes,Events,
+Webhook,POST /replyio-webhook,email.bounced,event,email_activities,bounced,Yes,Events,
+Webhook,POST /replyio-webhook,contact.interested,event,contacts,is_interested,No,Events,
+Calculated,-,reply_rate,decimal,campaigns,reply_rate,Yes,Derived,total_replied / delivered
+Calculated,-,bounce_rate,decimal,campaigns,bounce_rate,Yes,Derived,total_bounced / total_sent
+Calculated,-,positive_rate,decimal,campaigns,positive_rate,Yes,Derived,positive_replies / delivered
+Calculated,-,delivered,number,campaigns,total_delivered,Yes,Derived,total_sent - total_bounced
+Calculated,-,metrics_hash,string,campaigns,metrics_hash,No,Derived,Skip-unchanged optimization
