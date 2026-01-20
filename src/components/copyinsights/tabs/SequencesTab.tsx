@@ -1,61 +1,25 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { ExecutiveSummary } from '../ExecutiveSummary';
+import { SequenceFlowChart } from '../SequenceFlowChart';
+import { NoSequencesEmptyState } from '../ActionableEmptyState';
+import { useSequenceAnalytics } from '@/hooks/useSequenceAnalytics';
 
-interface SequenceStepData {
-  step_number: number;
-  sent: number;
-  replies: number;
-}
+export function SequencesTab() {
+  const { 
+    sequenceData, 
+    loading, 
+    hasData, 
+    totalSteps,
+    totalSent,
+    totalReplies,
+    step1ReplyShare,
+    optimalLength,
+  } = useSequenceAnalytics();
 
-interface SequencesTabProps {
-  sequenceData?: SequenceStepData[];
-}
-
-export function SequencesTab({ sequenceData = [] }: SequencesTabProps) {
-  // Calculate reply distribution from real data
-  const replyDistribution = useMemo(() => {
-    if (sequenceData.length === 0) return [];
-    
-    const totalReplies = sequenceData.reduce((sum, s) => sum + s.replies, 0);
-    
-    return sequenceData.map(step => ({
-      step: step.step_number === 1 ? 'Step 1 - Initial' : 
-            step.step_number >= 5 ? 'Step 5+' : 
-            `Step ${step.step_number} - Follow-up #${step.step_number - 1}`,
-      pct: totalReplies > 0 ? (step.replies / totalReplies) * 100 : 0,
-      rate: step.sent > 0 ? (step.replies / step.sent) * 100 : 0,
-      sent: step.sent,
-    }));
-  }, [sequenceData]);
-
-  // Calculate summary metrics from real data
-  const summaryMetrics = useMemo(() => {
-    if (sequenceData.length === 0) {
-      return {
-        activeSequences: 0,
-        avgLength: 0,
-        step1ReplyShare: 0,
-        hasData: false,
-      };
-    }
-    
-    const totalReplies = sequenceData.reduce((sum, s) => sum + s.replies, 0);
-    const step1Replies = sequenceData.find(s => s.step_number === 1)?.replies || 0;
-    
-    return {
-      activeSequences: sequenceData.length,
-      avgLength: sequenceData.length,
-      step1ReplyShare: totalReplies > 0 ? (step1Replies / totalReplies) * 100 : 0,
-      hasData: true,
-    };
-  }, [sequenceData]);
-
-  const hasData = sequenceData.length > 0;
-
-  // Generate executive insights only from real data
+  // Generate executive insights from real data
   const executiveInsights = useMemo(() => {
     if (!hasData) {
       return [{
@@ -67,22 +31,47 @@ export function SequencesTab({ sequenceData = [] }: SequencesTabProps) {
     
     const insights = [];
     
-    if (summaryMetrics.step1ReplyShare > 50) {
+    if (step1ReplyShare > 50) {
       insights.push({
         type: 'positive' as const,
-        title: `${summaryMetrics.step1ReplyShare.toFixed(0)}% of replies come from the first email`,
+        title: `${step1ReplyShare.toFixed(0)}% of replies come from the first email`,
         description: 'Most people who will reply do so quickly. Focus your best copy on Step 1.',
         impact: 'Step 1 focus',
       });
+    } else if (step1ReplyShare > 30) {
+      insights.push({
+        type: 'neutral' as const,
+        title: `${step1ReplyShare.toFixed(0)}% of replies come from the first email`,
+        description: 'Your sequence is working well—follow-ups are generating meaningful engagement.',
+      });
     }
     
-    if (replyDistribution.length > 3) {
-      const laterStepReplies = replyDistribution.slice(3).reduce((sum, s) => sum + s.pct, 0);
-      if (laterStepReplies < 15) {
+    if (optimalLength && optimalLength <= 3) {
+      insights.push({
+        type: 'positive' as const,
+        title: `Optimal sequence length: ${optimalLength} steps`,
+        description: 'Most of your positive outcomes happen early. Consider focusing on the first few touchpoints.',
+        impact: 'Efficiency opportunity',
+      });
+    } else if (optimalLength && optimalLength > 3) {
+      insights.push({
+        type: 'neutral' as const,
+        title: `Best reply rate at step ${optimalLength}`,
+        description: 'Your audience responds well to persistence. Your full sequence is working.',
+      });
+    }
+    
+    if (totalSteps >= 5) {
+      const laterStepsReplies = sequenceData
+        .filter(s => s.step_number > 3)
+        .reduce((sum, s) => sum + s.replies, 0);
+      const laterStepsPercent = totalReplies > 0 ? (laterStepsReplies / totalReplies) * 100 : 0;
+      
+      if (laterStepsPercent < 15) {
         insights.push({
-          type: 'neutral' as const,
-          title: `Steps 4+ contribute only ${laterStepReplies.toFixed(0)}% of replies`,
-          description: 'Later sequence steps have diminishing returns. Consider keeping sequences shorter.',
+          type: 'warning' as const,
+          title: `Steps 4+ contribute only ${laterStepsPercent.toFixed(0)}% of replies`,
+          description: 'Later sequence steps have diminishing returns. Consider shortening your sequences.',
         });
       }
     }
@@ -92,11 +81,21 @@ export function SequencesTab({ sequenceData = [] }: SequencesTabProps) {
       title: 'Analyzing your sequence patterns',
       description: 'We need more data to identify meaningful patterns in your multi-step sequences.',
     }];
-  }, [hasData, summaryMetrics, replyDistribution]);
+  }, [hasData, step1ReplyShare, optimalLength, totalSteps, totalReplies, sequenceData]);
 
   const bottomLine = hasData 
-    ? `Focus your best copy on early sequence steps where most replies happen.`
+    ? step1ReplyShare > 50
+      ? 'Your first email does the heavy lifting—make it count. Focus A/B testing there.'
+      : 'Your follow-ups are working. Keep refining your full sequence for maximum impact.'
     : 'Connect your email platform to analyze sequence performance.';
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   if (!hasData) {
     return (
@@ -107,19 +106,7 @@ export function SequencesTab({ sequenceData = [] }: SequencesTabProps) {
           insights={executiveInsights}
           bottomLine={bottomLine}
         />
-        
-        <Card>
-          <CardContent className="pt-8 pb-8">
-            <div className="text-center text-muted-foreground">
-              <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium mb-2">No Sequence Data Available</p>
-              <p className="text-sm">
-                Sequence analytics require step-level tracking from your email platform.
-                This data will populate once available.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <NoSequencesEmptyState />
       </div>
     );
   }
@@ -134,58 +121,36 @@ export function SequencesTab({ sequenceData = [] }: SequencesTabProps) {
         bottomLine={bottomLine}
       />
 
-      {/* Sequence Overview - Real Data Only */}
+      {/* Summary Cards */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="pt-4">
             <div className="text-sm text-muted-foreground">Sequence Steps</div>
-            <div className="text-2xl font-bold">{summaryMetrics.avgLength}</div>
+            <div className="text-2xl font-bold">{totalSteps}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
             <div className="text-sm text-muted-foreground">Step 1 Reply Share</div>
-            <div className="text-2xl font-bold">{summaryMetrics.step1ReplyShare.toFixed(0)}%</div>
+            <div className="text-2xl font-bold">{step1ReplyShare.toFixed(0)}%</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
             <div className="text-sm text-muted-foreground">Total Emails</div>
-            <div className="text-2xl font-bold">
-              {sequenceData.reduce((sum, s) => sum + s.sent, 0).toLocaleString()}
-            </div>
+            <div className="text-2xl font-bold">{totalSent.toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
             <div className="text-sm text-muted-foreground">Total Replies</div>
-            <div className="text-2xl font-bold">
-              {sequenceData.reduce((sum, s) => sum + s.replies, 0).toLocaleString()}
-            </div>
+            <div className="text-2xl font-bold">{totalReplies.toLocaleString()}</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Reply Distribution - Real Data */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Reply Distribution by Step</CardTitle>
-          <CardDescription>Where do your replies come from?</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {replyDistribution.map((step, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className="w-40 text-sm">{step.step}</div>
-              <div className="flex-1 relative h-6 bg-muted rounded">
-                <div className="absolute h-full bg-primary rounded" style={{ width: `${step.pct}%` }} />
-                <span className="absolute right-2 top-0.5 text-xs">{step.pct.toFixed(0)}%</span>
-              </div>
-              <div className="w-12 text-sm text-muted-foreground">{step.rate.toFixed(1)}%</div>
-              <Badge variant="outline" className="text-xs">n={step.sent.toLocaleString()}</Badge>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {/* Sequence Flow Visualization */}
+      <SequenceFlowChart data={sequenceData} />
     </div>
   );
 }
