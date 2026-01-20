@@ -16,8 +16,9 @@ const REPLYIO_V3_URL = 'https://api.reply.io/v3';
 // Reply.io Rate Limit: 10 seconds between API calls (strict!), 15,000 requests/month
 const RATE_LIMIT_DELAY_LIST = 3000;
 const RATE_LIMIT_DELAY_STATS = 10500;
-// Increased time budget for full processing - edge functions can run up to 400s  
-const TIME_BUDGET_MS = 300000;
+// IMPORTANT: Platform kills functions at ~3 minutes, so we need to trigger continuation before that
+// Set to 150 seconds (2.5 minutes) to ensure we have time to save state and trigger next batch
+const TIME_BUDGET_MS = 150000;
 // Remove practical batch limit - allow full sync to complete
 const MAX_BATCHES = 1000;
 const CONTINUATION_RETRIES = 3;
@@ -781,35 +782,16 @@ Deno.serve(async (req) => {
       let startIndex = reset ? 0 : (existingConfig.sequence_index || 0);
 
       for (let i = startIndex; i < allSequences.length; i++) {
-        // Heartbeat every 5 sequences - update data_sources and sync_progress
-        if (i > 0 && i % 5 === 0) {
-          await supabase.from('data_sources').update({
-            additional_config: { 
-              ...existingConfig,
-              cached_sequences: allSequences,
-              sequence_index: i, 
-              total_sequences: allSequences.length,
-              batch_number: batch_number,
-              heartbeat: new Date().toISOString(),
-            },
-            updated_at: new Date().toISOString(),
-          }).eq('id', data_source_id);
-          
-          // Update sync progress
-          await updateSyncProgress({
-            processed_campaigns: i,
-            current_campaign_name: allSequences[i]?.name || null,
-            records_synced: progress.sequences_synced + progress.people_synced + progress.email_activities_synced,
-          });
-        }
-        
+        // Check time budget FIRST before processing next sequence
         if (isTimeBudgetExceeded()) {
           console.log(`Time budget exceeded at sequence ${i}/${allSequences.length}. Triggering continuation...`);
           
           await supabase.from('data_sources').update({
             additional_config: { 
               ...existingConfig,
-              cached_sequences: allSequences,
+              cached_sequences: allSequences.map((s: any) => ({ 
+                id: s.id, name: s.name, status: s.status, ownerId: s.ownerId, teamId: s.teamId, isArchived: s.isArchived 
+              })),
               sequence_index: i, 
               total_sequences: allSequences.length,
               batch_number: batch_number,
@@ -818,6 +800,13 @@ Deno.serve(async (req) => {
             last_sync_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           }).eq('id', data_source_id);
+
+          // Update sync_progress before continuation
+          await updateSyncProgress({
+            processed_campaigns: i,
+            current_campaign_name: allSequences[i]?.name || null,
+            records_synced: progress.sequences_synced + progress.people_synced + progress.email_activities_synced,
+          });
 
           const shouldContinue = auto_continue || batch_number === 1;
           if (shouldContinue) {
@@ -837,6 +826,28 @@ Deno.serve(async (req) => {
             message: `Processed ${i}/${allSequences.length} sequences. ${shouldContinue ? 'Auto-continuing...' : 'Run again to continue.'}`,
           }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
+
+        // Update sync_progress every sequence (not every 5) for better UI feedback
+        await supabase.from('data_sources').update({
+          additional_config: { 
+            ...existingConfig,
+            cached_sequences: allSequences.map((s: any) => ({ 
+              id: s.id, name: s.name, status: s.status, ownerId: s.ownerId, teamId: s.teamId, isArchived: s.isArchived 
+            })),
+            sequence_index: i, 
+            total_sequences: allSequences.length,
+            batch_number: batch_number,
+            heartbeat: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        }).eq('id', data_source_id);
+        
+        // Update sync progress every sequence
+        await updateSyncProgress({
+          processed_campaigns: i,
+          current_campaign_name: allSequences[i]?.name || null,
+          records_synced: progress.sequences_synced + progress.people_synced + progress.email_activities_synced,
+        });
 
         const sequence = allSequences[i];
         console.log(`[${i + 1}/${allSequences.length}] Processing: ${sequence.name} (${sequence.status})`);
