@@ -15,9 +15,10 @@ const SMARTLEAD_BASE_URL = 'https://server.smartlead.ai/api/v1';
 // SmartLead Rate Limit: 10 requests per 2 seconds = 5 req/s
 // Using 250ms delay = 4 req/s to stay safely within limits
 const RATE_LIMIT_DELAY = 350;  // Safer margin for SmartLead's 10 req/2s limit
-// IMPORTANT: Platform kills functions at ~3 minutes, so we need to trigger continuation before that
-// Set to 150 seconds (2.5 minutes) to ensure we have time to save state and trigger next batch
-const TIME_BUDGET_MS = 150000;
+// IMPORTANT: Platform kills functions at ~3 minutes
+// Set to 120 seconds (2 minutes) to ensure we have time to save state and trigger next batch
+// This is MORE AGGRESSIVE to guarantee we continue before platform shutdown
+const TIME_BUDGET_MS = 120000;
 // Remove practical batch limit - allow full sync to complete
 const MAX_BATCHES = 1000;
 const CONTINUATION_RETRIES = 3;
@@ -853,6 +854,11 @@ serve(async (req) => {
       });
 
       let startIndex = reset ? 0 : (existingConfig.campaign_index || 0);
+      
+      // Get saved offsets for resuming mid-campaign
+      let resumeLeadOffset = existingConfig.lead_offset || 0;
+      let resumeStatsOffset = existingConfig.stats_offset || 0;
+      const resumeCampaignIndex = existingConfig.campaign_index || 0;
 
       // Process each campaign
       for (let i = startIndex; i < campaigns.length; i++) {
@@ -863,6 +869,8 @@ serve(async (req) => {
             additional_config: { 
               ...existingConfig,
               campaign_index: i, 
+              lead_offset: 0,
+              stats_offset: 0,
               total_campaigns: campaigns.length,
               batch_number,
             },
@@ -951,9 +959,16 @@ serve(async (req) => {
           // ============================================
           if (sync_leads) {
             try {
-              let offset = 0;
+              // Resume from saved offset if this is a continuation on the same campaign
+              let offset = (i === resumeCampaignIndex && resumeLeadOffset > 0) ? resumeLeadOffset : 0;
               const limit = 100;
               let hasMoreLeads = true;
+              
+              // Clear resume offset once we start
+              if (i === resumeCampaignIndex && resumeLeadOffset > 0) {
+                console.log(`  Resuming leads from offset ${offset}`);
+                resumeLeadOffset = 0; // Don't use again for this campaign
+              }
               
               // Get category lookup for this engagement
               const { data: categoriesLookup } = await supabase
@@ -962,7 +977,42 @@ serve(async (req) => {
                 .eq('engagement_id', activeEngagementId);
               const categoryMap = new Map(categoriesLookup?.map(c => [c.external_id, c.id]) || []);
               
-              while (hasMoreLeads && !isTimeBudgetExceeded()) {
+              while (hasMoreLeads) {
+                // GRANULAR TIME CHECK: Save state and continue if budget exceeded
+                if (isTimeBudgetExceeded()) {
+                  console.log(`Time budget exceeded during leads sync at campaign ${i}, offset ${offset}. Triggering continuation...`);
+                  
+                  await supabase.from('data_sources').update({
+                    additional_config: { 
+                      ...existingConfig,
+                      campaign_index: i,
+                      lead_offset: offset,
+                      stats_offset: 0,
+                      total_campaigns: campaigns.length,
+                      batch_number,
+                    },
+                    last_sync_status: 'partial',
+                    updated_at: new Date().toISOString(),
+                  }).eq('id', data_source_id);
+
+                  if (auto_continue) {
+                    EdgeRuntime.waitUntil(
+                      triggerNextBatch(supabaseUrl, supabaseServiceKey, client_id, activeEngagementId, data_source_id, batch_number + 1, 'campaigns')
+                    );
+                  }
+
+                  return new Response(JSON.stringify({
+                    success: true,
+                    complete: false,
+                    progress,
+                    current: i,
+                    total: campaigns.length,
+                    phase: 'campaigns-leads',
+                    batch_number,
+                    message: `Paused at campaign ${i}, lead offset ${offset}. Auto-continuing...`,
+                  }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+                }
+                
                 const leadsUrl = `/campaigns/${campaign.id}/leads?offset=${offset}&limit=${limit}`;
                 const leadsResponse = await smartleadRequest(leadsUrl, apiKey);
                 
@@ -1495,11 +1545,53 @@ serve(async (req) => {
           // ============================================
           if (sync_statistics) {
             try {
-              let offset = 0;
+              // Resume from saved offset if this is a continuation on the same campaign
+              let offset = (i === resumeCampaignIndex && resumeStatsOffset > 0) ? resumeStatsOffset : 0;
               const limit = 100;
               let hasMoreStats = true;
               
-              while (hasMoreStats && !isTimeBudgetExceeded()) {
+              // Clear resume offset once we start
+              if (i === resumeCampaignIndex && resumeStatsOffset > 0) {
+                console.log(`  Resuming statistics from offset ${offset}`);
+                resumeStatsOffset = 0; // Don't use again for this campaign
+              }
+              
+              while (hasMoreStats) {
+                // GRANULAR TIME CHECK: Save state and continue if budget exceeded
+                if (isTimeBudgetExceeded()) {
+                  console.log(`Time budget exceeded during stats sync at campaign ${i}, offset ${offset}. Triggering continuation...`);
+                  
+                  await supabase.from('data_sources').update({
+                    additional_config: { 
+                      ...existingConfig,
+                      campaign_index: i,
+                      lead_offset: 0, // Leads done for this campaign
+                      stats_offset: offset,
+                      total_campaigns: campaigns.length,
+                      batch_number,
+                    },
+                    last_sync_status: 'partial',
+                    updated_at: new Date().toISOString(),
+                  }).eq('id', data_source_id);
+
+                  if (auto_continue) {
+                    EdgeRuntime.waitUntil(
+                      triggerNextBatch(supabaseUrl, supabaseServiceKey, client_id, activeEngagementId, data_source_id, batch_number + 1, 'campaigns')
+                    );
+                  }
+
+                  return new Response(JSON.stringify({
+                    success: true,
+                    complete: false,
+                    progress,
+                    current: i,
+                    total: campaigns.length,
+                    phase: 'campaigns-stats',
+                    batch_number,
+                    message: `Paused at campaign ${i}, stats offset ${offset}. Auto-continuing...`,
+                  }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+                }
+                
                 const statsUrl = `/campaigns/${campaign.id}/statistics?offset=${offset}&limit=${limit}`;
                 const statsResponse = await smartleadRequest(statsUrl, apiKey);
                 
