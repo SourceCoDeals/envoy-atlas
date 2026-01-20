@@ -295,6 +295,40 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+// Generate a metrics hash for skip-unchanged optimization
+function generateMetricsHash(analytics: SmartleadAnalytics): string {
+  const sent = analytics.sent_count || 0;
+  const opened = analytics.unique_open_count || analytics.open_count || 0;
+  const replied = analytics.reply_count || 0;
+  const bounced = analytics.bounce_count || 0;
+  return `${sent}-${opened}-${replied}-${bounced}`;
+}
+
+// Batch size for database operations
+const DB_BATCH_SIZE = 50;
+
+// Helper to flush a batch of records to the database
+async function flushBatch(
+  supabase: any,
+  table: string,
+  records: any[],
+  conflictColumns: string
+): Promise<number> {
+  if (records.length === 0) return 0;
+  
+  const { error, data } = await supabase
+    .from(table)
+    .upsert(records, { onConflict: conflictColumns })
+    .select('id');
+  
+  if (error) {
+    console.error(`Batch upsert to ${table} failed:`, error.message);
+    return 0;
+  }
+  
+  return data?.length || records.length;
+}
+
 // Extract domain from email
 function extractDomain(email: string): string | null {
   if (!email || !email.includes('@')) return null;
@@ -954,10 +988,38 @@ serve(async (req) => {
           progress.campaigns_synced++;
 
           // ============================================
+          // SKIP-UNCHANGED OPTIMIZATION: Check metrics hash first
+          // If campaign metrics haven't changed, skip expensive leads/statistics fetches
+          // ============================================
+          let skipLeadsAndStats = false;
+          let currentMetricsHash: string | null = null;
+          
+          try {
+            const analyticsForHash: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
+            currentMetricsHash = generateMetricsHash(analyticsForHash);
+            
+            // Check if we have this exact hash stored
+            const { data: existingCampaignHash } = await supabase
+              .from('campaigns')
+              .select('metrics_hash')
+              .eq('id', campaignDbId)
+              .single();
+            
+            if (existingCampaignHash?.metrics_hash === currentMetricsHash && currentMetricsHash !== '0-0-0-0') {
+              console.log(`  Campaign unchanged (hash=${currentMetricsHash}), skipping leads/statistics`);
+              skipLeadsAndStats = true;
+            } else {
+              console.log(`  Campaign data changed (old=${existingCampaignHash?.metrics_hash || 'none'}, new=${currentMetricsHash})`);
+            }
+          } catch (hashError) {
+            console.log(`  Could not check metrics hash: ${(hashError as Error).message}`);
+          }
+
+          // ============================================
           // PRIORITY 1: Fetch Leads FIRST (before analytics)
           // This ensures contacts exist for email_activities
           // ============================================
-          if (sync_leads) {
+          if (sync_leads && !skipLeadsAndStats) {
             try {
               // Resume from saved offset if this is a continuation on the same campaign
               let offset = (i === resumeCampaignIndex && resumeLeadOffset > 0) ? resumeLeadOffset : 0;
@@ -1038,7 +1100,35 @@ serve(async (req) => {
                   }
                 }
                 
-                // Process leads in batch
+                // ============================================
+                // BATCH OPTIMIZATION: Pre-fetch existing companies
+                // ============================================
+                const leadEmails = leads.map((l: any) => {
+                  const lead = l.lead || l.lead_data || l;
+                  return lead?.email || l.email || l.lead_email;
+                }).filter(Boolean);
+                
+                const domains = [...new Set(leadEmails.map((e: string) => extractDomain(e)).filter(Boolean))] as string[];
+                
+                // Batch fetch existing companies by domain
+                const companyLookup = new Map<string, string>();
+                if (domains.length > 0) {
+                  const { data: existingCompanies } = await supabase
+                    .from('companies')
+                    .select('id, domain')
+                    .eq('engagement_id', activeEngagementId)
+                    .in('domain', domains);
+                  
+                  existingCompanies?.forEach((c: any) => {
+                    if (c.domain) companyLookup.set(c.domain, c.id);
+                  });
+                }
+                
+                // Batch arrays for bulk operations
+                const contactBatch: any[] = [];
+                const newCompanyBatch: any[] = [];
+                
+                // Process leads and collect for batch operations
                 for (const leadRaw of leads) {
                   try {
                     const rawItem = leadRaw as any;
@@ -1059,40 +1149,14 @@ serve(async (req) => {
                       continue;
                     }
                     
-                    // First, create/upsert company if we have company info
-                    let companyId: string | null = null;
+                    // Use pre-fetched company lookup for speed
                     const domain = extractDomain(leadEmail);
                     const companyName = lead.company_name || (leadRaw as any).company_name || (leadRaw as any).company || domain || 'Unknown';
                     
-                    // Try to find existing company first
-                    if (domain) {
-                      const { data: existingByDomain } = await supabase
-                        .from('companies')
-                        .select('id')
-                        .eq('engagement_id', activeEngagementId)
-                        .eq('domain', domain)
-                        .maybeSingle();
-                      
-                      if (existingByDomain) {
-                        companyId = existingByDomain.id;
-                      }
-                    }
+                    // Check pre-fetched lookup first
+                    let companyId: string | null = domain ? companyLookup.get(domain) || null : null;
                     
-                    // If not found by domain, try by name
-                    if (!companyId) {
-                      const { data: existingByName } = await supabase
-                        .from('companies')
-                        .select('id')
-                        .eq('engagement_id', activeEngagementId)
-                        .eq('name', companyName)
-                        .maybeSingle();
-                      
-                      if (existingByName) {
-                        companyId = existingByName.id;
-                      }
-                    }
-                    
-                    // Create new company if not found
+                    // If not in lookup, create new company
                     if (!companyId) {
                       const { data: newCompany, error: companyError } = await supabase
                         .from('companies')
@@ -1109,15 +1173,18 @@ serve(async (req) => {
                       if (!companyError && newCompany) {
                         companyId = newCompany.id;
                         progress.companies_synced++;
+                        // Add to lookup for subsequent leads
+                        if (domain && companyId) companyLookup.set(domain, companyId);
                       } else if (companyError?.code === '23505') {
                         // Duplicate - try to fetch again
                         const { data: retryCompany } = await supabase
                           .from('companies')
                           .select('id')
                           .eq('engagement_id', activeEngagementId)
-                          .or(`domain.eq.${domain},name.eq.${companyName}`)
+                          .eq('domain', domain)
                           .maybeSingle();
                         companyId = retryCompany?.id;
+                        if (companyId && domain) companyLookup.set(domain, companyId);
                       }
                     }
                     
@@ -1138,43 +1205,48 @@ serve(async (req) => {
                     const emailStatus = lead.email_status || (leadRaw as any).email_status || null;
                     const leadStatus = lead.status || (leadRaw as any).status || lead.lead_status || (leadRaw as any).lead_status || null;
                     
-                    // Upsert contact with extended fields
+                    // Collect contact for batch upsert
                     const enrolledAt = lead.created_at || (leadRaw as any).created_at || null;
-                    const { error: contactError } = await supabase
-                      .from('contacts')
-                      .upsert({
-                        engagement_id: activeEngagementId,
-                        company_id: companyId,
-                        email: leadEmail,
-                        first_name: firstName,
-                        last_name: lastName,
-                        phone: phoneNumber,
-                        linkedin_url: linkedinUrl,
-                        title: title,
-                        email_status: emailStatus,
-                        enrolled_at: enrolledAt,
-                        source: 'smartlead',
-                        // Extended fields
-                        external_lead_id: leadId ? String(leadId) : null,
-                        sequence_status: leadStatus,
-                        current_step: lead.last_email_sequence_sent || (leadRaw as any).last_email_sequence_sent || null,
-                        is_interested: lead.is_interested ?? (leadRaw as any).is_interested ?? null,
-                        is_unsubscribed: lead.is_unsubscribed ?? (leadRaw as any).is_unsubscribed ?? false,
-                        category_id: categoryId,
-                        open_count: lead.open_count || (leadRaw as any).open_count || 0,
-                        click_count: lead.click_count || (leadRaw as any).click_count || 0,
-                        reply_count: lead.reply_count || (leadRaw as any).reply_count || 0,
-                      }, { onConflict: 'engagement_id,email' });
+                    contactBatch.push({
+                      engagement_id: activeEngagementId,
+                      company_id: companyId,
+                      email: leadEmail,
+                      first_name: firstName,
+                      last_name: lastName,
+                      phone: phoneNumber,
+                      linkedin_url: linkedinUrl,
+                      title: title,
+                      email_status: emailStatus,
+                      enrolled_at: enrolledAt,
+                      source: 'smartlead',
+                      external_lead_id: leadId ? String(leadId) : null,
+                      sequence_status: leadStatus,
+                      current_step: lead.last_email_sequence_sent || (leadRaw as any).last_email_sequence_sent || null,
+                      is_interested: lead.is_interested ?? (leadRaw as any).is_interested ?? null,
+                      is_unsubscribed: lead.is_unsubscribed ?? (leadRaw as any).is_unsubscribed ?? false,
+                      category_id: categoryId,
+                      open_count: lead.open_count || (leadRaw as any).open_count || 0,
+                      click_count: lead.click_count || (leadRaw as any).click_count || 0,
+                      reply_count: lead.reply_count || (leadRaw as any).reply_count || 0,
+                    });
                     
-                    if (!contactError) {
-                      progress.leads_synced++;
-                    } else {
-                      console.error(`  Contact upsert error for ${leadEmail}:`, contactError.message);
+                    // Flush batch when it reaches DB_BATCH_SIZE
+                    if (contactBatch.length >= DB_BATCH_SIZE) {
+                      const flushed = await flushBatch(supabase, 'contacts', contactBatch, 'engagement_id,email');
+                      progress.leads_synced += flushed;
+                      contactBatch.length = 0; // Clear batch
                     }
                   } catch (leadError) {
                     // Silently continue on individual lead errors
                     console.error(`  Error processing lead:`, leadError);
                   }
+                }
+                
+                // Flush remaining contacts in batch
+                if (contactBatch.length > 0) {
+                  const flushed = await flushBatch(supabase, 'contacts', contactBatch, 'engagement_id,email');
+                  progress.leads_synced += flushed;
+                  contactBatch.length = 0;
                 }
                 
                 offset += leads.length;
@@ -1305,7 +1377,7 @@ serve(async (req) => {
               drafted_count: (analytics as any).drafted_count || 0,
             };
 
-            // Update campaign with totals and enrollment settings
+            // Update campaign with totals, enrollment settings, and metrics hash
             const { error: updateError } = await supabase.from('campaigns').update({
               total_sent: totalSent,
               total_opened: totalOpened,
@@ -1316,6 +1388,8 @@ serve(async (req) => {
               open_rate: totalSent > 0 ? Math.min(0.9999, totalOpened / totalSent) : null,
               bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
               settings: enrollmentSettings,
+              // Store metrics hash for skip-unchanged optimization
+              metrics_hash: currentMetricsHash || generateMetricsHash(analytics),
             }).eq('id', campaignDbId);
             
             if (updateError) {
@@ -1542,8 +1616,9 @@ serve(async (req) => {
 
           // ============================================
           // Fetch Individual Statistics (Email Events)
+          // Skip if campaign data is unchanged
           // ============================================
-          if (sync_statistics) {
+          if (sync_statistics && !skipLeadsAndStats) {
             try {
               // Resume from saved offset if this is a continuation on the same campaign
               let offset = (i === resumeCampaignIndex && resumeStatsOffset > 0) ? resumeStatsOffset : 0;
@@ -1613,21 +1688,35 @@ serve(async (req) => {
                   .eq('engagement_id', activeEngagementId);
                 const categoryMap = new Map(categoriesLookup?.map(c => [c.external_id, c.id]) || []);
                 
+                // ============================================
+                // BATCH OPTIMIZATION: Pre-fetch contacts for all emails in this batch
+                // ============================================
+                const statEmails = stats.map(s => s.email).filter(Boolean) as string[];
+                const contactLookup = new Map<string, { id: string; company_id: string | null }>();
+                
+                if (statEmails.length > 0) {
+                  const { data: existingContacts } = await supabase
+                    .from('contacts')
+                    .select('id, email, company_id')
+                    .eq('engagement_id', activeEngagementId)
+                    .in('email', statEmails);
+                  
+                  existingContacts?.forEach((c: any) => {
+                    if (c.email) contactLookup.set(c.email, { id: c.id, company_id: c.company_id });
+                  });
+                }
+                
+                // Batch arrays for bulk operations
+                const activityBatch: any[] = [];
+                const hourlyMetricsBatch: any[] = [];
+                
                 for (const stat of stats) {
                   try {
                     const email = stat.email;
                     if (!email) continue;
                     
-                    // Get contact for this email - or create on-the-fly if missing
-                    let contact = null;
-                    const { data: existingContact } = await supabase
-                      .from('contacts')
-                      .select('id, company_id')
-                      .eq('engagement_id', activeEngagementId)
-                      .eq('email', email)
-                      .single();
-                    
-                    contact = existingContact;
+                    // Use pre-fetched lookup first
+                    let contact = contactLookup.get(email) || null;
                     
                     // Create contact if doesn't exist
                     if (!contact) {
@@ -1662,7 +1751,8 @@ serve(async (req) => {
                         continue;
                       }
                       
-                      contact = newContact;
+                      contact = { id: newContact.id, company_id: newContact.company_id };
+                      contactLookup.set(email, contact); // Add to lookup for subsequent stats
                       progress.leads_synced++;
                     }
                     
@@ -1676,83 +1766,83 @@ serve(async (req) => {
                     // Get mapped category from SmartLead's lead_category for replies
                     const mappedCategory = mapSmartleadCategory(stat.lead_category);
                     
-                    const { error: activityError } = await supabase
-                      .from('email_activities')
-                      .upsert({
+                    // Collect activity for batch upsert
+                    activityBatch.push({
+                      engagement_id: activeEngagementId,
+                      campaign_id: campaignDbId,
+                      data_source_id: data_source_id,
+                      contact_id: contact.id,
+                      company_id: contact.company_id,
+                      external_id: stat.id ? String(stat.id) : null,
+                      to_email: email,
+                      sent: !!stat.sent_time,
+                      sent_at: stat.sent_time ? new Date(stat.sent_time).toISOString() : null,
+                      opened: !!stat.open_time,
+                      first_opened_at: stat.open_time ? new Date(stat.open_time).toISOString() : null,
+                      clicked: !!stat.click_time,
+                      first_clicked_at: stat.click_time ? new Date(stat.click_time).toISOString() : null,
+                      replied: !!stat.reply_time,
+                      replied_at: stat.reply_time ? new Date(stat.reply_time).toISOString() : null,
+                      bounced: stat.is_bounced ?? false,
+                      bounce_type: stat.bounce_type || null,
+                      unsubscribed: stat.is_unsubscribed ?? false,
+                      step_number: stat.seq_number || null,
+                      lead_category: stat.lead_category || null,
+                      category_id: categoryId,
+                      reply_category: stat.reply_time ? mappedCategory.reply_category : null,
+                      reply_sentiment: stat.reply_time ? mappedCategory.reply_sentiment : null,
+                    });
+                    
+                    // Collect hourly metrics
+                    const addToHourlyBatch = (timestamp: string | null, metricType: 'sent' | 'opened' | 'clicked' | 'replied' | 'bounced') => {
+                      if (!timestamp) return;
+                      const date = new Date(timestamp);
+                      hourlyMetricsBatch.push({
                         engagement_id: activeEngagementId,
                         campaign_id: campaignDbId,
-                        data_source_id: data_source_id,
-                        contact_id: contact.id,
-                        company_id: contact.company_id,
-                        external_id: stat.id ? String(stat.id) : null,
-                        to_email: email,
-                        sent: !!stat.sent_time,
-                        sent_at: stat.sent_time ? new Date(stat.sent_time).toISOString() : null,
-                        opened: !!stat.open_time,
-                        first_opened_at: stat.open_time ? new Date(stat.open_time).toISOString() : null,
-                        clicked: !!stat.click_time,
-                        first_clicked_at: stat.click_time ? new Date(stat.click_time).toISOString() : null,
-                        replied: !!stat.reply_time,
-                        replied_at: stat.reply_time ? new Date(stat.reply_time).toISOString() : null,
-                        bounced: stat.is_bounced ?? false,
-                        bounce_type: stat.bounce_type || null,
-                        unsubscribed: stat.is_unsubscribed ?? false,
-                        step_number: stat.seq_number || null,
-                        lead_category: stat.lead_category || null,
-                        category_id: categoryId,
-                        // Map reply category and sentiment from SmartLead's classification
-                        reply_category: stat.reply_time ? mappedCategory.reply_category : null,
-                        reply_sentiment: stat.reply_time ? mappedCategory.reply_sentiment : null,
-                      }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
+                        hour_of_day: date.getUTCHours(),
+                        day_of_week: date.getUTCDay(),
+                        metric_date: date.toISOString().split('T')[0],
+                        emails_sent: metricType === 'sent' ? 1 : 0,
+                        emails_opened: metricType === 'opened' ? 1 : 0,
+                        emails_clicked: metricType === 'clicked' ? 1 : 0,
+                        emails_replied: metricType === 'replied' ? 1 : 0,
+                        emails_bounced: metricType === 'bounced' ? 1 : 0,
+                      });
+                    };
                     
-                    if (!activityError) {
-                      progress.email_activities_synced++;
-                      
-                      // Aggregate hourly metrics from timestamps
-                      const hourlyBuckets: Map<string, { sent: number; opened: number; clicked: number; replied: number; bounced: number }> = new Map();
-                      
-                      const addToHourlyBucket = (timestamp: string | null, metricType: 'sent' | 'opened' | 'clicked' | 'replied' | 'bounced') => {
-                        if (!timestamp) return;
-                        const date = new Date(timestamp);
-                        const hour = date.getUTCHours();
-                        const dayOfWeek = date.getUTCDay();
-                        const metricDate = date.toISOString().split('T')[0];
-                        const key = `${hour}-${dayOfWeek}-${metricDate}`;
-                        
-                        if (!hourlyBuckets.has(key)) {
-                          hourlyBuckets.set(key, { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 });
-                        }
-                        const bucket = hourlyBuckets.get(key)!;
-                        bucket[metricType]++;
-                      };
-                      
-                      // Add metrics from this stat
-                      if (stat.sent_time) addToHourlyBucket(stat.sent_time, 'sent');
-                      if (stat.open_time) addToHourlyBucket(stat.open_time, 'opened');
-                      if (stat.click_time) addToHourlyBucket(stat.click_time, 'clicked');
-                      if (stat.reply_time) addToHourlyBucket(stat.reply_time, 'replied');
-                      if (stat.is_bounced && stat.sent_time) addToHourlyBucket(stat.sent_time, 'bounced');
-                      
-                      // Upsert hourly metrics
-                      for (const [key, metrics] of hourlyBuckets) {
-                        const [hour, dayOfWeek, metricDate] = key.split('-');
-                        await supabase.from('hourly_metrics').upsert({
-                          engagement_id: activeEngagementId,
-                          campaign_id: campaignDbId,
-                          hour_of_day: parseInt(hour),
-                          day_of_week: parseInt(dayOfWeek),
-                          metric_date: metricDate,
-                          emails_sent: metrics.sent,
-                          emails_opened: metrics.opened,
-                          emails_clicked: metrics.clicked,
-                          emails_replied: metrics.replied,
-                          emails_bounced: metrics.bounced,
-                        }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
-                      }
+                    if (stat.sent_time) addToHourlyBatch(stat.sent_time, 'sent');
+                    if (stat.open_time) addToHourlyBatch(stat.open_time, 'opened');
+                    if (stat.click_time) addToHourlyBatch(stat.click_time, 'clicked');
+                    if (stat.reply_time) addToHourlyBatch(stat.reply_time, 'replied');
+                    if (stat.is_bounced && stat.sent_time) addToHourlyBatch(stat.sent_time, 'bounced');
+                    
+                    // Flush activity batch when it reaches DB_BATCH_SIZE
+                    if (activityBatch.length >= DB_BATCH_SIZE) {
+                      const flushed = await flushBatch(supabase, 'email_activities', activityBatch, 'engagement_id,campaign_id,contact_id,step_number');
+                      progress.email_activities_synced += flushed;
+                      activityBatch.length = 0;
+                    }
+                    
+                    // Flush hourly metrics batch periodically
+                    if (hourlyMetricsBatch.length >= DB_BATCH_SIZE * 2) {
+                      await flushBatch(supabase, 'hourly_metrics', hourlyMetricsBatch, 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date');
+                      hourlyMetricsBatch.length = 0;
                     }
                   } catch (e) {
                     // Continue on individual stat errors
                   }
+                }
+                
+                // Flush remaining batches
+                if (activityBatch.length > 0) {
+                  const flushed = await flushBatch(supabase, 'email_activities', activityBatch, 'engagement_id,campaign_id,contact_id,step_number');
+                  progress.email_activities_synced += flushed;
+                  activityBatch.length = 0;
+                }
+                if (hourlyMetricsBatch.length > 0) {
+                  await flushBatch(supabase, 'hourly_metrics', hourlyMetricsBatch, 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date');
+                  hourlyMetricsBatch.length = 0;
                 }
                 
                 offset += stats.length;
