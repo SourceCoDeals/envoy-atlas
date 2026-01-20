@@ -988,17 +988,39 @@ serve(async (req) => {
           progress.campaigns_synced++;
 
           // ============================================
-          // SKIP-UNCHANGED OPTIMIZATION: Check metrics hash first
-          // If campaign metrics haven't changed, skip expensive leads/statistics fetches
+          // PRIORITY 0: Fetch Analytics FIRST (before leads/statistics)
+          // This ensures campaign metrics are always captured even if leads pagination times out
           // ============================================
           let skipLeadsAndStats = false;
           let currentMetricsHash: string | null = null;
+          const today = new Date().toISOString().split('T')[0];
           
           try {
-            const analyticsForHash: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
-            currentMetricsHash = generateMetricsHash(analyticsForHash);
+            const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
+            currentMetricsHash = generateMetricsHash(analytics);
+
+            const totalSent = analytics.sent_count || 0;
+            const totalOpened = analytics.unique_open_count || 0;
+            const totalClicked = analytics.unique_click_count || 0;
+            const totalReplied = analytics.reply_count || 0;
+            const totalBounced = analytics.bounce_count || 0;
             
-            // Check if we have this exact hash stored
+            console.log(`  Analytics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
+
+            // Extract lead stats for enrollment tracking
+            const leadStats = (analytics as any).campaign_lead_stats || {};
+            const enrollmentSettings = {
+              total_leads: (analytics as any).total_count || 0,
+              not_started: leadStats.notStarted || 0,
+              in_progress: leadStats.inprogress || 0,
+              completed: leadStats.completed || 0,
+              blocked: leadStats.blocked || 0,
+              paused: leadStats.paused || 0,
+              unsubscribed: leadStats.unsubscribed || (analytics as any).unsubscribe_count || 0,
+              drafted_count: (analytics as any).drafted_count || 0,
+            };
+            
+            // Check if we have this exact hash stored (for skip optimization)
             const { data: existingCampaignHash } = await supabase
               .from('campaigns')
               .select('metrics_hash')
@@ -1011,8 +1033,138 @@ serve(async (req) => {
             } else {
               console.log(`  Campaign data changed (old=${existingCampaignHash?.metrics_hash || 'none'}, new=${currentMetricsHash})`);
             }
-          } catch (hashError) {
-            console.log(`  Could not check metrics hash: ${(hashError as Error).message}`);
+
+            // ALWAYS update campaign with totals, enrollment settings, and metrics hash
+            const { error: updateError } = await supabase.from('campaigns').update({
+              total_sent: totalSent,
+              total_opened: totalOpened,
+              total_replied: totalReplied,
+              total_bounced: totalBounced,
+              total_delivered: Math.max(0, totalSent - totalBounced),
+              reply_rate: totalSent > 0 ? Math.min(0.9999, totalReplied / totalSent) : null,
+              open_rate: totalSent > 0 ? Math.min(0.9999, totalOpened / totalSent) : null,
+              bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
+              settings: enrollmentSettings,
+              metrics_hash: currentMetricsHash,
+            }).eq('id', campaignDbId);
+            
+            if (updateError) {
+              console.error(`  Campaign metrics update FAILED for ${campaign.name}: ${updateError.message}`);
+            } else {
+              console.log(`  Campaign metrics saved: sent=${totalSent}, replied=${totalReplied}`);
+            }
+
+            // Store enrollment snapshot for tracking trends
+            if (enrollmentSettings.total_leads > 0 || enrollmentSettings.not_started > 0) {
+              await supabase.from('enrollment_snapshots').upsert({
+                campaign_id: campaignDbId,
+                engagement_id: activeEngagementId,
+                date: today,
+                total_leads: enrollmentSettings.total_leads,
+                not_started: enrollmentSettings.not_started,
+                in_progress: enrollmentSettings.in_progress,
+                completed: enrollmentSettings.completed,
+                blocked: enrollmentSettings.blocked,
+                paused: enrollmentSettings.paused,
+                unsubscribed: enrollmentSettings.unsubscribed,
+              }, { onConflict: 'campaign_id,date' });
+            }
+
+            // Fetch analytics-by-date for granular daily metrics (quick - doesn't block leads)
+            try {
+              const campaignStartStr = campaign.created_at 
+                ? new Date(campaign.created_at).toISOString().split('T')[0]
+                : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+              
+              const campaignStartDate = new Date(campaignStartStr);
+              const todayDate = new Date(today);
+              const msPerDay = 24 * 60 * 60 * 1000;
+              
+              let totalDailyRecords = 0;
+              const maxDaysPerRequest = 29;
+              let windowStart = new Date(campaignStartDate);
+              
+              while (windowStart < todayDate) {
+                const windowEnd = new Date(Math.min(
+                  windowStart.getTime() + maxDaysPerRequest * msPerDay,
+                  todayDate.getTime()
+                ));
+                
+                const startStr = windowStart.toISOString().split('T')[0];
+                const endStr = windowEnd.toISOString().split('T')[0];
+                
+                try {
+                  const analyticsUrl = `/campaigns/${campaign.id}/analytics-by-date?start_date=${startStr}&end_date=${endStr}`;
+                  const dailyAnalytics = await smartleadRequest(analyticsUrl, apiKey);
+                  
+                  const dailyData = Array.isArray(dailyAnalytics) 
+                    ? dailyAnalytics 
+                    : (dailyAnalytics?.data || dailyAnalytics?.analytics || []);
+                  
+                  for (const day of dailyData) {
+                    const metricDate = day.date || day.metric_date;
+                    if (!metricDate) continue;
+                    
+                    const daySent = day.sent_count || day.sent || 0;
+                    const dayOpened = day.open_count || day.unique_open_count || day.opened || 0;
+                    const dayClicked = day.click_count || day.unique_click_count || day.clicked || 0;
+                    const dayReplied = day.reply_count || day.replied || 0;
+                    const dayBounced = day.bounce_count || day.bounced || 0;
+                    const dayPositive = day.positive_count || day.positive_replies || 0;
+                    
+                    if (daySent > 0 || dayOpened > 0 || dayReplied > 0) {
+                      await supabase.from('daily_metrics').upsert({
+                        engagement_id: activeEngagementId,
+                        campaign_id: campaignDbId,
+                        data_source_id: data_source_id,
+                        date: metricDate,
+                        emails_sent: daySent,
+                        emails_opened: dayOpened,
+                        emails_clicked: dayClicked,
+                        emails_replied: dayReplied,
+                        emails_bounced: dayBounced,
+                        positive_replies: dayPositive,
+                        open_rate: daySent > 0 ? Math.min(0.9999, dayOpened / daySent) : null,
+                        reply_rate: daySent > 0 ? Math.min(0.9999, dayReplied / daySent) : null,
+                        bounce_rate: daySent > 0 ? Math.min(0.9999, dayBounced / daySent) : null,
+                      }, { onConflict: 'engagement_id,campaign_id,date' });
+                      progress.metrics_created++;
+                      totalDailyRecords++;
+                    }
+                  }
+                } catch (chunkError) {
+                  console.log(`  Chunk ${startStr}-${endStr} failed: ${(chunkError as Error).message}`);
+                }
+                
+                windowStart = new Date(windowEnd.getTime() + msPerDay);
+              }
+              
+              if (totalDailyRecords > 0) {
+                console.log(`  Fetched ${totalDailyRecords} days of analytics-by-date`);
+              }
+            } catch (e) {
+              // analytics-by-date not available - store totals as single daily record
+              if (totalSent > 0 || totalOpened > 0 || totalReplied > 0) {
+                const metricDate = campaign.created_at 
+                  ? new Date(campaign.created_at).toISOString().split('T')[0]
+                  : today;
+
+                await supabase.from('daily_metrics').upsert({
+                  engagement_id: activeEngagementId,
+                  campaign_id: campaignDbId,
+                  data_source_id: data_source_id,
+                  date: metricDate,
+                  emails_sent: totalSent,
+                  emails_opened: totalOpened,
+                  emails_clicked: totalClicked,
+                  emails_replied: totalReplied,
+                  emails_bounced: totalBounced,
+                }, { onConflict: 'engagement_id,campaign_id,date' });
+                progress.metrics_created++;
+              }
+            }
+          } catch (analyticsError) {
+            console.log(`  Could not fetch analytics: ${(analyticsError as Error).message}`);
           }
 
           // ============================================
@@ -1328,180 +1480,7 @@ serve(async (req) => {
             }
           }
 
-          // Fetch analytics
-          try {
-            const analytics: SmartleadAnalytics = await smartleadRequest(`/campaigns/${campaign.id}/analytics`, apiKey);
-            const today = new Date().toISOString().split('T')[0];
-
-            const totalSent = analytics.sent_count || 0;
-            const totalOpened = analytics.unique_open_count || 0;
-            const totalClicked = analytics.unique_click_count || 0;
-            const totalReplied = analytics.reply_count || 0;
-            const totalBounced = analytics.bounce_count || 0;
-            
-            console.log(`  Analytics: sent=${totalSent}, opens=${totalOpened}, replies=${totalReplied}`);
-
-            // Extract lead stats for enrollment tracking
-            const leadStats = (analytics as any).campaign_lead_stats || {};
-            const enrollmentSettings = {
-              total_leads: (analytics as any).total_count || 0,
-              not_started: leadStats.notStarted || 0,
-              in_progress: leadStats.inprogress || 0,
-              completed: leadStats.completed || 0,
-              blocked: leadStats.blocked || 0,
-              paused: leadStats.paused || 0,
-              unsubscribed: leadStats.unsubscribed || (analytics as any).unsubscribe_count || 0,
-              drafted_count: (analytics as any).drafted_count || 0,
-            };
-
-            // Update campaign with totals, enrollment settings, and metrics hash
-            const { error: updateError } = await supabase.from('campaigns').update({
-              total_sent: totalSent,
-              total_opened: totalOpened,
-              total_replied: totalReplied,
-              total_bounced: totalBounced,
-              total_delivered: Math.max(0, totalSent - totalBounced),
-              reply_rate: totalSent > 0 ? Math.min(0.9999, totalReplied / totalSent) : null,
-              open_rate: totalSent > 0 ? Math.min(0.9999, totalOpened / totalSent) : null,
-              bounce_rate: totalSent > 0 ? Math.min(0.9999, totalBounced / totalSent) : null,
-              settings: enrollmentSettings,
-              // Store metrics hash for skip-unchanged optimization
-              metrics_hash: currentMetricsHash || generateMetricsHash(analytics),
-            }).eq('id', campaignDbId);
-            
-            if (updateError) {
-              console.error(`  Campaign update FAILED for ${campaign.name}: ${updateError.message}`);
-            } else {
-              console.log(`  Campaign metrics saved: sent=${totalSent}, replied=${totalReplied}`);
-            }
-
-            // Store enrollment snapshot for tracking trends
-            if (enrollmentSettings.total_leads > 0 || enrollmentSettings.not_started > 0) {
-              await supabase.from('enrollment_snapshots').upsert({
-                campaign_id: campaignDbId,
-                engagement_id: activeEngagementId,
-                date: today,
-                total_leads: enrollmentSettings.total_leads,
-                not_started: enrollmentSettings.not_started,
-                in_progress: enrollmentSettings.in_progress,
-                completed: enrollmentSettings.completed,
-                blocked: enrollmentSettings.blocked,
-                paused: enrollmentSettings.paused,
-                unsubscribed: enrollmentSettings.unsubscribed,
-              }, { onConflict: 'campaign_id,date' });
-              console.log(`  Enrollment snapshot: total=${enrollmentSettings.total_leads}, backlog=${enrollmentSettings.not_started}`);
-            }
-
-            // ============================================
-            // NEW: Fetch analytics-by-date for granular daily metrics
-            // SmartLead API limits to 30-day windows, so we chunk requests
-            // ============================================
-            try {
-              // Get date range: campaign start to today
-              const campaignStartStr = campaign.created_at 
-                ? new Date(campaign.created_at).toISOString().split('T')[0]
-                : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-              
-              const campaignStartDate = new Date(campaignStartStr);
-              const todayDate = new Date(today);
-              const msPerDay = 24 * 60 * 60 * 1000;
-              const totalDays = Math.ceil((todayDate.getTime() - campaignStartDate.getTime()) / msPerDay);
-              
-              let totalDailyRecords = 0;
-              
-              // Chunk into 30-day windows
-              const maxDaysPerRequest = 29; // Stay safely under 30
-              let windowStart = new Date(campaignStartDate);
-              
-              while (windowStart < todayDate) {
-                const windowEnd = new Date(Math.min(
-                  windowStart.getTime() + maxDaysPerRequest * msPerDay,
-                  todayDate.getTime()
-                ));
-                
-                const startStr = windowStart.toISOString().split('T')[0];
-                const endStr = windowEnd.toISOString().split('T')[0];
-                
-                try {
-                  const analyticsUrl = `/campaigns/${campaign.id}/analytics-by-date?start_date=${startStr}&end_date=${endStr}`;
-                  const dailyAnalytics = await smartleadRequest(analyticsUrl, apiKey);
-                  
-                  const dailyData = Array.isArray(dailyAnalytics) 
-                    ? dailyAnalytics 
-                    : (dailyAnalytics?.data || dailyAnalytics?.analytics || []);
-                  
-                  for (const day of dailyData) {
-                    const metricDate = day.date || day.metric_date;
-                    if (!metricDate) continue;
-                    
-                    const daySent = day.sent_count || day.sent || 0;
-                    const dayOpened = day.open_count || day.unique_open_count || day.opened || 0;
-                    const dayClicked = day.click_count || day.unique_click_count || day.clicked || 0;
-                    const dayReplied = day.reply_count || day.replied || 0;
-                    const dayBounced = day.bounce_count || day.bounced || 0;
-                    const dayPositive = day.positive_count || day.positive_replies || 0;
-                    
-                    if (daySent > 0 || dayOpened > 0 || dayReplied > 0) {
-                      await supabase.from('daily_metrics').upsert({
-                        engagement_id: activeEngagementId,
-                        campaign_id: campaignDbId,
-                        data_source_id: data_source_id,
-                        date: metricDate,
-                        emails_sent: daySent,
-                        emails_opened: dayOpened,
-                        emails_clicked: dayClicked,
-                        emails_replied: dayReplied,
-                        emails_bounced: dayBounced,
-                        positive_replies: dayPositive,
-                        open_rate: daySent > 0 ? Math.min(0.9999, dayOpened / daySent) : null,
-                        reply_rate: daySent > 0 ? Math.min(0.9999, dayReplied / daySent) : null,
-                        bounce_rate: daySent > 0 ? Math.min(0.9999, dayBounced / daySent) : null,
-                      }, { onConflict: 'engagement_id,campaign_id,date' });
-                      progress.metrics_created++;
-                      totalDailyRecords++;
-                    }
-                  }
-                } catch (chunkError) {
-                  // Continue to next chunk even if one fails
-                  console.log(`  Chunk ${startStr}-${endStr} failed: ${(chunkError as Error).message}`);
-                }
-                
-                // Move to next window
-                windowStart = new Date(windowEnd.getTime() + msPerDay);
-              }
-              
-              if (totalDailyRecords > 0) {
-                console.log(`  Fetched ${totalDailyRecords} days of analytics-by-date (${Math.ceil(totalDays / maxDaysPerRequest)} chunks)`);
-              }
-            } catch (e) {
-              // analytics-by-date may not be available for all campaigns - fall back to totals
-              console.log(`  analytics-by-date not available: ${(e as Error).message}`);
-              console.log(`  analytics-by-date not available: ${(e as Error).message}`);
-              
-              // Store daily metrics as before
-              if (totalSent > 0 || totalOpened > 0 || totalReplied > 0) {
-                const metricDate = campaign.created_at 
-                  ? new Date(campaign.created_at).toISOString().split('T')[0]
-                  : today;
-
-                await supabase.from('daily_metrics').upsert({
-                  engagement_id: activeEngagementId,
-                  campaign_id: campaignDbId,
-                  data_source_id: data_source_id,
-                  date: metricDate,
-                  emails_sent: totalSent,
-                  emails_opened: totalOpened,
-                  emails_clicked: totalClicked,
-                  emails_replied: totalReplied,
-                  emails_bounced: totalBounced,
-                }, { onConflict: 'engagement_id,campaign_id,date' });
-                progress.metrics_created++;
-              }
-            }
-          } catch (e) {
-            console.error(`  Analytics error for ${campaign.name}:`, e);
-            progress.errors.push(`Analytics ${campaign.name}: ${(e as Error).message}`);
-          }
+          // Analytics already fetched in PRIORITY 0 section above
 
           // Fetch sequences/variants with extended fields
           try {
