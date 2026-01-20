@@ -3489,6 +3489,123 @@ export type Database = {
           },
         ]
       }
+      sync_progress: {
+        Row: {
+          completed_at: string | null
+          current_campaign_name: string | null
+          current_phase: string | null
+          data_source_id: string | null
+          engagement_id: string | null
+          errors: Json | null
+          id: string
+          processed_campaigns: number | null
+          records_synced: number | null
+          started_at: string | null
+          status: string | null
+          total_campaigns: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          current_campaign_name?: string | null
+          current_phase?: string | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          errors?: Json | null
+          id?: string
+          processed_campaigns?: number | null
+          records_synced?: number | null
+          started_at?: string | null
+          status?: string | null
+          total_campaigns?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          current_campaign_name?: string | null
+          current_phase?: string | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          errors?: Json | null
+          id?: string
+          processed_campaigns?: number | null
+          records_synced?: number | null
+          started_at?: string | null
+          status?: string | null
+          total_campaigns?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_progress_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sync_progress_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sync_retry_queue: {
+        Row: {
+          created_at: string | null
+          data_source_id: string | null
+          engagement_id: string | null
+          id: string
+          last_error: string | null
+          max_retries: number | null
+          next_retry_at: string | null
+          retry_count: number | null
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          id?: string
+          last_error?: string | null
+          max_retries?: number | null
+          next_retry_at?: string | null
+          retry_count?: number | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          data_source_id?: string | null
+          engagement_id?: string | null
+          id?: string
+          last_error?: string | null
+          max_retries?: number | null
+          next_retry_at?: string | null
+          retry_count?: number | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_retry_queue_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sync_retry_queue_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_members: {
         Row: {
           client_id: string
