@@ -2704,6 +2704,162 @@ export type Database = {
           },
         ]
       }
+      external_call_intel: {
+        Row: {
+          ai_model_used: string | null
+          buyer_type_preference: string | null
+          call_id: string
+          conversation_quality_justification: string | null
+          conversation_quality_score: number | null
+          created_at: string
+          discovery_justification: string | null
+          discovery_score: number | null
+          engagement_id: string
+          id: string
+          interest_in_selling: string | null
+          next_steps: string | null
+          next_steps_clarity_justification: string | null
+          next_steps_clarity_score: number | null
+          number_of_objections: number | null
+          objection_details: Json | null
+          objection_handling_justification: string | null
+          objection_handling_score: number | null
+          objections_list: string[] | null
+          objections_resolved_count: number | null
+          overall_quality_justification: string | null
+          overall_quality_score: number | null
+          personal_insights: string | null
+          personal_insights_justification: string | null
+          personal_insights_score: number | null
+          processed_at: string | null
+          question_adherence_justification: string | null
+          question_adherence_score: number | null
+          questions_covered_count: number | null
+          questions_covered_list: string[] | null
+          rapport_building_justification: string | null
+          rapport_building_score: number | null
+          script_adherence_justification: string | null
+          script_adherence_score: number | null
+          seller_interest_justification: string | null
+          seller_interest_score: number | null
+          target_pain_points: string[] | null
+          timeline_to_sell: string | null
+          transcription_used: string | null
+          updated_at: string
+          valuation_discussion_justification: string | null
+          valuation_discussion_score: number | null
+          value_proposition_justification: string | null
+          value_proposition_score: number | null
+        }
+        Insert: {
+          ai_model_used?: string | null
+          buyer_type_preference?: string | null
+          call_id: string
+          conversation_quality_justification?: string | null
+          conversation_quality_score?: number | null
+          created_at?: string
+          discovery_justification?: string | null
+          discovery_score?: number | null
+          engagement_id: string
+          id?: string
+          interest_in_selling?: string | null
+          next_steps?: string | null
+          next_steps_clarity_justification?: string | null
+          next_steps_clarity_score?: number | null
+          number_of_objections?: number | null
+          objection_details?: Json | null
+          objection_handling_justification?: string | null
+          objection_handling_score?: number | null
+          objections_list?: string[] | null
+          objections_resolved_count?: number | null
+          overall_quality_justification?: string | null
+          overall_quality_score?: number | null
+          personal_insights?: string | null
+          personal_insights_justification?: string | null
+          personal_insights_score?: number | null
+          processed_at?: string | null
+          question_adherence_justification?: string | null
+          question_adherence_score?: number | null
+          questions_covered_count?: number | null
+          questions_covered_list?: string[] | null
+          rapport_building_justification?: string | null
+          rapport_building_score?: number | null
+          script_adherence_justification?: string | null
+          script_adherence_score?: number | null
+          seller_interest_justification?: string | null
+          seller_interest_score?: number | null
+          target_pain_points?: string[] | null
+          timeline_to_sell?: string | null
+          transcription_used?: string | null
+          updated_at?: string
+          valuation_discussion_justification?: string | null
+          valuation_discussion_score?: number | null
+          value_proposition_justification?: string | null
+          value_proposition_score?: number | null
+        }
+        Update: {
+          ai_model_used?: string | null
+          buyer_type_preference?: string | null
+          call_id?: string
+          conversation_quality_justification?: string | null
+          conversation_quality_score?: number | null
+          created_at?: string
+          discovery_justification?: string | null
+          discovery_score?: number | null
+          engagement_id?: string
+          id?: string
+          interest_in_selling?: string | null
+          next_steps?: string | null
+          next_steps_clarity_justification?: string | null
+          next_steps_clarity_score?: number | null
+          number_of_objections?: number | null
+          objection_details?: Json | null
+          objection_handling_justification?: string | null
+          objection_handling_score?: number | null
+          objections_list?: string[] | null
+          objections_resolved_count?: number | null
+          overall_quality_justification?: string | null
+          overall_quality_score?: number | null
+          personal_insights?: string | null
+          personal_insights_justification?: string | null
+          personal_insights_score?: number | null
+          processed_at?: string | null
+          question_adherence_justification?: string | null
+          question_adherence_score?: number | null
+          questions_covered_count?: number | null
+          questions_covered_list?: string[] | null
+          rapport_building_justification?: string | null
+          rapport_building_score?: number | null
+          script_adherence_justification?: string | null
+          script_adherence_score?: number | null
+          seller_interest_justification?: string | null
+          seller_interest_score?: number | null
+          target_pain_points?: string[] | null
+          timeline_to_sell?: string | null
+          transcription_used?: string | null
+          updated_at?: string
+          valuation_discussion_justification?: string | null
+          valuation_discussion_score?: number | null
+          value_proposition_justification?: string | null
+          value_proposition_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_call_intel_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: true
+            referencedRelation: "call_activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_call_intel_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hourly_metrics: {
         Row: {
           campaign_id: string | null
