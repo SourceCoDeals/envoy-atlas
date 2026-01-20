@@ -311,15 +311,31 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         .select('*')
         .eq('engagement_id', engagementId);
 
-      const [dailyMetricsResult, callsResult, meetingsResult] = await Promise.all([
+      // Fetch email accounts for infrastructure metrics
+      const emailAccountsQuery = supabase
+        .from('email_accounts')
+        .select('*')
+        .eq('engagement_id', engagementId);
+
+      // Fetch contacts for enrollment trend fallback
+      const contactsQuery = supabase
+        .from('contacts')
+        .select('id, enrolled_at, current_step, finish_reason')
+        .eq('engagement_id', engagementId);
+
+      const [dailyMetricsResult, callsResult, meetingsResult, emailAccountsResult, contactsResult] = await Promise.all([
         dailyMetricsQuery,
         callsQuery,
         meetingsQuery,
+        emailAccountsQuery,
+        contactsQuery,
       ]);
 
       const dailyMetrics = dailyMetricsResult.data || [];
       const calls = callsResult.data || [];
       const meetings = meetingsResult.data || [];
+      const emailAccounts = emailAccountsResult.data || [];
+      const contacts = contactsResult.data || [];
 
       // If the selected date range returns no rows, detect whether this engagement has
       // older daily metrics so the UI can suggest switching to "All time".
@@ -599,23 +615,103 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
                      'negative' as const,
         }));
 
-      // Infrastructure metrics - simplified since we don't have email_accounts/sending_domains tables
+      // Infrastructure metrics - calculated from email_accounts
+      const domainMap = new Map<string, {
+        mailboxCount: number;
+        dailyCapacity: number;
+        currentSending: number;
+        warmupCount: number;
+        activeCount: number;
+        spfValid: boolean | null;
+        dkimValid: boolean | null;
+        dmarcValid: boolean | null;
+        healthScores: number[];
+        bounceRates: number[];
+      }>();
+
+      emailAccounts.forEach((account: any) => {
+        const email = account.from_email || '';
+        const domain = email.split('@')[1] || 'unknown';
+        
+        const existing = domainMap.get(domain) || {
+          mailboxCount: 0,
+          dailyCapacity: 0,
+          currentSending: 0,
+          warmupCount: 0,
+          activeCount: 0,
+          spfValid: null,
+          dkimValid: null,
+          dmarcValid: null,
+          healthScores: [],
+          bounceRates: [],
+        };
+
+        existing.mailboxCount += 1;
+        existing.dailyCapacity += account.message_per_day || 0;
+        existing.currentSending += account.daily_sent_count || 0;
+        if (account.warmup_enabled) existing.warmupCount += 1;
+        if (account.is_active) existing.activeCount += 1;
+        if (account.warmup_reputation !== null) existing.healthScores.push(account.warmup_reputation);
+        
+        domainMap.set(domain, existing);
+      });
+
+      const domainBreakdown: DomainBreakdown[] = Array.from(domainMap.entries())
+        .map(([domain, data]) => ({
+          domain,
+          mailboxCount: data.mailboxCount,
+          dailyCapacity: data.dailyCapacity,
+          spfValid: data.spfValid,
+          dkimValid: data.dkimValid,
+          dmarcValid: data.dmarcValid,
+          bounceRate: data.bounceRates.length > 0 
+            ? data.bounceRates.reduce((a, b) => a + b, 0) / data.bounceRates.length 
+            : 0,
+          healthScore: data.healthScores.length > 0 
+            ? data.healthScores.reduce((a, b) => a + b, 0) / data.healthScores.length 
+            : 0,
+          warmupCount: data.warmupCount,
+        }))
+        .sort((a, b) => b.mailboxCount - a.mailboxCount);
+
+      const totalMailboxes = emailAccounts.length;
+      const activeMailboxes = emailAccounts.filter((a: any) => a.is_active).length;
+      const totalDailyCapacity = emailAccounts.reduce((sum: number, a: any) => sum + (a.message_per_day || 0), 0);
+      const currentDailySending = emailAccounts.reduce((sum: number, a: any) => sum + (a.daily_sent_count || 0), 0);
+      const warmupCount = emailAccounts.filter((a: any) => a.warmup_enabled).length;
+      const allHealthScores = emailAccounts
+        .filter((a: any) => a.warmup_reputation !== null)
+        .map((a: any) => a.warmup_reputation);
+
       const infrastructureMetrics: InfrastructureMetrics = {
-        totalDomains: 0,
-        totalMailboxes: 0,
-        activeMailboxes: 0,
-        totalDailyCapacity: 0,
-        currentDailySending: 0,
-        utilizationRate: 0,
-        warmupCount: 0,
-        domainsWithFullAuth: 0,
-        avgHealthScore: 0,
+        totalDomains: domainMap.size,
+        totalMailboxes,
+        activeMailboxes,
+        totalDailyCapacity,
+        currentDailySending,
+        utilizationRate: totalDailyCapacity > 0 ? (currentDailySending / totalDailyCapacity) * 100 : 0,
+        warmupCount,
+        domainsWithFullAuth: domainBreakdown.filter(d => d.spfValid && d.dkimValid && d.dmarcValid).length,
+        avgHealthScore: allHealthScores.length > 0 
+          ? allHealthScores.reduce((a: number, b: number) => a + b, 0) / allHealthScores.length 
+          : 0,
         avgBounceRate: 0,
-        domainBreakdown: [],
+        domainBreakdown,
       };
 
-      // Calculate enrollment metrics from campaign settings
-      const enrollmentTotals = (campaigns || []).reduce((acc, c) => {
+      // Calculate enrollment metrics - use contacts as primary source, campaign settings as fallback
+      const contactsCount = contacts.length;
+      const contactsNotStarted = contacts.filter((c: any) => !c.current_step || c.current_step === 0).length;
+      const contactsCompleted = contacts.filter((c: any) => c.finish_reason === 'completed' || c.finish_reason === 'replied').length;
+      const contactsInProgress = contacts.filter((c: any) => 
+        c.current_step && c.current_step > 0 && !c.finish_reason
+      ).length;
+      const contactsBlocked = contacts.filter((c: any) => 
+        c.finish_reason === 'bounced' || c.finish_reason === 'unsubscribed'
+      ).length;
+
+      // Fallback to campaign settings if no contacts
+      const campaignEnrollment = (campaigns || []).reduce((acc, c) => {
         const settings = c.settings as Record<string, number> | null;
         return {
           totalLeads: acc.totalLeads + (settings?.total_leads || 0),
@@ -626,23 +722,53 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         };
       }, { totalLeads: 0, notStarted: 0, inProgress: 0, completed: 0, blocked: 0 });
 
+      const useContactsData = contactsCount > 0;
       const enrollmentMetrics: EnrollmentMetrics = {
-        totalLeads: enrollmentTotals.totalLeads,
-        notStarted: enrollmentTotals.notStarted,
-        inProgress: enrollmentTotals.inProgress,
-        completed: enrollmentTotals.completed,
-        blocked: enrollmentTotals.blocked,
-        backlogRate: enrollmentTotals.totalLeads > 0 
-          ? (enrollmentTotals.notStarted / enrollmentTotals.totalLeads) * 100 
+        totalLeads: useContactsData ? contactsCount : campaignEnrollment.totalLeads,
+        notStarted: useContactsData ? contactsNotStarted : campaignEnrollment.notStarted,
+        inProgress: useContactsData ? contactsInProgress : campaignEnrollment.inProgress,
+        completed: useContactsData ? contactsCompleted : campaignEnrollment.completed,
+        blocked: useContactsData ? contactsBlocked : campaignEnrollment.blocked,
+        backlogRate: (useContactsData ? contactsCount : campaignEnrollment.totalLeads) > 0 
+          ? ((useContactsData ? contactsNotStarted : campaignEnrollment.notStarted) / 
+             (useContactsData ? contactsCount : campaignEnrollment.totalLeads)) * 100 
           : 0,
       };
 
-      // Calculate weekly enrollment trends from snapshots
+      // Calculate weekly enrollment trends - use contacts.enrolled_at as primary source
       const weeklyEnrollmentTrend: WeeklyEnrollmentTrend[] = [];
-      const snapshots = enrollmentSnapshots || [];
       
-      if (snapshots.length > 0) {
-        // Group snapshots by week
+      // Build from contacts.enrolled_at
+      if (contacts.length > 0) {
+        const weeklyContactsMap = new Map<string, number>();
+        
+        contacts.forEach((c: any) => {
+          if (c.enrolled_at) {
+            const enrolledDate = parseISO(c.enrolled_at);
+            const weekStart = startOfWeek(enrolledDate, { weekStartsOn: 1 });
+            const weekKey = format(weekStart, 'yyyy-MM-dd');
+            weeklyContactsMap.set(weekKey, (weeklyContactsMap.get(weekKey) || 0) + 1);
+          }
+        });
+
+        const sortedWeeks = Array.from(weeklyContactsMap.entries())
+          .sort(([a], [b]) => a.localeCompare(b));
+
+        let cumulativeTotal = 0;
+        sortedWeeks.forEach(([weekKey, count]) => {
+          cumulativeTotal += count;
+          const weekStart = parseISO(weekKey);
+          weeklyEnrollmentTrend.push({
+            weekStart: weekKey,
+            weekLabel: `Week of ${format(weekStart, 'MMM d')}`,
+            newLeadsEnrolled: count,
+            cumulativeTotal,
+            backlog: 0, // Can't calculate historical backlog from current data
+          });
+        });
+      } else if ((enrollmentSnapshots || []).length > 0) {
+        // Fallback to snapshots
+        const snapshots = enrollmentSnapshots || [];
         const weeklyMap = new Map<string, { total: number; backlog: number; date: string }>();
         
         snapshots.forEach((s: any) => {
@@ -651,7 +777,6 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           const weekKey = format(weekStart, 'yyyy-MM-dd');
           
           const existing = weeklyMap.get(weekKey);
-          // Use the latest values for that week (or accumulate if multiple campaigns)
           weeklyMap.set(weekKey, {
             total: (existing?.total || 0) + (s.total_leads || 0),
             backlog: (existing?.backlog || 0) + (s.not_started || 0),
@@ -659,7 +784,6 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           });
         });
 
-        // Convert to array and calculate weekly changes
         const sortedWeeks = Array.from(weeklyMap.entries())
           .sort(([a], [b]) => a.localeCompare(b));
 
@@ -705,7 +829,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           historicalEmailMinDate,
           historicalEmailMaxDate,
           callingData: calls.length > 0,
-          infrastructureData: false,
+          infrastructureData: emailAccounts.length > 0,
           syncInProgress: false,
         },
       });
