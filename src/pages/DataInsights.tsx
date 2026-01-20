@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
@@ -11,9 +11,10 @@ import { OutcomeMetricsTab } from '@/components/datainsights/OutcomeMetricsTab';
 import { ProspectStrategyTab } from '@/components/datainsights/ProspectStrategyTab';
 import { GatekeeperTrackingTab } from '@/components/datainsights/GatekeeperTrackingTab';
 import { WrongNumberTrackingTab } from '@/components/datainsights/WrongNumberTrackingTab';
-import { Loader2, Activity, Users, Target, Compass, UserCheck, PhoneOff, Filter } from 'lucide-react';
+import { Loader2, Activity, Users, Target, Compass, UserCheck, PhoneOff, Filter, Settings } from 'lucide-react';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { COLD_CALLING_BENCHMARKS } from '@/lib/coldCallingBenchmarks';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
+import { getDurationStatus, formatCallingDuration } from '@/lib/callingConfig';
 import {
   useExternalCalls,
   filterCalls,
@@ -25,6 +26,8 @@ import {
   DateRangeOption,
   ExternalCall,
 } from '@/hooks/useExternalCalls';
+import { Button } from '@/components/ui/button';
+import { Link } from 'react-router-dom';
 
 interface Benchmark {
   metric_name: string;
@@ -41,38 +44,72 @@ export default function DataInsights() {
   const { user, loading: authLoading } = useAuth();
   const { currentWorkspace } = useWorkspace();
   const { calls, analysts, loading: callsLoading, totalCount } = useExternalCalls();
+  const { config, isLoading: configLoading } = useCallingConfig();
   
   const [dateRange, setDateRange] = useState<DateRangeOption>('last_month');
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>('all');
 
-  // Auth not required - public read access enabled
-
-  // Build benchmarks from local constants
+  // Build benchmarks from config
   const benchmarks = useMemo(() => {
     const benchmarkMap: Record<string, Benchmark> = {};
-    const sdrMetrics = COLD_CALLING_BENCHMARKS.sdrMetrics;
     
-    // Map SDR metrics to benchmark format
-    if (sdrMetrics) {
-      Object.entries(sdrMetrics).forEach(([key, value]) => {
-        if (typeof value === 'number') {
-          benchmarkMap[key] = {
-            metric_name: key.replace(/_/g, ' '),
-            metric_key: key,
-            benchmark_value: value,
-            benchmark_unit: key.includes('rate') ? '%' : 'count',
-            benchmark_range_low: null,
-            benchmark_range_high: null,
-            description: null,
-          };
-        }
-      });
-    }
+    // Use config values for benchmarks
+    benchmarkMap['calls_per_hour'] = {
+      metric_name: 'Calls Per Hour',
+      metric_key: 'calls_per_hour',
+      benchmark_value: 12,
+      benchmark_unit: 'calls',
+      benchmark_range_low: 10,
+      benchmark_range_high: 15,
+      description: 'Target calls per hour',
+    };
+    
+    benchmarkMap['calls_per_day'] = {
+      metric_name: 'Calls Per Day',
+      metric_key: 'calls_per_day',
+      benchmark_value: 80,
+      benchmark_unit: 'calls',
+      benchmark_range_low: 60,
+      benchmark_range_high: 100,
+      description: 'Target calls per day',
+    };
+    
+    benchmarkMap['attempts_per_lead'] = {
+      metric_name: 'Attempts Per Lead',
+      metric_key: 'attempts_per_lead',
+      benchmark_value: 6,
+      benchmark_unit: 'attempts',
+      benchmark_range_low: 4,
+      benchmark_range_high: 8,
+      description: 'Target attempts per lead',
+    };
+
+    // Connect rate benchmark
+    benchmarkMap['connect_rate'] = {
+      metric_name: 'Connect Rate',
+      metric_key: 'connect_rate',
+      benchmark_value: 15,
+      benchmark_unit: '%',
+      benchmark_range_low: 10,
+      benchmark_range_high: 20,
+      description: 'Target connect rate',
+    };
+
+    // Call duration from config
+    benchmarkMap['avg_call_duration'] = {
+      metric_name: 'Avg Call Duration',
+      metric_key: 'avg_call_duration',
+      benchmark_value: config.callDurationMinOptimal,
+      benchmark_unit: 'seconds',
+      benchmark_range_low: config.callDurationMinOptimal,
+      benchmark_range_high: config.callDurationMaxOptimal,
+      description: 'Optimal call duration range',
+    };
     
     return benchmarkMap;
-  }, []);
+  }, [config]);
 
-  // Compute all metrics from filtered calls
+  // Compute all metrics from filtered calls using config thresholds
   const { activityMetrics, engagementMetrics, outcomeMetrics, prospectMetrics, gatekeeperMetrics, wrongNumberMetrics } = useMemo(() => {
     const filtered = filterCalls(calls, dateRange, selectedAnalyst);
     
@@ -128,19 +165,20 @@ export default function DataInsights() {
       hourlyDistribution,
     };
 
-    // Engagement Metrics
+    // Engagement Metrics - use config for duration classification
     const connectRate = totalDials > 0 ? (totalConnects / totalDials) * 100 : 0;
     const callsWithDuration = filtered.filter(c => c.talk_duration != null && c.talk_duration > 0);
     const avgDuration = callsWithDuration.length
       ? callsWithDuration.reduce((sum, c) => sum + (c.talk_duration || 0), 0) / callsWithDuration.length
       : 0;
 
+    // Duration buckets based on config thresholds
     const durationBuckets = [
-      { range: '0-1 min', min: 0, max: 60 },
-      { range: '1-3 min', min: 60, max: 180 },
-      { range: '3-5 min', min: 180, max: 300 },
-      { range: '5-10 min', min: 300, max: 600 },
-      { range: '10+ min', min: 600, max: Infinity },
+      { range: `0-${Math.round(config.callDurationTooShort / 60)}m`, min: 0, max: config.callDurationTooShort },
+      { range: `${Math.round(config.callDurationTooShort / 60)}-${Math.round(config.callDurationMinOptimal / 60)}m`, min: config.callDurationTooShort, max: config.callDurationMinOptimal },
+      { range: `${Math.round(config.callDurationMinOptimal / 60)}-${Math.round(config.callDurationMaxOptimal / 60)}m (Optimal)`, min: config.callDurationMinOptimal, max: config.callDurationMaxOptimal },
+      { range: `${Math.round(config.callDurationMaxOptimal / 60)}-${Math.round(config.callDurationTooLong / 60)}m`, min: config.callDurationMaxOptimal, max: config.callDurationTooLong },
+      { range: `${Math.round(config.callDurationTooLong / 60)}m+`, min: config.callDurationTooLong, max: Infinity },
     ];
     const durationDistribution = durationBuckets.map(bucket => ({
       range: bucket.range,
@@ -249,9 +287,9 @@ export default function DataInsights() {
       blockedRate: gatekeeperCalls.length > 0 ? Math.round((blocked / gatekeeperCalls.length) * 100) : 0,
     };
 
-    // Wrong Number Metrics
+    // Wrong Number Metrics - use config duration threshold
     const wrongNumbers = filtered.filter(c =>
-      (c.talk_duration || 0) < 30 && 
+      (c.talk_duration || 0) < config.callDurationTooShort && 
       (c.disposition?.toLowerCase().includes('wrong') || c.call_title?.toLowerCase().includes('wrong'))
     );
 
@@ -283,9 +321,9 @@ export default function DataInsights() {
     };
 
     return { activityMetrics, engagementMetrics, outcomeMetrics, prospectMetrics, gatekeeperMetrics, wrongNumberMetrics };
-  }, [calls, dateRange, selectedAnalyst]);
+  }, [calls, dateRange, selectedAnalyst, config]);
 
-  const loading = authLoading || callsLoading;
+  const loading = authLoading || callsLoading || configLoading;
   const dateRangeLabel = DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label || 'Selected Period';
 
   if (loading) {
@@ -308,6 +346,12 @@ export default function DataInsights() {
               {totalCount.toLocaleString()} total calls • Analyzing {dateRangeLabel.toLowerCase()}
             </p>
           </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/settings?tab=calling">
+              <Settings className="h-4 w-4 mr-2" />
+              Configure Thresholds
+            </Link>
+          </Button>
         </div>
 
         {/* Filters */}

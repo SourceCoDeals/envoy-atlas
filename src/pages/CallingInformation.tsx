@@ -4,6 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCallInformation } from '@/hooks/useCallInformation';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
+import { getScoreStatus, getScoreStatusColor, formatScore } from '@/lib/callingConfig';
 import { ScoreRadarChart } from '@/components/callinformation/ScoreRadarChart';
 import { MandatoryQuestionsBreakdown } from '@/components/callinformation/MandatoryQuestionsBreakdown';
 import { ObjectionAnalysis } from '@/components/callinformation/ObjectionAnalysis';
@@ -25,18 +27,30 @@ import {
 import {
   Phone,
   Loader2,
-  Users,
   ThumbsUp,
   Clock,
   Target,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--muted))'];
 
 export default function CallingInformation() {
   const { data, isLoading, markFollowupComplete } = useCallInformation();
+  const { config, isLoading: configLoading } = useCallingConfig();
 
-  // Prepare chart data
+  // Get status colors based on config thresholds
+  const getInterestStatusColor = (score: number) => {
+    const status = getScoreStatus(score, config.sellerInterestThresholds);
+    return getScoreStatusColor(status);
+  };
+
+  const getQualityStatusColor = (score: number) => {
+    const status = getScoreStatus(score, config.overallQualityThresholds);
+    return getScoreStatusColor(status);
+  };
+
+  // Prepare chart data with config-aware colors
   const categoryChartData = data ? [
     { name: 'Connection', value: data.callCategories.connection },
     { name: 'Gatekeeper', value: data.callCategories.gatekeeper },
@@ -44,10 +58,10 @@ export default function CallingInformation() {
   ].filter(d => d.value > 0) : [];
 
   const interestChartData = data ? [
-    { name: 'Yes', value: data.interestDistribution.yes },
-    { name: 'Maybe', value: data.interestDistribution.maybe },
-    { name: 'No', value: data.interestDistribution.no },
-    { name: 'Unknown', value: data.interestDistribution.unknown },
+    { name: 'Yes', value: data.interestDistribution.yes, fill: 'hsl(var(--success))' },
+    { name: 'Maybe', value: data.interestDistribution.maybe, fill: 'hsl(var(--warning))' },
+    { name: 'No', value: data.interestDistribution.no, fill: 'hsl(var(--destructive))' },
+    { name: 'Unknown', value: data.interestDistribution.unknown, fill: 'hsl(var(--muted))' },
   ].filter(d => d.value > 0) : [];
 
   const timelineChartData = data ? [
@@ -58,6 +72,8 @@ export default function CallingInformation() {
     { name: 'Unknown', value: data.timelineDistribution.unknown },
   ].filter(d => d.value > 0) : [];
 
+  const loading = isLoading || configLoading;
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -67,7 +83,7 @@ export default function CallingInformation() {
           <p className="text-muted-foreground">AI-extracted insights from all scored conversations</p>
         </div>
 
-        {isLoading ? (
+        {loading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {[...Array(4)].map((_, i) => (
               <Card key={i}>
@@ -79,7 +95,7 @@ export default function CallingInformation() {
           </div>
         ) : (
           <>
-            {/* KPI Cards */}
+            {/* KPI Cards with config-based coloring */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Card>
                 <CardHeader className="pb-2">
@@ -101,10 +117,16 @@ export default function CallingInformation() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-3xl font-bold">
-                    {data?.averageScores.sellerInterest || 0}
+                  <p className={cn("text-3xl font-bold", getInterestStatusColor(data?.averageScores.sellerInterest || 0))}>
+                    {formatScore(data?.averageScores.sellerInterest, config)}
                     <span className="text-lg text-muted-foreground">/10</span>
                   </p>
+                  <Badge 
+                    variant="outline" 
+                    className={cn("mt-1 text-xs", getInterestStatusColor(data?.averageScores.sellerInterest || 0))}
+                  >
+                    {getScoreStatus(data?.averageScores.sellerInterest || 0, config.sellerInterestThresholds)}
+                  </Badge>
                 </CardContent>
               </Card>
 
@@ -116,10 +138,16 @@ export default function CallingInformation() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-3xl font-bold">
-                    {data?.averageScores.overallQuality || 0}
+                  <p className={cn("text-3xl font-bold", getQualityStatusColor(data?.averageScores.overallQuality || 0))}>
+                    {formatScore(data?.averageScores.overallQuality, config)}
                     <span className="text-lg text-muted-foreground">/10</span>
                   </p>
+                  <Badge 
+                    variant="outline" 
+                    className={cn("mt-1 text-xs", getQualityStatusColor(data?.averageScores.overallQuality || 0))}
+                  >
+                    {getScoreStatus(data?.averageScores.overallQuality || 0, config.overallQualityThresholds)}
+                  </Badge>
                 </CardContent>
               </Card>
 
@@ -189,7 +217,9 @@ export default function CallingInformation() {
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-base">Interest Level Distribution</CardTitle>
-                      <CardDescription>Seller interest breakdown</CardDescription>
+                      <CardDescription>
+                        Seller interest breakdown (Hot Lead threshold: {config.hotLeadInterestScore}/10)
+                      </CardDescription>
                     </CardHeader>
                     <CardContent>
                       {interestChartData.length > 0 ? (
@@ -205,8 +235,8 @@ export default function CallingInformation() {
                                 outerRadius={80}
                                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                               >
-                                {interestChartData.map((_, index) => (
-                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                {interestChartData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.fill || COLORS[index % COLORS.length]} />
                                 ))}
                               </Pie>
                               <Tooltip />

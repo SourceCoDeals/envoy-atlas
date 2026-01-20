@@ -15,15 +15,49 @@ import {
   CallLibraryEntry,
   SuggestedCall,
 } from '@/hooks/useCallLibrary';
-import { Library, Play, Trash2, Search, User, Sparkles } from 'lucide-react';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
+import { isTopCall, isWorstCall, formatScore, getScoreStatus, getScoreStatusColor } from '@/lib/callingConfig';
+import { Library, Play, Trash2, Search, User, Sparkles, Star, AlertTriangle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemove: () => void }) {
+function LibraryEntryCard({ 
+  entry, 
+  onRemove,
+  config 
+}: { 
+  entry: CallLibraryEntry; 
+  onRemove: () => void;
+  config: ReturnType<typeof useCallingConfig>['config'];
+}) {
+  // Determine if this is a top or worst call based on config - use talk_duration as proxy
+  const callScore = entry.call?.talk_duration ? Math.min(10, entry.call.talk_duration / 60) : null;
+  const isTop = callScore != null && isTopCall(callScore, config);
+  const isWorst = callScore != null && isWorstCall(callScore, config);
+
   return (
-    <Card className="hover:shadow-md transition-shadow">
+    <Card className={cn(
+      "hover:shadow-md transition-shadow",
+      isTop && "border-success/50",
+      isWorst && "border-destructive/50"
+    )}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <h4 className="font-medium text-foreground truncate">{entry.title}</h4>
+            <div className="flex items-center gap-2">
+              <h4 className="font-medium text-foreground truncate">{entry.title}</h4>
+              {isTop && (
+                <Badge variant="default" className="bg-success text-success-foreground shrink-0">
+                  <Star className="h-3 w-3 mr-1" />
+                  Top Call
+                </Badge>
+              )}
+              {isWorst && (
+                <Badge variant="destructive" className="shrink-0">
+                  <AlertTriangle className="h-3 w-3 mr-1" />
+                  Avoid
+                </Badge>
+              )}
+            </div>
             {entry.description && (
               <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{entry.description}</p>
             )}
@@ -34,6 +68,14 @@ function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemo
                   <User className="h-3 w-3" />
                   {entry.call.caller_name}
                 </div>
+              )}
+              {callScore != null && (
+                <Badge 
+                  variant="outline" 
+                  className={cn("text-xs", getScoreStatusColor(getScoreStatus(callScore, config.overallQualityThresholds)))}
+                >
+                  Score: {formatScore(callScore, config)}
+                </Badge>
               )}
             </div>
 
@@ -66,9 +108,25 @@ function LibraryEntryCard({ entry, onRemove }: { entry: CallLibraryEntry; onRemo
   );
 }
 
-function SuggestedCallRow({ call, onAdd, type }: { call: SuggestedCall; onAdd: () => void; type?: 'best' | 'worst' }) {
+function SuggestedCallRow({ 
+  call, 
+  onAdd, 
+  type,
+  config 
+}: { 
+  call: SuggestedCall; 
+  onAdd: () => void; 
+  type?: 'best' | 'worst';
+  config: ReturnType<typeof useCallingConfig>['config'];
+}) {
+  const score = call.talk_duration ? Math.min(10, call.talk_duration / 60) : null;
+  const scoreStatus = score != null ? getScoreStatus(score, config.overallQualityThresholds) : 'none';
+
   return (
-    <div className={`flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 ${type === 'worst' ? 'border-destructive/30' : type === 'best' ? 'border-green-500/30' : ''}`}>
+    <div className={cn(
+      "flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2",
+      type === 'worst' ? 'border-destructive/30' : type === 'best' ? 'border-success/30' : ''
+    )}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           {type && (
@@ -78,10 +136,20 @@ function SuggestedCallRow({ call, onAdd, type }: { call: SuggestedCall; onAdd: (
           )}
           <p className="text-sm font-medium truncate">{call.company_name || call.call_title || 'Untitled call'}</p>
         </div>
-        <p className="text-xs text-muted-foreground truncate">
-          {call.caller_name || 'Unknown rep'}
-          {call.talk_duration != null ? ` • ${Math.round(call.talk_duration / 60)}min` : ''}
-        </p>
+        <div className="flex items-center gap-2 mt-1">
+          <p className="text-xs text-muted-foreground truncate">
+            {call.caller_name || 'Unknown rep'}
+            {call.talk_duration != null ? ` • ${Math.round(call.talk_duration / 60)}min` : ''}
+          </p>
+          {score != null && (
+            <Badge 
+              variant="outline" 
+              className={cn("text-xs", getScoreStatusColor(scoreStatus))}
+            >
+              {formatScore(score, config)}
+            </Badge>
+          )}
+        </div>
       </div>
       <Button size="sm" onClick={onAdd}>
         Add
@@ -90,7 +158,15 @@ function SuggestedCallRow({ call, onAdd, type }: { call: SuggestedCall; onAdd: (
   );
 }
 
-function CategorySection({ entries, onRemove }: { entries: CallLibraryEntry[]; onRemove: (id: string) => void }) {
+function CategorySection({ 
+  entries, 
+  onRemove,
+  config 
+}: { 
+  entries: CallLibraryEntry[]; 
+  onRemove: (id: string) => void;
+  config: ReturnType<typeof useCallingConfig>['config'];
+}) {
   if (entries.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground">
@@ -104,7 +180,12 @@ function CategorySection({ entries, onRemove }: { entries: CallLibraryEntry[]; o
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {entries.map((entry) => (
-        <LibraryEntryCard key={entry.id} entry={entry} onRemove={() => onRemove(entry.id)} />
+        <LibraryEntryCard 
+          key={entry.id} 
+          entry={entry} 
+          onRemove={() => onRemove(entry.id)} 
+          config={config}
+        />
       ))}
     </div>
   );
@@ -121,6 +202,7 @@ export default function CallLibrary() {
     addToLibrary,
     removeFromLibrary,
   } = useCallLibrary();
+  const { config, isLoading: configLoading } = useCallingConfig();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
@@ -177,6 +259,8 @@ export default function CallLibrary() {
     setSelectedCall(null);
   };
 
+  const loading = isLoading || configLoading;
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -184,7 +268,10 @@ export default function CallLibrary() {
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Call Library</h1>
-            <p className="text-muted-foreground">Curated collection of exemplary calls for training and reference</p>
+            <p className="text-muted-foreground">
+              Curated collection of exemplary calls for training and reference
+              (Top: ≥{config.topCallsMinScore}, Avoid: ≤{config.worstCallsMaxScore})
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="secondary" className="text-lg px-3 py-1">
@@ -230,7 +317,9 @@ export default function CallLibrary() {
             <div className="flex items-center justify-between gap-3 mb-4">
               <div>
                 <p className="font-medium">AI-Categorized Call Suggestions</p>
-                <p className="text-sm text-muted-foreground">Best and worst examples for each skill area, based on call duration</p>
+                <p className="text-sm text-muted-foreground">
+                  Best (≥{config.topCallsMinScore}) and worst (≤{config.worstCallsMaxScore}) examples based on AI scores
+                </p>
               </div>
               <Badge variant="outline" className="gap-2">
                 <Sparkles className="h-4 w-4" />
@@ -255,28 +344,46 @@ export default function CallLibrary() {
                     
                     {cat.value === 'avoid_examples' ? (
                       <div>
-                        <h4 className="text-sm font-medium text-destructive mb-2">Calls to Avoid (Shortest Duration)</h4>
+                        <h4 className="text-sm font-medium text-destructive mb-2">Calls to Avoid (Score ≤{config.worstCallsMaxScore})</h4>
                         <div className="grid gap-2 md:grid-cols-2">
                           {suggestions?.best.slice(0, 6).map((c) => (
-                            <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} type="worst" />
+                            <SuggestedCallRow 
+                              key={c.id} 
+                              call={c} 
+                              onAdd={() => openAddForCall(c)} 
+                              type="worst"
+                              config={config}
+                            />
                           ))}
                         </div>
                       </div>
                     ) : (
                       <div className="grid gap-4 md:grid-cols-2">
                         <div>
-                          <h4 className="text-sm font-medium text-green-600 mb-2">Best Examples</h4>
+                          <h4 className="text-sm font-medium text-success mb-2">Best Examples (≥{config.topCallsMinScore})</h4>
                           <div className="space-y-2">
                             {suggestions?.best.slice(0, 3).map((c) => (
-                              <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} type="best" />
+                              <SuggestedCallRow 
+                                key={c.id} 
+                                call={c} 
+                                onAdd={() => openAddForCall(c)} 
+                                type="best"
+                                config={config}
+                              />
                             ))}
                           </div>
                         </div>
                         <div>
-                          <h4 className="text-sm font-medium text-destructive mb-2">Worst Examples</h4>
+                          <h4 className="text-sm font-medium text-destructive mb-2">Worst Examples (≤{config.worstCallsMaxScore})</h4>
                           <div className="space-y-2">
                             {suggestions?.worst.slice(0, 3).map((c) => (
-                              <SuggestedCallRow key={c.id} call={c} onAdd={() => openAddForCall(c)} type="worst" />
+                              <SuggestedCallRow 
+                                key={c.id} 
+                                call={c} 
+                                onAdd={() => openAddForCall(c)} 
+                                type="worst"
+                                config={config}
+                              />
                             ))}
                           </div>
                         </div>
@@ -365,7 +472,7 @@ export default function CallLibrary() {
               return (
                 <TabsContent key={cat.value} value={cat.value} className="space-y-4">
                   <p className="text-muted-foreground">{cat.description}</p>
-                  <CategorySection entries={categoryEntries} onRemove={handleRemove} />
+                  <CategorySection entries={categoryEntries} onRemove={handleRemove} config={config} />
                 </TabsContent>
               );
             })}
@@ -378,13 +485,18 @@ export default function CallLibrary() {
             </p>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {filteredEntries.map((entry) => (
-                <LibraryEntryCard key={entry.id} entry={entry} onRemove={() => handleRemove(entry.id)} />
+                <LibraryEntryCard 
+                  key={entry.id} 
+                  entry={entry} 
+                  onRemove={() => handleRemove(entry.id)} 
+                  config={config}
+                />
               ))}
             </div>
           </div>
         )}
 
-        {isLoading && <div className="text-center py-12 text-muted-foreground">Loading library...</div>}
+        {loading && <div className="text-center py-12 text-muted-foreground">Loading library...</div>}
       </div>
     </DashboardLayout>
   );
