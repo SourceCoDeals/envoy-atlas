@@ -19,6 +19,7 @@ export interface CallLibraryEntry {
     recording_url: string | null;
     date_time: string | null;
     caller_name: string | null;
+    talk_duration: number | null;
   };
 }
 
