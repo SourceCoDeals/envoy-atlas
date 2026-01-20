@@ -1275,33 +1275,10 @@ serve(async (req) => {
                   // Upsert email account
                   let warmupDetails = account.warmup_details || {};
                   
-                  // ============================================
-                  // NEW: Fetch warmup-stats for enhanced deliverability data
-                  // ============================================
-                  let warmupScore: number | null = null;
-                  let inboxRate: number | null = null;
-                  let spamRate: number | null = null;
-                  
-                  try {
-                    const warmupStatsUrl = `/email-accounts/${account.id}/warmup-stats`;
-                    const warmupStats = await smartleadRequest(warmupStatsUrl, apiKey);
-                    
-                    if (warmupStats) {
-                      warmupDetails = {
-                        ...warmupDetails,
-                        status: warmupStats.status || warmupDetails.status,
-                        warmup_reputation: warmupStats.warmup_reputation ?? warmupStats.reputation ?? warmupDetails.warmup_reputation,
-                        total_spam_count: warmupStats.spam_count ?? warmupStats.total_spam_count ?? warmupDetails.total_spam_count,
-                        total_sent_count: warmupStats.sent_count ?? warmupStats.total_sent_count ?? warmupDetails.total_sent_count,
-                      };
-                      warmupScore = warmupStats.score ?? warmupStats.warmup_score ?? null;
-                      inboxRate = warmupStats.inbox_rate ?? warmupStats.inboxRate ?? null;
-                      spamRate = warmupStats.spam_rate ?? warmupStats.spamRate ?? null;
-                      console.log(`    Warmup stats for ${account.from_email}: rep=${warmupDetails.warmup_reputation}, spam=${warmupDetails.total_spam_count}`);
-                    }
-                  } catch (e) {
-                    // Warmup stats may not be available for all accounts
-                  }
+                  // Warmup stats fetch SKIPPED for performance - use basic warmup_details from account object
+                  const warmupScore: number | null = null;
+                  const inboxRate: number | null = null;
+                  const spamRate: number | null = null;
                   
                   const { data: emailAccountData, error: eaError } = await supabase
                     .from('email_accounts')
