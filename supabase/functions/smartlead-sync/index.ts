@@ -694,6 +694,47 @@ serve(async (req) => {
 
     const existingConfig = (dataSource.additional_config as any) || {};
 
+    // Create sync progress record (only for first batch)
+    let progressId: string | null = null;
+    if (batch_number === 1) {
+      try {
+        const { data: progressRecord } = await supabase
+          .from('sync_progress')
+          .insert({
+            data_source_id: data_source_id,
+            engagement_id: activeEngagementId,
+            status: 'running',
+            current_phase: 'initializing',
+          })
+          .select('id')
+          .single();
+        progressId = progressRecord?.id;
+      } catch (e) {
+        console.log('Could not create sync progress record:', (e as Error).message);
+      }
+    } else {
+      // Get existing progress record for continuation
+      const { data: existingProgress } = await supabase
+        .from('sync_progress')
+        .select('id')
+        .eq('data_source_id', data_source_id)
+        .eq('status', 'running')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      progressId = existingProgress?.id || null;
+    }
+
+    // Helper to update sync progress
+    async function updateSyncProgress(updates: Record<string, any>) {
+      if (!progressId) return;
+      try {
+        await supabase.from('sync_progress').update(updates).eq('id', progressId);
+      } catch (e) {
+        console.log('Could not update sync progress:', (e as Error).message);
+      }
+    }
+
     // Reset if requested
     if (reset) {
       console.log('Resetting synced data for engagement:', activeEngagementId);
@@ -774,6 +815,12 @@ serve(async (req) => {
       const campaigns: SmartleadCampaign[] = Array.isArray(campaignsRaw) ? campaignsRaw : (campaignsRaw?.campaigns || []);
       console.log(`Found ${campaigns.length} total campaigns`);
 
+      // Update progress with total campaigns
+      await updateSyncProgress({
+        total_campaigns: campaigns.length,
+        current_phase: 'campaigns',
+      });
+
       // Sort: active first, then by created_at
       campaigns.sort((a, b) => {
         const statusOrder = { active: 0, paused: 1, drafted: 2, completed: 3 };
@@ -821,6 +868,13 @@ serve(async (req) => {
 
         const campaign = campaigns[i];
         console.log(`[${i + 1}/${campaigns.length}] Processing: ${campaign.name} (${campaign.status})`);
+
+        // Update progress (every campaign)
+        await updateSyncProgress({
+          processed_campaigns: i,
+          current_campaign_name: campaign.name,
+          records_synced: progress.email_activities_synced + progress.leads_synced,
+        });
 
         try {
           // Build schedule and sending limits config
@@ -1609,6 +1663,20 @@ serve(async (req) => {
     // ============================================
     // PHASE 2: Sync Complete
     // ============================================
+    const hasErrors = progress.errors.length > 0;
+    const finalStatus = hasErrors ? 'partial' : 'completed';
+
+    // Update sync progress record
+    await updateSyncProgress({
+      status: finalStatus,
+      processed_campaigns: progress.campaigns_synced,
+      records_synced: progress.email_activities_synced + progress.leads_synced,
+      errors: progress.errors,
+      completed_at: new Date().toISOString(),
+      current_phase: 'complete',
+      current_campaign_name: null,
+    });
+
     await supabase.from('data_sources').update({
       last_sync_status: 'success',
       last_sync_at: new Date().toISOString(),
@@ -1642,6 +1710,41 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('smartlead-sync error:', error);
+
+    // Update sync progress to failed and add to retry queue
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Mark any running progress as failed
+    try {
+      await supabaseAdmin.from('sync_progress')
+        .update({ 
+          status: 'failed', 
+          errors: [{ message: (error as Error).message }],
+          completed_at: new Date().toISOString(),
+        })
+        .eq('status', 'running');
+    } catch (e) {
+      console.log('Could not update sync progress:', e);
+    }
+
+    // Add to retry queue if not already a retry
+    try {
+      const body = await new Response(req.clone().body).json().catch(() => ({}));
+      if (!body.is_retry && body.data_source_id) {
+        await supabaseAdmin.from('sync_retry_queue').insert({
+          data_source_id: body.data_source_id,
+          engagement_id: body.engagement_id,
+          last_error: (error as Error).message,
+          next_retry_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 min
+        });
+        console.log('Added sync to retry queue');
+      }
+    } catch (e) {
+      console.log('Could not add to retry queue:', e);
+    }
+
     return new Response(JSON.stringify({ error: (error as Error).message }), 
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }

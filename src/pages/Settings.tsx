@@ -15,6 +15,7 @@ import { TeamMembersList } from '@/components/settings/TeamMembersList';
 import { TeamMembersSettings } from '@/components/settings/TeamMembersSettings';
 import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
 import { SyncStatusPanel } from '@/components/settings/SyncStatusPanel';
+import { SyncProgressCard } from '@/components/dashboard/SyncProgressCard';
 import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle } from 'lucide-react';
 
 export default function Settings() {
@@ -266,6 +267,7 @@ export default function Settings() {
           <TabsContent value="connections" className="mt-6 space-y-6">
             {currentWorkspace ? (
               <>
+                <SyncProgressCard />
                 <SyncStatusPanel />
                 <ConnectionsSection workspaceId={currentWorkspace.id} />
               </>
