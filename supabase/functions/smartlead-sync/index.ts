@@ -559,13 +559,16 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let requestBody: any = null;
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = await req.json();
+    requestBody = await req.json().catch(() => ({}));
+    const body = requestBody;
     const { 
       client_id,
       engagement_id,
@@ -573,7 +576,7 @@ serve(async (req) => {
       reset = false, 
       batch_number = 1, 
       auto_continue = true,
-      internal_continuation = false,
+      internal_continuation: internal_continuation_input = false,
       current_phase = 'campaigns',
       sync_leads = true,
       sync_email_accounts = true,
@@ -582,6 +585,9 @@ serve(async (req) => {
       sync_message_history = false,
       classify_replies = true,
     } = body;
+
+    // Normalize internal continuation (may be upgraded when service-role auth is detected)
+    let internal_continuation = internal_continuation_input;
 
     // Auth check: skip for internal continuations (they use service role)
     const authHeader = req.headers.get('Authorization');
@@ -1716,26 +1722,32 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Mark any running progress as failed
+    const dsId = requestBody?.data_source_id ?? null;
+
+    // Mark running progress for this data source as failed (or all running if dsId is unknown)
     try {
-      await supabaseAdmin.from('sync_progress')
-        .update({ 
-          status: 'failed', 
+      let q = supabaseAdmin
+        .from('sync_progress')
+        .update({
+          status: 'failed',
           errors: [{ message: (error as Error).message }],
           completed_at: new Date().toISOString(),
         })
         .eq('status', 'running');
+
+      if (dsId) q = q.eq('data_source_id', dsId);
+
+      await q;
     } catch (e) {
       console.log('Could not update sync progress:', e);
     }
 
     // Add to retry queue if not already a retry
     try {
-      const body = await new Response(req.clone().body).json().catch(() => ({}));
-      if (!body.is_retry && body.data_source_id) {
+      if (!requestBody?.is_retry && dsId) {
         await supabaseAdmin.from('sync_retry_queue').insert({
-          data_source_id: body.data_source_id,
-          engagement_id: body.engagement_id,
+          data_source_id: dsId,
+          engagement_id: requestBody?.engagement_id ?? null,
           last_error: (error as Error).message,
           next_retry_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 min
         });
@@ -1745,7 +1757,7 @@ serve(async (req) => {
       console.log('Could not add to retry queue:', e);
     }
 
-    return new Response(JSON.stringify({ error: (error as Error).message }), 
+    return new Response(JSON.stringify({ error: (error as Error).message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
