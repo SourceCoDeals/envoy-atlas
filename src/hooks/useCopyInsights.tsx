@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
 
 export interface CopyPerformance {
   subject_line: string;
@@ -147,6 +148,10 @@ export function useCopyInsights() {
                 ? Object.values(v.personalization_vars)
                 : [];
 
+            // Use delivered as denominator for engagement rates (estimate: sent - bounced if available)
+            const bounced = (v as any).total_bounced || 0;
+            const delivered = sent - bounced;
+            
             return {
               subject_line: v.subject_line || '',
               body_preview: v.body_preview || (v.body_plain || v.body_html || '').substring(0, 500) || null,
@@ -159,10 +164,10 @@ export function useCopyInsights() {
               clicked_count: v.total_clicked || 0,
               replied_count: v.total_replied || 0,
               positive_reply_count: v.positive_replies || 0,
-              open_rate: v.open_rate || (sent > 0 ? ((v.total_opened || 0) / sent) * 100 : 0),
-              click_rate: v.click_rate || (sent > 0 ? ((v.total_clicked || 0) / sent) * 100 : 0),
-              reply_rate: v.reply_rate || (sent > 0 ? ((v.total_replied || 0) / sent) * 100 : 0),
-              positive_rate: v.positive_reply_rate || (sent > 0 ? ((v.positive_replies || 0) / sent) * 100 : 0),
+              open_rate: v.open_rate || calculateRate(v.total_opened, delivered || sent),
+              click_rate: v.click_rate || calculateRate(v.total_clicked, delivered || sent),
+              reply_rate: v.reply_rate || calculateRate(v.total_replied, delivered || sent),
+              positive_rate: v.positive_reply_rate || calculateRate(v.positive_replies, delivered || sent),
               word_count: wordCount,
               personalization_vars: persVars as string[],
               platform: campaign?.campaign_type || 'email',

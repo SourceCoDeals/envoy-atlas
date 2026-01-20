@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
 
 export interface CampaignSummaryData {
   campaign: {
@@ -202,10 +203,10 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
         total_replied,
         total_bounced,
         total_positive_replies,
-        delivery_rate: total_sent > 0 ? (total_delivered / total_sent) * 100 : 0,
-        reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
-        bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
-        positive_rate: total_sent > 0 ? (total_positive_replies / total_sent) * 100 : 0,
+        delivery_rate: calculateRate(total_delivered, total_sent),
+        reply_rate: calculateRate(total_replied, total_delivered), // Use delivered as denominator
+        bounce_rate: calculateRate(total_bounced, total_sent), // Bounce rate uses sent
+        positive_rate: calculateRate(total_positive_replies, total_delivered), // Use delivered as denominator
       };
 
       // 4. Build infrastructure data from email_accounts
@@ -316,6 +317,8 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
       const variants: VariantPerformance[] = variantsData.map(v => {
         const sent = v.total_sent || 0;
         const replied = v.total_replied || 0;
+        const bounced = v.total_bounced || 0;
+        const delivered = sent - bounced;
         return {
           id: v.id,
           name: v.subject_line || 'Variant',
@@ -323,7 +326,7 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
           variant_type: 'email',
           sent,
           replied,
-          reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
+          reply_rate: calculateRate(replied, delivered || sent),
         };
       }).sort((a, b) => b.reply_rate - a.reply_rate);
 
@@ -333,12 +336,14 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
         .map(v => {
           const sent = v.total_sent || 0;
           const replied = v.total_replied || 0;
+          const bounced = v.total_bounced || 0;
+          const delivered = sent - bounced;
           return {
             step_number: v.step_number || 1,
             step_type: 'email',
             sent,
             replied,
-            reply_rate: sent > 0 ? (replied / sent) * 100 : 0,
+            reply_rate: calculateRate(replied, delivered || sent),
           };
         })
         .sort((a, b) => a.step_number - b.step_number);

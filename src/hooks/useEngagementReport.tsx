@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { startOfWeek, format, parseISO } from 'date-fns';
+import { calculateRate } from '@/lib/metrics';
 
 export interface EngagementDetails {
   id: string;
@@ -451,23 +452,21 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         positiveResponses: finalEmailTotals.positive + conversations,
         meetingsScheduled: meetingsBooked,
         opportunities: 0,
-        responseRate: finalEmailTotals.sent > 0 ? (finalEmailTotals.replied / finalEmailTotals.sent) * 100 : 0,
-        meetingRate: (finalEmailTotals.sent + totalCalls) > 0 
-          ? (meetingsBooked / (finalEmailTotals.sent + totalCalls)) * 100 
-          : 0,
+        responseRate: calculateRate(finalEmailTotals.replied, finalEmailTotals.sent),
+        meetingRate: calculateRate(meetingsBooked, finalEmailTotals.sent + totalCalls),
       };
 
-      // Build email metrics
+      // Build email metrics - use delivered as denominator for engagement rates
       const emailMetrics: EmailMetrics = {
         sent: finalEmailTotals.sent,
         delivered,
-        deliveryRate: finalEmailTotals.sent > 0 ? (delivered / finalEmailTotals.sent) * 100 : 0,
+        deliveryRate: calculateRate(delivered, finalEmailTotals.sent),
         replied: finalEmailTotals.replied,
-        replyRate: delivered > 0 ? (finalEmailTotals.replied / delivered) * 100 : 0,
+        replyRate: calculateRate(finalEmailTotals.replied, delivered),
         positiveReplies: finalEmailTotals.positive,
-        positiveRate: delivered > 0 ? (finalEmailTotals.positive / delivered) * 100 : 0,
+        positiveRate: calculateRate(finalEmailTotals.positive, delivered),
         bounced: finalEmailTotals.bounced,
-        bounceRate: finalEmailTotals.sent > 0 ? (finalEmailTotals.bounced / finalEmailTotals.sent) * 100 : 0,
+        bounceRate: calculateRate(finalEmailTotals.bounced, finalEmailTotals.sent), // Bounce rate uses sent
         unsubscribed: 0,
         meetings: 0,
       };
@@ -476,14 +475,14 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       const callingMetrics: CallingMetrics = {
         totalCalls,
         connections,
-        connectRate: totalCalls > 0 ? (connections / totalCalls) * 100 : 0,
+        connectRate: calculateRate(connections, totalCalls),
         conversations,
-        conversationRate: totalCalls > 0 ? (conversations / totalCalls) * 100 : 0,
+        conversationRate: calculateRate(conversations, totalCalls),
         dmConversations: conversations,
         meetings: callMeetings,
-        meetingRate: totalCalls > 0 ? (callMeetings / totalCalls) * 100 : 0,
+        meetingRate: calculateRate(callMeetings, totalCalls),
         voicemails,
-        voicemailRate: totalCalls > 0 ? (voicemails / totalCalls) * 100 : 0,
+        voicemailRate: calculateRate(voicemails, totalCalls),
         avgDuration,
         avgScore: 0,
       };

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
 
 // Metrics status to distinguish "zero" vs "missing/broken source"
 export type MetricsStatus = 'verified' | 'partial' | 'missing' | 'broken';
@@ -160,7 +161,11 @@ export function useCampaigns() {
           metricsSource = 'none';
         }
 
-        const positive_rate = total_replied > 0 ? (positive_replies / total_replied) * 100 : 0;
+        // Use delivered as denominator for engagement rates
+        const delivered = total_sent - total_bounced;
+        const reply_rate = calculateRate(total_replied, delivered);
+        const bounce_rate = calculateRate(total_bounced, total_sent); // Bounce rate uses sent
+        const positive_rate = calculateRate(positive_replies, delivered);
 
         return {
           id: campaign.id,
@@ -176,8 +181,8 @@ export function useCampaigns() {
           total_bounced,
           positive_replies,
           total_leads: 0,
-          reply_rate: total_sent > 0 ? (total_replied / total_sent) * 100 : 0,
-          bounce_rate: total_sent > 0 ? (total_bounced / total_sent) * 100 : 0,
+          reply_rate,
+          bounce_rate,
           positive_rate,
           engagement_id: campaign.engagement_id || null,
           engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
