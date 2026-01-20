@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,10 +13,13 @@ import {
   TrendingUp,
   TrendingDown,
   AlertCircle,
+  Eye,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, ReferenceLine, Cell, LineChart, Line } from 'recharts';
 import type { SubjectLineAnalysis } from '@/hooks/useCopyAnalytics';
 import { getPersonalizationLabel, getFormatLabel } from '@/lib/patternTaxonomy';
+import { ExecutiveSummary } from '../ExecutiveSummary';
+import { VariantDetailModal } from '../VariantDetailModal';
 
 interface SubjectLinesTabProps {
   subjectLines: SubjectLineAnalysis[];
@@ -24,12 +27,17 @@ interface SubjectLinesTabProps {
   onSaveToLibrary: (item: SubjectLineAnalysis) => void;
 }
 
-import { ExecutiveSummary } from '../ExecutiveSummary';
-
 export function SubjectLinesTab({ subjectLines, baselineReplyRate, onSaveToLibrary }: SubjectLinesTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<'reply_rate' | 'open_rate' | 'sent_count'>('reply_rate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [selectedVariant, setSelectedVariant] = useState<SubjectLineAnalysis | null>(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+
+  const handleViewDetails = useCallback((item: SubjectLineAnalysis) => {
+    setSelectedVariant(item);
+    setDetailModalOpen(true);
+  }, []);
 
   // Format performance by type
   const formatPerformance = useMemo(() => {
@@ -353,16 +361,28 @@ export function SubjectLinesTab({ subjectLines, baselineReplyRate, onSaveToLibra
                         <div className="font-mono text-sm font-medium">{formatRate(item.open_rate)}</div>
                         <div className="text-xs text-muted-foreground">n={item.sent_count.toLocaleString()}</div>
                       </div>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onSaveToLibrary(item)}>
-                              <BookMarked className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Save to Library</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                      <div className="flex gap-1">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleViewDetails(item)}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>View Details</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onSaveToLibrary(item)}>
+                                <BookMarked className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Save to Library</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -401,6 +421,33 @@ export function SubjectLinesTab({ subjectLines, baselineReplyRate, onSaveToLibra
           </div>
         </CardContent>
       </Card>
+
+      {/* Variant Detail Modal */}
+      <VariantDetailModal
+        open={detailModalOpen}
+        onOpenChange={setDetailModalOpen}
+        variant={selectedVariant ? {
+          variant_id: selectedVariant.variant_id,
+          campaign_name: selectedVariant.campaign_name,
+          subject_line: selectedVariant.subject_line,
+          sent_count: selectedVariant.sent_count,
+          open_count: selectedVariant.open_count,
+          reply_count: selectedVariant.reply_count,
+          positive_count: selectedVariant.positive_count,
+          open_rate: selectedVariant.open_rate,
+          reply_rate: selectedVariant.reply_rate,
+          positive_rate: selectedVariant.positive_rate,
+          format_type: selectedVariant.format_type,
+          personalization_type: selectedVariant.personalization_type,
+          char_count: selectedVariant.char_count,
+          word_count: selectedVariant.word_count,
+        } : null}
+        baselineReplyRate={baselineReplyRate}
+        onSaveToLibrary={selectedVariant ? () => {
+          onSaveToLibrary(selectedVariant);
+          setDetailModalOpen(false);
+        } : undefined}
+      />
     </div>
   );
 }
