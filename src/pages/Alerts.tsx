@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAlerts } from '@/hooks/useAlerts';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +20,7 @@ import {
   AlertCircle,
   Info,
   Target,
+  Settings,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -35,6 +37,7 @@ export default function Alerts() {
     resolveAlert,
     isResolving,
   } = useAlerts();
+  const { config, isLoading: configLoading } = useCallingConfig();
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const handleResolve = async (alertId: string) => {
@@ -87,16 +90,24 @@ export default function Alerts() {
       case 'reply_drop': return 'Reply Drop';
       case 'deliverability': return 'Deliverability Issue';
       case 'opportunity': return 'Opportunity';
+      case 'coaching_needed': return 'Coaching Needed';
+      case 'low_quality': return 'Low Quality';
+      case 'hot_lead': return 'Hot Lead';
       default: return type;
     }
   };
 
   const getTypeIcon = (type: string) => {
     switch (type) {
-      case 'opportunity': return Target;
-      default: return AlertTriangle;
+      case 'opportunity': 
+      case 'hot_lead':
+        return Target;
+      default: 
+        return AlertTriangle;
     }
   };
+
+  const loading = isLoading || configLoading;
 
   return (
     <DashboardLayout>
@@ -108,16 +119,39 @@ export default function Alerts() {
               Monitor issues and opportunities across your campaigns
             </p>
           </div>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => refetch()}
-            disabled={isLoading}
-          >
-            <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/settings?tab=calling">
+                <Settings className="h-4 w-4 mr-2" />
+                Thresholds
+              </Link>
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => refetch()}
+              disabled={loading}
+            >
+              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         </div>
+
+        {/* Alert Thresholds Info */}
+        <Card className="bg-muted/30">
+          <CardContent className="py-3">
+            <div className="flex flex-wrap items-center gap-4 text-sm">
+              <span className="text-muted-foreground font-medium">Coaching Triggers:</span>
+              <span>Quality &lt;{config.coachingAlertOverallQuality}</span>
+              <span>Objections &lt;{config.coachingAlertObjectionHandling}</span>
+              <span>Script &lt;{config.coachingAlertScriptAdherence}</span>
+              <span className="text-muted-foreground">|</span>
+              <span className="text-muted-foreground font-medium">Hot Lead:</span>
+              <span>Interest ≥{config.hotLeadInterestScore}</span>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Summary Cards */}
         <div className="grid gap-4 md:grid-cols-4">
@@ -178,7 +212,7 @@ export default function Alerts() {
           </Card>
         </div>
 
-        {isLoading ? (
+        {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
@@ -209,21 +243,21 @@ export default function Alerts() {
                 </Card>
               ) : (
                 unresolvedAlerts.map((alert) => {
-                  const config = getSeverityConfig(alert.severity);
-                  const Icon = config.icon;
+                  const alertConfig = getSeverityConfig(alert.severity);
+                  const Icon = alertConfig.icon;
                   const TypeIcon = getTypeIcon(alert.type);
 
                   return (
                     <Card 
                       key={alert.id} 
-                      className={cn("border", config.bgColor, config.borderColor)}
+                      className={cn("border", alertConfig.bgColor, alertConfig.borderColor)}
                     >
                       <CardContent className="py-4">
                         <div className="flex items-start gap-4">
-                          <Icon className={cn("h-5 w-5 mt-0.5 shrink-0", config.iconColor)} />
+                          <Icon className={cn("h-5 w-5 mt-0.5 shrink-0", alertConfig.iconColor)} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap mb-1">
-                              <Badge className={cn("text-[10px]", config.badgeClass)}>
+                              <Badge className={cn("text-[10px]", alertConfig.badgeClass)}>
                                 {alert.severity.toUpperCase()}
                               </Badge>
                               <Badge variant="outline" className="text-[10px]">

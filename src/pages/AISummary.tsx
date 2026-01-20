@@ -1,4 +1,6 @@
 import { useAISummary } from '@/hooks/useAISummary';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
+import { getScoreStatus, getScoreStatusColor, formatScore } from '@/lib/callingConfig';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +9,7 @@ import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 import {
   TrendingUp,
   TrendingDown,
@@ -33,12 +36,14 @@ import {
   ThumbsDown,
   RefreshCw,
   ExternalLink,
+  Settings,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 export default function AISummary() {
   const navigate = useNavigate();
   const { data, loading, error, refetch } = useAISummary();
+  const { config, isLoading: configLoading } = useCallingConfig();
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -84,6 +89,24 @@ export default function AISummary() {
     }
   };
 
+  // Config-based score coloring
+  const getInterestScoreColor = (score: number) => {
+    const status = getScoreStatus(score, config.sellerInterestThresholds);
+    return getScoreStatusColor(status);
+  };
+
+  const getQualityScoreColor = (score: number) => {
+    const status = getScoreStatus(score, config.overallQualityThresholds);
+    return getScoreStatusColor(status);
+  };
+
+  const getObjectionScoreColor = (score: number) => {
+    const status = getScoreStatus(score, config.objectionHandlingThresholds);
+    return getScoreStatusColor(status);
+  };
+
+  const isLoading = loading || configLoading;
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -96,6 +119,12 @@ export default function AISummary() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/settings?tab=calling">
+                <Settings className="h-4 w-4 mr-2" />
+                Thresholds
+              </Link>
+            </Button>
             <Button variant="outline" size="sm" onClick={refetch}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
@@ -107,7 +136,7 @@ export default function AISummary() {
           </div>
         </div>
 
-        {loading ? (
+        {isLoading ? (
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
               {[...Array(6)].map((_, i) => (
@@ -121,7 +150,7 @@ export default function AISummary() {
           </div>
         ) : data ? (
           <>
-            {/* 1. Program Overview */}
+            {/* 1. Program Overview with config-based coloring */}
             <div>
               <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
                 <BarChart3 className="h-5 w-5 text-primary" />
@@ -156,7 +185,9 @@ export default function AISummary() {
                       <Star className="h-5 w-5 text-muted-foreground" />
                       {getChangeIcon(data.previousWeekComparison.interestChange)}
                     </div>
-                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgInterestRating}/10</p>
+                    <p className={cn("text-2xl font-bold mt-2", getInterestScoreColor(data.programOverview.avgInterestRating))}>
+                      {formatScore(data.programOverview.avgInterestRating, config)}/10
+                    </p>
                     <p className="text-xs text-muted-foreground">Avg Interest Rating</p>
                     <p className={`text-xs mt-1 ${getChangeColor(data.previousWeekComparison.interestChange)}`}>
                       {data.previousWeekComparison.interestChange > 0 ? '+' : ''}{data.previousWeekComparison.interestChange} vs last week
@@ -167,7 +198,9 @@ export default function AISummary() {
                 <Card>
                   <CardContent className="pt-4">
                     <Shield className="h-5 w-5 text-muted-foreground" />
-                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgObjectionHandlingScore}/10</p>
+                    <p className={cn("text-2xl font-bold mt-2", getObjectionScoreColor(data.programOverview.avgObjectionHandlingScore))}>
+                      {formatScore(data.programOverview.avgObjectionHandlingScore, config)}/10
+                    </p>
                     <p className="text-xs text-muted-foreground">Avg Objection Handling</p>
                   </CardContent>
                 </Card>
@@ -175,15 +208,28 @@ export default function AISummary() {
                 <Card>
                   <CardContent className="pt-4">
                     <Target className="h-5 w-5 text-muted-foreground" />
-                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgResolutionRate}%</p>
+                    <p className={cn("text-2xl font-bold mt-2", 
+                      data.programOverview.avgResolutionRate >= config.objectionResolutionGoodThreshold 
+                        ? 'text-success' 
+                        : data.programOverview.avgResolutionRate >= config.objectionResolutionWarningThreshold
+                          ? 'text-warning'
+                          : 'text-destructive'
+                    )}>
+                      {data.programOverview.avgResolutionRate}%
+                    </p>
                     <p className="text-xs text-muted-foreground">Avg Resolution Rate</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Target: {config.objectionResolutionGoodThreshold}%+
+                    </p>
                   </CardContent>
                 </Card>
 
                 <Card>
                   <CardContent className="pt-4">
                     <MessageSquare className="h-5 w-5 text-muted-foreground" />
-                    <p className="text-2xl font-bold mt-2">{data.programOverview.avgConversationQuality}/10</p>
+                    <p className={cn("text-2xl font-bold mt-2", getQualityScoreColor(data.programOverview.avgConversationQuality))}>
+                      {formatScore(data.programOverview.avgConversationQuality, config)}/10
+                    </p>
                     <p className="text-xs text-muted-foreground">Avg Conversation Quality</p>
                   </CardContent>
                 </Card>
@@ -198,7 +244,10 @@ export default function AISummary() {
                     <Users className="h-5 w-5 text-success" />
                     Seller Signal Summary
                   </CardTitle>
-                  <CardDescription>Owners expressing interest in selling</CardDescription>
+                  <CardDescription>
+                    Owners expressing interest (threshold: {config.hotLeadInterestScore}/10
+                    {config.hotLeadRequiresInterestYes && ' + explicit interest'})
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between p-4 rounded-lg bg-success/10 border border-success/20">
@@ -225,7 +274,10 @@ export default function AISummary() {
                                 <p className="text-xs text-muted-foreground">{company.contactName}</p>
                               </div>
                               <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="bg-success/10 text-success">
+                                <Badge 
+                                  variant="outline" 
+                                  className={cn("bg-success/10", getInterestScoreColor(company.interestScore))}
+                                >
                                   {company.interestScore}/10
                                 </Badge>
                                 <ExternalLink className="h-3 w-3 text-muted-foreground" />
@@ -283,6 +335,7 @@ export default function AISummary() {
                 </CardTitle>
                 <CardDescription>
                   {data.commonObjections.totalObjections} total objections tracked this week
+                  (Resolution target: {config.objectionResolutionGoodThreshold}%+)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -296,7 +349,14 @@ export default function AISummary() {
                         <div className="flex-1">
                           <p className="font-medium text-sm">{theme.objection}</p>
                           <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
+                            <span className={cn(
+                              "flex items-center gap-1",
+                              theme.resolutionRate >= config.objectionResolutionGoodThreshold
+                                ? 'text-success'
+                                : theme.resolutionRate >= config.objectionResolutionWarningThreshold
+                                  ? 'text-warning'
+                                  : 'text-destructive'
+                            )}>
                               <Target className="h-3 w-3" />
                               {theme.resolutionRate}% resolved
                             </span>
@@ -348,7 +408,7 @@ export default function AISummary() {
                     <ThumbsDown className="h-5 w-5 text-destructive" />
                     Program Weaknesses & Gaps
                   </CardTitle>
-                  <CardDescription>Areas needing improvement</CardDescription>
+                  <CardDescription>Areas needing improvement (below coaching thresholds)</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {data.programWeaknesses.map((weakness, index) => (
@@ -394,31 +454,31 @@ export default function AISummary() {
               </CardContent>
             </Card>
 
-            {/* 8. AI Recommendations for Next Week */}
-            <Card className="bg-gradient-to-br from-primary/5 to-chart-4/5">
+            {/* 8. AI Recommendations */}
+            <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Rocket className="h-5 w-5 text-primary" />
+                  <Zap className="h-5 w-5 text-primary" />
                   AI Recommendations for Next Week
                 </CardTitle>
-                <CardDescription>Strategic priorities based on this week's data</CardDescription>
+                <CardDescription>Strategic priorities based on this week's performance</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-4">
                   {data.aiRecommendations.map((rec, index) => (
-                    <div key={index} className="p-4 rounded-lg bg-background border">
-                      <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                          {getRecommendationTypeIcon(rec.type)}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{rec.action}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            <Badge variant="outline" className="bg-success/10 text-success border-success/30 text-xs">
-                              {rec.predictedImpact}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">{rec.dueDate}</span>
-                          </div>
+                    <div key={index} className="flex items-start gap-4 p-4 rounded-lg bg-muted/30 border">
+                      <div className="flex-shrink-0 mt-0.5">
+                        {getRecommendationTypeIcon(rec.type)}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium">{rec.action}</p>
+                        <div className="flex items-center gap-3 mt-2">
+                          <Badge variant="outline" className="text-xs">
+                            {rec.type.replace('_', ' ')}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            Predicted Impact: <span className="text-primary font-medium">{rec.predictedImpact}</span>
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -428,11 +488,13 @@ export default function AISummary() {
             </Card>
           </>
         ) : (
-          <Card className="border-dashed">
-            <CardContent className="py-12 text-center text-muted-foreground">
-              <Zap className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">No AI Summary Available</p>
-              <p className="text-sm">Complete more calls to generate weekly insights</p>
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
+              <h2 className="text-xl font-semibold mb-2">No AI Summary Available</h2>
+              <p className="text-muted-foreground text-center max-w-md">
+                Not enough call data to generate a summary. Make sure calls are being synced and scored.
+              </p>
             </CardContent>
           </Card>
         )}

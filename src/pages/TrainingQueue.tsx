@@ -9,23 +9,43 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCallLibrary } from '@/hooks/useCallLibrary';
 import { useTrainingAssignments, TrainingAssignment } from '@/hooks/useTrainingAssignments';
-import { GraduationCap, Play, CheckCircle2, Clock, User, Target, Headphones } from 'lucide-react';
+import { useCallingConfig } from '@/hooks/useCallingConfig';
+import { needsCoachingReview, formatScore, getScoreStatus, getScoreStatusColor } from '@/lib/callingConfig';
+import { GraduationCap, Play, CheckCircle2, Clock, User, Target, Headphones, AlertTriangle, Settings } from 'lucide-react';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { Link } from 'react-router-dom';
 
 function AssignmentCard({ 
   assignment, 
-  onToggleComplete 
+  onToggleComplete,
+  config 
 }: { 
   assignment: TrainingAssignment;
   onToggleComplete: (id: string, completed: boolean) => void;
+  config: ReturnType<typeof useCallingConfig>['config'];
 }) {
   const isCompleted = !!assignment.completed_at;
   const callTitle = assignment.call 
     ? `${assignment.call.contact_name || 'Unknown'} - ${assignment.call.company_name || 'Unknown Company'}`
     : 'Call Recording';
 
+  // Check if call needs coaching based on config thresholds
+  const callNeedsCoaching = assignment.call && needsCoachingReview({
+    overall_quality_score: assignment.call.overall_quality_score,
+    objection_handling_score: assignment.call.objection_handling_score,
+    script_adherence_score: assignment.call.script_adherence_score,
+    question_adherence_score: assignment.call.question_adherence_score,
+  }, config);
+
+  const callScore = assignment.call?.overall_quality_score;
+  const scoreStatus = callScore != null ? getScoreStatus(callScore, config.overallQualityThresholds) : 'none';
+
   return (
-    <Card className={isCompleted ? 'opacity-60' : ''}>
+    <Card className={cn(
+      isCompleted ? 'opacity-60' : '',
+      callNeedsCoaching && !isCompleted && 'border-warning/50'
+    )}>
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
           <Checkbox
@@ -36,10 +56,26 @@ function AssignmentCard({
           <div className="flex-1">
             <div className="flex items-start justify-between">
               <div>
-                <h4 className="font-medium">{callTitle}</h4>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-medium">{callTitle}</h4>
+                  {callNeedsCoaching && !isCompleted && (
+                    <Badge variant="outline" className="text-warning border-warning/50">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      Needs Review
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground mt-1">
                   {assignment.focus_area || 'Review this call for training purposes'}
                 </p>
+                {callScore != null && (
+                  <Badge 
+                    variant="outline" 
+                    className={cn("mt-2 text-xs", getScoreStatusColor(scoreStatus))}
+                  >
+                    Score: {formatScore(callScore, config)} ({scoreStatus})
+                  </Badge>
+                )}
               </div>
               <Badge variant={
                 assignment.assignment_type === 'discovery_excellence' ? 'default' :
@@ -81,12 +117,24 @@ export default function TrainingQueue() {
     markComplete,
     markIncomplete 
   } = useTrainingAssignments();
+  const { config, isLoading: configLoading } = useCallingConfig();
   
-  const isLoading = isLoadingAssignments || isLoadingLibrary;
+  const isLoading = isLoadingAssignments || isLoadingLibrary || configLoading;
   
   const completionRate = assignments.length > 0 
     ? (completedAssignments.length / assignments.length) * 100 
     : 0;
+
+  // Count assignments that need coaching review based on config
+  const needsReviewCount = pendingAssignments.filter(a => {
+    if (!a.call) return false;
+    return needsCoachingReview({
+      overall_quality_score: a.call.overall_quality_score,
+      objection_handling_score: a.call.objection_handling_score,
+      script_adherence_score: a.call.script_adherence_score,
+      question_adherence_score: a.call.question_adherence_score,
+    }, config);
+  }).length;
 
   const handleToggleComplete = (assignmentId: string, completed: boolean) => {
     if (completed) {
@@ -123,10 +171,18 @@ export default function TrainingQueue() {
               Assigned call reviews and coaching materials
             </p>
           </div>
-          <Badge variant="secondary" className="text-lg px-3 py-1 w-fit">
-            <GraduationCap className="h-4 w-4 mr-2" />
-            {pendingAssignments.length} Pending
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/settings?tab=calling">
+                <Settings className="h-4 w-4 mr-2" />
+                Thresholds
+              </Link>
+            </Button>
+            <Badge variant="secondary" className="text-lg px-3 py-1 w-fit">
+              <GraduationCap className="h-4 w-4 mr-2" />
+              {pendingAssignments.length} Pending
+            </Badge>
+          </div>
         </div>
 
         {/* Progress Overview */}
@@ -149,13 +205,17 @@ export default function TrainingQueue() {
               <p className="text-xs text-muted-foreground">Calls to listen to</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className={needsReviewCount > 0 ? 'border-warning/50' : ''}>
             <CardHeader className="pb-2">
-              <CardDescription>Completed This Week</CardDescription>
-              <CardTitle className="text-2xl">{completedAssignments.length}</CardTitle>
+              <CardDescription>Needs Coaching Review</CardDescription>
+              <CardTitle className={cn("text-2xl", needsReviewCount > 0 && "text-warning")}>
+                {needsReviewCount}
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-muted-foreground">Reviews done</p>
+              <p className="text-xs text-muted-foreground">
+                Calls below coaching thresholds
+              </p>
             </CardContent>
           </Card>
           <Card>
@@ -169,11 +229,29 @@ export default function TrainingQueue() {
           </Card>
         </div>
 
+        {/* Coaching Thresholds Info */}
+        <Card className="bg-muted/30">
+          <CardContent className="py-3">
+            <div className="flex items-center gap-6 text-sm">
+              <span className="text-muted-foreground">Coaching Alert Thresholds:</span>
+              <span>Overall: &lt;{config.coachingAlertOverallQuality}</span>
+              <span>Objections: &lt;{config.coachingAlertObjectionHandling}</span>
+              <span>Script: &lt;{config.coachingAlertScriptAdherence}</span>
+              <span>Questions: &lt;{config.coachingAlertQuestionAdherence}</span>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Assignments */}
         <Tabs defaultValue="pending">
           <TabsList>
             <TabsTrigger value="pending">
               Pending ({pendingAssignments.length})
+              {needsReviewCount > 0 && (
+                <Badge variant="outline" className="ml-2 text-warning border-warning/50">
+                  {needsReviewCount}
+                </Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="completed">
               Completed ({completedAssignments.length})
@@ -187,7 +265,7 @@ export default function TrainingQueue() {
             {pendingAssignments.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
-                  <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                  <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-success" />
                   <p>All caught up!</p>
                   <p className="text-sm mt-1">No pending training assignments</p>
                 </CardContent>
@@ -198,6 +276,7 @@ export default function TrainingQueue() {
                   key={assignment.id} 
                   assignment={assignment} 
                   onToggleComplete={handleToggleComplete}
+                  config={config}
                 />
               ))
             )}
@@ -217,6 +296,7 @@ export default function TrainingQueue() {
                   key={assignment.id} 
                   assignment={assignment}
                   onToggleComplete={handleToggleComplete}
+                  config={config}
                 />
               ))
             )}
