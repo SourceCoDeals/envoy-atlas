@@ -71,14 +71,22 @@ export interface ContactFilters {
 }
 
 export function useContacts(filters: ContactFilters = {}) {
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, loading: workspaceLoading } = useWorkspace();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchContacts = useCallback(async () => {
-    if (!currentWorkspace?.id) return;
+    // Wait for workspace to load first
+    if (workspaceLoading) return;
+    
+    if (!currentWorkspace?.id) {
+      setContacts([]);
+      setTotalCount(0);
+      setLoading(false);
+      return;
+    }
     
     setLoading(true);
     try {
@@ -147,7 +155,7 @@ export function useContacts(filters: ContactFilters = {}) {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspace?.id, filters.search, filters.hasPhone]);
+  }, [currentWorkspace?.id, workspaceLoading, filters.search, filters.hasPhone]);
 
   useEffect(() => {
     fetchContacts();
