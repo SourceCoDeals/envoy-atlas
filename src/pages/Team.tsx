@@ -77,14 +77,17 @@ export default function Team() {
     }));
   }, [data?.repPerformance, config]);
 
-  // Prepare chart data for score comparison
+  // Prepare chart data for score comparison - all 12 dimensions
   const scoreComparisonData = useMemo(() => {
     if (!data?.repPerformance) return [];
-    return data.repPerformance.slice(0, 10).map(rep => ({
+    return data.repPerformance.slice(0, 8).map(rep => ({
       name: rep.rep.split('@')[0],
-      'Overall Quality': rep.avgOverallScore ?? 0,
-      'Avg Duration (min)': Math.round((rep.avgDuration || 0) / 60 * 10) / 10,
-      'Positive Interest': rep.positiveInterestCount,
+      'Overall': rep.avgOverallScore ?? 0,
+      'Script': rep.avgScriptAdherence ?? 0,
+      'Questions': rep.avgQuestionAdherence ?? 0,
+      'Objections': rep.avgObjectionHandling ?? 0,
+      'Interest': rep.avgSellerInterest ?? 0,
+      'Quality': rep.avgConversationQuality ?? 0,
     }));
   }, [data?.repPerformance]);
 
@@ -302,12 +305,12 @@ export default function Team() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-[300px]">
+              <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={scoreComparisonData}>
+                  <BarChart data={scoreComparisonData} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
+                    <XAxis type="number" domain={[0, 10]} tick={{ fontSize: 11 }} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: 'hsl(var(--card))',
@@ -315,9 +318,13 @@ export default function Team() {
                         borderRadius: '8px',
                       }}
                     />
-                    <Legend />
-                    <Bar dataKey="Overall Quality" fill="hsl(var(--primary))" />
-                    <Bar dataKey="Positive Interest" fill="hsl(var(--chart-2))" />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="Overall" fill="hsl(var(--primary))" />
+                    <Bar dataKey="Script" fill="hsl(var(--chart-2))" />
+                    <Bar dataKey="Questions" fill="hsl(var(--chart-3))" />
+                    <Bar dataKey="Objections" fill="hsl(var(--chart-4))" />
+                    <Bar dataKey="Interest" fill="hsl(var(--chart-5))" />
+                    <Bar dataKey="Quality" fill="hsl(var(--accent))" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

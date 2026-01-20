@@ -32,6 +32,7 @@ export interface SuggestedCall {
   date_time: string | null;
   recording_url: string | null;
   talk_duration: number | null;
+  overall_score: number | null;
 }
 
 export const LIBRARY_CATEGORIES = [
@@ -79,10 +80,10 @@ export function useCallLibrary() {
 
       const { data, error: callsError } = await supabase
         .from('call_activities')
-        .select('id, to_name, to_phone, caller_name, recording_url, talk_duration, started_at, transcription')
+        .select('id, to_name, to_phone, caller_name, recording_url, talk_duration, started_at, transcription, composite_score')
         .in('engagement_id', engagementIds)
         .not('transcription', 'is', null)
-        .order('talk_duration', { ascending: false });
+        .order('composite_score', { ascending: false, nullsFirst: false });
 
       if (callsError) throw callsError;
       
@@ -95,17 +96,18 @@ export function useCallLibrary() {
         date_time: c.started_at,
         recording_url: c.recording_url,
         talk_duration: c.talk_duration,
+        overall_score: c.composite_score,
       })) as SuggestedCall[];
     },
     enabled: !!workspace?.id,
   });
 
-  // Categorize calls by talk duration (proxy for quality)
+  // Categorize calls by actual AI overall_score
   const categorizedSuggestions = useMemo(() => {
-    const validCalls = allScoredCalls.filter(c => c.talk_duration != null);
+    const validCalls = allScoredCalls.filter(c => c.overall_score != null);
     
     const getTopBottom = (count = 5) => {
-      const sorted = [...validCalls].sort((a, b) => (b.talk_duration || 0) - (a.talk_duration || 0));
+      const sorted = [...validCalls].sort((a, b) => (b.overall_score || 0) - (a.overall_score || 0));
       return {
         best: sorted.slice(0, count),
         worst: sorted.slice(-count).reverse(),
@@ -123,7 +125,7 @@ export function useCallLibrary() {
       value_proposition: defaultTopBottom,
       training_examples: defaultTopBottom,
       avoid_examples: {
-        best: [...validCalls].sort((a, b) => (a.talk_duration || 0) - (b.talk_duration || 0)).slice(0, 5),
+        best: [...validCalls].sort((a, b) => (a.overall_score || 0) - (b.overall_score || 0)).slice(0, 5),
         worst: [],
       },
     };

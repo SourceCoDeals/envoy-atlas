@@ -29,8 +29,8 @@ function LibraryEntryCard({
   onRemove: () => void;
   config: ReturnType<typeof useCallingConfig>['config'];
 }) {
-  // Determine if this is a top or worst call based on config - use talk_duration as proxy
-  const callScore = entry.call?.talk_duration ? Math.min(10, entry.call.talk_duration / 60) : null;
+  // Determine if this is a top or worst call based on actual AI score
+  const callScore = (entry as any).overall_score ?? null;
   const isTop = callScore != null && isTopCall(callScore, config);
   const isWorst = callScore != null && isWorstCall(callScore, config);
 
@@ -119,7 +119,8 @@ function SuggestedCallRow({
   type?: 'best' | 'worst';
   config: ReturnType<typeof useCallingConfig>['config'];
 }) {
-  const score = call.talk_duration ? Math.min(10, call.talk_duration / 60) : null;
+  // Use actual AI overall_score instead of duration proxy
+  const score = call.overall_score ?? null;
   const scoreStatus = score != null ? getScoreStatus(score, config.overallQualityThresholds) : 'none';
 
   return (
