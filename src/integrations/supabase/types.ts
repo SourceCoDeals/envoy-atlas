@@ -2860,6 +2860,39 @@ export type Database = {
           },
         ]
       }
+      function_logs: {
+        Row: {
+          created_at: string
+          engagement_id: string | null
+          function_name: string
+          id: string
+          level: string
+          message: string
+          metadata: Json | null
+          workspace_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          engagement_id?: string | null
+          function_name: string
+          id?: string
+          level: string
+          message: string
+          metadata?: Json | null
+          workspace_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          engagement_id?: string | null
+          function_name?: string
+          id?: string
+          level?: string
+          message?: string
+          metadata?: Json | null
+          workspace_id?: string | null
+        }
+        Relationships: []
+      }
       hourly_metrics: {
         Row: {
           campaign_id: string | null
@@ -3865,6 +3898,48 @@ export type Database = {
           },
         ]
       }
+      sync_errors: {
+        Row: {
+          created_at: string
+          data_source_id: string | null
+          error_message: string
+          id: string
+          operation: string
+          platform: string
+          raw_data: Json | null
+          record_id: string | null
+          resolved_at: string | null
+          retry_count: number | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          data_source_id?: string | null
+          error_message: string
+          id?: string
+          operation: string
+          platform: string
+          raw_data?: Json | null
+          record_id?: string | null
+          resolved_at?: string | null
+          retry_count?: number | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          data_source_id?: string | null
+          error_message?: string
+          id?: string
+          operation?: string
+          platform?: string
+          raw_data?: Json | null
+          record_id?: string | null
+          resolved_at?: string | null
+          retry_count?: number | null
+          workspace_id?: string
+        }
+        Relationships: []
+      }
       sync_logs: {
         Row: {
           completed_at: string | null
@@ -4350,6 +4425,7 @@ export type Database = {
         Returns: number
       }
       classify_email_isp: { Args: { email_address: string }; Returns: string }
+      cleanup_old_function_logs: { Args: never; Returns: undefined }
       decrypt_api_key: { Args: { encrypted_value: string }; Returns: string }
       encrypt_api_key: { Args: { key_value: string }; Returns: string }
       get_client_id_from_engagement: {
