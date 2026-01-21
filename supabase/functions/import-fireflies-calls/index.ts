@@ -160,10 +160,26 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { csvContent, testEngagementId, batchSize = 50 } = await req.json();
+    const { csvContent, csvUrl, testEngagementId, batchSize = 50, maxRows = 500 } = await req.json();
     
-    if (!csvContent) {
-      return new Response(JSON.stringify({ error: "csvContent is required" }), {
+    let content = csvContent;
+    
+    // If csvUrl is provided, fetch the CSV from that URL
+    if (csvUrl && !csvContent) {
+      console.log("Fetching CSV from URL:", csvUrl);
+      const response = await fetch(csvUrl);
+      if (!response.ok) {
+        return new Response(JSON.stringify({ error: `Failed to fetch CSV: ${response.status}` }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      content = await response.text();
+      console.log("Fetched CSV content length:", content.length);
+    }
+    
+    if (!content) {
+      return new Response(JSON.stringify({ error: "csvContent or csvUrl is required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -218,7 +234,7 @@ serve(async (req) => {
     }
 
     // Parse CSV content
-    const lines = csvContent.split("\n");
+    const lines = content.split("\n");
     const headerLine = lines[0].replace(/^\uFEFF/, ""); // Remove BOM
     const headers = parseCSVLine(headerLine);
     
@@ -263,8 +279,8 @@ serve(async (req) => {
         }
       }
       
-      // Safety limit for testing
-      if (rows.length >= 500) break;
+      // Limit for processing
+      if (rows.length >= maxRows) break;
     }
 
     console.log("Parsed rows:", rows.length);
