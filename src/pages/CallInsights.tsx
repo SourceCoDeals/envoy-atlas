@@ -1,34 +1,16 @@
 import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
-  Brain, TrendingUp, TrendingDown, Minus, Search, 
-  MessageSquare, Target, AlertTriangle, Lightbulb, Users,
-  Phone, ChevronDown, ChevronUp, ExternalLink
+  Brain, TrendingUp, MessageSquare, Target, AlertTriangle, Lightbulb
 } from 'lucide-react';
 import { useExternalCallIntel } from '@/hooks/useExternalCallIntel';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
-import { getScoreStatus, getScoreStatusColor, formatScore } from '@/lib/callingConfig';
-import { cn } from '@/lib/utils';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from '@/components/ui/table';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import { ScoreOverviewSection } from '@/components/callinsights/ScoreOverviewSection';
 import { ScoreJustificationBrowser } from '@/components/callinsights/ScoreJustificationBrowser';
 import { QuestionAdherenceSection } from '@/components/callinsights/QuestionAdherenceSection';
@@ -39,6 +21,7 @@ export default function CallInsights() {
   const { data, isLoading, error } = useExternalCallIntel();
   const { config } = useCallingConfig();
   const [activeTab, setActiveTab] = useState('overview');
+  const [dateRange, setDateRange] = useState('30d');
 
   if (isLoading) {
     return (
@@ -82,13 +65,31 @@ export default function CallInsights() {
           <div className="flex items-center gap-3">
             <Brain className="h-8 w-8 text-primary" />
             <div>
-              <h1 className="text-3xl font-bold">Call Insights</h1>
-              <p className="text-muted-foreground">AI-Extracted Intelligence from {totalCalls} Calls</p>
+              <h1 className="text-2xl font-bold">Call Insights</h1>
+              <p className="text-muted-foreground">
+                AI-Extracted Intelligence from {totalCalls} Calls
+              </p>
             </div>
           </div>
-          <Badge variant="secondary" className="text-sm">
-            {totalCalls} calls analyzed
-          </Badge>
+          
+          <div className="flex items-center gap-4">
+            <Select value={dateRange} onValueChange={setDateRange}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Date range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7d">Last 7 days</SelectItem>
+                <SelectItem value="14d">Last 14 days</SelectItem>
+                <SelectItem value="30d">Last 30 days</SelectItem>
+                <SelectItem value="90d">Last 90 days</SelectItem>
+                <SelectItem value="all">All time</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Badge variant="secondary" className="text-sm">
+              {totalCalls} calls analyzed
+            </Badge>
+          </div>
         </div>
 
         {/* No Data State */}

@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Target, AlertTriangle, Users } from 'lucide-react';
-import { CallInsightsData } from '@/hooks/useExternalCallIntel';
+import { Target, AlertTriangle, Users, HelpCircle } from 'lucide-react';
+import { CallInsightsData, ExternalCallIntel } from '@/hooks/useExternalCallIntel';
 import { CallingMetricsConfig } from '@/lib/callingConfig';
 import { cn } from '@/lib/utils';
 import {
@@ -13,11 +13,33 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { format } from 'date-fns';
 
 interface Props {
   data: CallInsightsData | undefined;
   config: CallingMetricsConfig;
 }
+
+const REQUIRED_QUESTIONS = [
+  { label: 'Company growth and future prospects', key: 'growth' },
+  { label: 'Valuation expectations', key: 'valuation' },
+  { label: 'Past or ongoing M&A discussions', key: 'ma_discussions' },
+  { label: 'Historical and projected revenue & EBITDA', key: 'financials' },
+  { label: 'Interest in selling', key: 'interest' },
+  { label: 'Mobile number', key: 'mobile' },
+  { label: 'Reasons for exit (why and when)', key: 'exit_reason' },
+  { label: 'Past growth history', key: 'growth_history' },
+  { label: 'Future growth plans', key: 'future_plans' },
+  { label: 'Key business pain points', key: 'pain_points' },
+  { label: 'Employee count', key: 'employees' },
+  { label: 'Post-sale involvement duration', key: 'involvement' },
+  { label: 'Annual revenue', key: 'revenue' },
+  { label: 'Ownership structure', key: 'ownership' },
+  { label: 'EBITDA (number or description)', key: 'ebitda' },
+  { label: 'Brief company history', key: 'history' },
+  { label: "Owner's transaction goals", key: 'transaction_goals' },
+];
 
 export function QuestionAdherenceSection({ data, config }: Props) {
   if (!data) return null;
@@ -26,61 +48,73 @@ export function QuestionAdherenceSection({ data, config }: Props) {
     avgQuestionsCovered, 
     questionDistribution, 
     callsWithZeroQuestions, 
-    questionsByRep 
+    questionsByRep,
+    intelRecords
   } = data;
 
-  // Prepare chart data
-  const chartData = questionDistribution.length > 0 
-    ? questionDistribution 
-    : Array.from({ length: 11 }, (_, i) => ({ count: i, calls: 0 }));
-
-  const totalCalls = data.intelRecords.length;
+  const totalCalls = intelRecords.length;
   const zeroQuestionRate = totalCalls > 0 ? (callsWithZeroQuestions / totalCalls) * 100 : 0;
+
+  // Calculate good/poor coverage counts
+  const callsWithGoodCoverage = intelRecords.filter(r => 
+    (r.questions_covered_count || 0) >= config.questionCoverageGoodThreshold
+  ).length;
+  const callsWithPoorCoverage = intelRecords.filter(r => 
+    (r.questions_covered_count || 0) < config.questionCoverageWarningThreshold
+  ).length;
+
+  // Get question justifications for examples
+  const questionJustifications = intelRecords
+    .filter(r => r.question_adherence_justification)
+    .slice(0, 5);
 
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Avg Questions Covered</CardDescription>
-            <CardTitle className="text-3xl">{avgQuestionsCovered.toFixed(1)}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm text-muted-foreground">
-              Out of {config.questionCoverageTotal} expected
-            </div>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground">Total Questions</div>
+            <div className="text-3xl font-bold">{config.questionCoverageTotal}</div>
+            <p className="text-xs text-muted-foreground">Required per call</p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Coverage Rate</CardDescription>
-            <CardTitle className="text-3xl">
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground">Avg Coverage</div>
+            <div className="text-3xl font-bold">
+              {avgQuestionsCovered.toFixed(1)}
+              <span className="text-lg text-muted-foreground">/{config.questionCoverageTotal}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
               {config.questionCoverageTotal > 0 
                 ? ((avgQuestionsCovered / config.questionCoverageTotal) * 100).toFixed(0)
-                : 0}%
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className={cn(callsWithZeroQuestions > 0 && 'border-destructive')}>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-destructive" />
-              Calls with 0 Questions
-            </CardDescription>
-            <CardTitle className="text-3xl text-destructive">{callsWithZeroQuestions}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm text-muted-foreground">
-              {zeroQuestionRate.toFixed(1)}% of all calls
-            </div>
+                : 0}% coverage rate
+            </p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total Calls Analyzed</CardDescription>
-            <CardTitle className="text-3xl">{totalCalls}</CardTitle>
-          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground">Good Coverage</div>
+            <div className="text-3xl font-bold text-green-600">
+              {callsWithGoodCoverage}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Calls with ≥{config.questionCoverageGoodThreshold} questions
+            </p>
+          </CardContent>
+        </Card>
+        <Card className={cn(callsWithZeroQuestions > 0 && 'border-destructive')}>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Zero Question Calls
+            </div>
+            <div className="text-3xl font-bold text-destructive">{callsWithZeroQuestions}</div>
+            <p className="text-xs text-muted-foreground">
+              {zeroQuestionRate.toFixed(1)}% of all calls
+            </p>
+          </CardContent>
         </Card>
       </div>
 
@@ -98,7 +132,7 @@ export function QuestionAdherenceSection({ data, config }: Props) {
         <CardContent>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
+              <BarChart data={questionDistribution}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis 
                   dataKey="count" 
@@ -119,7 +153,7 @@ export function QuestionAdherenceSection({ data, config }: Props) {
                   labelFormatter={(label) => `${label} questions covered`}
                 />
                 <Bar dataKey="calls" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, index) => (
+                  {questionDistribution.map((entry, index) => (
                     <Cell 
                       key={`cell-${index}`} 
                       fill={entry.count === 0 
@@ -133,6 +167,36 @@ export function QuestionAdherenceSection({ data, config }: Props) {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* The 17 Required Questions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <HelpCircle className="h-5 w-5" />
+            The {REQUIRED_QUESTIONS.length} Required Questions
+          </CardTitle>
+          <CardDescription>
+            Questions that should be covered in every discovery call
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {REQUIRED_QUESTIONS.map((question, index) => (
+              <div
+                key={index}
+                className="flex items-center gap-3 p-3 rounded-lg border bg-card"
+              >
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium bg-primary/10 text-primary">
+                  {index + 1}
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-sm">{question.label}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -165,8 +229,8 @@ export function QuestionAdherenceSection({ data, config }: Props) {
                   const coverageRate = config.questionCoverageTotal > 0 
                     ? (rep.avgQuestions / config.questionCoverageTotal) * 100 
                     : 0;
-                  const isGood = coverageRate >= (config.questionCoverageGoodThreshold / config.questionCoverageTotal) * 100;
-                  const isWarning = coverageRate >= (config.questionCoverageWarningThreshold / config.questionCoverageTotal) * 100;
+                  const isGood = rep.avgQuestions >= config.questionCoverageGoodThreshold;
+                  const isWarning = rep.avgQuestions >= config.questionCoverageWarningThreshold;
                   
                   return (
                     <TableRow key={rep.rep}>
@@ -203,6 +267,50 @@ export function QuestionAdherenceSection({ data, config }: Props) {
               No rep-level question data available yet.
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Question Adherence Justifications */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Question Adherence Feedback</CardTitle>
+          <CardDescription>
+            AI explanations of what questions were missed
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[400px]">
+            <div className="space-y-4 pr-4">
+              {questionJustifications.length > 0 ? (
+                questionJustifications.map(call => (
+                  <div key={call.id} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={(call.question_adherence_score || 0) >= 8 ? 'default' : 'destructive'}>
+                          {call.questions_covered_count || 0}/{config.questionCoverageTotal} covered
+                        </Badge>
+                        <span className="font-medium truncate max-w-xs">
+                          {call.call?.to_name || 'Unknown'}
+                        </span>
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        {call.call?.started_at 
+                          ? format(new Date(call.call.started_at), 'MMM d, yyyy')
+                          : '-'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded">
+                      {call.question_adherence_justification || 'No justification provided'}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  No question adherence feedback available yet
+                </div>
+              )}
+            </div>
+          </ScrollArea>
         </CardContent>
       </Card>
     </div>
