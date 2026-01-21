@@ -89,10 +89,8 @@ export function ScoreOverviewSection({ data, config }: Props) {
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground"># Meetings Booked</div>
-            <div className="text-3xl font-bold text-primary">
-              {intelRecords.filter(r => r.next_steps?.toLowerCase().includes('meeting') || r.next_steps?.toLowerCase().includes('appointment')).length}
-            </div>
+            <div className="text-sm text-muted-foreground"># Owners Willing to Sell</div>
+            <div className="text-3xl font-bold text-primary">{data.interestBreakdown.yes}</div>
           </CardContent>
         </Card>
         <Card>
