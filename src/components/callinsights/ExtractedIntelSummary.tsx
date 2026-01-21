@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { 
-  ThumbsUp, Search, Clock, Users, Target, Brain, AlertCircle
+  ThumbsUp, Search, Clock, Users, Target, Brain, AlertCircle, ArrowRight, Briefcase
 } from 'lucide-react';
 import { CallInsightsData } from '@/hooks/useExternalCallIntel';
 import { CallingMetricsConfig, formatScore } from '@/lib/callingConfig';
@@ -35,10 +35,31 @@ export function ExtractedIntelSummary({ data, config }: Props) {
     timelineBreakdown, 
     buyerTypeBreakdown,
     personalInsightsList,
-    painPointsList 
+    painPointsList,
+    intelRecords
   } = data;
 
-  const totalCalls = data.intelRecords.length;
+  const totalCalls = intelRecords.length;
+
+  // Extract next steps from records
+  const nextStepsList = intelRecords
+    .filter(r => r.next_steps && r.next_steps.trim())
+    .map(r => ({
+      nextSteps: r.next_steps!,
+      contact: r.call?.to_name || 'Unknown',
+      rep: r.call?.caller_name || 'Unknown',
+      callId: r.call_id,
+      score: r.next_steps_clarity_score
+    }));
+
+  // Extract transaction goals (from personal insights or a dedicated field if available)
+  const transactionGoals = intelRecords
+    .filter(r => r.personal_insights && r.personal_insights.toLowerCase().includes('goal'))
+    .map(r => ({
+      goal: r.personal_insights!,
+      contact: r.call?.to_name || 'Unknown',
+      callId: r.call_id
+    }));
 
   // Filter insights
   const filteredInsights = personalInsightsList.filter(item =>
@@ -52,15 +73,100 @@ export function ExtractedIntelSummary({ data, config }: Props) {
 
   const getScoreColor = (score: number | null) => {
     if (score === null) return 'text-muted-foreground';
-    if (score >= 8) return 'text-green-600';
-    if (score >= 6) return 'text-yellow-600';
-    return 'text-red-600';
+    if (score >= 8) return 'text-primary';
+    if (score >= 6) return 'text-amber-600';
+    return 'text-destructive';
   };
 
   const maxTimelineCount = Math.max(...timelineBreakdown.map(t => t.count), 1);
 
   return (
     <div className="space-y-6">
+      {/* Next Steps Summary - New Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ArrowRight className="h-5 w-5" />
+            Next Steps Summary
+          </CardTitle>
+          <CardDescription>
+            AI-extracted action items and follow-ups from conversations
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {nextStepsList.length > 0 ? (
+            <ScrollArea className="h-[300px]">
+              <div className="space-y-3 pr-4">
+                {nextStepsList.slice(0, 30).map((item, idx) => (
+                  <div 
+                    key={`${item.callId}-${idx}`}
+                    className="p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{item.nextSteps}</p>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                          <span>Contact: {item.contact}</span>
+                          <span>Rep: {item.rep}</span>
+                        </div>
+                      </div>
+                      {item.score !== null && (
+                        <Badge className={cn('shrink-0', getScoreColor(item.score))}>
+                          Clarity: {formatScore(item.score, config)}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No next steps captured yet
+            </div>
+          )}
+          {nextStepsList.length > 30 && (
+            <div className="text-center text-sm text-muted-foreground mt-4">
+              Showing first 30 of {nextStepsList.length} next steps
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Transaction Goals - New Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Briefcase className="h-5 w-5" />
+            Transaction Goals
+          </CardTitle>
+          <CardDescription>
+            Prospect goals and motivations extracted from conversations
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {transactionGoals.length > 0 ? (
+            <ScrollArea className="h-[200px]">
+              <div className="space-y-2 pr-4">
+                {transactionGoals.slice(0, 20).map((item, idx) => (
+                  <div 
+                    key={`${item.callId}-${idx}`}
+                    className="p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                  >
+                    <p className="text-sm">{item.goal}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Contact: {item.contact}</p>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No transaction goals captured yet
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Interest in Selling Breakdown */}
       <Card>
         <CardHeader>
@@ -74,24 +180,24 @@ export function ExtractedIntelSummary({ data, config }: Props) {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-4">
-            <div className="text-center p-4 rounded-lg bg-green-50 border border-green-200 dark:bg-green-950/30 dark:border-green-900">
-              <div className="text-3xl font-bold text-green-600">{interestBreakdown.yes}</div>
-              <div className="text-sm text-green-700 dark:text-green-400">Yes</div>
-              <div className="text-xs text-green-600 dark:text-green-500 mt-1">
+            <div className="text-center p-4 rounded-lg bg-primary/10 border border-primary/20">
+              <div className="text-3xl font-bold text-primary">{interestBreakdown.yes}</div>
+              <div className="text-sm text-primary">Yes</div>
+              <div className="text-xs text-primary/70 mt-1">
                 {totalCalls > 0 ? ((interestBreakdown.yes / totalCalls) * 100).toFixed(1) : 0}%
               </div>
             </div>
-            <div className="text-center p-4 rounded-lg bg-yellow-50 border border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-900">
-              <div className="text-3xl font-bold text-yellow-600">{interestBreakdown.maybe}</div>
-              <div className="text-sm text-yellow-700 dark:text-yellow-400">Maybe</div>
-              <div className="text-xs text-yellow-600 dark:text-yellow-500 mt-1">
+            <div className="text-center p-4 rounded-lg bg-amber-100/50 border border-amber-200 dark:bg-amber-950/30 dark:border-amber-800">
+              <div className="text-3xl font-bold text-amber-700 dark:text-amber-400">{interestBreakdown.maybe}</div>
+              <div className="text-sm text-amber-700 dark:text-amber-400">Maybe</div>
+              <div className="text-xs text-amber-600 dark:text-amber-500 mt-1">
                 {totalCalls > 0 ? ((interestBreakdown.maybe / totalCalls) * 100).toFixed(1) : 0}%
               </div>
             </div>
-            <div className="text-center p-4 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-900">
-              <div className="text-3xl font-bold text-red-600">{interestBreakdown.no}</div>
-              <div className="text-sm text-red-700 dark:text-red-400">No</div>
-              <div className="text-xs text-red-600 dark:text-red-500 mt-1">
+            <div className="text-center p-4 rounded-lg bg-destructive/10 border border-destructive/20">
+              <div className="text-3xl font-bold text-destructive">{interestBreakdown.no}</div>
+              <div className="text-sm text-destructive">No</div>
+              <div className="text-xs text-destructive/70 mt-1">
                 {totalCalls > 0 ? ((interestBreakdown.no / totalCalls) * 100).toFixed(1) : 0}%
               </div>
             </div>
