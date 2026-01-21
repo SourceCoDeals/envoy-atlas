@@ -5,6 +5,7 @@ import {
   aggregateCallingMetrics, 
   aggregateCallingByRep,
   formatCallDuration,
+  calculateRate,
   type CallingMetrics,
   type RepPerformance,
 } from '@/lib/metrics';
@@ -73,6 +74,38 @@ function emptyData(): CallingAnalyticsData {
   };
 }
 
+/**
+ * Safe rate calculation to prevent NaN - uses centralized calculateRate
+ */
+const safeRate = (numerator: number, denominator: number): number => {
+  return calculateRate(numerator, denominator);
+};
+
+/**
+ * Check if a call is a connection based on disposition or talk duration
+ * Enhanced with configurable disposition mappings support
+ */
+const isCallConnection = (call: {
+  disposition?: string | null;
+  talk_duration?: number | null;
+}): boolean => {
+  const disposition = call.disposition?.toLowerCase() || '';
+  
+  // Check disposition mapping (configurable via disposition_mappings table)
+  const connectedDispositions = [
+    'connected', 'conversation', 'dm_conversation', 'answered', 
+    'completed_call', 'connection_made', 'meeting_booked', 'interested',
+    'callback', 'gatekeeper'
+  ];
+  
+  if (connectedDispositions.some(d => disposition.includes(d))) {
+    return true;
+  }
+  
+  // Fallback: check talk duration >= 30 seconds
+  return (call.talk_duration ?? 0) >= 30;
+};
+
 export function useCallingAnalytics(dateRange: DateRange = '30d') {
   const { currentWorkspace } = useWorkspace();
 
@@ -122,7 +155,7 @@ export function useCallingAnalytics(dateRange: DateRange = '30d') {
       const repPerformance = aggregateCallingByRep(calls);
       const topPerformers = repPerformance.slice(0, 5);
 
-      // Build hourly data
+      // Build hourly data with safe rate calculation
       const hourlyMap = new Map<number, { calls: number; connections: number }>();
       for (let h = 6; h <= 20; h++) {
         hourlyMap.set(h, { calls: 0, connections: 0 });
@@ -134,7 +167,7 @@ export function useCallingAnalytics(dateRange: DateRange = '30d') {
           if (hourlyMap.has(hour)) {
             const current = hourlyMap.get(hour)!;
             current.calls++;
-            if (call.disposition === 'connected' || (call.talk_duration && call.talk_duration > 30)) {
+            if (isCallConnection(call)) {
               current.connections++;
             }
           }
@@ -147,10 +180,10 @@ export function useCallingAnalytics(dateRange: DateRange = '30d') {
           hourLabel: `${hour}:00`,
           calls: data.calls,
           connections: data.connections,
-          connectRate: data.calls > 0 ? (data.connections / data.calls) * 100 : 0,
+          connectRate: safeRate(data.connections, data.calls), // ✅ NaN-safe
         }));
 
-      // Build daily trends
+      // Build daily trends with safe rate calculation
       const dailyMap = new Map<string, { calls: number; connections: number; meetings: number }>();
       
       calls.forEach(call => {
@@ -161,7 +194,7 @@ export function useCallingAnalytics(dateRange: DateRange = '30d') {
           }
           const current = dailyMap.get(dateKey)!;
           current.calls++;
-          if (call.disposition === 'connected' || (call.talk_duration && call.talk_duration > 30)) {
+          if (isCallConnection(call)) {
             current.connections++;
           }
           if (call.conversation_outcome === 'meeting_booked' || call.callback_scheduled) {
@@ -177,11 +210,11 @@ export function useCallingAnalytics(dateRange: DateRange = '30d') {
           calls: data.calls,
           connections: data.connections,
           meetings: data.meetings,
-          connectRate: data.calls > 0 ? (data.connections / data.calls) * 100 : 0,
+          connectRate: safeRate(data.connections, data.calls), // ✅ NaN-safe
         }))
         .sort((a, b) => a.date.localeCompare(b.date));
 
-      // Build funnel
+      // Build funnel with safe rate calculation
       const funnel: FunnelStage[] = [
         { stage: 'Total Dials', count: metrics.totalCalls, rate: 100 },
         { stage: 'Connections', count: metrics.connections, rate: metrics.connectRate },
@@ -189,7 +222,7 @@ export function useCallingAnalytics(dateRange: DateRange = '30d') {
         { 
           stage: 'DM Conversations', 
           count: metrics.dmConversations, 
-          rate: metrics.totalCalls > 0 ? (metrics.dmConversations / metrics.totalCalls) * 100 : 0 
+          rate: safeRate(metrics.dmConversations, metrics.totalCalls) // ✅ NaN-safe
         },
         { stage: 'Meetings Set', count: metrics.meetings, rate: metrics.meetingRate },
       ];

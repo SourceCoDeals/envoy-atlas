@@ -45,6 +45,7 @@ export type Database = {
           raw_data: Json | null
           recording_duration: number | null
           recording_url: string | null
+          rep_id: string | null
           ring_duration: number | null
           scheduled_at: string | null
           script_adherence_score: number | null
@@ -91,6 +92,7 @@ export type Database = {
           raw_data?: Json | null
           recording_duration?: number | null
           recording_url?: string | null
+          rep_id?: string | null
           ring_duration?: number | null
           scheduled_at?: string | null
           script_adherence_score?: number | null
@@ -137,6 +139,7 @@ export type Database = {
           raw_data?: Json | null
           recording_duration?: number | null
           recording_url?: string | null
+          rep_id?: string | null
           ring_duration?: number | null
           scheduled_at?: string | null
           script_adherence_score?: number | null
@@ -196,6 +199,13 @@ export type Database = {
             referencedRelation: "engagements"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "call_activities_rep_id_fkey"
+            columns: ["rep_id"]
+            isOneToOne: false
+            referencedRelation: "reps"
+            referencedColumns: ["id"]
+          },
         ]
       }
       call_ai_scores: {
@@ -241,6 +251,63 @@ export type Database = {
             columns: ["call_id"]
             isOneToOne: false
             referencedRelation: "call_activities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      call_objections: {
+        Row: {
+          call_id: string
+          confidence: number | null
+          created_at: string | null
+          engagement_id: string
+          extracted_by: string | null
+          id: string
+          objection_text: string
+          objection_type: string
+          resolution_attempted: string | null
+          timestamp_in_call: number | null
+          was_resolved: boolean | null
+        }
+        Insert: {
+          call_id: string
+          confidence?: number | null
+          created_at?: string | null
+          engagement_id: string
+          extracted_by?: string | null
+          id?: string
+          objection_text: string
+          objection_type: string
+          resolution_attempted?: string | null
+          timestamp_in_call?: number | null
+          was_resolved?: boolean | null
+        }
+        Update: {
+          call_id?: string
+          confidence?: number | null
+          created_at?: string | null
+          engagement_id?: string
+          extracted_by?: string | null
+          id?: string
+          objection_text?: string
+          objection_type?: string
+          resolution_attempted?: string | null
+          timestamp_in_call?: number | null
+          was_resolved?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_objections_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "call_activities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_objections_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
             referencedColumns: ["id"]
           },
         ]
@@ -484,6 +551,54 @@ export type Database = {
             columns: ["email_account_id"]
             isOneToOne: false
             referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_platform_mappings: {
+        Row: {
+          campaign_id: string
+          created_at: string | null
+          engagement_id: string
+          external_campaign_id: string
+          external_campaign_name: string | null
+          id: string
+          last_synced_at: string | null
+          platform: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string | null
+          engagement_id: string
+          external_campaign_id: string
+          external_campaign_name?: string | null
+          id?: string
+          last_synced_at?: string | null
+          platform: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string | null
+          engagement_id?: string
+          external_campaign_id?: string
+          external_campaign_name?: string | null
+          id?: string
+          last_synced_at?: string | null
+          platform?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_platform_mappings_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_platform_mappings_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
             referencedColumns: ["id"]
           },
         ]
@@ -2012,6 +2127,65 @@ export type Database = {
           },
         ]
       }
+      disposition_mappings: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          engagement_id: string
+          external_disposition: string
+          id: string
+          internal_disposition: string
+          is_connection: boolean | null
+          is_conversation: boolean | null
+          is_dm: boolean | null
+          is_meeting: boolean | null
+          is_voicemail: boolean | null
+          min_talk_duration_seconds: number | null
+          platform: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          engagement_id: string
+          external_disposition: string
+          id?: string
+          internal_disposition: string
+          is_connection?: boolean | null
+          is_conversation?: boolean | null
+          is_dm?: boolean | null
+          is_meeting?: boolean | null
+          is_voicemail?: boolean | null
+          min_talk_duration_seconds?: number | null
+          platform?: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          engagement_id?: string
+          external_disposition?: string
+          id?: string
+          internal_disposition?: string
+          is_connection?: boolean | null
+          is_conversation?: boolean | null
+          is_dm?: boolean | null
+          is_meeting?: boolean | null
+          is_voicemail?: boolean | null
+          min_talk_duration_seconds?: number | null
+          platform?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "disposition_mappings_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_accounts: {
         Row: {
           account_type: string | null
@@ -3526,6 +3700,53 @@ export type Database = {
         }
         Relationships: []
       }
+      reps: {
+        Row: {
+          created_at: string | null
+          email: string | null
+          engagement_id: string
+          external_id: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          phone: string | null
+          platform: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          email?: string | null
+          engagement_id: string
+          external_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          phone?: string | null
+          platform?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string | null
+          engagement_id?: string
+          external_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          phone?: string | null
+          platform?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reps_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       responses: {
         Row: {
           call_activity_id: string | null
@@ -4420,6 +4641,7 @@ export type Database = {
       }
     }
     Functions: {
+      backfill_reps_from_calls: { Args: never; Returns: undefined }
       calc_margin_of_error: {
         Args: { confidence?: number; successes: number; total: number }
         Returns: number
@@ -4485,6 +4707,14 @@ export type Database = {
       }
       is_client_member: {
         Args: { _client_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_connection_disposition: {
+        Args: {
+          p_disposition: string
+          p_engagement_id: string
+          p_talk_duration?: number
+        }
         Returns: boolean
       }
       is_first_workspace_member: {
