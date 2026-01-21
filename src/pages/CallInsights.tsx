@@ -81,6 +81,71 @@ export default function CallInsights() {
       return true;
     });
 
+    // Helper function to calculate average
+    const avg = (values: (number | null | undefined)[]): number | null => {
+      const valid = values.filter((v): v is number => v != null);
+      return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+    };
+
+    // Recalculate scoreOverview for filtered records
+    const scoreKeys = [
+      { key: 'seller_interest_score', label: 'Seller Interest' },
+      { key: 'objection_handling_score', label: 'Objection Handling' },
+      { key: 'valuation_discussion_score', label: 'Valuation Discussion' },
+      { key: 'rapport_building_score', label: 'Rapport Building' },
+      { key: 'value_proposition_score', label: 'Value Proposition' },
+      { key: 'conversation_quality_score', label: 'Conversation Quality' },
+      { key: 'script_adherence_score', label: 'Script Adherence' },
+      { key: 'overall_quality_score', label: 'Overall Quality' },
+      { key: 'question_adherence_score', label: 'Question Adherence' },
+      { key: 'personal_insights_score', label: 'Personal Insights' },
+      { key: 'next_steps_clarity_score', label: 'Next Steps Clarity' },
+      { key: 'discovery_score', label: 'Discovery' },
+    ];
+
+    const scoreOverview = scoreKeys.map(({ key, label }) => {
+      const thisWeekAvg = avg(filteredRecords.map(r => r[key as keyof typeof r] as number | null));
+      
+      // For trend, compare to original data's last week avg if available
+      const originalScore = data.scoreOverview.find(s => s.key === key);
+      const lastWeekAvg = originalScore?.lastWeekAvg ?? null;
+      
+      let trend: 'up' | 'down' | 'flat' = 'flat';
+      if (thisWeekAvg != null && lastWeekAvg != null) {
+        if (thisWeekAvg > lastWeekAvg + 0.2) trend = 'up';
+        else if (thisWeekAvg < lastWeekAvg - 0.2) trend = 'down';
+      }
+
+      // Find best rep for this score within filtered data
+      const repScores = new Map<string, number[]>();
+      filteredRecords.forEach(r => {
+        const rep = r.call?.caller_name || 'Unknown';
+        const score = r[key as keyof typeof r] as number | null;
+        if (score != null) {
+          if (!repScores.has(rep)) repScores.set(rep, []);
+          repScores.get(rep)!.push(score);
+        }
+      });
+      
+      let bestRep: string | null = null;
+      let bestAvg = 0;
+      repScores.forEach((scores, rep) => {
+        const repAvg = scores.reduce((a, b) => a + b, 0) / scores.length;
+        if (repAvg > bestAvg) {
+          bestAvg = repAvg;
+          bestRep = rep;
+        }
+      });
+
+      // Count needing coaching (score below 5)
+      const needsCoachingCount = filteredRecords.filter(r => {
+        const score = r[key as keyof typeof r] as number | null;
+        return score != null && score < 5;
+      }).length;
+
+      return { key, label, thisWeekAvg, lastWeekAvg, trend, bestRep, needsCoachingCount };
+    });
+
     // Recalculate aggregates for filtered data
     const totalObjectionsFaced = filteredRecords.reduce((sum, r) => sum + (r.number_of_objections || 0), 0);
     const totalObjectionsResolved = filteredRecords.reduce((sum, r) => sum + (r.objections_resolved_count || 0), 0);
@@ -149,6 +214,7 @@ export default function CallInsights() {
     return {
       ...data,
       intelRecords: filteredRecords,
+      scoreOverview,
       totalObjectionsFaced,
       totalObjectionsResolved,
       overallResolutionRate,
