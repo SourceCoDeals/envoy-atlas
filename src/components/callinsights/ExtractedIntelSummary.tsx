@@ -41,7 +41,7 @@ export function ExtractedIntelSummary({ data, config }: Props) {
 
   const totalCalls = intelRecords.length;
 
-  // Extract next steps from records
+  // Extract next steps from records (check both next_steps and look for callback patterns in notes)
   const nextStepsList = intelRecords
     .filter(r => r.next_steps && r.next_steps.trim())
     .map(r => ({
@@ -52,12 +52,14 @@ export function ExtractedIntelSummary({ data, config }: Props) {
       score: r.next_steps_clarity_score
     }));
 
-  // Extract transaction goals (from personal insights or a dedicated field if available)
+  // Extract transaction goals from timeline and buyer preferences (more useful data)
   const transactionGoals = intelRecords
-    .filter(r => r.personal_insights && r.personal_insights.toLowerCase().includes('goal'))
+    .filter(r => (r.timeline_to_sell && r.timeline_to_sell.trim()) || (r.buyer_type_preference && r.buyer_type_preference.trim()))
     .map(r => ({
-      goal: r.personal_insights!,
+      timeline: r.timeline_to_sell,
+      buyerPreference: r.buyer_type_preference,
       contact: r.call?.to_name || 'Unknown',
+      interest: r.interest_in_selling,
       callId: r.call_id
     }));
 
@@ -153,8 +155,32 @@ export function ExtractedIntelSummary({ data, config }: Props) {
                     key={`${item.callId}-${idx}`}
                     className="p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                   >
-                    <p className="text-sm">{item.goal}</p>
-                    <p className="text-xs text-muted-foreground mt-1">Contact: {item.contact}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {item.timeline && (
+                        <Badge variant="outline" className="text-xs">
+                          <Clock className="h-3 w-3 mr-1" />
+                          {item.timeline}
+                        </Badge>
+                      )}
+                      {item.buyerPreference && (
+                        <Badge variant="secondary" className="text-xs">
+                          {item.buyerPreference}
+                        </Badge>
+                      )}
+                      {item.interest && (
+                        <Badge 
+                          className={cn(
+                            'text-xs',
+                            item.interest === 'yes' ? 'bg-primary/10 text-primary' :
+                            item.interest === 'maybe' ? 'bg-accent text-accent-foreground' :
+                            'bg-destructive/10 text-destructive'
+                          )}
+                        >
+                          Interest: {item.interest}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">Contact: {item.contact}</p>
                   </div>
                 ))}
               </div>
