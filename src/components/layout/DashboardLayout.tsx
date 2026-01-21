@@ -92,7 +92,7 @@ const callingMainNavItems: NavItem[] = [
   { title: 'Data Insights', href: '/calling/insights', icon: PieChart },
   { title: 'Call Insights', href: '/calling/call-insights', icon: Brain },
   { title: 'Call Library', href: '/calling/library', icon: Library },
-  { title: 'Call Information', href: '/calling/information', icon: FileText },
+  
   { title: 'AI Summary', href: '/calling/ai-summary', icon: Sparkles },
 ];
 
