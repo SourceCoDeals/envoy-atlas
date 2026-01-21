@@ -141,6 +141,9 @@ export function ExtractedIntelSummary({ data, config }: Props) {
           <CardTitle className="flex items-center gap-2">
             <Briefcase className="h-5 w-5" />
             Transaction Goals
+            {transactionGoals.length > 0 && (
+              <Badge variant="secondary" className="ml-2">{transactionGoals.length}</Badge>
+            )}
           </CardTitle>
           <CardDescription>
             Prospect goals and motivations extracted from conversations
@@ -148,46 +151,53 @@ export function ExtractedIntelSummary({ data, config }: Props) {
         </CardHeader>
         <CardContent>
           {transactionGoals.length > 0 ? (
-            <ScrollArea className="h-[200px]">
-              <div className="space-y-2 pr-4">
-                {transactionGoals.slice(0, 20).map((item, idx) => (
-                  <div 
-                    key={`${item.callId}-${idx}`}
-                    className="p-3 border rounded-lg hover:bg-muted/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {item.timeline && (
-                        <Badge variant="outline" className="text-xs">
-                          <Clock className="h-3 w-3 mr-1" />
-                          {item.timeline}
-                        </Badge>
-                      )}
-                      {item.buyerPreference && (
-                        <Badge variant="secondary" className="text-xs">
-                          {item.buyerPreference}
-                        </Badge>
-                      )}
-                      {item.interest && (
-                        <Badge 
-                          className={cn(
-                            'text-xs',
-                            item.interest === 'yes' ? 'bg-primary/10 text-primary' :
-                            item.interest === 'maybe' ? 'bg-accent text-accent-foreground' :
-                            'bg-destructive/10 text-destructive'
-                          )}
-                        >
-                          Interest: {item.interest}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">Contact: {item.contact}</p>
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {transactionGoals.slice(0, 30).map((item, idx) => (
+                <div 
+                  key={`${item.callId}-${idx}`}
+                  className="p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2 flex-wrap mb-2">
+                    {item.interest && (
+                      <Badge 
+                        className={cn(
+                          'text-xs',
+                          item.interest === 'yes' ? 'bg-primary/10 text-primary border-primary/20' :
+                          item.interest === 'maybe' ? 'bg-amber-100/50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800' :
+                          'bg-destructive/10 text-destructive border-destructive/20'
+                        )}
+                        variant="outline"
+                      >
+                        {item.interest === 'yes' ? '✓ Interested' : item.interest === 'maybe' ? '? Maybe' : '✗ No'}
+                      </Badge>
+                    )}
                   </div>
-                ))}
-              </div>
-            </ScrollArea>
+                  <div className="flex flex-wrap gap-1.5">
+                    {item.timeline && (
+                      <Badge variant="outline" className="text-xs">
+                        <Clock className="h-3 w-3 mr-1" />
+                        {item.timeline}
+                      </Badge>
+                    )}
+                    {item.buyerPreference && (
+                      <Badge variant="secondary" className="text-xs">
+                        <Users className="h-3 w-3 mr-1" />
+                        {item.buyerPreference}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2 truncate">Contact: {item.contact}</p>
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               No transaction goals captured yet
+            </div>
+          )}
+          {transactionGoals.length > 30 && (
+            <div className="text-center text-sm text-muted-foreground mt-4">
+              Showing first 30 of {transactionGoals.length} goals
             </div>
           )}
         </CardContent>
