@@ -95,3 +95,6 @@ verify_jwt = false
 
 [functions.replyio-webhook]
 verify_jwt = false
+
+[functions.compute-variant-decay]
+verify_jwt = false

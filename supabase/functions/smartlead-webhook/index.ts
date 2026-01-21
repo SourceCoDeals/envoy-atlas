@@ -1,4 +1,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { validateWebhookRequest, WEBHOOK_CONFIGS } from '../_shared/webhook-validation.ts';
+import { validateSmartLeadWebhook, SmartLeadWebhookEvent } from '../_shared/webhook-schemas.ts';
+import { 
+  incrementCampaignMetric, 
+  recordHourlyMetric, 
+  recordDailyMetric,
+  updatePositiveReplyCounts 
+} from '../_shared/atomic-metrics.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -54,23 +62,6 @@ function mapSmartleadCategory(name: string | null | undefined): { reply_category
   return { reply_category: 'neutral', reply_sentiment: 'neutral' };
 }
 
-interface SmartleadWebhookEvent {
-  event_type: string;
-  campaign_id?: number;
-  lead_id?: number;
-  email?: string;
-  event_timestamp?: string;
-  sequence_number?: number;
-  variant_id?: string;
-  link_url?: string;
-  reply_text?: string;
-  bounce_type?: string;
-  bounce_reason?: string;
-  category_id?: number;
-  category_name?: string;
-  [key: string]: any;
-}
-
 Deno.serve(async (req) => {
   console.log('smartlead-webhook: Request received', { method: req.method });
 
@@ -81,11 +72,36 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const webhookSecret = Deno.env.get('SMARTLEAD_WEBHOOK_SECRET');
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = await req.json();
-    const event: SmartleadWebhookEvent = body;
+    // ✅ SECURITY: Validate webhook signature
+    const validation = await validateWebhookRequest(req, webhookSecret, WEBHOOK_CONFIGS.smartlead);
+    if (!validation.valid) {
+      console.error('Webhook validation failed:', validation.error);
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
+    if (validation.error) {
+      console.warn('Webhook warning:', validation.error);
+    }
 
+    // ✅ SECURITY: Validate and sanitize payload
+    const rawBody = JSON.parse(validation.body);
+    const payloadValidation = validateSmartLeadWebhook(rawBody);
+    
+    if (!payloadValidation.success) {
+      console.error('Payload validation failed:', payloadValidation.errors);
+      return new Response(JSON.stringify({ error: 'Invalid payload', details: payloadValidation.errors }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
+    const event = payloadValidation.data!;
     console.log('Webhook event:', event.event_type, 'campaign:', event.campaign_id);
 
     // Find the engagement based on campaign external_id
@@ -111,7 +127,7 @@ Deno.serve(async (req) => {
       source_type: 'smartlead',
       event_type: event.event_type,
       event_id: event.event_id || `sl-${Date.now()}`,
-      payload: body,
+      payload: rawBody,
       processed: false,
     });
 
@@ -248,54 +264,11 @@ async function getOrCreateContact(
   return { contactId: newContact.id, companyId: newContact.company_id };
 }
 
-// Helper for atomic hourly metrics increment
-async function incrementHourlyMetric(
-  supabase: any,
-  engagementId: string,
-  campaignId: string,
-  eventTimestamp: string | undefined,
-  metricField: 'emails_sent' | 'emails_opened' | 'emails_clicked' | 'emails_replied' | 'emails_bounced'
-) {
-  const now = new Date(eventTimestamp || Date.now());
-  const hourOfDay = now.getUTCHours();
-  const dayOfWeek = now.getUTCDay();
-  const metricDate = now.toISOString().split('T')[0];
-  
-  // Try to find existing record
-  const { data: existing } = await supabase
-    .from('hourly_metrics')
-    .select(`id, ${metricField}`)
-    .eq('engagement_id', engagementId)
-    .eq('campaign_id', campaignId)
-    .eq('hour_of_day', hourOfDay)
-    .eq('day_of_week', dayOfWeek)
-    .eq('metric_date', metricDate)
-    .maybeSingle();
-  
-  if (existing) {
-    const updateData: Record<string, number> = {};
-    updateData[metricField] = ((existing as any)[metricField] || 0) + 1;
-    await supabase.from('hourly_metrics')
-      .update(updateData)
-      .eq('id', existing.id);
-  } else {
-    const insertData: Record<string, any> = {
-      engagement_id: engagementId,
-      campaign_id: campaignId,
-      hour_of_day: hourOfDay,
-      day_of_week: dayOfWeek,
-      metric_date: metricDate,
-    };
-    insertData[metricField] = 1;
-    await supabase.from('hourly_metrics').insert(insertData);
-  }
-}
-
 async function processEmailSent(
   supabase: any,
   engagementId: string,
   campaignId: string,
-  event: SmartleadWebhookEvent
+  event: SmartLeadWebhookEvent
 ) {
   if (!event.email) return;
 
@@ -313,36 +286,14 @@ async function processEmailSent(
     step_number: event.sequence_number || 1,
   }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
 
-  // Update hourly metrics - use RPC for atomic increment
-  const now = new Date(event.event_timestamp || Date.now());
-  const hourKey = {
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-  };
-  
-  // Try to increment, otherwise insert
-  const { data: existing } = await supabase
-    .from('hourly_metrics')
-    .select('id, emails_sent')
-    .eq('engagement_id', engagementId)
-    .eq('campaign_id', campaignId)
-    .eq('hour_of_day', hourKey.hour_of_day)
-    .eq('day_of_week', hourKey.day_of_week)
-    .eq('metric_date', hourKey.metric_date)
-    .single();
-  
-  if (existing) {
-    await supabase.from('hourly_metrics')
-      .update({ emails_sent: (existing.emails_sent || 0) + 1 })
-      .eq('id', existing.id);
-  } else {
-    await supabase.from('hourly_metrics').insert({
-      ...hourKey,
-      emails_sent: 1,
-    });
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_sent', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_sent');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_sent');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+    // Don't fail the webhook for metric errors
   }
 
   console.log('Processed EMAIL_SENT for', event.email);
@@ -352,26 +303,42 @@ async function processEmailOpen(
   supabase: any,
   engagementId: string,
   campaignId: string,
-  event: SmartleadWebhookEvent
+  event: SmartLeadWebhookEvent
 ) {
   if (!event.email) return;
 
   const contactInfo = await getOrCreateContact(supabase, engagementId, event.email);
   if (!contactInfo) return;
 
+  // Get current open count for increment
+  const { data: currentActivity } = await supabase
+    .from('email_activities')
+    .select('open_count')
+    .eq('engagement_id', engagementId)
+    .eq('campaign_id', campaignId)
+    .eq('contact_id', contactInfo.contactId)
+    .eq('step_number', event.sequence_number || 1)
+    .single();
+
   await supabase.from('email_activities')
     .update({
       opened: true,
       first_opened_at: event.event_timestamp || new Date().toISOString(),
-      open_count: supabase.raw('COALESCE(open_count, 0) + 1'),
+      open_count: (currentActivity?.open_count || 0) + 1,
     })
     .eq('engagement_id', engagementId)
     .eq('campaign_id', campaignId)
     .eq('contact_id', contactInfo.contactId)
     .eq('step_number', event.sequence_number || 1);
 
-  // Update hourly metrics with atomic increment
-  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_opened');
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_opened', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_opened');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_opened');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   console.log('Processed EMAIL_OPEN for', event.email);
 }
@@ -380,17 +347,17 @@ async function processEmailClick(
   supabase: any,
   engagementId: string,
   campaignId: string,
-  event: SmartleadWebhookEvent
+  event: SmartLeadWebhookEvent
 ) {
   if (!event.email) return;
 
   const contactInfo = await getOrCreateContact(supabase, engagementId, event.email);
   if (!contactInfo) return;
 
-  // Get email activity ID
+  // Get email activity ID and current click count
   const { data: activity } = await supabase
     .from('email_activities')
-    .select('id')
+    .select('id, click_count')
     .eq('engagement_id', engagementId)
     .eq('campaign_id', campaignId)
     .eq('contact_id', contactInfo.contactId)
@@ -401,7 +368,7 @@ async function processEmailClick(
     .update({
       clicked: true,
       first_clicked_at: event.event_timestamp || new Date().toISOString(),
-      click_count: supabase.raw('COALESCE(click_count, 0) + 1'),
+      click_count: (activity?.click_count || 0) + 1,
     })
     .eq('engagement_id', engagementId)
     .eq('campaign_id', campaignId)
@@ -420,8 +387,12 @@ async function processEmailClick(
     });
   }
 
-  // Update hourly metrics with atomic increment
-  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_clicked');
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_clicked');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   console.log('Processed EMAIL_CLICK for', event.email);
 }
@@ -430,7 +401,7 @@ async function processEmailReply(
   supabase: any,
   engagementId: string,
   campaignId: string,
-  event: SmartleadWebhookEvent
+  event: SmartLeadWebhookEvent
 ) {
   if (!event.email) return;
 
@@ -470,8 +441,19 @@ async function processEmailReply(
     });
   }
 
-  // Update hourly metrics with atomic increment
-  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_replied');
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_replied', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_replied');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_replied');
+    
+    // Update positive reply counts if this is a positive category
+    if (mapped.reply_sentiment === 'positive') {
+      await updatePositiveReplyCounts(supabase, engagementId, campaignId, event.event_timestamp);
+    }
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   // Trigger reply classification (for AI analysis of reply text if category not provided)
   if (!event.category_name && event.reply_text) {
@@ -492,11 +474,6 @@ async function processEmailReply(
     }
   }
 
-  // Update positive reply counts if this is a positive category
-  if (mapped.reply_sentiment === 'positive') {
-    await updatePositiveReplyCounts(supabase, engagementId, campaignId, event.event_timestamp);
-  }
-
   console.log('Processed EMAIL_REPLY for', event.email, '→ category:', mapped.reply_category);
 }
 
@@ -504,7 +481,7 @@ async function processEmailBounce(
   supabase: any,
   engagementId: string,
   campaignId: string,
-  event: SmartleadWebhookEvent
+  event: SmartLeadWebhookEvent
 ) {
   if (!event.email) return;
 
@@ -532,8 +509,14 @@ async function processEmailBounce(
     })
     .eq('id', contactInfo.contactId);
 
-  // Update hourly metrics with atomic increment
-  await incrementHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_bounced');
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_bounced', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_bounced');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.event_timestamp, 'emails_bounced');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   console.log('Processed EMAIL_BOUNCE for', event.email);
 }
@@ -542,7 +525,7 @@ async function processUnsubscribe(
   supabase: any,
   engagementId: string,
   campaignId: string,
-  event: SmartleadWebhookEvent
+  event: SmartLeadWebhookEvent
 ) {
   if (!event.email) return;
 
@@ -573,7 +556,7 @@ async function processCategoryUpdate(
   supabase: any,
   engagementId: string,
   campaignId: string,
-  event: SmartleadWebhookEvent
+  event: SmartLeadWebhookEvent
 ) {
   if (!event.email) return;
 
@@ -603,64 +586,14 @@ async function processCategoryUpdate(
       .eq('id', contactInfo.contactId);
   }
 
-  // Update positive reply counts if this is a positive category
+  // ✅ ATOMIC: Update positive reply counts if this is a positive category
   if (wasPositive) {
-    await updatePositiveReplyCounts(supabase, engagementId, campaignId, event.event_timestamp);
+    try {
+      await updatePositiveReplyCounts(supabase, engagementId, campaignId, event.event_timestamp);
+    } catch (metricError) {
+      console.error('Error updating positive reply counts:', metricError);
+    }
   }
 
   console.log('Processed LEAD_CATEGORY_UPDATED for', event.email, '→', mapped.reply_category, '(positive:', wasPositive, ')');
-}
-
-// Helper function to update positive reply counts across tables
-async function updatePositiveReplyCounts(
-  supabase: any,
-  engagementId: string,
-  campaignId: string,
-  eventTimestamp?: string
-) {
-  try {
-    // Count positive replies for this campaign from email_activities
-    const { count: positiveCount } = await supabase
-      .from('email_activities')
-      .select('*', { count: 'exact', head: true })
-      .eq('engagement_id', engagementId)
-      .eq('campaign_id', campaignId)
-      .in('reply_category', ['meeting_request', 'interested']);
-
-    // Update campaign positive_replies count
-    await supabase.from('campaigns')
-      .update({ 
-        positive_replies: positiveCount || 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', campaignId);
-
-    // Update daily_metrics for today
-    const today = eventTimestamp 
-      ? new Date(eventTimestamp).toISOString().split('T')[0] 
-      : new Date().toISOString().split('T')[0];
-
-    // Get positive count for today
-    const { count: todayPositiveCount } = await supabase
-      .from('email_activities')
-      .select('*', { count: 'exact', head: true })
-      .eq('engagement_id', engagementId)
-      .eq('campaign_id', campaignId)
-      .in('reply_category', ['meeting_request', 'interested'])
-      .gte('replied_at', `${today}T00:00:00Z`)
-      .lt('replied_at', `${today}T23:59:59Z`);
-
-    // Upsert daily_metrics with positive count
-    await supabase.from('daily_metrics')
-      .upsert({
-        engagement_id: engagementId,
-        campaign_id: campaignId,
-        date: today,
-        positive_replies: todayPositiveCount || 0,
-      }, { onConflict: 'engagement_id,campaign_id,date' });
-
-    console.log(`Updated positive reply counts: campaign=${positiveCount}, today=${todayPositiveCount}`);
-  } catch (error) {
-    console.error('Error updating positive reply counts:', error);
-  }
 }

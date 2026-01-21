@@ -1,27 +1,17 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { validateWebhookRequest, WEBHOOK_CONFIGS } from '../_shared/webhook-validation.ts';
+import { validateReplyioWebhook, ReplyioWebhookEvent } from '../_shared/webhook-schemas.ts';
+import { 
+  incrementCampaignMetric, 
+  recordHourlyMetric, 
+  recordDailyMetric,
+  updatePositiveReplyCounts 
+} from '../_shared/atomic-metrics.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-replyio-signature',
 };
-
-interface ReplyioWebhookEvent {
-  eventType: string;
-  sequenceId?: number;
-  campaignId?: number;
-  personId?: number;
-  email?: string;
-  personEmail?: string;
-  timestamp?: string;
-  stepNumber?: number;
-  replyText?: string;
-  bounceType?: string;
-  bounceReason?: string;
-  clickedUrl?: string;
-  finishReason?: string;
-  status?: string;
-  [key: string]: any;
-}
 
 // Category mapping for Reply.io - maps finish reasons/statuses to standardized categories
 const REPLYIO_CATEGORY_MAP: Record<string, { category: string; sentiment: string }> = {
@@ -74,12 +64,37 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const webhookSecret = Deno.env.get('REPLYIO_WEBHOOK_SECRET');
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = await req.json();
-    const event: ReplyioWebhookEvent = body;
-    const email = event.email || event.personEmail;
+    // ✅ SECURITY: Validate webhook signature
+    const validation = await validateWebhookRequest(req, webhookSecret, WEBHOOK_CONFIGS.replyio);
+    if (!validation.valid) {
+      console.error('Webhook validation failed:', validation.error);
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
+    if (validation.error) {
+      console.warn('Webhook warning:', validation.error);
+    }
 
+    // ✅ SECURITY: Validate and sanitize payload
+    const rawBody = JSON.parse(validation.body);
+    const payloadValidation = validateReplyioWebhook(rawBody);
+    
+    if (!payloadValidation.success) {
+      console.error('Payload validation failed:', payloadValidation.errors);
+      return new Response(JSON.stringify({ error: 'Invalid payload', details: payloadValidation.errors }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
+    const event = payloadValidation.data!;
+    const email = event.email || event.personEmail;
     console.log('Webhook event:', event.eventType, 'sequence:', event.sequenceId);
 
     // Find the engagement based on campaign external_id
@@ -106,7 +121,7 @@ Deno.serve(async (req) => {
       source_type: 'replyio',
       event_type: event.eventType,
       event_id: event.eventId || `rio-${Date.now()}`,
-      payload: body,
+      payload: rawBody,
       processed: false,
     });
 
@@ -189,27 +204,45 @@ async function getOrCreateContact(
     return { contactId: contact.id, companyId: contact.company_id };
   }
 
-  // Create company first
+  // Create company first - use select-then-insert pattern for NULL domain handling
   const domain = email.split('@')[1]?.toLowerCase();
-  const { data: company } = await supabase
-    .from('companies')
-    .upsert({
-      engagement_id: engagementId,
-      name: domain || 'Unknown',
-      domain,
-      source: 'webhook',
-    }, { onConflict: 'engagement_id,domain' })
-    .select('id')
-    .single();
+  let companyId: string | null = null;
+  
+  if (domain) {
+    const { data: existingCompany } = await supabase
+      .from('companies')
+      .select('id')
+      .eq('engagement_id', engagementId)
+      .eq('domain', domain)
+      .maybeSingle();
+    
+    if (existingCompany) {
+      companyId = existingCompany.id;
+    }
+  }
+  
+  if (!companyId) {
+    const { data: newCompany } = await supabase
+      .from('companies')
+      .insert({
+        engagement_id: engagementId,
+        name: domain || 'Unknown',
+        domain,
+        source: 'webhook',
+      })
+      .select('id')
+      .single();
+    companyId = newCompany?.id;
+  }
 
-  if (!company) return null;
+  if (!companyId) return null;
 
   // Create contact
   const { data: newContact } = await supabase
     .from('contacts')
     .upsert({
       engagement_id: engagementId,
-      company_id: company.id,
+      company_id: companyId,
       email,
       source: 'webhook',
     }, { onConflict: 'engagement_id,email' })
@@ -243,16 +276,14 @@ async function processEmailSent(
     step_number: event.stepNumber || 1,
   }, { onConflict: 'engagement_id,campaign_id,contact_id,step_number' });
 
-  // Update hourly metrics
-  const now = new Date(event.timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_sent: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_sent', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_sent');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_sent');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   console.log('Processed email_sent for', email);
 }
@@ -279,16 +310,14 @@ async function processEmailOpen(
     .eq('contact_id', contactInfo.contactId)
     .eq('step_number', event.stepNumber || 1);
 
-  // Update hourly metrics
-  const now = new Date(event.timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_opened: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_opened', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_opened');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_opened');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   console.log('Processed email_opened for', email);
 }
@@ -337,16 +366,12 @@ async function processEmailClick(
     });
   }
 
-  // Update hourly metrics
-  const now = new Date(event.timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_clicked: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_clicked');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   console.log('Processed email_clicked for', email);
 }
@@ -395,16 +420,19 @@ async function processEmailReply(
     });
   }
 
-  // Update hourly metrics
-  const now = new Date(event.timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_replied: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_replied', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_replied');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_replied');
+    
+    // Update positive reply counts if this is a positive category
+    if (mapped.reply_sentiment === 'positive') {
+      await updatePositiveReplyCounts(supabase, engagementId, campaignId, event.timestamp);
+    }
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   // Trigger reply classification
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -459,16 +487,14 @@ async function processEmailBounce(
     })
     .eq('id', contactInfo.contactId);
 
-  // Update hourly metrics
-  const now = new Date(event.timestamp || Date.now());
-  await supabase.from('hourly_metrics').upsert({
-    engagement_id: engagementId,
-    campaign_id: campaignId,
-    hour_of_day: now.getUTCHours(),
-    day_of_week: now.getUTCDay(),
-    metric_date: now.toISOString().split('T')[0],
-    emails_bounced: 1,
-  }, { onConflict: 'engagement_id,campaign_id,hour_of_day,day_of_week,metric_date' });
+  // ✅ ATOMIC: Use database functions for race-safe metric updates
+  try {
+    await incrementCampaignMetric(supabase, campaignId, 'total_bounced', 1);
+    await recordHourlyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_bounced');
+    await recordDailyMetric(supabase, engagementId, campaignId, event.timestamp, 'emails_bounced');
+  } catch (metricError) {
+    console.error('Error updating metrics:', metricError);
+  }
 
   console.log('Processed email_bounced for', email);
 }
