@@ -138,52 +138,55 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
           🥧 Disposition Breakdown
         </CardTitle>
         <CardDescription>How are completed calls ending? This tells you where to focus.</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Pie Chart */}
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value: number, name: string) => [`${value} (${((value / calls.length) * 100).toFixed(1)}%)`, name]}
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                  }}
-                />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Pie Chart - Left side */}
+          <div className="flex items-center justify-center">
+            <div className="h-56 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={75}
+                    paddingAngle={2}
+                    dataKey="value"
+                    label={({ name, percentage }) => `${name} ${percentage.toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: number, name: string) => [`${value} (${((value / calls.length) * 100).toFixed(1)}%)`, name]}
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
-          {/* Breakdown Table */}
-          <div className="space-y-4">
+          {/* Breakdown Table - Right side */}
+          <div className="space-y-3">
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-green-600">POSITIVE OUTCOMES</span>
-                <Badge variant="outline" className="text-green-600">{breakdown.positive.percentage.toFixed(0)}%</Badge>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium text-sm text-green-600 dark:text-green-400">POSITIVE OUTCOMES</span>
+                <Badge variant="outline" className="text-green-600 dark:text-green-400 border-green-600/30">{breakdown.positive.percentage.toFixed(0)}%</Badge>
               </div>
-              <div className="space-y-1 pl-4 text-sm">
+              <div className="space-y-0.5 pl-3 text-xs">
                 {breakdown.positive.items.map(item => (
                   <div key={item.label} className="flex justify-between text-muted-foreground">
                     <span>├── {item.label}</span>
@@ -194,11 +197,11 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-amber-600">TARGETING ISSUES</span>
-                <Badge variant="outline" className="text-amber-600">{breakdown.targeting.percentage.toFixed(0)}%</Badge>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium text-sm text-amber-600 dark:text-amber-400">TARGETING ISSUES</span>
+                <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-600/30">{breakdown.targeting.percentage.toFixed(0)}%</Badge>
               </div>
-              <div className="space-y-1 pl-4 text-sm">
+              <div className="space-y-0.5 pl-3 text-xs">
                 {breakdown.targeting.items.map(item => (
                   <div key={item.label} className="flex justify-between text-muted-foreground">
                     <span>├── {item.label}</span>
@@ -209,11 +212,11 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-red-600">MESSAGE/REP ISSUES</span>
-                <Badge variant="outline" className="text-red-600">{breakdown.message.percentage.toFixed(0)}%</Badge>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium text-sm text-red-600 dark:text-red-400">MESSAGE/REP ISSUES</span>
+                <Badge variant="outline" className="text-red-600 dark:text-red-400 border-red-600/30">{breakdown.message.percentage.toFixed(0)}%</Badge>
               </div>
-              <div className="space-y-1 pl-4 text-sm">
+              <div className="space-y-0.5 pl-3 text-xs">
                 {breakdown.message.items.map(item => (
                   <div key={item.label} className="flex justify-between text-muted-foreground">
                     <span>└── {item.label}</span>
@@ -226,8 +229,8 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
         </div>
 
         {/* Summary */}
-        <div className="mt-4 p-3 bg-muted/50 rounded-lg">
-          <p className="text-sm">💡 {summary}</p>
+        <div className="mt-3 p-2 bg-muted/50 rounded-lg">
+          <p className="text-xs">💡 {summary}</p>
         </div>
       </CardContent>
     </Card>
