@@ -3596,6 +3596,222 @@ export type Database = {
           },
         ]
       }
+      nocodb_replyio_campaigns: {
+        Row: {
+          bounces: number | null
+          campaign_created_date: string | null
+          campaign_id: string
+          campaign_name: string
+          created_at: string
+          deliveries: number | null
+          id: string
+          nocodb_created_at: string | null
+          nocodb_id: number
+          nocodb_updated_at: string | null
+          ooos: number | null
+          optouts: number | null
+          people_active: number | null
+          people_count: number | null
+          people_finished: number | null
+          people_paused: number | null
+          replies: number | null
+          status: string | null
+          step1_body: string | null
+          step1_subject: string | null
+          step2_body: string | null
+          step2_subject: string | null
+          step3_body: string | null
+          step3_subject: string | null
+          step4_body: string | null
+          step4_subject: string | null
+          step5_body: string | null
+          step5_subject: string | null
+          step6_body: string | null
+          step6_subject: string | null
+          step7_body: string | null
+          step7_subject: string | null
+          step8_body: string | null
+          step8_subject: string | null
+          step9_body: string | null
+          step9_subject: string | null
+          synced_at: string
+          updated_at: string
+        }
+        Insert: {
+          bounces?: number | null
+          campaign_created_date?: string | null
+          campaign_id: string
+          campaign_name: string
+          created_at?: string
+          deliveries?: number | null
+          id?: string
+          nocodb_created_at?: string | null
+          nocodb_id: number
+          nocodb_updated_at?: string | null
+          ooos?: number | null
+          optouts?: number | null
+          people_active?: number | null
+          people_count?: number | null
+          people_finished?: number | null
+          people_paused?: number | null
+          replies?: number | null
+          status?: string | null
+          step1_body?: string | null
+          step1_subject?: string | null
+          step2_body?: string | null
+          step2_subject?: string | null
+          step3_body?: string | null
+          step3_subject?: string | null
+          step4_body?: string | null
+          step4_subject?: string | null
+          step5_body?: string | null
+          step5_subject?: string | null
+          step6_body?: string | null
+          step6_subject?: string | null
+          step7_body?: string | null
+          step7_subject?: string | null
+          step8_body?: string | null
+          step8_subject?: string | null
+          step9_body?: string | null
+          step9_subject?: string | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Update: {
+          bounces?: number | null
+          campaign_created_date?: string | null
+          campaign_id?: string
+          campaign_name?: string
+          created_at?: string
+          deliveries?: number | null
+          id?: string
+          nocodb_created_at?: string | null
+          nocodb_id?: number
+          nocodb_updated_at?: string | null
+          ooos?: number | null
+          optouts?: number | null
+          people_active?: number | null
+          people_count?: number | null
+          people_finished?: number | null
+          people_paused?: number | null
+          replies?: number | null
+          status?: string | null
+          step1_body?: string | null
+          step1_subject?: string | null
+          step2_body?: string | null
+          step2_subject?: string | null
+          step3_body?: string | null
+          step3_subject?: string | null
+          step4_body?: string | null
+          step4_subject?: string | null
+          step5_body?: string | null
+          step5_subject?: string | null
+          step6_body?: string | null
+          step6_subject?: string | null
+          step7_body?: string | null
+          step7_subject?: string | null
+          step8_body?: string | null
+          step8_subject?: string | null
+          step9_body?: string | null
+          step9_subject?: string | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      nocodb_smartlead_campaigns: {
+        Row: {
+          campaign_created_date: string | null
+          campaign_id: string
+          campaign_name: string
+          created_at: string
+          id: string
+          leads_blocked: number | null
+          leads_completed: number | null
+          leads_in_progress: number | null
+          leads_interested: number | null
+          leads_not_started: number | null
+          leads_paused: number | null
+          leads_stopped: number | null
+          link_to_campaign: string | null
+          nocodb_created_at: string | null
+          nocodb_id: number
+          nocodb_updated_at: string | null
+          status: string | null
+          step1_body: string | null
+          step1_subject: string | null
+          step2_body: string | null
+          step2_subject: string | null
+          step3_body: string | null
+          step3_subject: string | null
+          step4_body: string | null
+          step4_subject: string | null
+          steps_count: number | null
+          synced_at: string
+          updated_at: string
+        }
+        Insert: {
+          campaign_created_date?: string | null
+          campaign_id: string
+          campaign_name: string
+          created_at?: string
+          id?: string
+          leads_blocked?: number | null
+          leads_completed?: number | null
+          leads_in_progress?: number | null
+          leads_interested?: number | null
+          leads_not_started?: number | null
+          leads_paused?: number | null
+          leads_stopped?: number | null
+          link_to_campaign?: string | null
+          nocodb_created_at?: string | null
+          nocodb_id: number
+          nocodb_updated_at?: string | null
+          status?: string | null
+          step1_body?: string | null
+          step1_subject?: string | null
+          step2_body?: string | null
+          step2_subject?: string | null
+          step3_body?: string | null
+          step3_subject?: string | null
+          step4_body?: string | null
+          step4_subject?: string | null
+          steps_count?: number | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Update: {
+          campaign_created_date?: string | null
+          campaign_id?: string
+          campaign_name?: string
+          created_at?: string
+          id?: string
+          leads_blocked?: number | null
+          leads_completed?: number | null
+          leads_in_progress?: number | null
+          leads_interested?: number | null
+          leads_not_started?: number | null
+          leads_paused?: number | null
+          leads_stopped?: number | null
+          link_to_campaign?: string | null
+          nocodb_created_at?: string | null
+          nocodb_id?: number
+          nocodb_updated_at?: string | null
+          status?: string | null
+          step1_body?: string | null
+          step1_subject?: string | null
+          step2_body?: string | null
+          step2_subject?: string | null
+          step3_body?: string | null
+          step3_subject?: string | null
+          step4_body?: string | null
+          step4_subject?: string | null
+          steps_count?: number | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       playbook_entries: {
         Row: {
           context: string | null

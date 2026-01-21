@@ -98,3 +98,6 @@ verify_jwt = false
 
 [functions.compute-variant-decay]
 verify_jwt = false
+
+[functions.sync-nocodb-campaigns]
+verify_jwt = false
