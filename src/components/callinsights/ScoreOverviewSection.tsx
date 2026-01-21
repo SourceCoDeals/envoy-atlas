@@ -79,32 +79,40 @@ export function ScoreOverviewSection({ data, config }: Props) {
         />
       </div>
 
-      {/* Quick Stats Row - Per spec */}
-      <div className="grid gap-4 md:grid-cols-4">
+      {/* Quick Stats Row - Key Counts */}
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Total Calls Analyzed</div>
+            <div className="text-sm text-muted-foreground"># Interested in Selling</div>
+            <div className="text-3xl font-bold text-primary">{data.interestBreakdown.yes}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground"># Meetings Booked</div>
+            <div className="text-3xl font-bold text-primary">
+              {intelRecords.filter(r => r.next_steps?.toLowerCase().includes('meeting') || r.next_steps?.toLowerCase().includes('appointment')).length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground"># Gatekeepers</div>
+            <div className="text-3xl font-bold text-accent-foreground">
+              {intelRecords.filter(r => r.call?.disposition?.toLowerCase().includes('gatekeeper')).length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground"># Not Interested</div>
+            <div className="text-3xl font-bold text-destructive">{data.interestBreakdown.no}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground">Total Calls</div>
             <div className="text-3xl font-bold">{intelRecords.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Avg Script Adherence</div>
-            <div className="text-3xl font-bold">{avgScriptAdherence().toFixed(1)}</div>
-            <div className="text-xs text-muted-foreground">out of 10</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Objection Resolution Rate</div>
-            <div className="text-3xl font-bold">{data.overallResolutionRate.toFixed(0)}%</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Positive Interest Rate</div>
-            <div className="text-3xl font-bold">{positiveInterestRate.toFixed(0)}%</div>
-            <div className="text-xs text-muted-foreground">(Yes + Maybe)</div>
           </CardContent>
         </Card>
       </div>
