@@ -1,27 +1,174 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { 
-  Brain, TrendingUp, MessageSquare, Target, AlertTriangle, Lightbulb
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { 
+  Brain, TrendingUp, MessageSquare, AlertTriangle, Lightbulb, RotateCcw, Users, Folder
 } from 'lucide-react';
 import { useExternalCallIntel } from '@/hooks/useExternalCallIntel';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { ScoreOverviewSection } from '@/components/callinsights/ScoreOverviewSection';
 import { ScoreJustificationBrowser } from '@/components/callinsights/ScoreJustificationBrowser';
-import { QuestionAdherenceSection } from '@/components/callinsights/QuestionAdherenceSection';
 import { ObjectionIntelligence } from '@/components/callinsights/ObjectionIntelligence';
 import { ExtractedIntelSummary } from '@/components/callinsights/ExtractedIntelSummary';
+import { DateRangeFilter, DateRangeOption, getDateRange } from '@/components/dashboard/DateRangeFilter';
+import { parseISO, isWithinInterval } from 'date-fns';
 
 export default function CallInsights() {
   const { data, isLoading, error } = useExternalCallIntel();
   const { config } = useCallingConfig();
   const [activeTab, setActiveTab] = useState('overview');
-  const [dateRange, setDateRange] = useState('30d');
+  const [dateRange, setDateRange] = useState<DateRangeOption>('last30');
+  const [selectedEngagement, setSelectedEngagement] = useState<string>('all');
+  const [selectedRep, setSelectedRep] = useState<string>('all');
+
+  // Get unique engagements and reps from data
+  const { engagements, reps } = useMemo(() => {
+    if (!data?.intelRecords) return { engagements: [], reps: [] };
+    
+    const engagementSet = new Set<string>();
+    const repSet = new Set<string>();
+    
+    data.intelRecords.forEach(record => {
+      if (record.engagement_id) engagementSet.add(record.engagement_id);
+      const rep = record.call?.caller_name;
+      if (rep && rep !== 'Unknown') repSet.add(rep);
+    });
+    
+    return {
+      engagements: Array.from(engagementSet),
+      reps: Array.from(repSet).sort(),
+    };
+  }, [data?.intelRecords]);
+
+  // Filter data based on selected filters
+  const filteredData = useMemo(() => {
+    if (!data) return data;
+    
+    const { startDate, endDate } = getDateRange(dateRange);
+    
+    const filteredRecords = data.intelRecords.filter(record => {
+      // Date filter
+      if (startDate && record.call?.started_at) {
+        const callDate = parseISO(record.call.started_at);
+        if (!isWithinInterval(callDate, { start: startDate, end: endDate })) {
+          return false;
+        }
+      }
+      
+      // Engagement filter
+      if (selectedEngagement !== 'all' && record.engagement_id !== selectedEngagement) {
+        return false;
+      }
+      
+      // Rep filter
+      if (selectedRep !== 'all') {
+        const rep = record.call?.caller_name || 'Unknown';
+        if (rep !== selectedRep) return false;
+      }
+      
+      return true;
+    });
+
+    // Recalculate aggregates for filtered data
+    const totalObjectionsFaced = filteredRecords.reduce((sum, r) => sum + (r.number_of_objections || 0), 0);
+    const totalObjectionsResolved = filteredRecords.reduce((sum, r) => sum + (r.objections_resolved_count || 0), 0);
+    const overallResolutionRate = totalObjectionsFaced > 0 
+      ? (totalObjectionsResolved / totalObjectionsFaced) * 100 
+      : 0;
+    const avgObjectionsPerCall = filteredRecords.length > 0 
+      ? totalObjectionsFaced / filteredRecords.length 
+      : 0;
+
+    const interestBreakdown = {
+      yes: filteredRecords.filter(r => r.interest_in_selling?.toLowerCase() === 'yes').length,
+      maybe: filteredRecords.filter(r => r.interest_in_selling?.toLowerCase() === 'maybe').length,
+      no: filteredRecords.filter(r => r.interest_in_selling?.toLowerCase() === 'no').length,
+      notAsked: filteredRecords.filter(r => !r.interest_in_selling).length,
+    };
+
+    // Timeline breakdown
+    const timelineMap = new Map<string, number>();
+    filteredRecords.forEach(r => {
+      if (r.timeline_to_sell) {
+        timelineMap.set(r.timeline_to_sell, (timelineMap.get(r.timeline_to_sell) || 0) + 1);
+      }
+    });
+    const timelineBreakdown = Array.from(timelineMap.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Buyer type breakdown
+    const buyerTypeMap = new Map<string, number>();
+    filteredRecords.forEach(r => {
+      if (r.buyer_type_preference) {
+        buyerTypeMap.set(r.buyer_type_preference, (buyerTypeMap.get(r.buyer_type_preference) || 0) + 1);
+      }
+    });
+    const buyerTypeBreakdown = Array.from(buyerTypeMap.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Personal insights list
+    const personalInsightsList = filteredRecords
+      .filter(r => r.personal_insights)
+      .map(r => ({
+        insight: r.personal_insights!,
+        score: r.personal_insights_score,
+        callId: r.call_id,
+      }));
+
+    // Pain points aggregation
+    const painPointMap = new Map<string, number>();
+    filteredRecords.forEach(r => {
+      (r.target_pain_points || []).forEach(pp => {
+        painPointMap.set(pp, (painPointMap.get(pp) || 0) + 1);
+      });
+    });
+    const painPointsList = Array.from(painPointMap.entries())
+      .map(([painPoint, count]) => ({ painPoint, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Questions data
+    const questionsData = filteredRecords.map(r => r.questions_covered_count || 0);
+    const avgQuestionsCovered = questionsData.length > 0 
+      ? questionsData.reduce((a, b) => a + b, 0) / questionsData.length 
+      : 0;
+
+    return {
+      ...data,
+      intelRecords: filteredRecords,
+      totalObjectionsFaced,
+      totalObjectionsResolved,
+      overallResolutionRate,
+      avgObjectionsPerCall,
+      interestBreakdown,
+      timelineBreakdown,
+      buyerTypeBreakdown,
+      personalInsightsList,
+      painPointsList,
+      avgQuestionsCovered,
+    };
+  }, [data, dateRange, selectedEngagement, selectedRep]);
+
+  const resetFilters = () => {
+    setDateRange('last30');
+    setSelectedEngagement('all');
+    setSelectedRep('all');
+  };
+
+  const hasActiveFilters = dateRange !== 'last30' || selectedEngagement !== 'all' || selectedRep !== 'all';
 
   if (isLoading) {
     return (
@@ -55,7 +202,8 @@ export default function CallInsights() {
     );
   }
 
-  const totalCalls = data?.intelRecords.length || 0;
+  const totalCalls = filteredData?.intelRecords.length || 0;
+  const unfilteredTotal = data?.intelRecords.length || 0;
 
   return (
     <DashboardLayout>
@@ -67,49 +215,95 @@ export default function CallInsights() {
             <div>
               <h1 className="text-2xl font-bold">Call Insights</h1>
               <p className="text-muted-foreground">
-                AI-Extracted Intelligence from {totalCalls} Calls
+                AI-Extracted Intelligence from Calls
               </p>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
-            <Select value={dateRange} onValueChange={setDateRange}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Date range" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7d">Last 7 days</SelectItem>
-                <SelectItem value="14d">Last 14 days</SelectItem>
-                <SelectItem value="30d">Last 30 days</SelectItem>
-                <SelectItem value="90d">Last 90 days</SelectItem>
-                <SelectItem value="all">All time</SelectItem>
-              </SelectContent>
-            </Select>
-            
-            <Badge variant="secondary" className="text-sm">
-              {totalCalls} calls analyzed
-            </Badge>
-          </div>
+          <Badge variant="secondary" className="text-sm">
+            {totalCalls} {totalCalls !== unfilteredTotal && `of ${unfilteredTotal}`} calls
+          </Badge>
         </div>
+
+        {/* Global Filter Bar */}
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Engagement Filter */}
+              <div className="flex items-center gap-2">
+                <Folder className="h-4 w-4 text-muted-foreground" />
+                <Select value={selectedEngagement} onValueChange={setSelectedEngagement}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="All Engagements" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Engagements</SelectItem>
+                    {engagements.map((id) => (
+                      <SelectItem key={id} value={id}>
+                        {id.slice(0, 8)}...
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Team Member Filter */}
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                <Select value={selectedRep} onValueChange={setSelectedRep}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="All Reps" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Reps</SelectItem>
+                    {reps.map((rep) => (
+                      <SelectItem key={rep} value={rep}>
+                        {rep}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Date Range Filter */}
+              <DateRangeFilter value={dateRange} onChange={setDateRange} />
+
+              {/* Reset Button */}
+              {hasActiveFilters && (
+                <Button variant="outline" size="sm" onClick={resetFilters}>
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Reset
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* No Data State */}
         {totalCalls === 0 && (
           <Card>
             <CardContent className="py-12 text-center">
               <Brain className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No Call Intelligence Data Yet</h3>
+              <h3 className="text-lg font-semibold mb-2">No Call Intelligence Data</h3>
               <p className="text-muted-foreground max-w-md mx-auto">
-                Call intelligence data will appear here once calls are processed through the AI scoring pipeline.
-                This includes score breakdowns, objection handling, and extracted prospect insights.
+                {unfilteredTotal > 0 
+                  ? 'No calls match the current filters. Try adjusting your filter criteria.'
+                  : 'Call intelligence data will appear here once calls are processed through the AI scoring pipeline.'}
               </p>
+              {hasActiveFilters && (
+                <Button variant="outline" className="mt-4" onClick={resetFilters}>
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Reset Filters
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}
 
-        {/* Main Content */}
+        {/* Main Content - 4 Tabs per spec */}
         {totalCalls > 0 && (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-5 mb-6">
+            <TabsList className="grid w-full grid-cols-4 mb-6">
               <TabsTrigger value="overview" className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4" />
                 Score Overview
@@ -117,10 +311,6 @@ export default function CallInsights() {
               <TabsTrigger value="justifications" className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
                 Justifications
-              </TabsTrigger>
-              <TabsTrigger value="questions" className="flex items-center gap-2">
-                <Target className="h-4 w-4" />
-                Question Adherence
               </TabsTrigger>
               <TabsTrigger value="objections" className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4" />
@@ -133,23 +323,19 @@ export default function CallInsights() {
             </TabsList>
 
             <TabsContent value="overview">
-              <ScoreOverviewSection data={data} config={config} />
+              <ScoreOverviewSection data={filteredData} config={config} />
             </TabsContent>
 
             <TabsContent value="justifications">
-              <ScoreJustificationBrowser data={data} config={config} />
-            </TabsContent>
-
-            <TabsContent value="questions">
-              <QuestionAdherenceSection data={data} config={config} />
+              <ScoreJustificationBrowser data={filteredData} config={config} />
             </TabsContent>
 
             <TabsContent value="objections">
-              <ObjectionIntelligence data={data} config={config} />
+              <ObjectionIntelligence data={filteredData} config={config} />
             </TabsContent>
 
             <TabsContent value="intel">
-              <ExtractedIntelSummary data={data} config={config} />
+              <ExtractedIntelSummary data={filteredData} config={config} />
             </TabsContent>
           </Tabs>
         )}

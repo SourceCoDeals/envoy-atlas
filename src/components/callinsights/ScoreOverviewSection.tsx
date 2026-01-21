@@ -1,5 +1,5 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Star, ThumbsUp, FileText, HelpCircle } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Star, ThumbsUp, FileText, ArrowRight } from 'lucide-react';
 import { CallInsightsData } from '@/hooks/useExternalCallIntel';
 import { CallingMetricsConfig } from '@/lib/callingConfig';
 import { ScoreCard } from './ScoreCard';
@@ -16,11 +16,11 @@ export function ScoreOverviewSection({ data, config }: Props) {
 
   const { scoreOverview, intelRecords } = data;
 
-  // Get key scores for hero cards
+  // Get key scores for hero cards (per spec: Overall, Seller Interest, Script Adherence, Next Steps)
   const overallScore = scoreOverview.find(s => s.key === 'overall_quality_score');
   const sellerInterestScore = scoreOverview.find(s => s.key === 'seller_interest_score');
   const scriptScore = scoreOverview.find(s => s.key === 'script_adherence_score');
-  const questionScore = scoreOverview.find(s => s.key === 'question_adherence_score');
+  const nextStepsScore = scoreOverview.find(s => s.key === 'next_steps_clarity_score');
 
   // Calculate trends as numeric values
   const getTrend = (item: typeof overallScore) => {
@@ -28,9 +28,22 @@ export function ScoreOverviewSection({ data, config }: Props) {
     return item.thisWeekAvg - item.lastWeekAvg;
   };
 
+  // Calculate positive interest rate (yes + maybe) / total
+  const positiveInterestRate = intelRecords.length > 0
+    ? ((data.interestBreakdown.yes + data.interestBreakdown.maybe) / intelRecords.length) * 100
+    : 0;
+
+  // Calculate avg script adherence from all records
+  const avgScriptAdherence = () => {
+    const scores = intelRecords
+      .map(r => r.script_adherence_score)
+      .filter((s): s is number => s !== null);
+    return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  };
+
   return (
     <div className="space-y-6">
-      {/* Key Score Cards */}
+      {/* Key Score Cards - Updated per spec */}
       <div className="grid gap-4 md:grid-cols-4">
         <ScoreCard
           title="Overall Quality"
@@ -45,7 +58,7 @@ export function ScoreOverviewSection({ data, config }: Props) {
           score={sellerInterestScore?.thisWeekAvg ?? null}
           trend={getTrend(sellerInterestScore)}
           icon={<ThumbsUp className="w-5 h-5" />}
-          description="Prospect engagement level"
+          description="Lead qualification"
           thresholds={config.sellerInterestThresholds}
         />
         <ScoreCard
@@ -53,20 +66,20 @@ export function ScoreOverviewSection({ data, config }: Props) {
           score={scriptScore?.thisWeekAvg ?? null}
           trend={getTrend(scriptScore)}
           icon={<FileText className="w-5 h-5" />}
-          description="Following call framework"
+          description="Training compliance"
           thresholds={config.scriptAdherenceThresholds}
         />
         <ScoreCard
-          title="Question Coverage"
-          score={questionScore?.thisWeekAvg ?? null}
-          trend={getTrend(questionScore)}
-          icon={<HelpCircle className="w-5 h-5" />}
-          description="Discovery effectiveness"
-          thresholds={config.questionAdherenceThresholds}
+          title="Next Steps Clarity"
+          score={nextStepsScore?.thisWeekAvg ?? null}
+          trend={getTrend(nextStepsScore)}
+          icon={<ArrowRight className="w-5 h-5" />}
+          description="Pipeline progression"
+          thresholds={config.nextStepsClarityThresholds}
         />
       </div>
 
-      {/* Quick Stats Row */}
+      {/* Quick Stats Row - Per spec */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
@@ -76,9 +89,9 @@ export function ScoreOverviewSection({ data, config }: Props) {
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Avg Questions Covered</div>
-            <div className="text-3xl font-bold">{data.avgQuestionsCovered.toFixed(1)}</div>
-            <div className="text-xs text-muted-foreground">out of {config.questionCoverageTotal}</div>
+            <div className="text-sm text-muted-foreground">Avg Script Adherence</div>
+            <div className="text-3xl font-bold">{avgScriptAdherence().toFixed(1)}</div>
+            <div className="text-xs text-muted-foreground">out of 10</div>
           </CardContent>
         </Card>
         <Card>
@@ -90,11 +103,8 @@ export function ScoreOverviewSection({ data, config }: Props) {
         <Card>
           <CardContent className="pt-6">
             <div className="text-sm text-muted-foreground">Positive Interest Rate</div>
-            <div className="text-3xl font-bold">
-              {intelRecords.length > 0 
-                ? ((data.interestBreakdown.yes / intelRecords.length) * 100).toFixed(0)
-                : 0}%
-            </div>
+            <div className="text-3xl font-bold">{positiveInterestRate.toFixed(0)}%</div>
+            <div className="text-xs text-muted-foreground">(Yes + Maybe)</div>
           </CardContent>
         </Card>
       </div>
