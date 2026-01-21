@@ -1,5 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card';
-import { Star, ThumbsUp, FileText, ArrowRight } from 'lucide-react';
+import { Star, ThumbsUp, FileText, Shield } from 'lucide-react';
 import { CallInsightsData } from '@/hooks/useExternalCallIntel';
 import { CallingMetricsConfig } from '@/lib/callingConfig';
 import { ScoreCard } from './ScoreCard';
@@ -20,7 +20,7 @@ export function ScoreOverviewSection({ data, config }: Props) {
   const overallScore = scoreOverview.find(s => s.key === 'overall_quality_score');
   const sellerInterestScore = scoreOverview.find(s => s.key === 'seller_interest_score');
   const scriptScore = scoreOverview.find(s => s.key === 'script_adherence_score');
-  const nextStepsScore = scoreOverview.find(s => s.key === 'next_steps_clarity_score');
+  const objectionScore = scoreOverview.find(s => s.key === 'objection_handling_score');
 
   // Calculate trends as numeric values
   const getTrend = (item: typeof overallScore) => {
@@ -70,12 +70,12 @@ export function ScoreOverviewSection({ data, config }: Props) {
           thresholds={config.scriptAdherenceThresholds}
         />
         <ScoreCard
-          title="Next Steps Clarity"
-          score={nextStepsScore?.thisWeekAvg ?? null}
-          trend={getTrend(nextStepsScore)}
-          icon={<ArrowRight className="w-5 h-5" />}
-          description="Pipeline progression"
-          thresholds={config.nextStepsClarityThresholds}
+          title="Objection Handling"
+          score={objectionScore?.thisWeekAvg ?? null}
+          trend={getTrend(objectionScore)}
+          icon={<Shield className="w-5 h-5" />}
+          description="Response to concerns"
+          thresholds={config.objectionHandlingThresholds}
         />
       </div>
 
