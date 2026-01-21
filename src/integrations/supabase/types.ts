@@ -4395,6 +4395,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      increment_campaign_metric: {
+        Args: { p_campaign_id: string; p_metric_name: string; p_value?: number }
+        Returns: undefined
+      }
+      increment_variant_metric: {
+        Args: { p_metric_name: string; p_value?: number; p_variant_id: string }
+        Returns: undefined
+      }
       is_client_admin: {
         Args: { _client_id: string; _user_id: string }
         Returns: boolean
@@ -4416,6 +4424,29 @@ export type Database = {
         Returns: boolean
       }
       join_default_client: { Args: never; Returns: string }
+      upsert_daily_metric: {
+        Args: {
+          p_campaign_id: string
+          p_date: string
+          p_engagement_id: string
+          p_metric_name: string
+          p_value?: number
+          p_variant_id?: string
+        }
+        Returns: undefined
+      }
+      upsert_hourly_metric: {
+        Args: {
+          p_campaign_id: string
+          p_day_of_week: number
+          p_engagement_id: string
+          p_hour_of_day: number
+          p_metric_date: string
+          p_metric_name: string
+          p_value?: number
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "admin" | "analyst" | "viewer" | "manager" | "rep"
