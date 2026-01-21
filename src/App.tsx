@@ -34,7 +34,7 @@ import TopCallsWeek from "./pages/TopCallsWeek";
 import DataInsights from "./pages/DataInsights";
 import CallLibrary from "./pages/CallLibrary";
 import CallInsights from "./pages/CallInsights";
-import CallingInformation from "./pages/CallingInformation";
+
 import AISummary from "./pages/AISummary";
 import EngagementReport from "./pages/EngagementReport";
 import { Navigate } from "react-router-dom";
@@ -107,7 +107,7 @@ const App = () => (
                   <Route path="/calling/insights" element={<DataInsights />} />
                   <Route path="/calling/call-insights" element={<CallInsights />} />
                   <Route path="/calling/library" element={<CallLibrary />} />
-                  <Route path="/calling/information" element={<CallingInformation />} />
+                  
                   <Route path="/calling/ai-summary" element={<AISummary />} />
                   <Route path="/calling/chatbot" element={<Navigate to="/calling" replace />} />
                   <Route path="/calling/engagements" element={<Navigate to="/engagements" replace />} />
