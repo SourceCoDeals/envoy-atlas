@@ -13,6 +13,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
+import { ObjectionCategoriesChart } from './ObjectionCategoriesChart';
+import { ObjectionsList } from './ObjectionsList';
 
 interface Props {
   data: CallInsightsData | undefined;
@@ -51,55 +53,46 @@ export function ObjectionIntelligence({ data, config }: Props) {
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center gap-2">
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground flex items-center gap-2">
               <AlertTriangle className="h-4 w-4" />
-              Total Objections Faced
-            </CardDescription>
-            <CardTitle className="text-3xl">{totalObjectionsFaced}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm text-muted-foreground">
-              Sum across all analyzed calls
+              Total Objections
             </div>
+            <div className="text-3xl font-bold">{totalObjectionsFaced}</div>
+            <p className="text-xs text-muted-foreground">Across all calls</p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center gap-2">
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground flex items-center gap-2">
               <Shield className="h-4 w-4" />
-              Total Resolved
-            </CardDescription>
-            <CardTitle className="text-3xl text-green-600">{totalObjectionsResolved}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm text-muted-foreground">
-              Successfully handled objections
+              Resolved
             </div>
+            <div className="text-3xl font-bold text-green-600">{totalObjectionsResolved}</div>
+            <p className="text-xs text-muted-foreground">Successfully addressed</p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Overall Resolution Rate</CardDescription>
-            <CardTitle className={cn('text-3xl', getResolutionColor(overallResolutionRate))}>
-              {overallResolutionRate.toFixed(0)}%
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground">Resolution Rate</div>
+            <div className={cn('text-3xl font-bold', getResolutionColor(overallResolutionRate))}>
+              {overallResolutionRate.toFixed(1)}%
+            </div>
             <Progress 
               value={overallResolutionRate} 
-              className="h-2"
+              className="h-2 mt-2"
             />
-            <div className="text-sm text-muted-foreground mt-2">
-              Target: {config.objectionResolutionGoodThreshold}%+
-            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Benchmark: ≥{config.objectionResolutionGoodThreshold}%
+            </p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Avg Objections Per Call</CardDescription>
-            <CardTitle className="text-3xl">{avgObjectionsPerCall.toFixed(1)}</CardTitle>
-          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground">Avg Per Call</div>
+            <div className="text-3xl font-bold">{avgObjectionsPerCall.toFixed(1)}</div>
+            <p className="text-xs text-muted-foreground">Objections encountered</p>
+          </CardContent>
         </Card>
       </div>
 
@@ -121,7 +114,7 @@ export function ObjectionIntelligence({ data, config }: Props) {
                 <span className="text-sm font-medium">Faced</span>
                 <span className="text-sm text-muted-foreground">{totalObjectionsFaced}</span>
               </div>
-              <Progress value={100} className="h-4 bg-red-100" />
+              <Progress value={100} className="h-4" />
             </div>
             <div className="flex-1">
               <div className="flex justify-between mb-2">
@@ -136,6 +129,9 @@ export function ObjectionIntelligence({ data, config }: Props) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Objection Categories */}
+      <ObjectionCategoriesChart data={data} />
 
       {/* By Rep Breakdown */}
       <Card>
@@ -187,6 +183,9 @@ export function ObjectionIntelligence({ data, config }: Props) {
           )}
         </CardContent>
       </Card>
+
+      {/* Objections List */}
+      <ObjectionsList data={data} />
     </div>
   );
 }
