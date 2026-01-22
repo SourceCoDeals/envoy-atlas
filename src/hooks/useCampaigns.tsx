@@ -5,18 +5,19 @@ import { calculateRate } from '@/lib/metrics';
 
 // Metrics status to distinguish "zero" vs "missing/broken source"
 export type MetricsStatus = 'verified' | 'partial' | 'missing' | 'broken';
-export type MetricsSource = 'cumulative' | 'daily' | 'none';
+export type MetricsSource = 'cumulative' | 'daily' | 'nocodb' | 'none';
 
 export interface CampaignWithMetrics {
   id: string;
   name: string;
   status: string;
   campaign_type: string;
-  platform: string; // Alias for campaign_type for backward compatibility
+  platform: string; // 'smartlead' or 'replyio'
   data_source_id: string | null;
   created_at: string;
   updated_at: string | null;
   total_sent: number;
+  total_delivered: number;
   total_replied: number;
   total_bounced: number;
   total_leads: number;
@@ -24,10 +25,17 @@ export interface CampaignWithMetrics {
   reply_rate: number;
   bounce_rate: number;
   positive_rate: number;
+  delivery_rate: number;
   engagement_id: string | null;
   engagement_name?: string | null;
   metricsStatus: MetricsStatus;
   metricsSource: MetricsSource;
+  // NocoDB specific fields
+  nocodbId?: string;
+  stepsCount?: number;
+  leadsActive?: number;
+  leadsCompleted?: number;
+  optouts?: number;
 }
 
 export function useCampaigns() {
@@ -66,134 +74,216 @@ export function useCampaigns() {
         engagementMap.set(e.id, e.name);
       });
 
-      if (engagementIds.length === 0) {
-        setCampaigns([]);
-        setLoading(false);
-        return;
-      }
+      // Fetch campaigns from internal table AND NocoDB tables in parallel
+      const [internalRes, smartleadRes, replyioRes] = await Promise.all([
+        engagementIds.length > 0
+          ? supabase.from('campaigns').select('*').in('engagement_id', engagementIds)
+          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from('nocodb_smartlead_campaigns')
+          .select('*')
+          .order('total_emails_sent', { ascending: false }),
+        supabase
+          .from('nocodb_replyio_campaigns')
+          .select('*')
+          .order('deliveries', { ascending: false }),
+      ]);
 
-      // Fetch campaigns for these engagements
-      const { data: campaignsData, error: campError } = await supabase
-        .from('campaigns')
-        .select('*')
-        .in('engagement_id', engagementIds);
+      if (internalRes.error) throw internalRes.error;
 
-      if (campError) throw campError;
+      const internalCampaigns = internalRes.data || [];
+      const smartleadData = smartleadRes.data || [];
+      const replyioData = replyioRes.data || [];
 
-      const allCampaigns = campaignsData || [];
+      // Build a map of internal campaign IDs for matching
+      const internalCampaignMap = new Map<string, any>();
+      internalCampaigns.forEach(c => {
+        // Try to match by external_id or name
+        if (c.external_id) {
+          internalCampaignMap.set(c.external_id, c);
+        }
+        internalCampaignMap.set(c.name?.toLowerCase(), c);
+      });
 
-      if (allCampaigns.length === 0) {
-        setCampaigns([]);
-        setLoading(false);
-        return;
-      }
-
-      const campaignIds = allCampaigns.map(c => c.id);
-
-      // Fetch daily metrics aggregated per campaign - including positive_replies
-      const { data: dailyData } = await supabase
-        .from('daily_metrics')
-        .select('campaign_id, emails_sent, emails_opened, emails_clicked, emails_replied, emails_bounced, positive_replies')
-        .in('campaign_id', campaignIds);
-
-      // Build daily aggregation map
-      const dailyAggregateMap = new Map<string, {
-        total_sent: number;
-        total_opened: number;
-        total_clicked: number;
-        total_replied: number;
-        total_bounced: number;
-        positive_replies: number;
+      // Fetch daily metrics for internal campaigns if any
+      const campaignIds = internalCampaigns.map(c => c.id);
+      let dailyAggregateMap = new Map<string, {
+        total_sent: number; total_replied: number; total_bounced: number; positive_replies: number;
       }>();
 
-      (dailyData || []).forEach(row => {
-        const existing = dailyAggregateMap.get(row.campaign_id);
-        if (existing) {
-          existing.total_sent += row.emails_sent || 0;
-          existing.total_opened += row.emails_opened || 0;
-          existing.total_clicked += row.emails_clicked || 0;
-          existing.total_replied += row.emails_replied || 0;
-          existing.total_bounced += row.emails_bounced || 0;
-          existing.positive_replies += row.positive_replies || 0;
-        } else {
-          dailyAggregateMap.set(row.campaign_id, {
-            total_sent: row.emails_sent || 0,
-            total_opened: row.emails_opened || 0,
-            total_clicked: row.emails_clicked || 0,
-            total_replied: row.emails_replied || 0,
-            total_bounced: row.emails_bounced || 0,
-            positive_replies: row.positive_replies || 0,
+      if (campaignIds.length > 0) {
+        const { data: dailyData } = await supabase
+          .from('daily_metrics')
+          .select('campaign_id, emails_sent, emails_replied, emails_bounced, positive_replies')
+          .in('campaign_id', campaignIds);
+
+        (dailyData || []).forEach(row => {
+          const existing = dailyAggregateMap.get(row.campaign_id);
+          if (existing) {
+            existing.total_sent += row.emails_sent || 0;
+            existing.total_replied += row.emails_replied || 0;
+            existing.total_bounced += row.emails_bounced || 0;
+            existing.positive_replies += row.positive_replies || 0;
+          } else {
+            dailyAggregateMap.set(row.campaign_id, {
+              total_sent: row.emails_sent || 0,
+              total_replied: row.emails_replied || 0,
+              total_bounced: row.emails_bounced || 0,
+              positive_replies: row.positive_replies || 0,
+            });
+          }
+        });
+      }
+
+      const allCampaigns: CampaignWithMetrics[] = [];
+
+      // Process SmartLead campaigns from NocoDB
+      smartleadData.forEach(row => {
+        const sent = row.total_emails_sent || 0;
+        const replied = row.total_replies || 0;
+        const bounced = 0; // SmartLead doesn't have bounce data in NocoDB yet
+        const delivered = sent - bounced;
+        const positive = row.leads_interested || 0;
+
+        allCampaigns.push({
+          id: row.id,
+          name: row.campaign_name,
+          status: row.status || 'unknown',
+          campaign_type: 'smartlead',
+          platform: 'smartlead',
+          data_source_id: null,
+          created_at: row.campaign_created_date || row.created_at,
+          updated_at: row.updated_at,
+          total_sent: sent,
+          total_delivered: delivered,
+          total_replied: replied,
+          total_bounced: bounced,
+          total_leads: row.total_leads || 0,
+          positive_replies: positive,
+          reply_rate: calculateRate(replied, delivered > 0 ? delivered : sent),
+          bounce_rate: calculateRate(bounced, sent),
+          positive_rate: calculateRate(positive, delivered > 0 ? delivered : sent),
+          delivery_rate: calculateRate(delivered, sent),
+          engagement_id: null, // Could be linked later
+          metricsStatus: sent > 0 ? 'verified' : 'missing',
+          metricsSource: 'nocodb',
+          nocodbId: row.campaign_id,
+          stepsCount: row.steps_count || 0,
+          leadsActive: row.leads_in_progress || 0,
+          leadsCompleted: row.leads_completed || 0,
+          optouts: 0,
+        });
+      });
+
+      // Process Reply.io campaigns from NocoDB
+      replyioData.forEach(row => {
+        const delivered = row.deliveries || 0;
+        const bounced = row.bounces || 0;
+        const sent = delivered + bounced;
+        const replied = row.replies || 0;
+        const positive = 0; // Reply.io doesn't have positive flag
+
+        allCampaigns.push({
+          id: row.id,
+          name: row.campaign_name,
+          status: row.status || 'unknown',
+          campaign_type: 'replyio',
+          platform: 'replyio',
+          data_source_id: null,
+          created_at: row.campaign_created_date || row.created_at,
+          updated_at: row.updated_at,
+          total_sent: sent,
+          total_delivered: delivered,
+          total_replied: replied,
+          total_bounced: bounced,
+          total_leads: row.people_count || 0,
+          positive_replies: positive,
+          reply_rate: calculateRate(replied, delivered),
+          bounce_rate: calculateRate(bounced, sent),
+          positive_rate: calculateRate(positive, delivered),
+          delivery_rate: calculateRate(delivered, sent),
+          engagement_id: null,
+          metricsStatus: delivered > 0 ? 'verified' : 'missing',
+          metricsSource: 'nocodb',
+          nocodbId: row.campaign_id,
+          stepsCount: countSteps(row),
+          leadsActive: row.people_active || 0,
+          leadsCompleted: row.people_finished || 0,
+          optouts: row.optouts || 0,
+        });
+      });
+
+      // Also add internal campaigns that may not be in NocoDB
+      internalCampaigns.forEach(campaign => {
+        // Check if this campaign is already in the list (by external_id match)
+        const alreadyExists = allCampaigns.some(
+          c => c.nocodbId === campaign.external_id || 
+               c.name.toLowerCase() === campaign.name?.toLowerCase()
+        );
+
+        if (!alreadyExists) {
+          const dailyAggregate = dailyAggregateMap.get(campaign.id);
+          const hasCumulativeData = (campaign.total_sent || 0) > 0;
+          const hasDailyData = dailyAggregate && dailyAggregate.total_sent > 0;
+
+          let total_sent = 0;
+          let total_replied = 0;
+          let total_bounced = 0;
+          let positive_replies = 0;
+          let metricsStatus: MetricsStatus;
+          let metricsSource: MetricsSource;
+
+          if (hasCumulativeData) {
+            total_sent = campaign.total_sent || 0;
+            total_replied = campaign.total_replied || 0;
+            total_bounced = campaign.total_bounced || 0;
+            positive_replies = (campaign as any).positive_replies || 0;
+            metricsStatus = 'verified';
+            metricsSource = 'cumulative';
+          } else if (hasDailyData) {
+            total_sent = dailyAggregate!.total_sent;
+            total_replied = dailyAggregate!.total_replied;
+            total_bounced = dailyAggregate!.total_bounced;
+            positive_replies = dailyAggregate!.positive_replies;
+            metricsStatus = 'partial';
+            metricsSource = 'daily';
+          } else {
+            metricsStatus = 'missing';
+            metricsSource = 'none';
+          }
+
+          const delivered = total_sent - total_bounced;
+
+          allCampaigns.push({
+            id: campaign.id,
+            name: campaign.name,
+            status: campaign.status || 'unknown',
+            campaign_type: campaign.campaign_type,
+            platform: campaign.campaign_type,
+            data_source_id: campaign.data_source_id,
+            created_at: campaign.created_at || new Date().toISOString(),
+            updated_at: campaign.updated_at,
+            total_sent,
+            total_delivered: delivered,
+            total_replied,
+            total_bounced,
+            positive_replies,
+            total_leads: 0,
+            reply_rate: calculateRate(total_replied, delivered),
+            bounce_rate: calculateRate(total_bounced, total_sent),
+            positive_rate: calculateRate(positive_replies, delivered),
+            delivery_rate: calculateRate(delivered, total_sent),
+            engagement_id: campaign.engagement_id || null,
+            engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
+            metricsStatus,
+            metricsSource,
           });
         }
       });
 
-      // Build campaigns with metrics
-      const campaignsWithMetrics: CampaignWithMetrics[] = allCampaigns.map(campaign => {
-        const dailyAggregate = dailyAggregateMap.get(campaign.id);
-        
-        // Use campaign cumulative fields first, then fall back to daily aggregate
-        const hasCumulativeData = (campaign.total_sent || 0) > 0;
-        const hasDailyData = dailyAggregate && dailyAggregate.total_sent > 0;
-
-        let total_sent = 0;
-        let total_replied = 0;
-        let total_bounced = 0;
-        let positive_replies = 0;
-        let metricsStatus: MetricsStatus;
-        let metricsSource: MetricsSource;
-
-        if (hasCumulativeData) {
-          total_sent = campaign.total_sent || 0;
-          total_replied = campaign.total_replied || 0;
-          total_bounced = campaign.total_bounced || 0;
-          positive_replies = (campaign as any).positive_replies || 0;
-          metricsStatus = 'verified';
-          metricsSource = 'cumulative';
-        } else if (hasDailyData) {
-          total_sent = dailyAggregate!.total_sent;
-          total_replied = dailyAggregate!.total_replied;
-          total_bounced = dailyAggregate!.total_bounced;
-          positive_replies = dailyAggregate!.positive_replies;
-          metricsStatus = 'partial';
-          metricsSource = 'daily';
-        } else {
-          metricsStatus = 'missing';
-          metricsSource = 'none';
-        }
-
-        // Use delivered as denominator for engagement rates
-        const delivered = total_sent - total_bounced;
-        const reply_rate = calculateRate(total_replied, delivered);
-        const bounce_rate = calculateRate(total_bounced, total_sent); // Bounce rate uses sent
-        const positive_rate = calculateRate(positive_replies, delivered);
-
-        return {
-          id: campaign.id,
-          name: campaign.name,
-          status: campaign.status || 'unknown',
-          campaign_type: campaign.campaign_type,
-          platform: campaign.campaign_type, // Backward compatibility alias
-          data_source_id: campaign.data_source_id,
-          created_at: campaign.created_at || new Date().toISOString(),
-          updated_at: campaign.updated_at,
-          total_sent,
-          total_replied,
-          total_bounced,
-          positive_replies,
-          total_leads: 0,
-          reply_rate,
-          bounce_rate,
-          positive_rate,
-          engagement_id: campaign.engagement_id || null,
-          engagement_name: campaign.engagement_id ? engagementMap.get(campaign.engagement_id) || null : null,
-          metricsStatus,
-          metricsSource,
-        };
-      });
-
       // Sort: active statuses first, then by total sent descending
       const activeStatuses = ['active', 'started', 'running'];
-      campaignsWithMetrics.sort((a, b) => {
+      allCampaigns.sort((a, b) => {
         const aIsActive = activeStatuses.includes(a.status.toLowerCase());
         const bIsActive = activeStatuses.includes(b.status.toLowerCase());
         
@@ -203,7 +293,7 @@ export function useCampaigns() {
         return b.total_sent - a.total_sent;
       });
 
-      setCampaigns(campaignsWithMetrics);
+      setCampaigns(allCampaigns);
     } catch (err: unknown) {
       console.error('Error fetching campaigns:', err);
       let errorMessage = 'Failed to fetch campaigns';
@@ -220,4 +310,15 @@ export function useCampaigns() {
   };
 
   return { campaigns, loading, error, refetch: fetchCampaigns };
+}
+
+// Helper to count non-empty steps
+function countSteps(row: any): number {
+  let count = 0;
+  for (let i = 1; i <= 9; i++) {
+    if (row[`step${i}_subject`] || row[`step${i}_body`]) {
+      count++;
+    }
+  }
+  return count;
 }

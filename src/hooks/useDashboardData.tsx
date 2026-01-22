@@ -34,6 +34,7 @@ interface TopCampaign {
   replyRate: number;
   positiveRate: number;
   sent: number;
+  platform?: 'smartlead' | 'replyio';
 }
 
 interface TimeData {
@@ -83,186 +84,204 @@ export function useDashboardData(dateRange?: DateRange) {
 
       const engagementIds = (engagements || []).map(e => e.id);
 
-      if (engagementIds.length === 0) {
+      // Fetch NocoDB campaigns as primary data source (global - not workspace filtered yet)
+      const [smartleadRes, replyioRes] = await Promise.all([
+        supabase
+          .from('nocodb_smartlead_campaigns')
+          .select('campaign_id, campaign_name, status, total_emails_sent, total_replies, leads_interested')
+          .order('total_emails_sent', { ascending: false }),
+        supabase
+          .from('nocodb_replyio_campaigns')
+          .select('campaign_id, campaign_name, status, deliveries, bounces, replies')
+          .order('deliveries', { ascending: false }),
+      ]);
+
+      const smartleadData = smartleadRes.data || [];
+      const replyioData = replyioRes.data || [];
+
+      // Calculate NocoDB totals
+      const nocodbTotals = {
+        sent: 0,
+        delivered: 0,
+        bounced: 0,
+        replied: 0,
+        positive: 0,
+      };
+
+      // SmartLead totals
+      smartleadData.forEach(row => {
+        const sent = row.total_emails_sent || 0;
+        nocodbTotals.sent += sent;
+        nocodbTotals.delivered += sent; // No bounce data in SmartLead
+        nocodbTotals.replied += row.total_replies || 0;
+        nocodbTotals.positive += row.leads_interested || 0;
+      });
+
+      // Reply.io totals
+      replyioData.forEach(row => {
+        const delivered = row.deliveries || 0;
+        const bounced = row.bounces || 0;
+        nocodbTotals.sent += delivered + bounced;
+        nocodbTotals.delivered += delivered;
+        nocodbTotals.bounced += bounced;
+        nocodbTotals.replied += row.replies || 0;
+      });
+
+      // Try to get workspace-specific daily metrics if we have engagements
+      let hasWorkspaceData = false;
+      let workspaceTotals = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 };
+
+      if (engagementIds.length > 0) {
+        // Build query for daily metrics
+        let metricsQuery = supabase
+          .from('daily_metrics')
+          .select('*')
+          .in('engagement_id', engagementIds)
+          .order('date', { ascending: true });
+
+        if (startDateStr) {
+          metricsQuery = metricsQuery.gte('date', startDateStr);
+        }
+        if (endDateStr) {
+          metricsQuery = metricsQuery.lte('date', endDateStr);
+        }
+
+        const { data: metricsData } = await metricsQuery;
+        const metrics = metricsData || [];
+
+        if (metrics.length > 0) {
+          hasWorkspaceData = true;
+          
+          // Aggregate metrics by date for trends
+          const metricsByDate = new Map<string, {
+            sent: number; opened: number; clicked: number; replied: number; bounced: number; positive: number;
+          }>();
+
+          for (const m of metrics) {
+            const existing = metricsByDate.get(m.date) || {
+              sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0
+            };
+            metricsByDate.set(m.date, {
+              sent: existing.sent + (m.emails_sent || 0),
+              opened: existing.opened + (m.emails_opened || 0),
+              clicked: existing.clicked + (m.emails_clicked || 0),
+              replied: existing.replied + (m.emails_replied || 0),
+              bounced: existing.bounced + (m.emails_bounced || 0),
+              positive: existing.positive + (m.positive_replies || 0),
+            });
+          }
+
+          // Calculate workspace totals
+          metricsByDate.forEach(m => {
+            workspaceTotals.sent += m.sent;
+            workspaceTotals.opened += m.opened;
+            workspaceTotals.clicked += m.clicked;
+            workspaceTotals.replied += m.replied;
+            workspaceTotals.bounced += m.bounced;
+            workspaceTotals.positive += m.positive;
+          });
+
+          // Build trend data from workspace metrics
+          const trend: TrendData[] = Array.from(metricsByDate.entries())
+            .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+            .map(([date, data]) => ({
+              date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+              sent: data.sent,
+              replies: data.replied,
+              positiveReplies: data.positive,
+            }))
+            .slice(-30);
+
+          setTrendData(trend);
+        }
+      }
+
+      // Determine which data source to use for stats
+      // Priority: workspace daily_metrics > NocoDB global
+      const usedTotals = hasWorkspaceData ? workspaceTotals : {
+        sent: nocodbTotals.sent,
+        opened: 0, // NocoDB doesn't have opens
+        clicked: 0,
+        replied: nocodbTotals.replied,
+        bounced: nocodbTotals.bounced,
+        positive: nocodbTotals.positive,
+      };
+
+      const delivered = usedTotals.sent - usedTotals.bounced;
+
+      if (usedTotals.sent > 0 || nocodbTotals.sent > 0) {
+        setHasData(true);
+        setStats({
+          totalSent: usedTotals.sent || nocodbTotals.sent,
+          totalOpened: usedTotals.opened,
+          totalClicked: usedTotals.clicked,
+          totalReplied: usedTotals.replied || nocodbTotals.replied,
+          totalBounced: usedTotals.bounced || nocodbTotals.bounced,
+          totalPositive: usedTotals.positive || nocodbTotals.positive,
+          totalSpam: 0,
+          totalDelivered: delivered || nocodbTotals.delivered,
+          openRate: calculateRate(usedTotals.opened, delivered),
+          clickRate: calculateRate(usedTotals.clicked, delivered),
+          replyRate: calculateRate(usedTotals.replied || nocodbTotals.replied, delivered || nocodbTotals.delivered),
+          bounceRate: calculateRate(usedTotals.bounced || nocodbTotals.bounced, usedTotals.sent || nocodbTotals.sent),
+          positiveRate: calculateRate(usedTotals.positive || nocodbTotals.positive, delivered || nocodbTotals.delivered),
+          spamRate: 0,
+          deliveredRate: calculateRate(delivered || nocodbTotals.delivered, usedTotals.sent || nocodbTotals.sent),
+        });
+      } else {
         setHasData(false);
-        setLoading(false);
-        return;
       }
 
-      // Build query for daily metrics
-      let metricsQuery = supabase
-        .from('daily_metrics')
-        .select('*')
-        .in('engagement_id', engagementIds)
-        .order('date', { ascending: true });
+      // Build top campaigns from NocoDB data
+      const nocodbCampaigns: TopCampaign[] = [];
 
-      if (startDateStr) {
-        metricsQuery = metricsQuery.gte('date', startDateStr);
-      }
-      if (endDateStr) {
-        metricsQuery = metricsQuery.lte('date', endDateStr);
-      }
+      smartleadData.forEach(row => {
+        const sent = row.total_emails_sent || 0;
+        if (sent > 0) {
+          nocodbCampaigns.push({
+            id: row.campaign_id,
+            name: row.campaign_name,
+            sent,
+            replyRate: calculateRate(row.total_replies || 0, sent),
+            positiveRate: calculateRate(row.leads_interested || 0, sent),
+            platform: 'smartlead',
+          });
+        }
+      });
 
-      const { data: metricsData, error: metricsError } = await metricsQuery;
+      replyioData.forEach(row => {
+        const delivered = row.deliveries || 0;
+        if (delivered > 0) {
+          nocodbCampaigns.push({
+            id: row.campaign_id,
+            name: row.campaign_name,
+            sent: delivered + (row.bounces || 0),
+            replyRate: calculateRate(row.replies || 0, delivered),
+            positiveRate: 0, // Reply.io doesn't have positive flag
+            platform: 'replyio',
+          });
+        }
+      });
 
-      if (metricsError) {
-        console.warn('Metrics error:', metricsError);
-      }
+      // Sort by reply rate and take top 5
+      nocodbCampaigns.sort((a, b) => b.replyRate - a.replyRate);
+      setTopCampaigns(nocodbCampaigns.slice(0, 5));
 
-      const metrics = metricsData || [];
-
-      if (metrics.length === 0) {
-        // Try to get data from campaigns table directly
-        const { data: campaignsData } = await supabase
-          .from('campaigns')
-          .select('total_sent, total_opened, total_replied, total_bounced')
+      // Fetch hourly metrics for time heatmap (workspace specific)
+      if (engagementIds.length > 0) {
+        const { data: hourlyMetricsData } = await supabase
+          .from('hourly_metrics')
+          .select('*')
           .in('engagement_id', engagementIds);
 
-        const campaignTotals = (campaignsData || []).reduce((acc, c) => ({
-          sent: acc.sent + (c.total_sent || 0),
-          opened: acc.opened + (c.total_opened || 0),
-          replied: acc.replied + (c.total_replied || 0),
-          bounced: acc.bounced + (c.total_bounced || 0),
-        }), { sent: 0, opened: 0, replied: 0, bounced: 0 });
-
-        if (campaignTotals.sent > 0) {
-          setHasData(true);
-          const delivered = campaignTotals.sent - campaignTotals.bounced;
-          setStats({
-            totalSent: campaignTotals.sent,
-            totalOpened: campaignTotals.opened,
-            totalClicked: 0,
-            totalReplied: campaignTotals.replied,
-            totalBounced: campaignTotals.bounced,
-            totalPositive: 0,
-            totalSpam: 0,
-            totalDelivered: delivered,
-            openRate: campaignTotals.sent > 0 ? (campaignTotals.opened / campaignTotals.sent) * 100 : 0,
-            clickRate: 0,
-            replyRate: campaignTotals.sent > 0 ? (campaignTotals.replied / campaignTotals.sent) * 100 : 0,
-            bounceRate: campaignTotals.sent > 0 ? (campaignTotals.bounced / campaignTotals.sent) * 100 : 0,
-            positiveRate: 0,
-            spamRate: 0,
-            deliveredRate: campaignTotals.sent > 0 ? (delivered / campaignTotals.sent) * 100 : 0,
-          });
-        } else {
-          setHasData(false);
+        if (hourlyMetricsData && hourlyMetricsData.length > 0) {
+          const timeDataPoints: TimeData[] = hourlyMetricsData.map((h: any) => ({
+            day: h.day_of_week || 0,
+            hour: h.hour_of_day || 0,
+            value: h.emails_replied || h.emails_sent || 0,
+          }));
+          setTimeData(timeDataPoints);
         }
-        setLoading(false);
-        return;
-      }
-
-      setHasData(true);
-
-      // Aggregate metrics by date
-      const metricsByDate = new Map<string, {
-        sent: number;
-        opened: number;
-        clicked: number;
-        replied: number;
-        bounced: number;
-        positive: number;
-      }>();
-
-      for (const m of metrics) {
-        const existing = metricsByDate.get(m.date) || {
-          sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0
-        };
-        metricsByDate.set(m.date, {
-          sent: existing.sent + (m.emails_sent || 0),
-          opened: existing.opened + (m.emails_opened || 0),
-          clicked: existing.clicked + (m.emails_clicked || 0),
-          replied: existing.replied + (m.emails_replied || 0),
-          bounced: existing.bounced + (m.emails_bounced || 0),
-          positive: existing.positive + (m.positive_replies || 0),
-        });
-      }
-
-      // Calculate totals
-      const totals = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0, positive: 0 };
-      metricsByDate.forEach(m => {
-        totals.sent += m.sent;
-        totals.opened += m.opened;
-        totals.clicked += m.clicked;
-        totals.replied += m.replied;
-        totals.bounced += m.bounced;
-        totals.positive += m.positive;
-      });
-
-      const delivered = totals.sent - totals.bounced;
-
-      setStats({
-        totalSent: totals.sent,
-        totalOpened: totals.opened,
-        totalClicked: totals.clicked,
-        totalReplied: totals.replied,
-        totalBounced: totals.bounced,
-        totalPositive: totals.positive,
-        totalSpam: 0,
-        totalDelivered: delivered,
-        openRate: calculateRate(totals.opened, delivered),
-        clickRate: calculateRate(totals.clicked, delivered),
-        replyRate: calculateRate(totals.replied, delivered),
-        bounceRate: calculateRate(totals.bounced, totals.sent), // Bounce rate uses sent
-        positiveRate: calculateRate(totals.positive, delivered),
-        spamRate: 0,
-        deliveredRate: calculateRate(delivered, totals.sent),
-      });
-
-      // Build trend data
-      const trend: TrendData[] = Array.from(metricsByDate.entries())
-        .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
-        .map(([date, data]) => ({
-          date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          sent: data.sent,
-          replies: data.replied,
-          positiveReplies: data.positive,
-        }))
-        .slice(-30);
-
-      setTrendData(trend);
-
-      // Fetch campaigns for top performers - include positive_replies
-      const { data: campaigns } = await supabase
-        .from('campaigns')
-        .select('id, name, total_sent, total_replied, positive_replies')
-        .in('engagement_id', engagementIds);
-
-      if (campaigns && campaigns.length > 0) {
-        const campaignStats = campaigns.map(c => {
-          const sent = c.total_sent || 0;
-          // Note: We don't have bounced per campaign here, so estimate delivered as sent
-          const delivered = sent; // Could fetch total_bounced if needed
-          return {
-            id: c.id,
-            name: c.name,
-            sent,
-            replyRate: calculateRate(c.total_replied, delivered),
-            positiveRate: calculateRate(c.positive_replies, delivered),
-          };
-        });
-
-        setTopCampaigns(
-          campaignStats
-            .filter(c => c.sent > 0)
-            .sort((a, b) => b.replyRate - a.replyRate)
-            .slice(0, 5)
-        );
-      }
-
-      // Fetch hourly metrics for time heatmap
-      const { data: hourlyMetricsData } = await supabase
-        .from('hourly_metrics')
-        .select('*')
-        .in('engagement_id', engagementIds);
-
-      if (hourlyMetricsData && hourlyMetricsData.length > 0) {
-        const timeDataPoints: TimeData[] = hourlyMetricsData.map((h: any) => ({
-          day: h.day_of_week || 0,
-          hour: h.hour_of_day || 0,
-          value: h.emails_replied || h.emails_sent || 0,
-        }));
-        setTimeData(timeDataPoints);
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
