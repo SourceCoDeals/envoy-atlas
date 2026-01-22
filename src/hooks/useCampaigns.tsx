@@ -95,15 +95,31 @@ export function useCampaigns() {
       const smartleadData = smartleadRes.data || [];
       const replyioData = replyioRes.data || [];
 
-      // Build a map of internal campaign IDs for matching
-      const internalCampaignMap = new Map<string, any>();
+      // Build maps for matching NocoDB campaigns to internal campaigns
+      const internalByExternalId = new Map<string, any>();
+      const internalByName = new Map<string, any>();
       internalCampaigns.forEach(c => {
-        // Try to match by external_id or name
         if (c.external_id) {
-          internalCampaignMap.set(c.external_id, c);
+          internalByExternalId.set(c.external_id, c);
         }
-        internalCampaignMap.set(c.name?.toLowerCase(), c);
+        if (c.name) {
+          internalByName.set(c.name.toLowerCase().trim(), c);
+        }
       });
+
+      // Helper to find matching internal campaign
+      const findInternalMatch = (nocodbCampaignId: string | null, campaignName: string) => {
+        // First try external_id match
+        if (nocodbCampaignId && internalByExternalId.has(nocodbCampaignId)) {
+          return internalByExternalId.get(nocodbCampaignId);
+        }
+        // Then try name match
+        const normalizedName = campaignName?.toLowerCase().trim();
+        if (normalizedName && internalByName.has(normalizedName)) {
+          return internalByName.get(normalizedName);
+        }
+        return null;
+      };
 
       // Fetch daily metrics for internal campaigns if any
       const campaignIds = internalCampaigns.map(c => c.id);
@@ -145,13 +161,18 @@ export function useCampaigns() {
         const delivered = sent - bounced;
         const positive = row.leads_interested || 0;
 
+        // Try to find matching internal campaign for engagement link
+        const internalMatch = findInternalMatch(row.campaign_id, row.campaign_name);
+        const engagementId = internalMatch?.engagement_id || null;
+        const engagementName = engagementId ? engagementMap.get(engagementId) || null : null;
+
         allCampaigns.push({
-          id: row.id,
+          id: internalMatch?.id || row.id,
           name: row.campaign_name,
           status: row.status || 'unknown',
           campaign_type: 'smartlead',
           platform: 'smartlead',
-          data_source_id: null,
+          data_source_id: internalMatch?.data_source_id || null,
           created_at: row.campaign_created_date || row.created_at,
           updated_at: row.updated_at,
           total_sent: sent,
@@ -164,7 +185,8 @@ export function useCampaigns() {
           bounce_rate: calculateRate(bounced, sent),
           positive_rate: calculateRate(positive, delivered > 0 ? delivered : sent),
           delivery_rate: calculateRate(delivered, sent),
-          engagement_id: null, // Could be linked later
+          engagement_id: engagementId,
+          engagement_name: engagementName,
           metricsStatus: sent > 0 ? 'verified' : 'missing',
           metricsSource: 'nocodb',
           nocodbId: row.campaign_id,
@@ -183,13 +205,18 @@ export function useCampaigns() {
         const replied = row.replies || 0;
         const positive = 0; // Reply.io doesn't have positive flag
 
+        // Try to find matching internal campaign for engagement link
+        const internalMatch = findInternalMatch(row.campaign_id, row.campaign_name);
+        const engagementId = internalMatch?.engagement_id || null;
+        const engagementName = engagementId ? engagementMap.get(engagementId) || null : null;
+
         allCampaigns.push({
-          id: row.id,
+          id: internalMatch?.id || row.id,
           name: row.campaign_name,
           status: row.status || 'unknown',
           campaign_type: 'replyio',
           platform: 'replyio',
-          data_source_id: null,
+          data_source_id: internalMatch?.data_source_id || null,
           created_at: row.campaign_created_date || row.created_at,
           updated_at: row.updated_at,
           total_sent: sent,
@@ -202,7 +229,8 @@ export function useCampaigns() {
           bounce_rate: calculateRate(bounced, sent),
           positive_rate: calculateRate(positive, delivered),
           delivery_rate: calculateRate(delivered, sent),
-          engagement_id: null,
+          engagement_id: engagementId,
+          engagement_name: engagementName,
           metricsStatus: delivered > 0 ? 'verified' : 'missing',
           metricsSource: 'nocodb',
           nocodbId: row.campaign_id,
