@@ -7,94 +7,223 @@ const corsHeaders = {
 
 interface AutoPairResult {
   campaignsLinked: number;
-  campaignsSkipped: number;
-  skippedReasons: { name: string; reason: string }[];
-  details: { engagement: string; campaigns: string[]; confidence: string }[];
+  campaignsUnlinked: number;
+  ambiguous: { name: string; reason: string }[];
+  linkedDetails: { engagement: string; campaigns: string[] }[];
 }
 
-interface MatchPattern {
-  pattern: RegExp;
-  weight: number; // name=3, portfolio=2, sponsor=1
-  term: string;
-  type: 'name' | 'portfolio' | 'sponsor';
-}
-
-interface EngagementMatcher {
+interface Engagement {
   id: string;
   name: string;
-  patterns: MatchPattern[];
-}
-
-// Minimum score threshold to consider a match valid
-// A portfolio company match (weight=2) of 8 chars = 16 points minimum
-const MIN_SCORE_THRESHOLD = 12;
-
-// Minimum term length to create a pattern (avoids short word collisions)
-const MIN_TERM_LENGTH = 4;
-
-/**
- * Creates matching patterns for a term
- * Returns multiple patterns to handle different formats:
- * - Word boundary match for exact term
- * - Flexible space matching for compound words ("Broad Sky" matches "BroadSky")
- */
-function createMatchPatterns(term: string): RegExp[] {
-  const patterns: RegExp[] = [];
-  const trimmed = term.trim();
-  if (trimmed.length < MIN_TERM_LENGTH) return patterns;
-  
-  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  
-  // Standard word boundary pattern
-  patterns.push(new RegExp(`\\b${escaped}\\b`, 'i'));
-  
-  // For multi-word terms, create pattern that allows optional/no spaces
-  // "Broad Sky" should match "BroadSky", "Broad-Sky", "Broad Sky"
-  if (trimmed.includes(' ')) {
-    const noSpaceVersion = escaped.replace(/\\ /g, '[\\s\\-]*');
-    patterns.push(new RegExp(noSpaceVersion, 'i'));
-  }
-  
-  // For camelCase terms, create pattern that allows spaces
-  // "BroadSky" should match "Broad Sky", "Broad-Sky"
-  const camelSplit = trimmed.replace(/([a-z])([A-Z])/g, '$1 $2');
-  if (camelSplit !== trimmed && camelSplit.length >= MIN_TERM_LENGTH) {
-    const camelEscaped = camelSplit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const flexibleCamel = camelEscaped.replace(/ /g, '[\\s\\-]*');
-    patterns.push(new RegExp(flexibleCamel, 'i'));
-  }
-  
-  return patterns;
+  sponsor_name: string | null;
+  portfolio_company: string | null;
 }
 
 /**
- * Extracts meaningful terms from a string (for multi-word matching)
- * Returns both the full string and significant individual words
+ * Strips status prefixes from campaign names like [Ended], [paused], {PAUSED}, (Archive), etc.
  */
-function extractTerms(text: string | null): string[] {
-  if (!text) return [];
+function stripStatusPrefix(name: string): string {
+  return name
+    .replace(/^\s*[\[\(\{][^\]\)\}]*[\]\)\}]\s*/gi, '') // Remove [Ended], (Archive), {PAUSED} etc.
+    .replace(/^\s*\*+\s*/, '') // Remove leading asterisks
+    .trim();
+}
+
+/**
+ * Normalizes text for matching:
+ * - Lowercase
+ * - Remove LLC, Inc, Partners, Corp, etc.
+ * - Replace & with 'and'
+ * - Trim whitespace
+ */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\b(llc|inc|incorporated|partners|corp|corporation|holdings|group|management|fund|funds|capital|equity)\b/gi, '')
+    .replace(/&/g, 'and')
+    .replace(/[.,]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Check if two strings match with high confidence
+ * Handles:
+ * - Exact match (case insensitive)
+ * - Abbreviations (Capital vs Cap, Education vs Ed)
+ * - One contained in the other (Baum matches Baum Capital)
+ */
+function isHighConfidenceMatch(a: string, b: string): boolean {
+  const normA = normalizeText(a);
+  const normB = normalizeText(b);
   
-  const terms: string[] = [];
-  const trimmed = text.trim();
+  if (!normA || !normB) return false;
   
-  // Add full string if long enough
-  if (trimmed.length >= MIN_TERM_LENGTH) {
-    terms.push(trimmed);
-  }
+  // Exact match after normalization
+  if (normA === normB) return true;
   
-  // Add significant words (5+ chars) that aren't common words
-  const commonWords = new Set(['capital', 'group', 'partners', 'holdings', 'management', 'services', 'company', 'corp', 'corporation', 'inc', 'llc', 'fund', 'funds']);
-  const words = trimmed.split(/[\s\-\/]+/).filter(w => 
-    w.length >= 5 && !commonWords.has(w.toLowerCase())
-  );
+  // One contained in the other (for short forms)
+  if (normA.length >= 3 && normB.includes(normA)) return true;
+  if (normB.length >= 3 && normA.includes(normB)) return true;
   
-  for (const word of words) {
-    if (!terms.includes(word)) {
-      terms.push(word);
+  // Handle common abbreviations
+  const abbreviations: Record<string, string[]> = {
+    'capital': ['cap', 'capitol'],
+    'investment': ['inv', 'invest', 'investments'],
+    'partners': ['ptnrs', 'part'],
+    'management': ['mgmt', 'mgt'],
+    'associates': ['assoc', 'assocs'],
+    'technology': ['tech'],
+    'services': ['svcs', 'svc'],
+    'financial': ['fin'],
+    'industries': ['ind', 'indus'],
+    'international': ['intl', 'int'],
+    'american': ['amer'],
+    'education': ['edu', 'ed'],
+    'senior': ['sr'],
+    'junior': ['jr'],
+    'living': ['liv'],
+    'nexcore': ['nexcore', 'nex core', 'nex-core'],
+    'touchsuite': ['touch suite', 'touch-suite'],
+  };
+  
+  let expandedA = normA;
+  let expandedB = normB;
+  
+  for (const [full, abbrevs] of Object.entries(abbreviations)) {
+    for (const abbrev of abbrevs) {
+      expandedA = expandedA.replace(new RegExp(`\\b${abbrev}\\b`, 'g'), full);
+      expandedB = expandedB.replace(new RegExp(`\\b${abbrev}\\b`, 'g'), full);
     }
   }
   
-  return terms;
+  if (expandedA === expandedB) return true;
+  if (expandedA.length >= 3 && expandedB.includes(expandedA)) return true;
+  if (expandedB.length >= 3 && expandedA.includes(expandedB)) return true;
+  
+  return false;
+}
+
+/**
+ * Parse campaign name and extract potential sponsor/client segments
+ * Returns all meaningful segments for flexible matching
+ */
+function parseCampaignSegments(name: string): string[] {
+  const cleaned = stripStatusPrefix(name);
+  const parts = cleaned.split(/\s+-\s+/).map(p => p.trim()).filter(p => p.length >= 2);
+  
+  // Filter out common non-entity parts (initials, tier indicators, etc.)
+  const skipPatterns = [
+    /^[A-Z]{1,3}$/,                    // Single initials like JF, SD, TM
+    /^tier\s*\d/i,                     // Tier 1, Tier 2, etc.
+    /^t\d/i,                           // T1, T2, etc.
+    /^all\s*tiers/i,                   // All Tiers
+    /^no\s*name/i,                     // No Name
+    /^\d+$/,                           // Just numbers
+    /^re-?engage/i,                    // Re-engagement
+    /^retarget/i,                      // Retargeting
+    /^gifting/i,                       // Gifting Sequence
+    /^top\s*targets/i,                 // Top Targets
+    /^highly\s*personalized/i,         // Highly Personalized
+    /new\s*script/i,                   // New Script
+    /^part\s*\d/i,                     // Part 2
+    /^copy$/i,                         // Copy
+    /^short$/i,                        // Short
+    /hov\s*\(prev/i,                   // Hov (prev AK)
+    /^\d{2}\.\d{2}\.\d{2}$/,           // Dates like 05.20.24
+    /email/i,                          // Email references
+    /gmail/i,                          // Gmail references
+    /call/i,                           // Call references
+    /^li\s*\+/i,                       // LI + Email
+  ];
+  
+  return parts.filter(part => {
+    const cleaned = part.replace(/\|.*$/, '').trim(); // Remove pipe and after
+    return !skipPatterns.some(pattern => pattern.test(cleaned));
+  });
+}
+
+/**
+ * Find matching engagement for a campaign
+ * Returns the engagement if BOTH sponsor AND client match with high confidence
+ */
+function findMatchingEngagement(
+  segments: string[], 
+  rawCampaignName: string,
+  engagements: Engagement[]
+): { match: Engagement | null; ambiguous: boolean; reason?: string } {
+  const matches: { eng: Engagement; sponsorSeg: string; clientSeg: string; score: number }[] = [];
+  
+  // Also try matching against the full cleaned campaign name for embedded client names
+  const cleanedName = stripStatusPrefix(rawCampaignName).toLowerCase();
+  
+  for (const eng of engagements) {
+    if (!eng.sponsor_name || !eng.portfolio_company) continue;
+    
+    let sponsorMatch: string | null = null;
+    let clientMatch: string | null = null;
+    let score = 0;
+    
+    // Check segments for sponsor match
+    for (const seg of segments) {
+      if (!sponsorMatch && isHighConfidenceMatch(seg, eng.sponsor_name)) {
+        sponsorMatch = seg;
+        score += 10;
+      }
+    }
+    
+    // Check segments for client match
+    for (const seg of segments) {
+      if (!clientMatch && isHighConfidenceMatch(seg, eng.portfolio_company)) {
+        clientMatch = seg;
+        score += 20; // Client match is more specific
+      }
+    }
+    
+    // If client not found in segments, check if it appears anywhere in the campaign name
+    // This handles cases like "Trivest - JF - Funeral Services" where "Funeral Services" is in position 3
+    if (!clientMatch) {
+      const normalizedClient = normalizeText(eng.portfolio_company);
+      if (normalizedClient.length >= 4 && cleanedName.includes(normalizedClient)) {
+        clientMatch = eng.portfolio_company;
+        score += 15; // Slightly lower score for embedded match
+      }
+    }
+    
+    // BOTH must match
+    if (sponsorMatch && clientMatch) {
+      matches.push({ eng, sponsorSeg: sponsorMatch, clientSeg: clientMatch, score });
+    }
+  }
+  
+  if (matches.length === 0) {
+    return { match: null, ambiguous: false, reason: 'No matching sponsor+client combo found' };
+  }
+  
+  // If multiple matches, pick the one with highest score (most specific client match)
+  if (matches.length > 1) {
+    matches.sort((a, b) => b.score - a.score);
+    // If top two have same score, it's truly ambiguous
+    if (matches[0].score === matches[1].score) {
+      return { 
+        match: null, 
+        ambiguous: true, 
+        reason: `Multiple matches: ${matches.map(m => m.eng.name).join(', ')}` 
+      };
+    }
+    // Otherwise take the highest scored match
+    return { match: matches[0].eng, ambiguous: false };
+  }
+  
+  if (matches.length > 1) {
+    return { 
+      match: null, 
+      ambiguous: true, 
+      reason: `Multiple matches: ${matches.map(m => m.eng.name).join(', ')}` 
+    };
+  }
+  
+  return { match: matches[0].eng, ambiguous: false };
 }
 
 Deno.serve(async (req) => {
@@ -108,10 +237,9 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { client_id, dry_run = false, fix_mislinks = false } = await req.json() as { 
+    const { client_id, dry_run = false } = await req.json() as { 
       client_id: string;
       dry_run?: boolean;
-      fix_mislinks?: boolean; // Re-evaluate all campaigns, not just unlinked ones
     };
 
     if (!client_id) {
@@ -121,211 +249,83 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Auto-pairing campaigns for client ${client_id}, dry_run: ${dry_run}, fix_mislinks: ${fix_mislinks}`);
+    console.log(`Auto-pairing campaigns for client ${client_id}, dry_run: ${dry_run}`);
 
-    // Fetch existing engagements for this client
+    // Fetch existing engagements (excluding Unassigned placeholder)
     const { data: existingEngagements, error: engagementsError } = await supabase
       .from('engagements')
       .select('id, name, sponsor_name, portfolio_company')
-      .eq('client_id', client_id);
+      .eq('client_id', client_id)
+      .neq('id', '00000000-0000-0000-0000-000000000000');
 
     if (engagementsError) {
       throw new Error(`Failed to fetch engagements: ${engagementsError.message}`);
     }
 
-    if (!existingEngagements || existingEngagements.length === 0) {
-      return new Response(
-        JSON.stringify({ 
-          success: true, 
-          dry_run,
-          campaignsLinked: 0, 
-          campaignsSkipped: 0,
-          skippedReasons: [],
-          details: [],
-          message: 'No engagements found for this client'
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    console.log(`Found ${existingEngagements?.length || 0} engagements`);
+    for (const eng of existingEngagements || []) {
+      console.log(`  Engagement: "${eng.name}" | Sponsor: "${eng.sponsor_name}" | Client: "${eng.portfolio_company}"`);
     }
 
-    const engagementIds = existingEngagements.map(e => e.id);
-
-    // Fetch campaigns - either all linked to this client's engagements (fix_mislinks) or just for processing
-    let campaignsQuery = supabase
+    // Fetch ALL unassigned campaigns
+    const { data: campaigns, error: campaignsError } = await supabase
       .from('campaigns')
       .select('id, name, engagement_id')
+      .eq('engagement_id', '00000000-0000-0000-0000-000000000000')
       .order('name');
-
-    if (fix_mislinks) {
-      // Get all campaigns linked to any engagement of this client
-      campaignsQuery = campaignsQuery.in('engagement_id', engagementIds);
-    } else {
-      // Only get campaigns already linked (we can't create new links without an engagement_id due to NOT NULL)
-      campaignsQuery = campaignsQuery.in('engagement_id', engagementIds);
-    }
-
-    const { data: campaigns, error: campaignsError } = await campaignsQuery;
 
     if (campaignsError) {
       throw new Error(`Failed to fetch campaigns: ${campaignsError.message}`);
     }
 
-    console.log(`Found ${campaigns?.length || 0} campaigns and ${existingEngagements.length} engagements`);
-
-    // Check for sponsors with multiple engagements (ambiguous)
-    const sponsorEngagementCount: Map<string, number> = new Map();
-    for (const eng of existingEngagements) {
-      if (eng.sponsor_name) {
-        const sponsor = eng.sponsor_name.toLowerCase();
-        sponsorEngagementCount.set(sponsor, (sponsorEngagementCount.get(sponsor) || 0) + 1);
-      }
-    }
-    const ambiguousSponsors = new Set(
-      [...sponsorEngagementCount.entries()]
-        .filter(([_, count]) => count > 1)
-        .map(([sponsor]) => sponsor)
-    );
-
-    console.log(`Ambiguous sponsors (multiple engagements): ${[...ambiguousSponsors].join(', ')}`);
-
-    // Build matching patterns from existing engagements
-    const engagementMatchers: EngagementMatcher[] = [];
-    
-    for (const eng of existingEngagements) {
-      const patterns: MatchPattern[] = [];
-      
-      // Priority 1: Engagement name (weight = 3)
-      for (const term of extractTerms(eng.name)) {
-        for (const pattern of createMatchPatterns(term)) {
-          patterns.push({ pattern, weight: 3, term, type: 'name' });
-        }
-      }
-      
-      // Priority 2: Portfolio company (weight = 2)
-      for (const term of extractTerms(eng.portfolio_company)) {
-        for (const pattern of createMatchPatterns(term)) {
-          patterns.push({ pattern, weight: 2, term, type: 'portfolio' });
-        }
-      }
-      
-      // Priority 3: Sponsor name (weight = 1) - but only if not ambiguous
-      if (eng.sponsor_name && !ambiguousSponsors.has(eng.sponsor_name.toLowerCase())) {
-        for (const term of extractTerms(eng.sponsor_name)) {
-          for (const pattern of createMatchPatterns(term)) {
-            patterns.push({ pattern, weight: 1, term, type: 'sponsor' });
-          }
-        }
-      }
-      
-      if (patterns.length > 0) {
-        engagementMatchers.push({ id: eng.id, name: eng.name, patterns });
-      }
-    }
+    console.log(`Found ${campaigns?.length || 0} unassigned campaigns to process`);
 
     const result: AutoPairResult = {
       campaignsLinked: 0,
-      campaignsSkipped: 0,
-      skippedReasons: [],
-      details: [],
+      campaignsUnlinked: 0,
+      ambiguous: [],
+      linkedDetails: [],
     };
 
-    // Group campaigns by their best matched engagement
-    const engagementCampaigns: Map<string, { 
-      name: string; 
-      campaigns: { id: string; name: string }[];
-      confidence: 'high' | 'medium';
-    }> = new Map();
+    const engagementCampaigns: Map<string, { name: string; campaigns: { id: string; name: string }[] }> = new Map();
 
     for (const campaign of campaigns || []) {
-      // Skip internal/test campaigns
-      if (/sourceco|^new sequence|^test\b/i.test(campaign.name)) {
-        result.campaignsSkipped++;
-        result.skippedReasons.push({ 
+      const segments = parseCampaignSegments(campaign.name);
+      
+      if (segments.length < 2) {
+        result.campaignsUnlinked++;
+        result.ambiguous.push({ 
           name: campaign.name, 
-          reason: 'Internal or test campaign'
+          reason: `Only ${segments.length} meaningful segment(s) found: [${segments.join(', ')}]` 
         });
         continue;
       }
 
-      // Find best matching engagement using weighted scoring
-      let bestMatch: { 
-        id: string; 
-        name: string; 
-        score: number; 
-        confidence: 'high' | 'medium';
-        matchedTerms: string[];
-      } | null = null;
-      
-      for (const matcher of engagementMatchers) {
-        let totalScore = 0;
-        let hasNameOrPortfolioMatch = false;
-        const matchedTerms: string[] = [];
-        
-        for (const { pattern, weight, term, type } of matcher.patterns) {
-          if (pattern.test(campaign.name)) {
-            // Score = weight * term length (longer matches score higher)
-            const matchScore = weight * term.length;
-            totalScore += matchScore;
-            matchedTerms.push(`${type}:${term}`);
-            
-            if (type === 'name' || type === 'portfolio') {
-              hasNameOrPortfolioMatch = true;
-            }
-          }
-        }
-        
-        // Must meet minimum threshold
-        if (totalScore < MIN_SCORE_THRESHOLD) continue;
-        
-        // Determine confidence level
-        const confidence: 'high' | 'medium' = hasNameOrPortfolioMatch ? 'high' : 'medium';
-        
-        // Take best score, preferring higher confidence on ties
-        if (!bestMatch || 
-            totalScore > bestMatch.score || 
-            (totalScore === bestMatch.score && confidence === 'high' && bestMatch.confidence === 'medium')) {
-          bestMatch = { 
-            id: matcher.id, 
-            name: matcher.name, 
-            score: totalScore, 
-            confidence,
-            matchedTerms 
-          };
-        }
+      console.log(`Parsing: "${campaign.name}" → Segments: [${segments.join(' | ')}]`);
+
+      const { match, ambiguous, reason } = findMatchingEngagement(segments, campaign.name, existingEngagements || []);
+
+      if (ambiguous) {
+        result.campaignsUnlinked++;
+        result.ambiguous.push({ name: campaign.name, reason: reason || 'Ambiguous match' });
+        continue;
       }
 
-      if (bestMatch) {
-        // Check if this is actually a change (for fix_mislinks mode)
-        if (campaign.engagement_id === bestMatch.id) {
-          // Already correctly linked, skip
-          continue;
-        }
-
-        if (!engagementCampaigns.has(bestMatch.id)) {
-          engagementCampaigns.set(bestMatch.id, { 
-            name: bestMatch.name, 
-            campaigns: [],
-            confidence: bestMatch.confidence
-          });
-        }
-        engagementCampaigns.get(bestMatch.id)!.campaigns.push({ 
-          id: campaign.id, 
-          name: campaign.name 
-        });
-        
-        console.log(`Match: "${campaign.name}" → "${bestMatch.name}" (score: ${bestMatch.score}, confidence: ${bestMatch.confidence}, terms: ${bestMatch.matchedTerms.join(', ')})`);
-      } else {
-        result.campaignsSkipped++;
-        result.skippedReasons.push({ 
-          name: campaign.name, 
-          reason: 'No matching engagement found (below threshold)'
-        });
+      if (!match) {
+        result.campaignsUnlinked++;
+        result.ambiguous.push({ name: campaign.name, reason: reason || 'No match found' });
+        continue;
       }
+
+      if (!engagementCampaigns.has(match.id)) {
+        engagementCampaigns.set(match.id, { name: match.name, campaigns: [] });
+      }
+      engagementCampaigns.get(match.id)!.campaigns.push({ id: campaign.id, name: campaign.name });
+
+      console.log(`✓ Match: "${campaign.name}" → "${match.name}"`);
     }
 
-    console.log(`Matched campaigns to ${engagementCampaigns.size} engagements for relinking`);
-
-    // Link/relink campaigns to their correct engagements
+    // Execute batch updates
     for (const [engagementId, group] of engagementCampaigns) {
       if (!dry_run) {
         const campaignIds = group.campaigns.map(c => c.id);
@@ -338,28 +338,29 @@ Deno.serve(async (req) => {
         if (updateError) {
           console.error(`Failed to link campaigns to ${group.name}:`, updateError);
           for (const c of group.campaigns) {
-            result.campaignsSkipped++;
-            result.skippedReasons.push({ name: c.name, reason: `Failed to link: ${updateError.message}` });
+            result.campaignsUnlinked++;
+            result.ambiguous.push({ name: c.name, reason: `DB error: ${updateError.message}` });
           }
           continue;
         }
       }
 
       result.campaignsLinked += group.campaigns.length;
-      result.details.push({
+      result.linkedDetails.push({
         engagement: group.name,
         campaigns: group.campaigns.map(c => c.name),
-        confidence: group.confidence,
       });
     }
 
-    console.log(`Auto-pair complete: ${result.campaignsLinked} campaigns ${dry_run ? 'would be ' : ''}linked, ${result.campaignsSkipped} skipped`);
+    console.log(`\n=== AUTO-PAIR RESULTS ===`);
+    console.log(`Campaigns linked: ${result.campaignsLinked}`);
+    console.log(`Campaigns unlinked: ${result.campaignsUnlinked}`);
+    console.log(`Ambiguous/problematic: ${result.ambiguous.length}`);
 
     return new Response(
       JSON.stringify({
         success: true,
         dry_run,
-        fix_mislinks,
         ...result,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
