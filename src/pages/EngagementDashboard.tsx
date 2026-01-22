@@ -671,11 +671,11 @@ export default function EngagementDashboard() {
                       <TableHead>Sponsor</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Start</TableHead>
-                      <TableHead>Deal Lead</TableHead>
-                      <TableHead>Analysts</TableHead>
-                      <TableHead>Research</TableHead>
-                      <TableHead className="text-right">Retainer</TableHead>
                       <TableHead>Type</TableHead>
+                      <TableHead>Deal Lead</TableHead>
+                      <TableHead>Associate</TableHead>
+                      <TableHead>Analyst</TableHead>
+                      <TableHead>Research Lead</TableHead>
                       <TableHead className="w-[80px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -684,10 +684,9 @@ export default function EngagementDashboard() {
                       const currentStatus = engagement.status || 'active';
                       const statusConfig = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.active;
                       const dealLead = getTeamMemberById(engagement.deal_lead_id);
-                      const analyst1 = getTeamMemberById(engagement.analyst_id);
-                      const analyst2 = getTeamMemberById(engagement.analyst_2_id);
+                      const associate = getTeamMemberById(engagement.associate_id);
+                      const analyst = getTeamMemberById(engagement.analyst_id);
                       const researchLead = getTeamMemberById(engagement.research_lead_id);
-                      const researchMid = getTeamMemberById(engagement.research_mid_id);
 
                       return (
                         <TableRow 
@@ -719,6 +718,11 @@ export default function EngagementDashboard() {
                               : '—'}
                           </TableCell>
                           <TableCell>
+                            <Badge variant={engagement.is_platform ? 'default' : 'secondary'}>
+                              {engagement.is_platform ? 'Platform' : 'Add-on'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
                             {dealLead ? (
                               <span className="text-sm">{getTeamMemberName(dealLead)}</span>
                             ) : (
@@ -726,48 +730,29 @@ export default function EngagementDashboard() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <div className="flex gap-1">
-                              {analyst1 && (
-                                <Badge variant="outline" className="text-xs">
-                                  {getInitials(engagement.analyst_id)}
-                                </Badge>
-                              )}
-                              {analyst2 && (
-                                <Badge variant="outline" className="text-xs">
-                                  {getInitials(engagement.analyst_2_id)}
-                                </Badge>
-                              )}
-                              {!analyst1 && !analyst2 && (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </div>
+                            {associate ? (
+                              <span className="text-sm">{getTeamMemberName(associate)}</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell>
-                            <div className="flex gap-1">
-                              {researchLead && (
-                                <Badge variant="outline" className="text-xs">
-                                  {getInitials(engagement.research_lead_id)}
-                                </Badge>
-                              )}
-                              {researchMid && (
-                                <Badge variant="outline" className="text-xs">
-                                  {getInitials(engagement.research_mid_id)}
-                                </Badge>
-                              )}
-                              {!researchLead && !researchMid && (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {engagement.monthly_retainer 
-                              ? `$${engagement.monthly_retainer.toLocaleString()}`
-                              : '—'}
+                            {analyst ? (
+                              <Badge variant="outline" className="text-xs">
+                                {getInitials(engagement.analyst_id)}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant={engagement.is_platform ? 'default' : 'secondary'}>
-                              {engagement.is_platform ? 'Platform' : 'Add-on'}
-                            </Badge>
+                            {researchLead ? (
+                              <Badge variant="outline" className="text-xs">
+                                {getInitials(engagement.research_lead_id)}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex gap-1">
