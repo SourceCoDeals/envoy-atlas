@@ -30,7 +30,7 @@ interface EnhancedCampaignTableProps {
   onCampaignUpdated?: () => void;
 }
 
-type SortField = 'name' | 'score' | 'health' | 'total_leads' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
+type SortField = 'name' | 'score' | 'health' | 'total_leads' | 'created_at' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
 type SortDirection = 'asc' | 'desc';
 
 interface CampaignWithScore extends CampaignWithMetrics {
@@ -221,6 +221,10 @@ export function EnhancedCampaignTable({
           const confOrder = { high: 5, good: 4, medium: 3, low: 2, none: 1 };
           aVal = confOrder[a.tier.confidence];
           bVal = confOrder[b.tier.confidence];
+          break;
+        case 'created_at':
+          aVal = new Date(a.created_at).getTime();
+          bVal = new Date(b.created_at).getTime();
           break;
         case 'updated_at':
           aVal = new Date(a.updated_at).getTime();
@@ -448,6 +452,7 @@ export function EnhancedCampaignTable({
               <SortableHeader field="confidence" className="w-[60px] text-center">Conf</SortableHeader>
               <TableHead className="w-[80px] text-center">Status</TableHead>
               <SortableHeader field="total_leads" className="text-right">Leads</SortableHeader>
+              <SortableHeader field="created_at" className="text-right">Created</SortableHeader>
               <SortableHeader field="updated_at" className="text-right">Updated</SortableHeader>
               <SortableHeader field="total_sent" className="text-right">Sent</SortableHeader>
               <SortableHeader field="reply_rate" className="text-right">Reply %</SortableHeader>
@@ -459,7 +464,7 @@ export function EnhancedCampaignTable({
           <TableBody>
             {filteredAndSortedCampaigns.length === 0 ? (
             <TableRow>
-                <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={16} className="text-center py-8 text-muted-foreground">
                   No campaigns match your filters
                 </TableCell>
               </TableRow>
@@ -634,6 +639,9 @@ export function EnhancedCampaignTable({
                   </TableCell>
                   <TableCell className="text-right font-mono">
                     {campaign.total_leads.toLocaleString()}
+                  </TableCell>
+                  <TableCell className="text-right text-sm text-muted-foreground">
+                    {campaign.created_at ? format(new Date(campaign.created_at), 'MMM d, yyyy') : '—'}
                   </TableCell>
                   <TableCell className="text-right text-sm text-muted-foreground">
                     {format(new Date(campaign.updated_at), 'MMM d, yyyy')}
