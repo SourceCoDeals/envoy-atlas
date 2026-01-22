@@ -229,13 +229,33 @@ Deno.serve(async (req) => {
 
     console.log(`Auto-pairing campaigns for client ${client_id}, dry_run: ${dry_run}`);
 
-    // Step 1: Upsert NocoDB campaigns into campaigns table
+    // Step 1: Upsert NocoDB campaigns into campaigns table WITH METRICS
     const [smartleadRes, replyioRes] = await Promise.all([
-      supabase.from('nocodb_smartlead_campaigns').select('campaign_id, campaign_name, status, campaign_created_date, updated_at'),
-      supabase.from('nocodb_replyio_campaigns').select('campaign_id, campaign_name, status, campaign_created_date, updated_at'),
+      supabase.from('nocodb_smartlead_campaigns').select(`
+        campaign_id, campaign_name, status, campaign_created_date, updated_at,
+        total_emails_sent, unique_emails_sent, total_replies, total_leads,
+        leads_not_started, leads_in_progress, leads_completed, leads_blocked, leads_paused, leads_interested
+      `),
+      supabase.from('nocodb_replyio_campaigns').select(`
+        campaign_id, campaign_name, status, campaign_created_date, updated_at,
+        deliveries, bounces, total_replies, total_people
+      `),
     ]);
 
-    const nocodbCampaigns: { external_id: string; name: string; status: string; campaign_type: string; created_at: string; updated_at: string }[] = [];
+    interface NocoDBCampaign {
+      external_id: string;
+      name: string;
+      status: string;
+      campaign_type: string;
+      created_at: string;
+      updated_at: string;
+      total_sent: number;
+      total_replied: number;
+      total_leads: number;
+      settings: Record<string, unknown>;
+    }
+
+    const nocodbCampaigns: NocoDBCampaign[] = [];
     
     (smartleadRes.data || []).forEach(row => {
       if (row.campaign_id && row.campaign_name) {
@@ -246,12 +266,25 @@ Deno.serve(async (req) => {
           campaign_type: 'smartlead',
           created_at: row.campaign_created_date || new Date().toISOString(),
           updated_at: row.updated_at || new Date().toISOString(),
+          total_sent: row.total_emails_sent || 0,
+          total_replied: row.total_replies || 0,
+          total_leads: row.total_leads || 0,
+          settings: {
+            leads_not_started: row.leads_not_started || 0,
+            leads_in_progress: row.leads_in_progress || 0,
+            leads_completed: row.leads_completed || 0,
+            leads_blocked: row.leads_blocked || 0,
+            leads_paused: row.leads_paused || 0,
+            leads_interested: row.leads_interested || 0,
+          },
         });
       }
     });
     
     (replyioRes.data || []).forEach(row => {
       if (row.campaign_id && row.campaign_name) {
+        // Reply.io: total_sent = deliveries + bounces (since deliveries is after bounces)
+        const totalSent = (row.deliveries || 0) + (row.bounces || 0);
         nocodbCampaigns.push({
           external_id: row.campaign_id,
           name: row.campaign_name,
@@ -259,34 +292,49 @@ Deno.serve(async (req) => {
           campaign_type: 'replyio',
           created_at: row.campaign_created_date || new Date().toISOString(),
           updated_at: row.updated_at || new Date().toISOString(),
+          total_sent: totalSent,
+          total_replied: row.total_replies || 0,
+          total_leads: row.total_people || 0,
+          settings: {
+            deliveries: row.deliveries || 0,
+            bounces: row.bounces || 0,
+          },
         });
       }
     });
-
     console.log(`Found ${nocodbCampaigns.length} NocoDB campaigns to sync`);
 
-    // Sync NocoDB campaigns to campaigns table
+    // Sync NocoDB campaigns to campaigns table WITH METRICS using upsert
     let syncedCount = 0;
+    let updatedCount = 0;
     if (!dry_run && nocodbCampaigns.length > 0) {
-      // First, get all existing campaign names to avoid duplicates
+      // Get existing campaigns by external_id to decide insert vs update
       const { data: existingCampaigns } = await supabase
         .from('campaigns')
-        .select('name, external_id');
+        .select('id, external_id, name');
       
+      const existingByExternalId = new Map((existingCampaigns || [])
+        .filter(c => c.external_id)
+        .map(c => [c.external_id, c]));
       const existingNames = new Set((existingCampaigns || []).map(c => c.name?.toLowerCase().trim()));
-      const existingExternalIds = new Set((existingCampaigns || []).map(c => c.external_id).filter(Boolean));
       
-      // Filter to only campaigns that don't exist yet
-      const newCampaigns = nocodbCampaigns.filter(c => 
-        !existingNames.has(c.name?.toLowerCase().trim()) && 
-        !existingExternalIds.has(c.external_id)
-      );
+      // Separate into updates (existing external_id) and inserts (new campaigns)
+      const toUpdate: NocoDBCampaign[] = [];
+      const toInsert: NocoDBCampaign[] = [];
       
-      console.log(`${newCampaigns.length} new campaigns to insert (${nocodbCampaigns.length - newCampaigns.length} already exist)`);
+      for (const c of nocodbCampaigns) {
+        if (existingByExternalId.has(c.external_id)) {
+          toUpdate.push(c);
+        } else if (!existingNames.has(c.name?.toLowerCase().trim())) {
+          toInsert.push(c);
+        }
+      }
+      
+      console.log(`${toInsert.length} new campaigns to insert, ${toUpdate.length} existing campaigns to update metrics`);
 
-      // Insert in batches of 100
-      for (let i = 0; i < newCampaigns.length; i += 100) {
-        const batch = newCampaigns.slice(i, i + 100);
+      // Insert new campaigns in batches of 100
+      for (let i = 0; i < toInsert.length; i += 100) {
+        const batch = toInsert.slice(i, i + 100);
         const insertData = batch.map(c => ({
           external_id: c.external_id,
           name: c.name,
@@ -294,7 +342,10 @@ Deno.serve(async (req) => {
           campaign_type: c.campaign_type,
           created_at: c.created_at,
           updated_at: c.updated_at,
-          engagement_id: '00000000-0000-0000-0000-000000000000', // Default to unassigned
+          total_sent: c.total_sent,
+          total_replied: c.total_replied,
+          settings: c.settings,
+          engagement_id: '00000000-0000-0000-0000-000000000000',
         }));
 
         const { data: inserted, error: insertError } = await supabase
@@ -308,7 +359,34 @@ Deno.serve(async (req) => {
           syncedCount += (inserted?.length || 0);
         }
       }
-      console.log(`Synced ${syncedCount} new NocoDB campaigns to campaigns table`);
+
+      // Update existing campaigns with metrics in batches
+      for (let i = 0; i < toUpdate.length; i += 50) {
+        const batch = toUpdate.slice(i, i + 50);
+        
+        for (const c of batch) {
+          const existing = existingByExternalId.get(c.external_id);
+          if (!existing) continue;
+
+          const { error: updateError } = await supabase
+            .from('campaigns')
+            .update({
+              total_sent: c.total_sent,
+              total_replied: c.total_replied,
+              settings: c.settings,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existing.id);
+
+          if (updateError) {
+            console.error(`Update error for ${c.name}:`, updateError);
+          } else {
+            updatedCount++;
+          }
+        }
+      }
+      
+      console.log(`Synced ${syncedCount} new campaigns, updated metrics for ${updatedCount} existing campaigns`);
     }
 
     // Step 2: Fetch existing engagements (excluding Unassigned placeholder)
@@ -413,6 +491,7 @@ Deno.serve(async (req) => {
     }
 
     console.log(`\n=== AUTO-PAIR RESULTS ===`);
+    console.log(`NocoDB campaigns synced: ${syncedCount} new, ${updatedCount} updated`);
     console.log(`Campaigns linked: ${result.campaignsLinked}`);
     console.log(`Campaigns unlinked: ${result.campaignsUnlinked}`);
     console.log(`Ambiguous/problematic: ${result.ambiguous.length}`);
@@ -421,7 +500,8 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         dry_run,
-        nocodbSynced: nocodbCampaigns.length,
+        nocodbSynced: syncedCount,
+        nocodbUpdated: updatedCount,
         ...result,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
