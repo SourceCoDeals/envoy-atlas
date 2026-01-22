@@ -144,75 +144,53 @@ function parseCampaignSegments(name: string): string[] {
 }
 
 /**
- * Find matching engagement for a campaign
- * Returns the engagement if BOTH sponsor AND client match with high confidence
+ * Find matching engagement for a campaign using POSITIONAL matching:
+ * - Segment 0 (first part) MUST match sponsor_name
+ * - Segment 1 (second part) MUST match portfolio_company
  */
 function findMatchingEngagement(
   segments: string[], 
   rawCampaignName: string,
   engagements: Engagement[]
 ): { match: Engagement | null; ambiguous: boolean; reason?: string } {
-  const matches: { eng: Engagement; sponsorSeg: string; clientSeg: string; score: number }[] = [];
+  if (segments.length < 2) {
+    return { match: null, ambiguous: false, reason: 'Need at least 2 segments for sponsor+client' };
+  }
+
+  const sponsorSegment = segments[0]; // First segment = Sponsor
+  const clientSegment = segments[1];  // Second segment = Client
   
-  // Also try matching against the full cleaned campaign name for embedded client names
-  const cleanedName = stripStatusPrefix(rawCampaignName).toLowerCase();
+  const matches: { eng: Engagement; score: number }[] = [];
   
   for (const eng of engagements) {
     if (!eng.sponsor_name || !eng.portfolio_company) continue;
     
-    let sponsorMatch: string | null = null;
-    let clientMatch: string | null = null;
     let score = 0;
     
-    // Check segments for sponsor match
-    for (const seg of segments) {
-      if (!sponsorMatch && isHighConfidenceMatch(seg, eng.sponsor_name)) {
-        sponsorMatch = seg;
-        score += 10;
-      }
+    // Segment 0 MUST match sponsor_name
+    const sponsorMatches = isHighConfidenceMatch(sponsorSegment, eng.sponsor_name);
+    if (sponsorMatches) {
+      score += 10;
     }
     
-    // Check segments for client match
-    for (const seg of segments) {
-      if (!clientMatch && isHighConfidenceMatch(seg, eng.portfolio_company)) {
-        clientMatch = seg;
-        score += 20; // Client match is more specific
-      }
+    // Segment 1 MUST match portfolio_company
+    const clientMatches = isHighConfidenceMatch(clientSegment, eng.portfolio_company);
+    if (clientMatches) {
+      score += 20;
     }
     
-    // If client not found in segments, check if it appears anywhere in the campaign name
-    // This handles cases like "Trivest - JF - Funeral Services" where "Funeral Services" is in position 3
-    if (!clientMatch) {
-      const normalizedClient = normalizeText(eng.portfolio_company);
-      if (normalizedClient.length >= 4 && cleanedName.includes(normalizedClient)) {
-        clientMatch = eng.portfolio_company;
-        score += 15; // Slightly lower score for embedded match
-      }
-    }
-    
-    // BOTH must match
-    if (sponsorMatch && clientMatch) {
-      matches.push({ eng, sponsorSeg: sponsorMatch, clientSeg: clientMatch, score });
+    // BOTH must match - require score of 30 (10 for sponsor + 20 for client)
+    if (score === 30) {
+      matches.push({ eng, score });
     }
   }
   
   if (matches.length === 0) {
-    return { match: null, ambiguous: false, reason: 'No matching sponsor+client combo found' };
-  }
-  
-  // If multiple matches, pick the one with highest score (most specific client match)
-  if (matches.length > 1) {
-    matches.sort((a, b) => b.score - a.score);
-    // If top two have same score, it's truly ambiguous
-    if (matches[0].score === matches[1].score) {
-      return { 
-        match: null, 
-        ambiguous: true, 
-        reason: `Multiple matches: ${matches.map(m => m.eng.name).join(', ')}` 
-      };
-    }
-    // Otherwise take the highest scored match
-    return { match: matches[0].eng, ambiguous: false };
+    return { 
+      match: null, 
+      ambiguous: false, 
+      reason: `No match: sponsor="${sponsorSegment}" client="${clientSegment}"` 
+    };
   }
   
   if (matches.length > 1) {
