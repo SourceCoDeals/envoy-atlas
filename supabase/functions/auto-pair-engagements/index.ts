@@ -229,7 +229,89 @@ Deno.serve(async (req) => {
 
     console.log(`Auto-pairing campaigns for client ${client_id}, dry_run: ${dry_run}`);
 
-    // Fetch existing engagements (excluding Unassigned placeholder)
+    // Step 1: Upsert NocoDB campaigns into campaigns table
+    const [smartleadRes, replyioRes] = await Promise.all([
+      supabase.from('nocodb_smartlead_campaigns').select('campaign_id, campaign_name, status, campaign_created_date, updated_at'),
+      supabase.from('nocodb_replyio_campaigns').select('campaign_id, campaign_name, status, campaign_created_date, updated_at'),
+    ]);
+
+    const nocodbCampaigns: { external_id: string; name: string; status: string; campaign_type: string; created_at: string; updated_at: string }[] = [];
+    
+    (smartleadRes.data || []).forEach(row => {
+      if (row.campaign_id && row.campaign_name) {
+        nocodbCampaigns.push({
+          external_id: row.campaign_id,
+          name: row.campaign_name,
+          status: row.status || 'unknown',
+          campaign_type: 'smartlead',
+          created_at: row.campaign_created_date || new Date().toISOString(),
+          updated_at: row.updated_at || new Date().toISOString(),
+        });
+      }
+    });
+    
+    (replyioRes.data || []).forEach(row => {
+      if (row.campaign_id && row.campaign_name) {
+        nocodbCampaigns.push({
+          external_id: row.campaign_id,
+          name: row.campaign_name,
+          status: row.status || 'unknown',
+          campaign_type: 'replyio',
+          created_at: row.campaign_created_date || new Date().toISOString(),
+          updated_at: row.updated_at || new Date().toISOString(),
+        });
+      }
+    });
+
+    console.log(`Found ${nocodbCampaigns.length} NocoDB campaigns to sync`);
+
+    // Sync NocoDB campaigns to campaigns table
+    let syncedCount = 0;
+    if (!dry_run && nocodbCampaigns.length > 0) {
+      // First, get all existing campaign names to avoid duplicates
+      const { data: existingCampaigns } = await supabase
+        .from('campaigns')
+        .select('name, external_id');
+      
+      const existingNames = new Set((existingCampaigns || []).map(c => c.name?.toLowerCase().trim()));
+      const existingExternalIds = new Set((existingCampaigns || []).map(c => c.external_id).filter(Boolean));
+      
+      // Filter to only campaigns that don't exist yet
+      const newCampaigns = nocodbCampaigns.filter(c => 
+        !existingNames.has(c.name?.toLowerCase().trim()) && 
+        !existingExternalIds.has(c.external_id)
+      );
+      
+      console.log(`${newCampaigns.length} new campaigns to insert (${nocodbCampaigns.length - newCampaigns.length} already exist)`);
+
+      // Insert in batches of 100
+      for (let i = 0; i < newCampaigns.length; i += 100) {
+        const batch = newCampaigns.slice(i, i + 100);
+        const insertData = batch.map(c => ({
+          external_id: c.external_id,
+          name: c.name,
+          status: c.status,
+          campaign_type: c.campaign_type,
+          created_at: c.created_at,
+          updated_at: c.updated_at,
+          engagement_id: '00000000-0000-0000-0000-000000000000', // Default to unassigned
+        }));
+
+        const { data: inserted, error: insertError } = await supabase
+          .from('campaigns')
+          .insert(insertData)
+          .select();
+
+        if (insertError) {
+          console.error('Insert error:', insertError);
+        } else {
+          syncedCount += (inserted?.length || 0);
+        }
+      }
+      console.log(`Synced ${syncedCount} new NocoDB campaigns to campaigns table`);
+    }
+
+    // Step 2: Fetch existing engagements (excluding Unassigned placeholder)
     const { data: existingEngagements, error: engagementsError } = await supabase
       .from('engagements')
       .select('id, name, sponsor_name, portfolio_company')
@@ -245,7 +327,7 @@ Deno.serve(async (req) => {
       console.log(`  Engagement: "${eng.name}" | Sponsor: "${eng.sponsor_name}" | Client: "${eng.portfolio_company}"`);
     }
 
-    // Fetch ALL unassigned campaigns
+    // Step 3: Fetch ALL unassigned campaigns
     const { data: campaigns, error: campaignsError } = await supabase
       .from('campaigns')
       .select('id, name, engagement_id')
@@ -339,6 +421,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         dry_run,
+        nocodbSynced: nocodbCampaigns.length,
         ...result,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
