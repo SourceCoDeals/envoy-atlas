@@ -9,7 +9,92 @@ interface AutoPairResult {
   campaignsLinked: number;
   campaignsSkipped: number;
   skippedReasons: { name: string; reason: string }[];
-  details: { engagement: string; campaigns: string[] }[];
+  details: { engagement: string; campaigns: string[]; confidence: string }[];
+}
+
+interface MatchPattern {
+  pattern: RegExp;
+  weight: number; // name=3, portfolio=2, sponsor=1
+  term: string;
+  type: 'name' | 'portfolio' | 'sponsor';
+}
+
+interface EngagementMatcher {
+  id: string;
+  name: string;
+  patterns: MatchPattern[];
+}
+
+// Minimum score threshold to consider a match valid
+// A portfolio company match (weight=2) of 8 chars = 16 points minimum
+const MIN_SCORE_THRESHOLD = 12;
+
+// Minimum term length to create a pattern (avoids short word collisions)
+const MIN_TERM_LENGTH = 4;
+
+/**
+ * Creates matching patterns for a term
+ * Returns multiple patterns to handle different formats:
+ * - Word boundary match for exact term
+ * - Flexible space matching for compound words ("Broad Sky" matches "BroadSky")
+ */
+function createMatchPatterns(term: string): RegExp[] {
+  const patterns: RegExp[] = [];
+  const trimmed = term.trim();
+  if (trimmed.length < MIN_TERM_LENGTH) return patterns;
+  
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  
+  // Standard word boundary pattern
+  patterns.push(new RegExp(`\\b${escaped}\\b`, 'i'));
+  
+  // For multi-word terms, create pattern that allows optional/no spaces
+  // "Broad Sky" should match "BroadSky", "Broad-Sky", "Broad Sky"
+  if (trimmed.includes(' ')) {
+    const noSpaceVersion = escaped.replace(/\\ /g, '[\\s\\-]*');
+    patterns.push(new RegExp(noSpaceVersion, 'i'));
+  }
+  
+  // For camelCase terms, create pattern that allows spaces
+  // "BroadSky" should match "Broad Sky", "Broad-Sky"
+  const camelSplit = trimmed.replace(/([a-z])([A-Z])/g, '$1 $2');
+  if (camelSplit !== trimmed && camelSplit.length >= MIN_TERM_LENGTH) {
+    const camelEscaped = camelSplit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const flexibleCamel = camelEscaped.replace(/ /g, '[\\s\\-]*');
+    patterns.push(new RegExp(flexibleCamel, 'i'));
+  }
+  
+  return patterns;
+}
+
+/**
+ * Extracts meaningful terms from a string (for multi-word matching)
+ * Returns both the full string and significant individual words
+ */
+function extractTerms(text: string | null): string[] {
+  if (!text) return [];
+  
+  const terms: string[] = [];
+  const trimmed = text.trim();
+  
+  // Add full string if long enough
+  if (trimmed.length >= MIN_TERM_LENGTH) {
+    terms.push(trimmed);
+  }
+  
+  // Add significant words (5+ chars) that aren't common words
+  const commonWords = new Set(['capital', 'group', 'partners', 'holdings', 'management', 'services', 'company', 'corp', 'corporation', 'inc', 'llc', 'fund', 'funds']);
+  const words = trimmed.split(/[\s\-\/]+/).filter(w => 
+    w.length >= 5 && !commonWords.has(w.toLowerCase())
+  );
+  
+  for (const word of words) {
+    if (!terms.includes(word)) {
+      terms.push(word);
+    }
+  }
+  
+  return terms;
 }
 
 Deno.serve(async (req) => {
@@ -23,9 +108,10 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { client_id, dry_run = false } = await req.json() as { 
+    const { client_id, dry_run = false, fix_mislinks = false } = await req.json() as { 
       client_id: string;
       dry_run?: boolean;
+      fix_mislinks?: boolean; // Re-evaluate all campaigns, not just unlinked ones
     };
 
     if (!client_id) {
@@ -35,67 +121,99 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Auto-pairing campaigns for client ${client_id}, dry_run: ${dry_run}`);
+    console.log(`Auto-pairing campaigns for client ${client_id}, dry_run: ${dry_run}, fix_mislinks: ${fix_mislinks}`);
 
-    // Fetch all campaigns
-    const { data: campaigns, error: campaignsError } = await supabase
-      .from('campaigns')
-      .select('id, name, engagement_id')
-      .order('name');
-
-    if (campaignsError) {
-      throw new Error(`Failed to fetch campaigns: ${campaignsError.message}`);
-    }
-
-    // Fetch existing engagements
+    // Fetch existing engagements for this client
     const { data: existingEngagements, error: engagementsError } = await supabase
       .from('engagements')
-      .select('id, name, sponsor_name, portfolio_company, industry, status')
+      .select('id, name, sponsor_name, portfolio_company')
       .eq('client_id', client_id);
 
     if (engagementsError) {
       throw new Error(`Failed to fetch engagements: ${engagementsError.message}`);
     }
 
-    console.log(`Found ${campaigns?.length || 0} campaigns and ${existingEngagements?.length || 0} existing engagements`);
+    if (!existingEngagements || existingEngagements.length === 0) {
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          dry_run,
+          campaignsLinked: 0, 
+          campaignsSkipped: 0,
+          skippedReasons: [],
+          details: [],
+          message: 'No engagements found for this client'
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    const result: AutoPairResult = {
-      campaignsLinked: 0,
-      campaignsSkipped: 0,
-      skippedReasons: [],
-      details: [],
-    };
+    const engagementIds = existingEngagements.map(e => e.id);
+
+    // Fetch campaigns - either all linked to this client's engagements (fix_mislinks) or just for processing
+    let campaignsQuery = supabase
+      .from('campaigns')
+      .select('id, name, engagement_id')
+      .order('name');
+
+    if (fix_mislinks) {
+      // Get all campaigns linked to any engagement of this client
+      campaignsQuery = campaignsQuery.in('engagement_id', engagementIds);
+    } else {
+      // Only get campaigns already linked (we can't create new links without an engagement_id due to NOT NULL)
+      campaignsQuery = campaignsQuery.in('engagement_id', engagementIds);
+    }
+
+    const { data: campaigns, error: campaignsError } = await campaignsQuery;
+
+    if (campaignsError) {
+      throw new Error(`Failed to fetch campaigns: ${campaignsError.message}`);
+    }
+
+    console.log(`Found ${campaigns?.length || 0} campaigns and ${existingEngagements.length} engagements`);
+
+    // Check for sponsors with multiple engagements (ambiguous)
+    const sponsorEngagementCount: Map<string, number> = new Map();
+    for (const eng of existingEngagements) {
+      if (eng.sponsor_name) {
+        const sponsor = eng.sponsor_name.toLowerCase();
+        sponsorEngagementCount.set(sponsor, (sponsorEngagementCount.get(sponsor) || 0) + 1);
+      }
+    }
+    const ambiguousSponsors = new Set(
+      [...sponsorEngagementCount.entries()]
+        .filter(([_, count]) => count > 1)
+        .map(([sponsor]) => sponsor)
+    );
+
+    console.log(`Ambiguous sponsors (multiple engagements): ${[...ambiguousSponsors].join(', ')}`);
 
     // Build matching patterns from existing engagements
-    const engagementMatchers: { id: string; name: string; patterns: RegExp[] }[] = [];
+    const engagementMatchers: EngagementMatcher[] = [];
     
-    for (const eng of existingEngagements || []) {
-      const patterns: RegExp[] = [];
+    for (const eng of existingEngagements) {
+      const patterns: MatchPattern[] = [];
       
-      // Match by engagement name
-      if (eng.name) {
-        const escaped = eng.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        patterns.push(new RegExp(escaped, 'i'));
+      // Priority 1: Engagement name (weight = 3)
+      for (const term of extractTerms(eng.name)) {
+        for (const pattern of createMatchPatterns(term)) {
+          patterns.push({ pattern, weight: 3, term, type: 'name' });
+        }
       }
       
-      // Match by sponsor name
-      if (eng.sponsor_name) {
-        const escaped = eng.sponsor_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        patterns.push(new RegExp(escaped, 'i'));
+      // Priority 2: Portfolio company (weight = 2)
+      for (const term of extractTerms(eng.portfolio_company)) {
+        for (const pattern of createMatchPatterns(term)) {
+          patterns.push({ pattern, weight: 2, term, type: 'portfolio' });
+        }
       }
       
-      // Match by portfolio company
-      if (eng.portfolio_company) {
-        const escaped = eng.portfolio_company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        patterns.push(new RegExp(escaped, 'i'));
-      }
-      
-      // Match by industry keywords
-      if (eng.industry) {
-        const industryWords = eng.industry.split(/[\s\/\-,]+/).filter((w: string) => w.length > 3);
-        for (const word of industryWords) {
-          const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          patterns.push(new RegExp(`\\b${escaped}\\b`, 'i'));
+      // Priority 3: Sponsor name (weight = 1) - but only if not ambiguous
+      if (eng.sponsor_name && !ambiguousSponsors.has(eng.sponsor_name.toLowerCase())) {
+        for (const term of extractTerms(eng.sponsor_name)) {
+          for (const pattern of createMatchPatterns(term)) {
+            patterns.push({ pattern, weight: 1, term, type: 'sponsor' });
+          }
         }
       }
       
@@ -104,12 +222,23 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Group campaigns by matched engagement
-    const engagementCampaigns: Map<string, { name: string; campaigns: { id: string; name: string }[] }> = new Map();
+    const result: AutoPairResult = {
+      campaignsLinked: 0,
+      campaignsSkipped: 0,
+      skippedReasons: [],
+      details: [],
+    };
+
+    // Group campaigns by their best matched engagement
+    const engagementCampaigns: Map<string, { 
+      name: string; 
+      campaigns: { id: string; name: string }[];
+      confidence: 'high' | 'medium';
+    }> = new Map();
 
     for (const campaign of campaigns || []) {
-      // Skip internal campaigns
-      if (/sourceco|^new sequence|test/i.test(campaign.name)) {
+      // Skip internal/test campaigns
+      if (/sourceco|^new sequence|^test\b/i.test(campaign.name)) {
         result.campaignsSkipped++;
         result.skippedReasons.push({ 
           name: campaign.name, 
@@ -118,38 +247,85 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Find best matching engagement
-      let bestMatch: { id: string; name: string; score: number } | null = null;
+      // Find best matching engagement using weighted scoring
+      let bestMatch: { 
+        id: string; 
+        name: string; 
+        score: number; 
+        confidence: 'high' | 'medium';
+        matchedTerms: string[];
+      } | null = null;
       
       for (const matcher of engagementMatchers) {
-        let score = 0;
-        for (const pattern of matcher.patterns) {
+        let totalScore = 0;
+        let hasNameOrPortfolioMatch = false;
+        const matchedTerms: string[] = [];
+        
+        for (const { pattern, weight, term, type } of matcher.patterns) {
           if (pattern.test(campaign.name)) {
-            score++;
+            // Score = weight * term length (longer matches score higher)
+            const matchScore = weight * term.length;
+            totalScore += matchScore;
+            matchedTerms.push(`${type}:${term}`);
+            
+            if (type === 'name' || type === 'portfolio') {
+              hasNameOrPortfolioMatch = true;
+            }
           }
         }
-        if (score > 0 && (!bestMatch || score > bestMatch.score)) {
-          bestMatch = { id: matcher.id, name: matcher.name, score };
+        
+        // Must meet minimum threshold
+        if (totalScore < MIN_SCORE_THRESHOLD) continue;
+        
+        // Determine confidence level
+        const confidence: 'high' | 'medium' = hasNameOrPortfolioMatch ? 'high' : 'medium';
+        
+        // Take best score, preferring higher confidence on ties
+        if (!bestMatch || 
+            totalScore > bestMatch.score || 
+            (totalScore === bestMatch.score && confidence === 'high' && bestMatch.confidence === 'medium')) {
+          bestMatch = { 
+            id: matcher.id, 
+            name: matcher.name, 
+            score: totalScore, 
+            confidence,
+            matchedTerms 
+          };
         }
       }
 
       if (bestMatch) {
-        if (!engagementCampaigns.has(bestMatch.id)) {
-          engagementCampaigns.set(bestMatch.id, { name: bestMatch.name, campaigns: [] });
+        // Check if this is actually a change (for fix_mislinks mode)
+        if (campaign.engagement_id === bestMatch.id) {
+          // Already correctly linked, skip
+          continue;
         }
-        engagementCampaigns.get(bestMatch.id)!.campaigns.push({ id: campaign.id, name: campaign.name });
+
+        if (!engagementCampaigns.has(bestMatch.id)) {
+          engagementCampaigns.set(bestMatch.id, { 
+            name: bestMatch.name, 
+            campaigns: [],
+            confidence: bestMatch.confidence
+          });
+        }
+        engagementCampaigns.get(bestMatch.id)!.campaigns.push({ 
+          id: campaign.id, 
+          name: campaign.name 
+        });
+        
+        console.log(`Match: "${campaign.name}" → "${bestMatch.name}" (score: ${bestMatch.score}, confidence: ${bestMatch.confidence}, terms: ${bestMatch.matchedTerms.join(', ')})`);
       } else {
         result.campaignsSkipped++;
         result.skippedReasons.push({ 
           name: campaign.name, 
-          reason: 'No matching engagement found'
+          reason: 'No matching engagement found (below threshold)'
         });
       }
     }
 
-    console.log(`Matched campaigns to ${engagementCampaigns.size} engagements`);
+    console.log(`Matched campaigns to ${engagementCampaigns.size} engagements for relinking`);
 
-    // Link campaigns to engagements
+    // Link/relink campaigns to their correct engagements
     for (const [engagementId, group] of engagementCampaigns) {
       if (!dry_run) {
         const campaignIds = group.campaigns.map(c => c.id);
@@ -173,16 +349,17 @@ Deno.serve(async (req) => {
       result.details.push({
         engagement: group.name,
         campaigns: group.campaigns.map(c => c.name),
+        confidence: group.confidence,
       });
     }
 
-    console.log(`Auto-pair complete: ${result.campaignsLinked} campaigns linked, ${result.campaignsSkipped} skipped`);
+    console.log(`Auto-pair complete: ${result.campaignsLinked} campaigns ${dry_run ? 'would be ' : ''}linked, ${result.campaignsSkipped} skipped`);
 
     return new Response(
       JSON.stringify({
         success: true,
         dry_run,
-        engagementsCreated: 0, // Never create new engagements
+        fix_mislinks,
         ...result,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
