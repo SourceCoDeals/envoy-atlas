@@ -3746,8 +3746,22 @@ export type Database = {
           step3_subject: string | null
           step4_body: string | null
           step4_subject: string | null
+          step5_body: string | null
+          step5_subject: string | null
+          step6_body: string | null
+          step6_subject: string | null
+          step7_body: string | null
+          step7_subject: string | null
+          step8_body: string | null
+          step8_subject: string | null
+          step9_body: string | null
+          step9_subject: string | null
           steps_count: number | null
           synced_at: string
+          total_emails_sent: number | null
+          total_leads: number | null
+          total_replies: number | null
+          unique_emails_sent: number | null
           updated_at: string
         }
         Insert: {
@@ -3776,8 +3790,22 @@ export type Database = {
           step3_subject?: string | null
           step4_body?: string | null
           step4_subject?: string | null
+          step5_body?: string | null
+          step5_subject?: string | null
+          step6_body?: string | null
+          step6_subject?: string | null
+          step7_body?: string | null
+          step7_subject?: string | null
+          step8_body?: string | null
+          step8_subject?: string | null
+          step9_body?: string | null
+          step9_subject?: string | null
           steps_count?: number | null
           synced_at?: string
+          total_emails_sent?: number | null
+          total_leads?: number | null
+          total_replies?: number | null
+          unique_emails_sent?: number | null
           updated_at?: string
         }
         Update: {
@@ -3806,8 +3834,22 @@ export type Database = {
           step3_subject?: string | null
           step4_body?: string | null
           step4_subject?: string | null
+          step5_body?: string | null
+          step5_subject?: string | null
+          step6_body?: string | null
+          step6_subject?: string | null
+          step7_body?: string | null
+          step7_subject?: string | null
+          step8_body?: string | null
+          step8_subject?: string | null
+          step9_body?: string | null
+          step9_subject?: string | null
           steps_count?: number | null
           synced_at?: string
+          total_emails_sent?: number | null
+          total_leads?: number | null
+          total_replies?: number | null
+          unique_emails_sent?: number | null
           updated_at?: string
         }
         Relationships: []

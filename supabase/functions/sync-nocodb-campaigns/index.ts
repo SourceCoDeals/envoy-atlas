@@ -16,7 +16,7 @@ interface SmartLeadRecord {
   "Campaign Name": string;
   Status: string;
   "Campaign Created Date": string;
-  "# of Steps in Sequence": number;
+  "# of Steps in Sequence": number | null;
   "Step1 Subject": string | null;
   "Step1 Body": string | null;
   "Step2 Subject": string | null;
@@ -25,14 +25,28 @@ interface SmartLeadRecord {
   "Step3 Body": string | null;
   "Step4 Subject": string | null;
   "Step4 Body": string | null;
-  "Leads in Progress": number;
-  "Leads Completed": number;
-  "Leads Interested": number;
-  "Leads Not Started": number;
-  "Leads Paused": number;
-  "Leads Stopped": number;
-  "Leads Blocked": number;
-  "Link to Campaign": string;
+  "Step5 Subject": string | null;
+  "Step5 Body": string | null;
+  "Step6 Subject": string | null;
+  "Step6 Body": string | null;
+  "Step7 Subject": string | null;
+  "Step7 Body": string | null;
+  "Step8 Subject": string | null;
+  "Step8 Body": string | null;
+  "Step9 Subject": string | null;
+  "Step9 Body": string | null;
+  "Leads in Progress": number | null;
+  "Leads Completed": number | null;
+  "Leads Interested": number | null;
+  "Leads Not Started": number | null;
+  "Leads Paused": number | null;
+  "Leads Stopped": number | null;
+  "Leads Blocked": number | null;
+  "Link to Campaign": string | null;
+  "Total Emails Sent": number | null;
+  "Total Leads": number | null;
+  "Total Replies": number | null;
+  "Unique Emails Sent": number | null;
   CreatedAt: string;
   UpdatedAt: string;
 }
@@ -43,15 +57,15 @@ interface ReplyIORecord {
   "Campaign Name": string;
   Status: string;
   "Campaign Created Date": string;
-  "People Count": number;
-  "People Active": number;
-  "People Finished": number;
-  "People Paused": number;
-  "# of Deliveries": number;
-  "# of Bounces": number;
-  "# of Replies": number;
-  "# of OOOs": number;
-  "# of OptOuts": number;
+  "People Count": number | null;
+  "People Active": number | null;
+  "People Finished": number | null;
+  "People Paused": number | null;
+  "# of Deliveries": number | null;
+  "# of Bounces": number | null;
+  "# of Replies": number | null;
+  "# of OOOs": number | null;
+  "# of OptOuts": number | null;
   "Step1 Subject": string | null;
   "Step1 Body": string | null;
   "Step2 Subject": string | null;
@@ -82,44 +96,7 @@ function mapSmartLeadRecord(record: SmartLeadRecord) {
     status: record.Status,
     campaign_created_date: record["Campaign Created Date"] || null,
     steps_count: record["# of Steps in Sequence"] || 0,
-    step1_subject: record["Step1 Subject"],
-    step1_body: record["Step1 Body"],
-    step2_subject: record["Step2 Subject"],
-    step2_body: record["Step2 Body"],
-    step3_subject: record["Step3 Subject"],
-    step3_body: record["Step3 Body"],
-    step4_subject: record["Step4 Subject"],
-    step4_body: record["Step4 Body"],
-    leads_in_progress: record["Leads in Progress"] || 0,
-    leads_completed: record["Leads Completed"] || 0,
-    leads_interested: record["Leads Interested"] || 0,
-    leads_not_started: record["Leads Not Started"] || 0,
-    leads_paused: record["Leads Paused"] || 0,
-    leads_stopped: record["Leads Stopped"] || 0,
-    leads_blocked: record["Leads Blocked"] || 0,
-    link_to_campaign: record["Link to Campaign"],
-    nocodb_created_at: record.CreatedAt,
-    nocodb_updated_at: record.UpdatedAt,
-    synced_at: new Date().toISOString(),
-  };
-}
-
-function mapReplyIORecord(record: ReplyIORecord) {
-  return {
-    nocodb_id: record.Id,
-    campaign_id: record["Campaign Id"],
-    campaign_name: record["Campaign Name"],
-    status: record.Status,
-    campaign_created_date: record["Campaign Created Date"] || null,
-    people_count: record["People Count"] || 0,
-    people_active: record["People Active"] || 0,
-    people_finished: record["People Finished"] || 0,
-    people_paused: record["People Paused"] || 0,
-    deliveries: record["# of Deliveries"] || 0,
-    bounces: record["# of Bounces"] || 0,
-    replies: record["# of Replies"] || 0,
-    ooos: record["# of OOOs"] || 0,
-    optouts: record["# of OptOuts"] || 0,
+    // Step copy - all 9 steps
     step1_subject: record["Step1 Subject"],
     step1_body: record["Step1 Body"],
     step2_subject: record["Step2 Subject"],
@@ -138,6 +115,65 @@ function mapReplyIORecord(record: ReplyIORecord) {
     step8_body: record["Step8 Body"],
     step9_subject: record["Step9 Subject"],
     step9_body: record["Step9 Body"],
+    // Lead status breakdown
+    leads_in_progress: record["Leads in Progress"] || 0,
+    leads_completed: record["Leads Completed"] || 0,
+    leads_interested: record["Leads Interested"] || 0,
+    leads_not_started: record["Leads Not Started"] || 0,
+    leads_paused: record["Leads Paused"] || 0,
+    leads_stopped: record["Leads Stopped"] || 0,
+    leads_blocked: record["Leads Blocked"] || 0,
+    // Analytics metrics
+    total_emails_sent: record["Total Emails Sent"] || 0,
+    total_leads: record["Total Leads"] || 0,
+    total_replies: record["Total Replies"] || 0,
+    unique_emails_sent: record["Unique Emails Sent"] || 0,
+    // Links and metadata
+    link_to_campaign: record["Link to Campaign"],
+    nocodb_created_at: record.CreatedAt,
+    nocodb_updated_at: record.UpdatedAt,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+function mapReplyIORecord(record: ReplyIORecord) {
+  return {
+    nocodb_id: record.Id,
+    campaign_id: record["Campaign Id"],
+    campaign_name: record["Campaign Name"],
+    status: record.Status,
+    campaign_created_date: record["Campaign Created Date"] || null,
+    // People/enrollment metrics
+    people_count: record["People Count"] || 0,
+    people_active: record["People Active"] || 0,
+    people_finished: record["People Finished"] || 0,
+    people_paused: record["People Paused"] || 0,
+    // Email metrics
+    deliveries: record["# of Deliveries"] || 0,
+    bounces: record["# of Bounces"] || 0,
+    replies: record["# of Replies"] || 0,
+    ooos: record["# of OOOs"] || 0,
+    optouts: record["# of OptOuts"] || 0,
+    // Step copy - all 9 steps
+    step1_subject: record["Step1 Subject"],
+    step1_body: record["Step1 Body"],
+    step2_subject: record["Step2 Subject"],
+    step2_body: record["Step2 Body"],
+    step3_subject: record["Step3 Subject"],
+    step3_body: record["Step3 Body"],
+    step4_subject: record["Step4 Subject"],
+    step4_body: record["Step4 Body"],
+    step5_subject: record["Step5 Subject"],
+    step5_body: record["Step5 Body"],
+    step6_subject: record["Step6 Subject"],
+    step6_body: record["Step6 Body"],
+    step7_subject: record["Step7 Subject"],
+    step7_body: record["Step7 Body"],
+    step8_subject: record["Step8 Subject"],
+    step8_body: record["Step8 Body"],
+    step9_subject: record["Step9 Subject"],
+    step9_body: record["Step9 Body"],
+    // Metadata
     nocodb_created_at: record.CreatedAt,
     nocodb_updated_at: record.UpdatedAt,
     synced_at: new Date().toISOString(),
