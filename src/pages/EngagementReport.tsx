@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useEngagementReport } from '@/hooks/useEngagementReport';
 import { useCampaignLinking, UnlinkedCampaign } from '@/hooks/useCampaignLinking';
@@ -15,6 +15,7 @@ import { EmailReportTab } from '@/components/engagementReport/EmailReportTab';
 import { CallingReportTab } from '@/components/engagementReport/CallingReportTab';
 import { CampaignSummaryCard } from '@/components/engagementReport/CampaignSummaryCard';
 import { LinkedCampaignsSection } from '@/components/engagementReport/LinkedCampaignsSection';
+import { DataAvailabilitySummary } from '@/components/engagementReport/DataAvailabilitySummary';
 import { LinkCampaignsDialog, UnlinkedCampaign as DialogCampaign } from '@/components/engagements/LinkCampaignsDialog';
 import { ArrowLeft, Share2, Mail, Phone, Target, Calendar, Building2, Briefcase, Building, Link2, Plus, History, Loader2, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -30,6 +31,8 @@ export default function EngagementReport() {
   const [unlinkedCampaigns, setUnlinkedCampaigns] = useState<UnlinkedCampaign[]>([]);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [isGeneratingBreakdown, setIsGeneratingBreakdown] = useState(false);
+  const [isClassifyingReplies, setIsClassifyingReplies] = useState(false);
+  const backfillAttemptedRef = useRef(false);
   const dateRange = getDateRange(dateRangeOption);
   
   const { linkCampaignsToEngagement, fetchCampaignsNotInEngagement } = useCampaignLinking();
@@ -50,6 +53,22 @@ export default function EngagementReport() {
 
     if (shouldAutoSwitch) setDateRangeOption('all');
   }, [data?.dataAvailability, dateRangeOption]);
+
+  // Auto-trigger backfill when campaigns are linked but no weekly performance exists
+  useEffect(() => {
+    if (loading || backfillAttemptedRef.current) return;
+    if (!data || !engagementId) return;
+
+    const hasLinkedCampaigns = data.linkedCampaignsWithStats.length > 0;
+    const hasSentEmails = data.emailMetrics.sent > 0;
+    const hasWeeklyData = data.weeklyPerformance && data.weeklyPerformance.length > 0;
+
+    if (hasLinkedCampaigns && hasSentEmails && !hasWeeklyData) {
+      console.log('[EngagementReport] Auto-triggering backfill for engagement:', engagementId);
+      backfillAttemptedRef.current = true;
+      handleGenerateWeeklyBreakdown();
+    }
+  }, [loading, data, engagementId]);
 
   // Fetch unlinked campaigns when opening dialog
   const handleOpenLinkDialog = useCallback(async () => {
@@ -116,6 +135,28 @@ export default function EngagementReport() {
       toast.error('Failed to generate weekly breakdown');
     } finally {
       setIsGeneratingBreakdown(false);
+    }
+  }, [engagementId, refetch]);
+
+  // Handle classifying replies
+  const handleClassifyReplies = useCallback(async () => {
+    if (!engagementId) return;
+    
+    setIsClassifyingReplies(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('classify-replies', {
+        body: { engagement_id: engagementId },
+      });
+      
+      if (error) throw error;
+      
+      toast.success(`Classified ${data?.classified || 0} replies`);
+      refetch();
+    } catch (err) {
+      console.error('Classify replies error:', err);
+      toast.error('Failed to classify replies');
+    } finally {
+      setIsClassifyingReplies(false);
     }
   }, [engagementId, refetch]);
 
@@ -322,10 +363,10 @@ export default function EngagementReport() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Positive Responses</CardTitle>
-              <Mail className="h-4 w-4 text-green-500" />
+              <Mail className="h-4 w-4 text-success" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">{keyMetrics.positiveResponses}</div>
+              <div className="text-2xl font-bold text-success">{keyMetrics.positiveResponses}</div>
               <p className="text-xs text-muted-foreground">
                 {keyMetrics.responseRate.toFixed(1)}% response rate
               </p>
@@ -450,6 +491,22 @@ export default function EngagementReport() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* Data Availability Summary */}
+        <DataAvailabilitySummary
+          linkedCampaigns={linkedCampaignsWithStats}
+          emailMetrics={emailMetrics}
+          callingMetrics={callingMetrics}
+          infrastructureMetrics={data.infrastructureMetrics}
+          hasWeeklyPerformance={Boolean(data.weeklyPerformance && data.weeklyPerformance.length > 0)}
+          hasEnrollmentData={Boolean(enrollmentMetrics && enrollmentMetrics.totalLeads > 0)}
+          hasContacts={Boolean(dataAvailability?.callingData)} // proxy for contacts
+          hasVariants={false} // not currently tracked
+          onGenerateBreakdown={handleGenerateWeeklyBreakdown}
+          onClassifyReplies={handleClassifyReplies}
+          isGeneratingBreakdown={isGeneratingBreakdown}
+          isClassifying={isClassifyingReplies}
+        />
 
         {/* Linked Campaigns Section - Always visible */}
         <LinkedCampaignsSection

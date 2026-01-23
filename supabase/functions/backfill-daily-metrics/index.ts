@@ -96,17 +96,32 @@ Deno.serve(async (req) => {
       // Determine date range from campaign created_at and updated_at
       // Fall back to settings.campaign_created_date if available
       const settings = campaign.settings as Record<string, string> | null;
-      const createdDateStr = settings?.campaign_created_date || campaign.created_at;
-      const updatedDateStr = campaign.updated_at || new Date().toISOString();
+      let createdDateStr = settings?.campaign_created_date || campaign.created_at;
+      let updatedDateStr = campaign.updated_at || new Date().toISOString();
 
-      const createdDate = new Date(createdDateStr);
-      const updatedDate = new Date(updatedDateStr);
+      // Validate dates - ensure we have valid dates
+      let createdDate = new Date(createdDateStr);
+      let updatedDate = new Date(updatedDateStr);
 
-      // Calculate weeks between dates
+      // If created_at is invalid or in the future, use a sensible fallback
+      const now = new Date();
+      if (isNaN(createdDate.getTime()) || createdDate > now) {
+        console.warn(`[backfill-daily-metrics] Invalid created_at for campaign ${campaign.name}, using 90 days ago`);
+        createdDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      }
+
+      // If updated_at is before created_at or invalid, use now
+      if (isNaN(updatedDate.getTime()) || updatedDate < createdDate) {
+        console.warn(`[backfill-daily-metrics] Invalid updated_at for campaign ${campaign.name}, using now`);
+        updatedDate = now;
+      }
+
+      // Calculate weeks between dates - ensure at least 1 week, cap at 52 weeks for sanity
       const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-      const weeksDiff = Math.max(1, Math.ceil((updatedDate.getTime() - createdDate.getTime()) / msPerWeek));
+      let weeksDiff = Math.ceil((updatedDate.getTime() - createdDate.getTime()) / msPerWeek);
+      weeksDiff = Math.max(1, Math.min(weeksDiff, 52));
 
-      console.log(`[backfill-daily-metrics] Campaign ${campaign.name}: ${weeksDiff} weeks, ${campaign.total_sent} sent`);
+      console.log(`[backfill-daily-metrics] Campaign ${campaign.name}: ${weeksDiff} weeks (${createdDate.toISOString().split('T')[0]} to ${updatedDate.toISOString().split('T')[0]}), ${campaign.total_sent} sent`);
 
       // Distribute totals across weeks
       const sentPerWeek = Math.floor((campaign.total_sent || 0) / weeksDiff);
