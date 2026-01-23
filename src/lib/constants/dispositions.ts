@@ -630,6 +630,7 @@ export function getColdCallDispositionMatrix(): Array<{
     // Voicemail dispositions
     { disposition: 'voicemail', displayName: 'Voicemail', totalCalls: true, connections: false, meetings: false, voicemails: true, badData: false, notes: 'Standard VM' },
     { disposition: 'live voicemail', displayName: 'Live Voicemail', totalCalls: true, connections: false, meetings: false, voicemails: true, badData: false, notes: 'Live VM drop' },
+    { disposition: 'voicemail drop', displayName: 'Voicemail Drop', totalCalls: true, connections: false, meetings: false, voicemails: true, badData: false, notes: 'Pre-recorded VM, never a connection' },
     // Non-connection dispositions
     { disposition: 'no answer', displayName: 'No Answer', totalCalls: true, connections: false, meetings: false, voicemails: false, badData: false, notes: 'No pickup' },
     // Bad data dispositions
