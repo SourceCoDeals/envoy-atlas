@@ -13,26 +13,14 @@ import {
 } from 'recharts';
 import { startOfWeek, subWeeks, format, parseISO, isWithinInterval } from 'date-fns';
 
+interface ColdCallData {
+  called_date: string | null;
+  is_connection: boolean;
+  is_meeting: boolean;
+}
+
 interface WeeklyTrendChartProps {
-  calls: Array<{
-    started_at: string | null;
-    disposition: string | null;
-    talk_duration: number | null;
-    conversation_outcome: string | null;
-    callback_scheduled: boolean | null;
-  }>;
-}
-
-function isMeetingDisposition(disposition: string | null, outcome: string | null, callback: boolean | null): boolean {
-  if (callback) return true;
-  if (outcome === 'meeting_booked') return true;
-  if (!disposition) return false;
-  const lower = disposition.toLowerCase();
-  return lower.includes('meeting') || lower.includes('scheduled') || lower.includes('appointment');
-}
-
-function isConnection(call: { disposition: string | null; talk_duration: number | null }): boolean {
-  return call.disposition === 'connected' || (call.talk_duration != null && call.talk_duration > 30);
+  calls: ColdCallData[];
 }
 
 export function WeeklyTrendChart({ calls }: WeeklyTrendChartProps) {
@@ -53,18 +41,22 @@ export function WeeklyTrendChart({ calls }: WeeklyTrendChartProps) {
       });
     }
 
-    // Group calls by week
+    // Group calls by week using called_date
     const weeklyData = weeks.map(week => {
       const weekCalls = calls.filter(call => {
-        if (!call.started_at) return false;
-        const callDate = parseISO(call.started_at);
-        return isWithinInterval(callDate, { start: week.start, end: week.end });
+        if (!call.called_date) return false;
+        try {
+          // called_date is in YYYY-MM-DD format
+          const callDate = parseISO(call.called_date);
+          return isWithinInterval(callDate, { start: week.start, end: week.end });
+        } catch {
+          return false;
+        }
       });
 
-      const connections = weekCalls.filter(c => isConnection(c)).length;
-      const meetings = weekCalls.filter(c => 
-        isMeetingDisposition(c.disposition, c.conversation_outcome, c.callback_scheduled)
-      ).length;
+      // Use pre-computed flags from cold_calls
+      const connections = weekCalls.filter(c => c.is_connection).length;
+      const meetings = weekCalls.filter(c => c.is_meeting).length;
 
       return {
         week: week.weekLabel,
