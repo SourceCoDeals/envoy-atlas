@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useEnhancedCallingAnalytics, DateRange } from '@/hooks/useEnhancedCallingAnalytics';
+import { useColdCallAnalytics, DateRange, ColdCall } from '@/hooks/useColdCallAnalytics';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { formatScore, formatCallingDuration, getScoreStatus, getScoreStatusColor } from '@/lib/callingConfig';
 import {
@@ -20,11 +20,11 @@ import {
   Filter,
   Flame,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 
 export default function TopCallsWeek() {
   const [dateRange, setDateRange] = useState<DateRange>('7d');
-  const { data, isLoading } = useEnhancedCallingAnalytics(dateRange);
+  const { data, isLoading } = useColdCallAnalytics(dateRange);
   const { config } = useCallingConfig();
 
   const getRankIcon = (index: number) => {
@@ -48,7 +48,7 @@ export default function TopCallsWeek() {
       category: 'Duration',
       insight: 'Longer conversations correlate with higher scores',
       frequency: `Avg ${formatCallingDuration(
-        data.topCalls.reduce((sum, c) => sum + (c.talk_duration || 0), 0) / data.topCalls.length
+        data.topCalls.reduce((sum, c) => sum + (c.call_duration_sec || 0), 0) / data.topCalls.length
       )}`,
     },
     {
@@ -106,6 +106,7 @@ export default function TopCallsWeek() {
                   {data?.topCalls && data.topCalls.length > 0 ? (
                     data.topCalls.slice(0, 10).map((call, index) => {
                       const status = getScoreStatus(call.composite_score, config.overallQualityThresholds);
+                      const isDmConversation = call.is_connection && call.seller_interest_score !== null;
                       return (
                         <div
                           key={call.id}
@@ -121,22 +122,22 @@ export default function TopCallsWeek() {
                           {/* Call Info */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              <p className="font-medium truncate">{call.to_name || call.to_phone || 'Unknown'}</p>
-                              {call.is_dm_conversation && (
+                              <p className="font-medium truncate">{call.to_name || call.to_number || 'Unknown'}</p>
+                              {isDmConversation && (
                                 <Badge variant="secondary" className="text-xs">DM</Badge>
                               )}
                             </div>
                             <div className="flex items-center gap-3 text-sm text-muted-foreground">
                               <span className="flex items-center gap-1">
                                 <User className="h-3 w-3" />
-                                {call.caller_name?.split('@')[0] || 'Unknown'}
+                                {call.analyst?.split('@')[0] || 'Unknown'}
                               </span>
                               <span>
-                                {formatCallingDuration(call.talk_duration)}
+                                {formatCallingDuration(call.call_duration_sec)}
                               </span>
-                              {call.started_at && (
+                              {call.called_date && (
                                 <span>
-                                  {format(new Date(call.started_at), 'MMM d')}
+                                  {format(parseISO(call.called_date), 'MMM d')}
                                 </span>
                               )}
                             </div>
@@ -152,9 +153,9 @@ export default function TopCallsWeek() {
 
                           {/* Actions */}
                           <div className="flex gap-1">
-                            {call.recording_url && (
+                            {call.call_recording_url && (
                               <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                                <a href={call.recording_url} target="_blank" rel="noopener noreferrer">
+                                <a href={call.call_recording_url} target="_blank" rel="noopener noreferrer">
                                   <Play className="h-4 w-4" />
                                 </a>
                               </Button>
@@ -231,21 +232,21 @@ export default function TopCallsWeek() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      <p className="font-medium">{data.topCalls[0].to_name || data.topCalls[0].to_phone}</p>
+                      <p className="font-medium">{data.topCalls[0].to_name || data.topCalls[0].to_number}</p>
                       <p className="text-sm text-muted-foreground">
-                        Rep: {data.topCalls[0].caller_name?.split('@')[0]}
+                        Rep: {data.topCalls[0].analyst?.split('@')[0]}
                       </p>
                       <div className="flex items-center gap-2">
                         <Badge className={getScoreStatusColor(getScoreStatus(data.topCalls[0].composite_score, config.overallQualityThresholds))}>
                           Score: {formatScore(data.topCalls[0].composite_score, config)}
                         </Badge>
                         <Badge variant="outline">
-                          {formatCallingDuration(data.topCalls[0].talk_duration)}
+                          {formatCallingDuration(data.topCalls[0].call_duration_sec)}
                         </Badge>
                       </div>
-                      {data.topCalls[0].recording_url && (
+                      {data.topCalls[0].call_recording_url && (
                         <Button variant="outline" className="w-full mt-3" asChild>
-                          <a href={data.topCalls[0].recording_url} target="_blank" rel="noopener noreferrer">
+                          <a href={data.topCalls[0].call_recording_url} target="_blank" rel="noopener noreferrer">
                             <Play className="h-4 w-4 mr-2" />
                             Listen to Call
                           </a>
@@ -273,7 +274,7 @@ export default function TopCallsWeek() {
                     <div className="space-y-2">
                       {data.hotLeads.slice(0, 3).map(lead => (
                         <div key={lead.id} className="flex items-center justify-between text-sm">
-                          <span className="truncate">{lead.to_name || lead.to_phone}</span>
+                          <span className="truncate">{lead.to_name || lead.to_number}</span>
                           <Badge variant="outline" className="text-orange-500">
                             {formatScore(lead.seller_interest_score, config)}
                           </Badge>
