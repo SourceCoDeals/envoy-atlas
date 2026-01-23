@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Mail, Phone, Calculator, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Mail, Phone, Calculator, CheckCircle2, AlertTriangle, Database } from 'lucide-react';
 import {
   CALLING_BENCHMARKS,
   CONNECTED_DISPOSITIONS,
@@ -11,6 +11,7 @@ import {
   POSITIVE_REPLY_CATEGORIES,
   REPLY_CATEGORIES,
 } from '@/lib/metrics';
+import { getColdCallDispositionMatrix } from '@/lib/constants/dispositions';
 
 interface FormulaRow {
   name: string;
@@ -123,7 +124,17 @@ const callingFormulas: FormulaRow[] = [
     description: 'Average call duration for connected calls (in seconds)',
     benchmark: `${CALLING_BENCHMARKS.avgCallDuration.min / 60}-${CALLING_BENCHMARKS.avgCallDuration.max / 60} min optimal`,
   },
+  {
+    name: 'Composite Score',
+    formula: 'avg(interest, quality, objection, value, script, dm, referral)',
+    function: 'Calculated during NocoDB sync',
+    description: 'Average of 7 AI-scored dimensions (1-10 scale)',
+    benchmark: '≥ 7 excellent, 5-6.9 good, < 5 needs coaching',
+  },
 ];
+
+// Cold Calls disposition matrix for reference
+const coldCallDispositions = getColdCallDispositionMatrix();
 
 const callingClassifications = [
   {
@@ -200,7 +211,7 @@ export function MetricsReferenceSection() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="email-formulas">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="email-formulas" className="text-xs">
                 <Mail className="h-3 w-3 mr-1" />
                 Email Formulas
@@ -208,6 +219,10 @@ export function MetricsReferenceSection() {
               <TabsTrigger value="calling-formulas" className="text-xs">
                 <Phone className="h-3 w-3 mr-1" />
                 Calling Formulas
+              </TabsTrigger>
+              <TabsTrigger value="cold-calls" className="text-xs">
+                <Database className="h-3 w-3 mr-1" />
+                Cold Calls
               </TabsTrigger>
               <TabsTrigger value="calling-class" className="text-xs">
                 <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -324,6 +339,63 @@ export function MetricsReferenceSection() {
                   ))}
                 </TableBody>
               </Table>
+            </TabsContent>
+
+            <TabsContent value="cold-calls" className="mt-4">
+              <div className="mb-4 p-3 bg-purple-50 dark:bg-purple-950/30 rounded-lg border border-purple-200 dark:border-purple-800">
+                <p className="text-sm text-purple-800 dark:text-purple-200">
+                  <strong>cold_calls Table:</strong> Primary data source for Caller Dashboard. Dispositions are normalized (time suffixes stripped) 
+                  and boolean flags are pre-computed during NocoDB sync.
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Disposition</TableHead>
+                    <TableHead className="text-center">Dials</TableHead>
+                    <TableHead className="text-center">Connects</TableHead>
+                    <TableHead className="text-center">Meetings</TableHead>
+                    <TableHead className="text-center">VMs</TableHead>
+                    <TableHead className="text-center">Bad Data</TableHead>
+                    <TableHead>Notes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {coldCallDispositions.map((d) => (
+                    <TableRow key={d.disposition}>
+                      <TableCell>
+                        <Badge variant={d.connections ? 'default' : 'outline'}>
+                          {d.displayName}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {d.connections ? <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {d.meetings ? <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {d.voicemails ? <CheckCircle2 className="h-4 w-4 text-amber-600 mx-auto" /> : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {d.badData ? <AlertTriangle className="h-4 w-4 text-red-600 mx-auto" /> : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{d.notes}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+                <h4 className="font-medium mb-2 text-sm">Interest Classification (seller_interest_score)</h4>
+                <div className="flex gap-4 text-sm">
+                  <Badge variant="default" className="bg-green-600">Yes: ≥ 7</Badge>
+                  <Badge variant="outline" className="border-amber-500 text-amber-600">Maybe: 4–6.9</Badge>
+                  <Badge variant="outline" className="border-red-500 text-red-600">No: &lt; 4</Badge>
+                </div>
+              </div>
             </TabsContent>
 
             <TabsContent value="email-class" className="mt-4">

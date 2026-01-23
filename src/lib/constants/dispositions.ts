@@ -560,6 +560,85 @@ export function getPhoneBurnerDispositionMatrix(): Array<{
   ];
 }
 
+// ============================================================================
+// COLD CALLS TABLE DISPOSITION MAPPINGS (NocoDB → cold_calls)
+// Pre-computed during sync, used for dashboard metrics without runtime calc
+// Reference: cold-calls-sync edge function
+// ============================================================================
+
+export interface ColdCallDispositionFlags {
+  is_connection: boolean;
+  is_meeting: boolean;
+  is_voicemail: boolean;
+  is_bad_data: boolean;
+}
+
+/**
+ * Cold Call disposition mappings for the cold_calls table
+ * These dispositions are normalized (time suffixes stripped) during sync
+ */
+export const COLD_CALL_DISPOSITIONS: Record<string, ColdCallDispositionFlags> = {
+  // CONNECTION DISPOSITIONS (counts toward connections)
+  'receptionist': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'callback requested': { is_connection: true, is_meeting: true, is_voicemail: false, is_bad_data: false },
+  'send email': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'not qualified': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'positive - blacklist co': { is_connection: true, is_meeting: true, is_voicemail: false, is_bad_data: false },
+  'negative - blacklist co': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'negative - blacklist contact': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'hung up': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'meeting booked': { is_connection: true, is_meeting: true, is_voicemail: false, is_bad_data: false },
+  
+  // VOICEMAIL DISPOSITIONS
+  'voicemail': { is_connection: false, is_meeting: false, is_voicemail: true, is_bad_data: false },
+  'live voicemail': { is_connection: false, is_meeting: false, is_voicemail: true, is_bad_data: false },
+  'voicemail drop': { is_connection: false, is_meeting: false, is_voicemail: true, is_bad_data: false },
+  
+  // NO ANSWER / NON-CONNECTION
+  'no answer': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  
+  // BAD DATA
+  'bad phone': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: true },
+  'wrong number': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: true },
+  'do not call': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: true },
+};
+
+/**
+ * Get cold call dispositions matrix for Settings reference UI
+ */
+export function getColdCallDispositionMatrix(): Array<{
+  disposition: string;
+  displayName: string;
+  totalCalls: boolean;
+  connections: boolean;
+  meetings: boolean;
+  voicemails: boolean;
+  badData: boolean;
+  notes: string;
+}> {
+  return [
+    // Connection dispositions
+    { disposition: 'receptionist', displayName: 'Receptionist', totalCalls: true, connections: true, meetings: false, voicemails: false, badData: false, notes: 'Gatekeeper, not DM' },
+    { disposition: 'callback requested', displayName: 'Callback Requested', totalCalls: true, connections: true, meetings: true, voicemails: false, badData: false, notes: 'DM requested callback' },
+    { disposition: 'send email', displayName: 'Send Email', totalCalls: true, connections: true, meetings: false, voicemails: false, badData: false, notes: 'Connection if duration > 60s' },
+    { disposition: 'not qualified', displayName: 'Not Qualified', totalCalls: true, connections: true, meetings: false, voicemails: false, badData: false, notes: 'Spoke with DM, not a fit' },
+    { disposition: 'positive - blacklist co', displayName: 'Positive - Blacklist Co', totalCalls: true, connections: true, meetings: true, voicemails: false, badData: false, notes: 'Meeting interest, company blacklisted' },
+    { disposition: 'negative - blacklist co', displayName: 'Negative - Blacklist Co', totalCalls: true, connections: true, meetings: false, voicemails: false, badData: false, notes: 'Not interested' },
+    { disposition: 'negative - blacklist contact', displayName: 'Negative - Blacklist Contact', totalCalls: true, connections: true, meetings: false, voicemails: false, badData: false, notes: 'Contact blacklisted' },
+    { disposition: 'hung up', displayName: 'Hung Up', totalCalls: true, connections: true, meetings: false, voicemails: false, badData: false, notes: 'Connected but hung up' },
+    { disposition: 'meeting booked', displayName: 'Meeting Booked', totalCalls: true, connections: true, meetings: true, voicemails: false, badData: false, notes: 'Pursuable meeting booked' },
+    // Voicemail dispositions
+    { disposition: 'voicemail', displayName: 'Voicemail', totalCalls: true, connections: false, meetings: false, voicemails: true, badData: false, notes: 'Standard VM' },
+    { disposition: 'live voicemail', displayName: 'Live Voicemail', totalCalls: true, connections: false, meetings: false, voicemails: true, badData: false, notes: 'Live VM drop' },
+    // Non-connection dispositions
+    { disposition: 'no answer', displayName: 'No Answer', totalCalls: true, connections: false, meetings: false, voicemails: false, badData: false, notes: 'No pickup' },
+    // Bad data dispositions
+    { disposition: 'bad phone', displayName: 'Bad Phone', totalCalls: true, connections: false, meetings: false, voicemails: false, badData: true, notes: 'Disconnected' },
+    { disposition: 'wrong number', displayName: 'Wrong Number', totalCalls: true, connections: false, meetings: false, voicemails: false, badData: true, notes: 'Wrong person/company' },
+    { disposition: 'do not call', displayName: 'Do Not Call', totalCalls: true, connections: false, meetings: false, voicemails: false, badData: true, notes: 'Legal opt-out' },
+  ];
+}
+
 // Positive reply categories
 export const POSITIVE_REPLY_CATEGORIES = ['meeting_request', 'interested'] as const;
 

@@ -1177,11 +1177,16 @@ export type Database = {
           gatekeeper_handling_score: number | null
           id: string
           interest_rating_reasoning: string | null
+          is_bad_data: boolean | null
+          is_connection: boolean | null
+          is_meeting: boolean | null
+          is_voicemail: boolean | null
           key_concerns: string[] | null
           next_step_clarity_score: number | null
           nocodb_created_at: string | null
           nocodb_id: number | null
           nocodb_updated_at: string | null
+          normalized_category: string | null
           not_interested_reason: string | null
           objection_handling_reasoning: string | null
           objection_handling_score: number | null
@@ -1229,11 +1234,16 @@ export type Database = {
           gatekeeper_handling_score?: number | null
           id?: string
           interest_rating_reasoning?: string | null
+          is_bad_data?: boolean | null
+          is_connection?: boolean | null
+          is_meeting?: boolean | null
+          is_voicemail?: boolean | null
           key_concerns?: string[] | null
           next_step_clarity_score?: number | null
           nocodb_created_at?: string | null
           nocodb_id?: number | null
           nocodb_updated_at?: string | null
+          normalized_category?: string | null
           not_interested_reason?: string | null
           objection_handling_reasoning?: string | null
           objection_handling_score?: number | null
@@ -1281,11 +1291,16 @@ export type Database = {
           gatekeeper_handling_score?: number | null
           id?: string
           interest_rating_reasoning?: string | null
+          is_bad_data?: boolean | null
+          is_connection?: boolean | null
+          is_meeting?: boolean | null
+          is_voicemail?: boolean | null
           key_concerns?: string[] | null
           next_step_clarity_score?: number | null
           nocodb_created_at?: string | null
           nocodb_id?: number | null
           nocodb_updated_at?: string | null
+          normalized_category?: string | null
           not_interested_reason?: string | null
           objection_handling_reasoning?: string | null
           objection_handling_score?: number | null
