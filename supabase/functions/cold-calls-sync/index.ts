@@ -60,6 +60,143 @@ const COLUMN_MAP: Record<string, string> = {
   "Not Interested (Reason)": "not_interested_reason",
 };
 
+// Cold Call Disposition Classification Map
+// Strips time suffixes (e.g., "Voicemail - 39 seconds" → "Voicemail")
+// and maps to boolean metric flags
+const COLD_CALL_DISPOSITION_MAP: Record<string, {
+  is_connection: boolean;
+  is_meeting: boolean;
+  is_voicemail: boolean;
+  is_bad_data: boolean;
+}> = {
+  // CONNECTION DISPOSITIONS (counts toward connections)
+  'receptionist': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'callback requested': { is_connection: true, is_meeting: true, is_voicemail: false, is_bad_data: false },
+  'send email': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'not qualified': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'positive - blacklist co': { is_connection: true, is_meeting: true, is_voicemail: false, is_bad_data: false },
+  'negative - blacklist co': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'negative - blacklist contact': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'hung up': { is_connection: true, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  'meeting booked': { is_connection: true, is_meeting: true, is_voicemail: false, is_bad_data: false },
+  
+  // VOICEMAIL DISPOSITIONS
+  'voicemail': { is_connection: false, is_meeting: false, is_voicemail: true, is_bad_data: false },
+  'live voicemail': { is_connection: false, is_meeting: false, is_voicemail: true, is_bad_data: false },
+  'voicemail drop': { is_connection: false, is_meeting: false, is_voicemail: true, is_bad_data: false },
+  
+  // NO ANSWER / NON-CONNECTION
+  'no answer': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: false },
+  
+  // BAD DATA
+  'bad phone': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: true },
+  'wrong number': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: true },
+  'do not call': { is_connection: false, is_meeting: false, is_voicemail: false, is_bad_data: true },
+};
+
+/**
+ * Normalize category by stripping time suffixes and variations
+ * e.g., "Voicemail - 39 seconds" → "voicemail"
+ * e.g., "Live Voicemail - 1 minute 23 seconds" → "live voicemail"
+ * e.g., "Voicemail drop (or) Spoke for 21 seconds only" → "voicemail"
+ */
+function normalizeCategory(category: string | null): string | null {
+  if (!category) return null;
+  
+  let normalized = category.toLowerCase().trim();
+  
+  // Handle "Voicemail drop (or) Spoke for X seconds only" pattern
+  if (normalized.includes('voicemail drop') || normalized.includes('spoke for')) {
+    return 'voicemail';
+  }
+  
+  // Handle "Live Voicemail" variations
+  if (normalized.includes('live voicemail')) {
+    return 'live voicemail';
+  }
+  
+  // Handle simple voicemail with time suffix
+  if (normalized.startsWith('voicemail')) {
+    return 'voicemail';
+  }
+  
+  // Handle Gatekeeper (legacy disposition name)
+  if (normalized === 'gatekeeper') {
+    return 'receptionist';
+  }
+  
+  // Handle Connection (legacy generic name) 
+  if (normalized === 'connection') {
+    // Default to send email since it's a generic connection without clear outcome
+    return 'send email';
+  }
+  
+  // Remove time suffixes like "- 39 seconds", "- 1 minute 23 seconds"
+  normalized = normalized
+    .replace(/\s*-\s*\d+\s*(second|seconds|minute|minutes|min|sec|s).*$/i, '')
+    .trim();
+  
+  return normalized || null;
+}
+
+/**
+ * Classify a disposition with optional duration-based override
+ * If duration > 60s, consider it a connection even if not in map
+ */
+function classifyDisposition(
+  category: string | null,
+  durationSec: number | null
+): {
+  normalized_category: string | null;
+  is_connection: boolean;
+  is_meeting: boolean;
+  is_voicemail: boolean;
+  is_bad_data: boolean;
+} {
+  const normalized = normalizeCategory(category);
+  
+  // Default values
+  let result = {
+    normalized_category: normalized,
+    is_connection: false,
+    is_meeting: false,
+    is_voicemail: false,
+    is_bad_data: false,
+  };
+  
+  if (!normalized) return result;
+  
+  // Check exact match in map
+  const mapping = COLD_CALL_DISPOSITION_MAP[normalized];
+  if (mapping) {
+    result = { ...result, ...mapping };
+  } else {
+    // Fuzzy matching for variations
+    if (normalized.includes('voicemail')) {
+      result.is_voicemail = true;
+    } else if (normalized.includes('callback') || normalized.includes('meeting')) {
+      result.is_connection = true;
+      result.is_meeting = true;
+    } else if (normalized.includes('positive')) {
+      result.is_connection = true;
+      result.is_meeting = true;
+    } else if (normalized.includes('negative') || normalized.includes('not qualified')) {
+      result.is_connection = true;
+    } else if (normalized.includes('bad') || normalized.includes('wrong') || normalized.includes('do not call')) {
+      result.is_bad_data = true;
+    } else if (normalized.includes('receptionist') || normalized.includes('hung up')) {
+      result.is_connection = true;
+    }
+  }
+  
+  // Duration-based override: if talk_duration > 60s, count as connection
+  if (!result.is_connection && (durationSec ?? 0) > 60) {
+    result.is_connection = true;
+  }
+  
+  return result;
+}
+
 function parseDateTime(value: string | null): string | null {
   if (!value) return null;
   
@@ -141,6 +278,17 @@ function mapNocoDBRecord(record: Record<string, any>, clientId: string): Record<
   if (record["Direction"]) {
     mapped.from_name = extractFromName(record["Direction"]);
   }
+
+  // Classify disposition and add pre-computed flags
+  const classification = classifyDisposition(
+    record["Category"],
+    mapped.call_duration_sec
+  );
+  mapped.normalized_category = classification.normalized_category;
+  mapped.is_connection = classification.is_connection;
+  mapped.is_meeting = classification.is_meeting;
+  mapped.is_voicemail = classification.is_voicemail;
+  mapped.is_bad_data = classification.is_bad_data;
 
   // Calculate composite_score as average of available scores
   const scores = [
