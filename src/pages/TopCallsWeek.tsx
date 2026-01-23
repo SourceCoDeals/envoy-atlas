@@ -8,6 +8,14 @@ import { useColdCallAnalytics, DateRange, ColdCall } from '@/hooks/useColdCallAn
 import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { formatScore, formatCallingDuration, getScoreStatus, getScoreStatusColor } from '@/lib/callingConfig';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
   Trophy,
   Play,
   FileText,
@@ -25,6 +33,7 @@ import { format, parseISO } from 'date-fns';
 export default function TopCallsWeek() {
   const [dateRange, setDateRange] = useState<DateRange>('7d');
   const { data, isLoading } = useColdCallAnalytics(dateRange);
+  const [selectedCall, setSelectedCall] = useState<ColdCall | null>(null);
   const { config } = useCallingConfig();
 
   const getRankIcon = (index: number) => {
@@ -160,9 +169,16 @@ export default function TopCallsWeek() {
                                 </a>
                               </Button>
                             )}
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <FileText className="h-4 w-4" />
-                            </Button>
+                            {call.call_transcript && (
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8"
+                                onClick={() => setSelectedCall(call)}
+                              >
+                                <FileText className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </div>
                       );
@@ -287,6 +303,27 @@ export default function TopCallsWeek() {
             </div>
           </div>
         )}
+
+        {/* Transcript Dialog */}
+        <Dialog open={!!selectedCall} onOpenChange={(open) => !open && setSelectedCall(null)}>
+          <DialogContent className="max-w-2xl max-h-[80vh]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Call Transcript
+              </DialogTitle>
+              <DialogDescription>
+                {selectedCall?.to_name || selectedCall?.to_number} • {selectedCall?.analyst?.split('@')[0]}
+                {selectedCall?.called_date && ` • ${format(parseISO(selectedCall.called_date), 'MMM d, yyyy')}`}
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="h-[60vh] pr-4">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                {selectedCall?.call_transcript || 'No transcript available for this call.'}
+              </div>
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

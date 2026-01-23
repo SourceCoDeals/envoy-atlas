@@ -4,7 +4,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { 
   Select,
@@ -14,229 +13,119 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { 
-  Brain, TrendingUp, MessageSquare, AlertTriangle, Lightbulb, RotateCcw, Users, Folder
+  Brain, TrendingUp, MessageSquare, AlertTriangle, Lightbulb, RotateCcw, Users, Star, ThumbsUp, FileText, Shield
 } from 'lucide-react';
-import { useExternalCallIntel } from '@/hooks/useExternalCallIntel';
+import { useColdCallAnalytics, DateRange } from '@/hooks/useColdCallAnalytics';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
-import { ScoreOverviewSection } from '@/components/callinsights/ScoreOverviewSection';
-import { ScoreJustificationBrowser } from '@/components/callinsights/ScoreJustificationBrowser';
-import { ObjectionIntelligence } from '@/components/callinsights/ObjectionIntelligence';
-import { ExtractedIntelSummary } from '@/components/callinsights/ExtractedIntelSummary';
-import { DateRangeFilter, DateRangeOption, getDateRange } from '@/components/dashboard/DateRangeFilter';
-import { parseISO, isWithinInterval } from 'date-fns';
+import { formatScore, getScoreStatus, getScoreStatusColor } from '@/lib/callingConfig';
+import { ScoreCard } from '@/components/callinsights/ScoreCard';
+
+// Date range options
+const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: '7d', label: 'Last 7 Days' },
+  { value: '14d', label: 'Last 14 Days' },
+  { value: '30d', label: 'Last 30 Days' },
+  { value: '90d', label: 'Last 90 Days' },
+  { value: 'all', label: 'All Time' },
+];
 
 export default function CallInsights() {
-  const { data, isLoading, error } = useExternalCallIntel();
-  const { config } = useCallingConfig();
+  const { config, isLoading: configLoading } = useCallingConfig();
   const [activeTab, setActiveTab] = useState('overview');
-  const [dateRange, setDateRange] = useState<DateRangeOption>('last30');
-  const [selectedEngagement, setSelectedEngagement] = useState<string>('all');
+  const [dateRange, setDateRange] = useState<DateRange>('30d');
   const [selectedRep, setSelectedRep] = useState<string>('all');
+  
+  const { data, isLoading } = useColdCallAnalytics(dateRange);
 
-  // Get unique engagements and reps from data
-  const { engagements, reps } = useMemo(() => {
-    if (!data?.intelRecords) return { engagements: [], reps: [] };
-    
-    const engagementSet = new Set<string>();
+  // Get unique reps from data
+  const reps = useMemo(() => {
+    if (!data?.calls) return [];
     const repSet = new Set<string>();
-    
-    data.intelRecords.forEach(record => {
-      if (record.engagement_id) engagementSet.add(record.engagement_id);
-      const rep = record.call?.caller_name;
-      if (rep && rep !== 'Unknown') repSet.add(rep);
+    data.calls.forEach(call => {
+      if (call.analyst && call.analyst !== 'Unknown') repSet.add(call.analyst);
     });
-    
-    return {
-      engagements: Array.from(engagementSet),
-      reps: Array.from(repSet).sort(),
-    };
-  }, [data?.intelRecords]);
+    return Array.from(repSet).sort();
+  }, [data?.calls]);
 
-  // Filter data based on selected filters
-  const filteredData = useMemo(() => {
-    if (!data) return data;
-    
-    const { startDate, endDate } = getDateRange(dateRange);
-    
-    const filteredRecords = data.intelRecords.filter(record => {
-      // Date filter
-      if (startDate && record.call?.started_at) {
-        const callDate = parseISO(record.call.started_at);
-        if (!isWithinInterval(callDate, { start: startDate, end: endDate })) {
-          return false;
-        }
-      }
-      
-      // Engagement filter
-      if (selectedEngagement !== 'all' && record.engagement_id !== selectedEngagement) {
-        return false;
-      }
-      
-      // Rep filter
-      if (selectedRep !== 'all') {
-        const rep = record.call?.caller_name || 'Unknown';
-        if (rep !== selectedRep) return false;
-      }
-      
-      return true;
-    });
+  // Filter data based on selected rep
+  const filteredCalls = useMemo(() => {
+    if (!data?.calls) return [];
+    if (selectedRep === 'all') return data.calls;
+    return data.calls.filter(call => call.analyst === selectedRep);
+  }, [data?.calls, selectedRep]);
 
-    // Helper function to calculate average
-    const avg = (values: (number | null | undefined)[]): number | null => {
+  // Calculate score averages
+  const scoreAverages = useMemo(() => {
+    if (!filteredCalls.length) return null;
+    
+    const avg = (values: (number | null | undefined)[]) => {
       const valid = values.filter((v): v is number => v != null);
       return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
     };
-
-    // Recalculate scoreOverview for filtered records
-    const scoreKeys = [
-      { key: 'seller_interest_score', label: 'Seller Interest' },
-      { key: 'objection_handling_score', label: 'Objection Handling' },
-      { key: 'valuation_discussion_score', label: 'Valuation Discussion' },
-      { key: 'rapport_building_score', label: 'Rapport Building' },
-      { key: 'value_proposition_score', label: 'Value Proposition' },
-      { key: 'conversation_quality_score', label: 'Conversation Quality' },
-      { key: 'script_adherence_score', label: 'Script Adherence' },
-      { key: 'overall_quality_score', label: 'Overall Quality' },
-      { key: 'question_adherence_score', label: 'Question Adherence' },
-      { key: 'personal_insights_score', label: 'Personal Insights' },
-      { key: 'next_steps_clarity_score', label: 'Next Steps Clarity' },
-      { key: 'discovery_score', label: 'Discovery' },
-    ];
-
-    const scoreOverview = scoreKeys.map(({ key, label }) => {
-      const thisWeekAvg = avg(filteredRecords.map(r => r[key as keyof typeof r] as number | null));
-      
-      // For trend, compare to original data's last week avg if available
-      const originalScore = data.scoreOverview.find(s => s.key === key);
-      const lastWeekAvg = originalScore?.lastWeekAvg ?? null;
-      
-      let trend: 'up' | 'down' | 'flat' = 'flat';
-      if (thisWeekAvg != null && lastWeekAvg != null) {
-        if (thisWeekAvg > lastWeekAvg + 0.2) trend = 'up';
-        else if (thisWeekAvg < lastWeekAvg - 0.2) trend = 'down';
-      }
-
-      // Find best rep for this score within filtered data
-      const repScores = new Map<string, number[]>();
-      filteredRecords.forEach(r => {
-        const rep = r.call?.caller_name || 'Unknown';
-        const score = r[key as keyof typeof r] as number | null;
-        if (score != null) {
-          if (!repScores.has(rep)) repScores.set(rep, []);
-          repScores.get(rep)!.push(score);
-        }
-      });
-      
-      let bestRep: string | null = null;
-      let bestAvg = 0;
-      repScores.forEach((scores, rep) => {
-        const repAvg = scores.reduce((a, b) => a + b, 0) / scores.length;
-        if (repAvg > bestAvg) {
-          bestAvg = repAvg;
-          bestRep = rep;
-        }
-      });
-
-      // Count needing coaching (score below 5)
-      const needsCoachingCount = filteredRecords.filter(r => {
-        const score = r[key as keyof typeof r] as number | null;
-        return score != null && score < 5;
-      }).length;
-
-      return { key, label, thisWeekAvg, lastWeekAvg, trend, bestRep, needsCoachingCount };
-    });
-
-    // Recalculate aggregates for filtered data
-    const totalObjectionsFaced = filteredRecords.reduce((sum, r) => sum + (r.number_of_objections || 0), 0);
-    const totalObjectionsResolved = filteredRecords.reduce((sum, r) => sum + (r.objections_resolved_count || 0), 0);
-    const overallResolutionRate = totalObjectionsFaced > 0 
-      ? (totalObjectionsResolved / totalObjectionsFaced) * 100 
-      : 0;
-    const avgObjectionsPerCall = filteredRecords.length > 0 
-      ? totalObjectionsFaced / filteredRecords.length 
-      : 0;
-
-    const interestBreakdown = {
-      yes: filteredRecords.filter(r => r.interest_in_selling?.toLowerCase() === 'yes').length,
-      maybe: filteredRecords.filter(r => r.interest_in_selling?.toLowerCase() === 'maybe').length,
-      no: filteredRecords.filter(r => r.interest_in_selling?.toLowerCase() === 'no').length,
-      notAsked: filteredRecords.filter(r => !r.interest_in_selling).length,
-    };
-
-    // Timeline breakdown
-    const timelineMap = new Map<string, number>();
-    filteredRecords.forEach(r => {
-      if (r.timeline_to_sell) {
-        timelineMap.set(r.timeline_to_sell, (timelineMap.get(r.timeline_to_sell) || 0) + 1);
-      }
-    });
-    const timelineBreakdown = Array.from(timelineMap.entries())
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count);
-
-    // Buyer type breakdown
-    const buyerTypeMap = new Map<string, number>();
-    filteredRecords.forEach(r => {
-      if (r.buyer_type_preference) {
-        buyerTypeMap.set(r.buyer_type_preference, (buyerTypeMap.get(r.buyer_type_preference) || 0) + 1);
-      }
-    });
-    const buyerTypeBreakdown = Array.from(buyerTypeMap.entries())
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count);
-
-    // Personal insights list
-    const personalInsightsList = filteredRecords
-      .filter(r => r.personal_insights)
-      .map(r => ({
-        insight: r.personal_insights!,
-        score: r.personal_insights_score,
-        callId: r.call_id,
-      }));
-
-    // Pain points aggregation
-    const painPointMap = new Map<string, number>();
-    filteredRecords.forEach(r => {
-      (r.target_pain_points || []).forEach(pp => {
-        painPointMap.set(pp, (painPointMap.get(pp) || 0) + 1);
-      });
-    });
-    const painPointsList = Array.from(painPointMap.entries())
-      .map(([painPoint, count]) => ({ painPoint, count }))
-      .sort((a, b) => b.count - a.count);
-
-    // Questions data
-    const questionsData = filteredRecords.map(r => r.questions_covered_count || 0);
-    const avgQuestionsCovered = questionsData.length > 0 
-      ? questionsData.reduce((a, b) => a + b, 0) / questionsData.length 
-      : 0;
-
+    
     return {
-      ...data,
-      intelRecords: filteredRecords,
-      scoreOverview,
-      totalObjectionsFaced,
-      totalObjectionsResolved,
-      overallResolutionRate,
-      avgObjectionsPerCall,
-      interestBreakdown,
-      timelineBreakdown,
-      buyerTypeBreakdown,
-      personalInsightsList,
-      painPointsList,
-      avgQuestionsCovered,
+      overallQuality: avg(filteredCalls.map(c => c.composite_score)),
+      sellerInterest: avg(filteredCalls.map(c => c.seller_interest_score)),
+      scriptAdherence: avg(filteredCalls.map(c => c.script_adherence_score)),
+      objectionHandling: avg(filteredCalls.map(c => c.objection_handling_score)),
+      conversationQuality: avg(filteredCalls.map(c => c.quality_of_conversation_score)),
+      valueProposition: avg(filteredCalls.map(c => c.value_proposition_score)),
+      rapportBuilding: avg(filteredCalls.map(c => c.rapport_building_score)),
+      nextStepClarity: avg(filteredCalls.map(c => c.next_step_clarity_score)),
     };
-  }, [data, dateRange, selectedEngagement, selectedRep]);
+  }, [filteredCalls]);
+
+  // Interest breakdown from seller_interest_score
+  const interestBreakdown = useMemo(() => {
+    const yes = filteredCalls.filter(c => c.interest_in_selling === 'yes').length;
+    const maybe = filteredCalls.filter(c => c.interest_in_selling === 'maybe').length;
+    const no = filteredCalls.filter(c => c.interest_in_selling === 'no').length;
+    const unknown = filteredCalls.filter(c => !c.interest_in_selling).length;
+    return { yes, maybe, no, unknown };
+  }, [filteredCalls]);
+
+  // Objection stats
+  const objectionStats = useMemo(() => {
+    // cold_calls has 'objections' as a string field
+    const callsWithObjections = filteredCalls.filter(c => c.objections && c.objections.trim() !== '');
+    const resolved = filteredCalls.filter(c => (c.resolution_rate || 0) >= 50).length;
+    return {
+      totalWithObjections: callsWithObjections.length,
+      resolvedCount: resolved,
+      resolutionRate: callsWithObjections.length > 0 ? (resolved / callsWithObjections.length) * 100 : 0,
+    };
+  }, [filteredCalls]);
+
+  // Rep performance breakdown
+  const repScoreBreakdown = useMemo(() => {
+    const repMap = new Map<string, { scores: number[]; count: number }>();
+    filteredCalls.forEach(call => {
+      const rep = call.analyst || 'Unknown';
+      if (rep === 'Unknown') return;
+      const existing = repMap.get(rep) || { scores: [], count: 0 };
+      if (call.composite_score != null) existing.scores.push(call.composite_score);
+      existing.count += 1;
+      repMap.set(rep, existing);
+    });
+    
+    return Array.from(repMap.entries())
+      .map(([rep, data]) => ({
+        rep,
+        avgScore: data.scores.length > 0 ? data.scores.reduce((a, b) => a + b, 0) / data.scores.length : 0,
+        callCount: data.count,
+      }))
+      .sort((a, b) => b.avgScore - a.avgScore);
+  }, [filteredCalls]);
 
   const resetFilters = () => {
-    setDateRange('last30');
-    setSelectedEngagement('all');
+    setDateRange('30d');
     setSelectedRep('all');
   };
 
-  const hasActiveFilters = dateRange !== 'last30' || selectedEngagement !== 'all' || selectedRep !== 'all';
+  const hasActiveFilters = dateRange !== '30d' || selectedRep !== 'all';
+  const loading = isLoading || configLoading;
 
-  if (isLoading) {
+  if (loading) {
     return (
       <DashboardLayout>
         <div className="space-y-6">
@@ -257,19 +146,8 @@ export default function CallInsights() {
     );
   }
 
-  if (error) {
-    return (
-      <DashboardLayout>
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>Failed to load call insights: {String(error)}</AlertDescription>
-        </Alert>
-      </DashboardLayout>
-    );
-  }
-
-  const totalCalls = filteredData?.intelRecords.length || 0;
-  const unfilteredTotal = data?.intelRecords.length || 0;
+  const totalCalls = filteredCalls.length;
+  const unfilteredTotal = data?.totalCalls || 0;
 
   return (
     <DashboardLayout>
@@ -287,7 +165,7 @@ export default function CallInsights() {
           </div>
           
           <Badge variant="secondary" className="text-sm">
-            {totalCalls} {totalCalls !== unfilteredTotal && `of ${unfilteredTotal}`} calls
+            {totalCalls.toLocaleString()} {totalCalls !== unfilteredTotal && `of ${unfilteredTotal.toLocaleString()}`} calls
           </Badge>
         </div>
 
@@ -295,24 +173,6 @@ export default function CallInsights() {
         <Card>
           <CardContent className="py-4">
             <div className="flex flex-wrap items-center gap-4">
-              {/* Engagement Filter */}
-              <div className="flex items-center gap-2">
-                <Folder className="h-4 w-4 text-muted-foreground" />
-                <Select value={selectedEngagement} onValueChange={setSelectedEngagement}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="All Engagements" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Engagements</SelectItem>
-                    {engagements.map((id) => (
-                      <SelectItem key={id} value={id}>
-                        {id.slice(0, 8)}...
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
               {/* Team Member Filter */}
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-muted-foreground" />
@@ -332,7 +192,18 @@ export default function CallInsights() {
               </div>
 
               {/* Date Range Filter */}
-              <DateRangeFilter value={dateRange} onChange={setDateRange} />
+              <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Date range" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DATE_RANGE_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
               {/* Reset Button */}
               {hasActiveFilters && (
@@ -354,7 +225,7 @@ export default function CallInsights() {
               <p className="text-muted-foreground max-w-md mx-auto">
                 {unfilteredTotal > 0 
                   ? 'No calls match the current filters. Try adjusting your filter criteria.'
-                  : 'Call intelligence data will appear here once calls are processed through the AI scoring pipeline.'}
+                  : 'Call intelligence data will appear here once calls are synced.'}
               </p>
               {hasActiveFilters && (
                 <Button variant="outline" className="mt-4" onClick={resetFilters}>
@@ -366,7 +237,7 @@ export default function CallInsights() {
           </Card>
         )}
 
-        {/* Main Content - 4 Tabs per spec */}
+        {/* Main Content */}
         {totalCalls > 0 && (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-4 mb-6">
@@ -389,19 +260,249 @@ export default function CallInsights() {
             </TabsList>
 
             <TabsContent value="overview">
-              <ScoreOverviewSection data={filteredData} config={config} />
+              <div className="space-y-6">
+                {/* Key Score Cards */}
+                <div className="grid gap-4 md:grid-cols-4">
+                  <ScoreCard
+                    title="Overall Quality"
+                    score={scoreAverages?.overallQuality ?? null}
+                    icon={<Star className="h-4 w-4" />}
+                    description="Average overall call quality"
+                    thresholds={config.overallQualityThresholds}
+                  />
+                  <ScoreCard
+                    title="Seller Interest"
+                    score={scoreAverages?.sellerInterest ?? null}
+                    icon={<ThumbsUp className="h-4 w-4" />}
+                    description="Average seller interest score"
+                    thresholds={config.sellerInterestThresholds}
+                  />
+                  <ScoreCard
+                    title="Script Adherence"
+                    score={scoreAverages?.scriptAdherence ?? null}
+                    icon={<FileText className="h-4 w-4" />}
+                    description="Average script adherence"
+                    thresholds={config.scriptAdherenceThresholds}
+                  />
+                  <ScoreCard
+                    title="Objection Handling"
+                    score={scoreAverages?.objectionHandling ?? null}
+                    icon={<Shield className="h-4 w-4" />}
+                    description="Average objection handling"
+                    thresholds={config.objectionHandlingThresholds}
+                  />
+                </div>
+
+                {/* All Scores Table */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h3 className="font-semibold mb-4">All Score Dimensions</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {[
+                        { label: 'Conversation Quality', value: scoreAverages?.conversationQuality },
+                        { label: 'Value Proposition', value: scoreAverages?.valueProposition },
+                        { label: 'Rapport Building', value: scoreAverages?.rapportBuilding },
+                        { label: 'Next Steps Clarity', value: scoreAverages?.nextStepClarity },
+                      ].map(item => (
+                        <div key={item.label} className="p-3 rounded-lg bg-muted/50">
+                          <p className="text-xs text-muted-foreground">{item.label}</p>
+                          <p className="text-xl font-bold">
+                            {item.value != null ? formatScore(item.value, config) : '—'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Rep Performance */}
+                {repScoreBreakdown.length > 0 && (
+                  <Card>
+                    <CardContent className="p-4">
+                      <h3 className="font-semibold mb-4">Rep Performance</h3>
+                      <div className="space-y-2">
+                        {repScoreBreakdown.slice(0, 10).map((rep, i) => {
+                          const status = getScoreStatus(rep.avgScore, config.overallQualityThresholds);
+                          return (
+                            <div key={rep.rep} className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
+                              <div className="flex items-center gap-3">
+                                <span className="text-muted-foreground w-6">#{i + 1}</span>
+                                <span className="font-medium">{rep.rep}</span>
+                                <Badge variant="outline" className="text-xs">{rep.callCount} calls</Badge>
+                              </div>
+                              <span className={`font-bold ${getScoreStatusColor(status)}`}>
+                                {formatScore(rep.avgScore, config)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             </TabsContent>
 
             <TabsContent value="justifications">
-              <ScoreJustificationBrowser data={filteredData} config={config} />
+              <Card>
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4">Score Justifications</h3>
+                  <p className="text-muted-foreground mb-6">
+                    Browse individual call reasoning from AI scoring
+                  </p>
+                  <div className="space-y-4">
+                    {filteredCalls.slice(0, 20).map(call => (
+                      <div key={call.id} className="p-4 rounded-lg border bg-muted/20">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium">{call.to_name || call.to_number}</span>
+                          <Badge variant="outline">
+                            Score: {formatScore(call.composite_score, config)}
+                          </Badge>
+                        </div>
+                        {call.conversation_quality_reasoning && (
+                          <p className="text-sm text-muted-foreground mb-1">
+                            <strong>Quality:</strong> {call.conversation_quality_reasoning}
+                          </p>
+                        )}
+                        {call.script_adherence_reasoning && (
+                          <p className="text-sm text-muted-foreground mb-1">
+                            <strong>Script:</strong> {call.script_adherence_reasoning}
+                          </p>
+                        )}
+                        {call.objection_handling_reasoning && (
+                          <p className="text-sm text-muted-foreground">
+                            <strong>Objections:</strong> {call.objection_handling_reasoning}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
 
             <TabsContent value="objections">
-              <ObjectionIntelligence data={filteredData} config={config} />
+              <div className="space-y-6">
+                {/* Objection Summary */}
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground">Calls with Objections</p>
+                      <p className="text-2xl font-bold">{objectionStats.totalWithObjections}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground">Resolved</p>
+                      <p className="text-2xl font-bold">{objectionStats.resolvedCount}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <p className="text-sm text-muted-foreground">Resolution Rate</p>
+                      <p className="text-2xl font-bold">{Math.round(objectionStats.resolutionRate)}%</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Objection List */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h3 className="font-semibold mb-4">Recent Objections</h3>
+                    <div className="space-y-3">
+                      {filteredCalls
+                        .filter(c => c.objections && c.objections.trim() !== '')
+                        .slice(0, 15)
+                        .map(call => (
+                          <div key={call.id} className="p-3 rounded-lg border bg-muted/20">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-medium">{call.to_name || call.to_number}</span>
+                              <Badge variant={call.resolution_rate && call.resolution_rate >= 50 ? 'default' : 'secondary'}>
+                                {call.resolution_rate && call.resolution_rate >= 50 ? 'Resolved' : 'Unresolved'}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground">{call.objections}</p>
+                          </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </TabsContent>
 
             <TabsContent value="intel">
-              <ExtractedIntelSummary data={filteredData} config={config} />
+              <div className="space-y-6">
+                {/* Interest Breakdown */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h3 className="font-semibold mb-4">Interest in Selling</h3>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="text-center p-4 rounded-lg bg-green-500/10">
+                        <p className="text-2xl font-bold text-green-600">{interestBreakdown.yes}</p>
+                        <p className="text-xs text-muted-foreground">Yes</p>
+                      </div>
+                      <div className="text-center p-4 rounded-lg bg-yellow-500/10">
+                        <p className="text-2xl font-bold text-yellow-600">{interestBreakdown.maybe}</p>
+                        <p className="text-xs text-muted-foreground">Maybe</p>
+                      </div>
+                      <div className="text-center p-4 rounded-lg bg-red-500/10">
+                        <p className="text-2xl font-bold text-red-600">{interestBreakdown.no}</p>
+                        <p className="text-xs text-muted-foreground">No</p>
+                      </div>
+                      <div className="text-center p-4 rounded-lg bg-muted">
+                        <p className="text-2xl font-bold">{interestBreakdown.unknown}</p>
+                        <p className="text-xs text-muted-foreground">Unknown</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Call Summaries */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h3 className="font-semibold mb-4">Call Summaries</h3>
+                    <div className="space-y-3">
+                      {filteredCalls
+                        .filter(c => c.call_summary && c.call_summary.trim() !== '')
+                        .slice(0, 10)
+                        .map(call => (
+                          <div key={call.id} className="p-3 rounded-lg border bg-muted/20">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-medium">{call.to_name || call.to_number}</span>
+                              {call.interest_in_selling && (
+                                <Badge variant={
+                                  call.interest_in_selling === 'yes' ? 'default' :
+                                  call.interest_in_selling === 'maybe' ? 'secondary' : 'outline'
+                                }>
+                                  {call.interest_in_selling}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground">{call.call_summary}</p>
+                          </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Key Concerns / Pain Points */}
+                <Card>
+                  <CardContent className="p-4">
+                    <h3 className="font-semibold mb-4">Key Concerns & Pain Points</h3>
+                    <div className="space-y-2">
+                      {filteredCalls
+                        .filter(c => c.target_pain_points && c.target_pain_points.trim() !== '')
+                        .slice(0, 10)
+                        .map(call => (
+                          <div key={call.id} className="p-2 rounded-lg bg-muted/30 text-sm">
+                            <span className="font-medium">{call.to_name || call.to_number}:</span>{' '}
+                            <span className="text-muted-foreground">{call.target_pain_points}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </TabsContent>
           </Tabs>
         )}
