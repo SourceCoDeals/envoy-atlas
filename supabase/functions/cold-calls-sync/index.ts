@@ -140,8 +140,8 @@ function normalizeCategory(category: string | null): string | null {
 }
 
 /**
- * Classify a disposition with optional duration-based override
- * If duration > 60s, consider it a connection even if not in map
+ * Classify a disposition based on the normalized category
+ * Duration-based override ONLY applies to non-voicemail dispositions
  */
 function classifyDisposition(
   category: string | null,
@@ -189,8 +189,9 @@ function classifyDisposition(
     }
   }
   
-  // Duration-based override: if talk_duration > 60s, count as connection
-  if (!result.is_connection && (durationSec ?? 0) > 60) {
+  // Duration-based override: if talk_duration > 60s AND NOT a voicemail, count as connection
+  // Voicemails should NEVER be counted as connections regardless of duration
+  if (!result.is_connection && !result.is_voicemail && (durationSec ?? 0) > 60) {
     result.is_connection = true;
   }
   
