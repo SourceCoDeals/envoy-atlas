@@ -3,11 +3,12 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Button } from '@/components/ui/button';
 import { 
   Send, CheckCircle, MessageSquare, 
   ThumbsUp, AlertTriangle, Mail, Globe, Inbox, Activity,
   ChevronDown, ChevronUp, Shield, ShieldCheck, ShieldX,
-  Flame, Gauge, Users, Clock, UserPlus
+  Flame, Gauge, Users, Clock, UserPlus, Calendar, Loader2, Wand2
 } from 'lucide-react';
 import { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -23,6 +24,7 @@ interface DataAvailability {
   callingData: boolean;
   infrastructureData: boolean;
   syncInProgress: boolean;
+  isEstimated?: boolean;
 }
 
 interface EmailReportTabProps {
@@ -47,9 +49,11 @@ interface EmailReportTabProps {
     weeklyPerformance?: WeeklyPerformance[];
     dataAvailability?: DataAvailability;
   };
+  onGenerateWeeklyBreakdown?: () => void;
+  isGeneratingBreakdown?: boolean;
 }
 
-export function EmailReportTab({ data }: EmailReportTabProps) {
+export function EmailReportTab({ data, onGenerateWeeklyBreakdown, isGeneratingBreakdown }: EmailReportTabProps) {
   const { emailMetrics, linkedCampaigns, infrastructureMetrics, enrollmentMetrics, weeklyEnrollmentTrend, weeklyPerformance, dataAvailability } = data;
   const [domainsExpanded, setDomainsExpanded] = useState(false);
 
@@ -247,12 +251,49 @@ export function EmailReportTab({ data }: EmailReportTabProps) {
       )}
 
       {/* Week-by-Week Performance Breakdown */}
-      {weeklyPerformance && weeklyPerformance.length > 0 && (
+      {weeklyPerformance && weeklyPerformance.length > 0 ? (
         <WeeklyPerformanceBreakdown 
           weeklyData={weeklyPerformance} 
           enrollmentTrend={weeklyEnrollmentTrend}
+          isEstimated={dataAvailability?.isEstimated}
         />
-      )}
+      ) : emailMetrics.sent > 0 && onGenerateWeeklyBreakdown ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              Week-by-Week Performance
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center py-8 space-y-4">
+              <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                <Calendar className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-muted-foreground mb-1">
+                  No weekly breakdown data available yet.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Generate estimated weekly trends from campaign totals to visualize performance over time.
+                </p>
+              </div>
+              <Button 
+                onClick={onGenerateWeeklyBreakdown} 
+                disabled={isGeneratingBreakdown}
+                className="gap-2"
+              >
+                {isGeneratingBreakdown ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="h-4 w-4" />
+                )}
+                {isGeneratingBreakdown ? 'Generating...' : 'Generate Weekly Breakdown'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Data Availability Warning */}
       {dataAvailability?.emailCampaignFallback && (
