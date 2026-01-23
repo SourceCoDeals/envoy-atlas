@@ -487,9 +487,12 @@ export const formatCallDuration = (seconds: number | null | undefined): string =
 
 export const CALLING_BENCHMARKS = {
   connectRate: { min: 25, max: 35, warning: 20 },
-  conversationRate: { min: 4, max: 8 },
+  conversationRate: { min: 4, max: 8, warning: 2 },
+  dmConversationRate: { min: 70, max: 90 },
   meetingRate: { min: 0.5, max: 2 },
+  meetingConversion: { min: 25, max: 33 }, // Newer reps: 25%, experienced: 33%
   voicemailRate: { max: 60 }, // Above 60% might indicate timing issues
+  badDataRate: { max: 5, warning: 3 }, // Bad phones + wrong numbers
   avgCallDuration: { min: 180, max: 300 }, // 3-5 minutes optimal
   dialsPerDay: { min: 60, max: 100 },
   meetingsPerMonth: { avg: 15, top: 21 },
@@ -549,6 +552,11 @@ export interface CallActivityRecord {
   callback_scheduled?: boolean | null;
   started_at?: string | null;
   caller_name?: string | null;
+  // Pre-computed classification fields (from sync)
+  counts_as_connection?: boolean | null;
+  counts_as_conversation?: boolean | null;
+  counts_as_meeting?: boolean | null;
+  counts_as_bad_data?: boolean | null;
 }
 
 export interface CallingMetrics {
@@ -558,12 +566,15 @@ export interface CallingMetrics {
   dmConversations: number;
   meetings: number;
   voicemails: number;
+  badData: number;
   totalTalkTimeSeconds: number;
   connectRate: number;
   conversationRate: number;
+  dmConversationRate: number;
   meetingRate: number;
-  voicemailRate: number;
   meetingConversion: number;
+  voicemailRate: number;
+  badDataRate: number;
   avgCallDuration: number;
 }
 
@@ -574,31 +585,34 @@ export interface CallingMetrics {
 export const aggregateCallingMetrics = (calls: CallActivityRecord[]): CallingMetrics => {
   const totalCalls = calls.length;
 
-  // Connection: disposition is connected/conversation OR talk_duration > 30s
+  // Use pre-computed fields if available, otherwise fallback to inference
   const connections = calls.filter(c =>
-    isConnection(c.disposition) || (c.talk_duration && c.talk_duration > 30)
+    c.counts_as_connection === true || 
+    (c.counts_as_connection == null && (isConnection(c.disposition) || (c.talk_duration && c.talk_duration > 30)))
   ).length;
 
-  // Conversations: has an outcome that isn't no_answer/voicemail/busy/wrong_number
   const conversations = calls.filter(c =>
-    c.conversation_outcome &&
-    !['no_answer', 'voicemail', 'busy', 'wrong_number'].includes(c.conversation_outcome.toLowerCase())
+    c.counts_as_conversation === true ||
+    (c.counts_as_conversation == null && c.conversation_outcome &&
+      !['no_answer', 'voicemail', 'busy', 'wrong_number', 'unknown'].includes(c.conversation_outcome.toLowerCase()))
   ).length;
 
-  // DM Conversations: flagged as decision maker
   const dmConversations = calls.filter(c => c.is_dm_conversation).length;
 
-  // Meetings: outcome is meeting_booked OR callback_scheduled
   const meetings = calls.filter(c =>
-    isMeetingBooked(c.conversation_outcome) || c.callback_scheduled
+    c.counts_as_meeting === true ||
+    (c.counts_as_meeting == null && (isMeetingBooked(c.conversation_outcome) || c.callback_scheduled))
   ).length;
 
-  // Voicemails: voicemail_left flag OR voicemail disposition
   const voicemails = calls.filter(c =>
     c.voicemail_left || isVoicemail(c.disposition)
   ).length;
 
-  // Total talk time: sum of talk_duration for all calls
+  const badData = calls.filter(c =>
+    c.counts_as_bad_data === true ||
+    (c.counts_as_bad_data == null && c.disposition?.toLowerCase().includes('bad'))
+  ).length;
+
   const totalTalkTimeSeconds = calls.reduce((sum, c) =>
     sum + (c.talk_duration || 0), 0
   );
@@ -610,11 +624,14 @@ export const aggregateCallingMetrics = (calls: CallActivityRecord[]): CallingMet
     dmConversations,
     meetings,
     voicemails,
+    badData,
     totalTalkTimeSeconds,
     connectRate: calculateCallConnectRate(totalCalls, connections),
     conversationRate: calculateConversationRate(totalCalls, conversations),
+    dmConversationRate: calculateDMConversationRate(connections, dmConversations),
     meetingRate: calculateCallMeetingRate(totalCalls, meetings),
     voicemailRate: calculateVoicemailRate(totalCalls, voicemails),
+    badDataRate: calculateRate(badData, totalCalls),
     meetingConversion: calculateMeetingConversion(conversations, meetings),
     avgCallDuration: calculateAvgCallDuration(totalTalkTimeSeconds, connections),
   };

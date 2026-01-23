@@ -48,28 +48,517 @@ export const REPLYIO_CATEGORY_MAP: Record<string, {
   'Question': { category: 'question', sentiment: 'neutral', is_positive: false },
 };
 
-// Call disposition mappings
+// ============================================================================
+// PHONEBURNER DISPOSITION MAPPINGS
+// Complete mapping from PhoneBurner dispositions to internal metrics
+// Reference: public/docs/disposition-metrics-mapping.md
+// ============================================================================
+
+export interface DispositionClassification {
+  disposition: 'connected' | 'voicemail' | 'no_answer' | 'bad_data' | 'do_not_call';
+  outcome: string;
+  is_connection: boolean;
+  is_conversation: boolean;
+  is_dm: boolean;
+  is_voicemail: boolean;
+  is_meeting: boolean;
+  is_bad_data: boolean;
+}
+
+/**
+ * PhoneBurner disposition mappings
+ * Each disposition maps to specific metric classifications
+ */
+export const PHONEBURNER_DISPOSITION_MAP: Record<string, DispositionClassification> = {
+  // ============ CONNECTION DISPOSITIONS ============
+  // These count toward totalCalls AND connections
+  
+  'receptionist': {
+    disposition: 'connected',
+    outcome: 'gatekeeper',
+    is_connection: true,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'callback requested': {
+    disposition: 'connected',
+    outcome: 'callback',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'send email': {
+    disposition: 'connected',
+    outcome: 'send_email',
+    is_connection: true,
+    is_conversation: false, // Will be overridden if talk_duration > 60s
+    is_dm: false,           // Will be overridden if talk_duration > 60s
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'not qualified': {
+    disposition: 'connected',
+    outcome: 'not_qualified',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'positive - blacklist co': {
+    disposition: 'connected',
+    outcome: 'meeting_interest',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: true, // Meeting-level interest (even if company blacklisted)
+    is_bad_data: false,
+  },
+  'negative - blacklist co': {
+    disposition: 'connected',
+    outcome: 'not_interested',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'negative - blacklist contact': {
+    disposition: 'connected',
+    outcome: 'not_interested',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'hung up': {
+    disposition: 'connected',
+    outcome: 'hung_up',
+    is_connection: true,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'meeting booked': {
+    disposition: 'connected',
+    outcome: 'meeting_booked',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: true, // Actual pursuable meeting
+    is_bad_data: false,
+  },
+
+  // ============ NON-CONNECTION DISPOSITIONS ============
+  // These count toward totalCalls but NOT connections
+  
+  'voicemail': {
+    disposition: 'voicemail',
+    outcome: 'voicemail',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: true,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'live voicemail': {
+    disposition: 'voicemail',
+    outcome: 'voicemail',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: true,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'no answer': {
+    disposition: 'no_answer',
+    outcome: 'no_answer',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'bad phone': {
+    disposition: 'bad_data',
+    outcome: 'bad_phone',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: true,
+  },
+  'wrong number': {
+    disposition: 'bad_data',
+    outcome: 'wrong_number',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: true,
+  },
+  'do not call': {
+    disposition: 'do_not_call',
+    outcome: 'do_not_call',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false, // Track separately for compliance
+  },
+
+  // ============ LEGACY/GENERIC DISPOSITIONS ============
+  // For backward compatibility with existing data
+  
+  'connected': {
+    disposition: 'connected',
+    outcome: 'connected',
+    is_connection: true,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'conversation': {
+    disposition: 'connected',
+    outcome: 'connected',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'dm_conversation': {
+    disposition: 'connected',
+    outcome: 'dm_conversation',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'vm': {
+    disposition: 'voicemail',
+    outcome: 'voicemail',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: true,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'busy': {
+    disposition: 'no_answer',
+    outcome: 'busy',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'interested': {
+    disposition: 'connected',
+    outcome: 'interested',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'not_interested': {
+    disposition: 'connected',
+    outcome: 'not_interested',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'gatekeeper': {
+    disposition: 'connected',
+    outcome: 'gatekeeper',
+    is_connection: true,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'gk': {
+    disposition: 'connected',
+    outcome: 'gatekeeper',
+    is_connection: true,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'callback': {
+    disposition: 'connected',
+    outcome: 'callback',
+    is_connection: true,
+    is_conversation: true,
+    is_dm: true,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: false,
+  },
+  'disconnected': {
+    disposition: 'bad_data',
+    outcome: 'disconnected',
+    is_connection: false,
+    is_conversation: false,
+    is_dm: false,
+    is_voicemail: false,
+    is_meeting: false,
+    is_bad_data: true,
+  },
+};
+
+// Legacy CALL_DISPOSITION_MAP for backward compatibility
 export const CALL_DISPOSITION_MAP: Record<string, {
   disposition: string;
   outcome: string;
   is_dm: boolean;
-}> = {
-  'connected': { disposition: 'connected', outcome: 'connected', is_dm: false },
-  'conversation': { disposition: 'connected', outcome: 'connected', is_dm: false },
-  'dm_conversation': { disposition: 'connected', outcome: 'dm_conversation', is_dm: true },
-  'voicemail': { disposition: 'voicemail', outcome: 'voicemail', is_dm: false },
-  'vm': { disposition: 'voicemail', outcome: 'voicemail', is_dm: false },
-  'no_answer': { disposition: 'no_answer', outcome: 'no_answer', is_dm: false },
-  'busy': { disposition: 'no_answer', outcome: 'busy', is_dm: false },
-  'meeting_booked': { disposition: 'connected', outcome: 'meeting_booked', is_dm: true },
-  'interested': { disposition: 'connected', outcome: 'interested', is_dm: true },
-  'not_interested': { disposition: 'connected', outcome: 'not_interested', is_dm: true },
-  'gatekeeper': { disposition: 'connected', outcome: 'gatekeeper', is_dm: false },
-  'gk': { disposition: 'connected', outcome: 'gatekeeper', is_dm: false },
-  'callback': { disposition: 'connected', outcome: 'callback', is_dm: false },
-  'wrong_number': { disposition: 'no_answer', outcome: 'wrong_number', is_dm: false },
-  'disconnected': { disposition: 'no_answer', outcome: 'disconnected', is_dm: false },
-};
+}> = Object.fromEntries(
+  Object.entries(PHONEBURNER_DISPOSITION_MAP).map(([key, val]) => [
+    key,
+    { disposition: val.disposition, outcome: val.outcome, is_dm: val.is_dm }
+  ])
+);
+
+/**
+ * Classify a PhoneBurner disposition with talk_duration context
+ * Handles "Send Email" ambiguity using talk_duration > 60s as DM indicator
+ * 
+ * @param rawDisposition - The raw disposition string from PhoneBurner
+ * @param talkDuration - Talk duration in seconds (used for Send Email classification)
+ * @returns Complete classification for metric calculations
+ */
+export function classifyPhoneBurnerDisposition(
+  rawDisposition: string | null | undefined,
+  talkDuration: number = 0
+): {
+  disposition: string;
+  conversation_outcome: string;
+  is_dm_conversation: boolean;
+  counts_as_connection: boolean;
+  counts_as_conversation: boolean;
+  counts_as_voicemail: boolean;
+  counts_as_meeting: boolean;
+  counts_as_bad_data: boolean;
+} {
+  if (!rawDisposition) {
+    return {
+      disposition: 'no_answer',
+      conversation_outcome: 'unknown',
+      is_dm_conversation: false,
+      counts_as_connection: false,
+      counts_as_conversation: false,
+      counts_as_voicemail: false,
+      counts_as_meeting: false,
+      counts_as_bad_data: false,
+    };
+  }
+
+  const normalized = rawDisposition.toLowerCase().trim();
+  const mapping = PHONEBURNER_DISPOSITION_MAP[normalized];
+
+  if (mapping) {
+    // Special handling for "Send Email" - use talk_duration as proxy for DM vs gatekeeper
+    let isDM = mapping.is_dm;
+    let isConversation = mapping.is_conversation;
+    if (normalized === 'send email' && talkDuration > 60) {
+      isDM = true;
+      isConversation = true;
+    }
+
+    return {
+      disposition: mapping.disposition,
+      conversation_outcome: mapping.outcome,
+      is_dm_conversation: isDM,
+      counts_as_connection: mapping.is_connection,
+      counts_as_conversation: isConversation,
+      counts_as_voicemail: mapping.is_voicemail,
+      counts_as_meeting: mapping.is_meeting,
+      counts_as_bad_data: mapping.is_bad_data,
+    };
+  }
+
+  // Fuzzy matching for variations not in the map
+  if (normalized.includes('callback')) {
+    return {
+      disposition: 'connected',
+      conversation_outcome: 'callback',
+      is_dm_conversation: true,
+      counts_as_connection: true,
+      counts_as_conversation: true,
+      counts_as_voicemail: false,
+      counts_as_meeting: false,
+      counts_as_bad_data: false,
+    };
+  }
+  if (normalized.includes('positive')) {
+    return {
+      disposition: 'connected',
+      conversation_outcome: 'meeting_interest',
+      is_dm_conversation: true,
+      counts_as_connection: true,
+      counts_as_conversation: true,
+      counts_as_voicemail: false,
+      counts_as_meeting: true,
+      counts_as_bad_data: false,
+    };
+  }
+  if (normalized.includes('negative')) {
+    return {
+      disposition: 'connected',
+      conversation_outcome: 'not_interested',
+      is_dm_conversation: true,
+      counts_as_connection: true,
+      counts_as_conversation: true,
+      counts_as_voicemail: false,
+      counts_as_meeting: false,
+      counts_as_bad_data: false,
+    };
+  }
+  if (normalized.includes('meeting') || normalized.includes('booked')) {
+    return {
+      disposition: 'connected',
+      conversation_outcome: 'meeting_booked',
+      is_dm_conversation: true,
+      counts_as_connection: true,
+      counts_as_conversation: true,
+      counts_as_voicemail: false,
+      counts_as_meeting: true,
+      counts_as_bad_data: false,
+    };
+  }
+  if (normalized.includes('voicemail') || normalized === 'vm') {
+    return {
+      disposition: 'voicemail',
+      conversation_outcome: 'voicemail',
+      is_dm_conversation: false,
+      counts_as_connection: false,
+      counts_as_conversation: false,
+      counts_as_voicemail: true,
+      counts_as_meeting: false,
+      counts_as_bad_data: false,
+    };
+  }
+  if (normalized.includes('no answer')) {
+    return {
+      disposition: 'no_answer',
+      conversation_outcome: 'no_answer',
+      is_dm_conversation: false,
+      counts_as_connection: false,
+      counts_as_conversation: false,
+      counts_as_voicemail: false,
+      counts_as_meeting: false,
+      counts_as_bad_data: false,
+    };
+  }
+  if (normalized.includes('bad') || normalized.includes('wrong') || normalized.includes('disconnect')) {
+    return {
+      disposition: 'bad_data',
+      conversation_outcome: normalized.includes('wrong') ? 'wrong_number' : 'bad_phone',
+      is_dm_conversation: false,
+      counts_as_connection: false,
+      counts_as_conversation: false,
+      counts_as_voicemail: false,
+      counts_as_meeting: false,
+      counts_as_bad_data: true,
+    };
+  }
+  if (normalized.includes('connect') || normalized.includes('answer')) {
+    return {
+      disposition: 'connected',
+      conversation_outcome: 'connected',
+      is_dm_conversation: false,
+      counts_as_connection: true,
+      counts_as_conversation: false,
+      counts_as_voicemail: false,
+      counts_as_meeting: false,
+      counts_as_bad_data: false,
+    };
+  }
+
+  // Default fallback for unknown dispositions
+  console.warn(`Unknown PhoneBurner disposition: "${rawDisposition}"`);
+  return {
+    disposition: 'no_answer',
+    conversation_outcome: 'unknown',
+    is_dm_conversation: false,
+    counts_as_connection: false,
+    counts_as_conversation: false,
+    counts_as_voicemail: false,
+    counts_as_meeting: false,
+    counts_as_bad_data: false,
+  };
+}
+
+/**
+ * Get all PhoneBurner dispositions for reference UI
+ */
+export function getPhoneBurnerDispositionMatrix(): Array<{
+  disposition: string;
+  totalCalls: boolean;
+  connections: boolean;
+  conversations: boolean;
+  dmConversations: boolean;
+  voicemails: boolean;
+  meetings: boolean;
+  badData: boolean;
+  notes: string;
+}> {
+  return [
+    // Connection dispositions
+    { disposition: 'Receptionist', totalCalls: true, connections: true, conversations: false, dmConversations: false, voicemails: false, meetings: false, badData: false, notes: 'Gatekeeper, not DM' },
+    { disposition: 'Callback Requested', totalCalls: true, connections: true, conversations: true, dmConversations: true, voicemails: false, meetings: false, badData: false, notes: 'DM requested callback' },
+    { disposition: 'Send Email', totalCalls: true, connections: true, conversations: false, dmConversations: false, voicemails: false, meetings: false, badData: false, notes: 'DM if talk > 60s' },
+    { disposition: 'Not Qualified', totalCalls: true, connections: true, conversations: true, dmConversations: true, voicemails: false, meetings: false, badData: false, notes: 'Spoke with DM, not a fit' },
+    { disposition: 'Positive - Blacklist Co', totalCalls: true, connections: true, conversations: true, dmConversations: true, voicemails: false, meetings: true, badData: false, notes: 'Meeting interest, company blacklisted' },
+    { disposition: 'Negative - Blacklist Co', totalCalls: true, connections: true, conversations: true, dmConversations: true, voicemails: false, meetings: false, badData: false, notes: 'Not interested, company blacklisted' },
+    { disposition: 'Negative - Blacklist Contact', totalCalls: true, connections: true, conversations: true, dmConversations: true, voicemails: false, meetings: false, badData: false, notes: 'Not interested, contact blacklisted' },
+    { disposition: 'Hung Up', totalCalls: true, connections: true, conversations: false, dmConversations: false, voicemails: false, meetings: false, badData: false, notes: 'Connected but hung up' },
+    { disposition: 'Meeting Booked', totalCalls: true, connections: true, conversations: true, dmConversations: true, voicemails: false, meetings: true, badData: false, notes: 'Pursuable meeting booked' },
+    // Non-connection dispositions
+    { disposition: 'Voicemail', totalCalls: true, connections: false, conversations: false, dmConversations: false, voicemails: true, meetings: false, badData: false, notes: 'Standard VM' },
+    { disposition: 'Live Voicemail', totalCalls: true, connections: false, conversations: false, dmConversations: false, voicemails: true, meetings: false, badData: false, notes: 'Live VM drop' },
+    { disposition: 'No Answer', totalCalls: true, connections: false, conversations: false, dmConversations: false, voicemails: false, meetings: false, badData: false, notes: 'No pickup' },
+    { disposition: 'Bad Phone', totalCalls: true, connections: false, conversations: false, dmConversations: false, voicemails: false, meetings: false, badData: true, notes: 'Disconnected' },
+    { disposition: 'Wrong Number', totalCalls: true, connections: false, conversations: false, dmConversations: false, voicemails: false, meetings: false, badData: true, notes: 'Wrong person/company' },
+    { disposition: 'Do Not Call', totalCalls: true, connections: false, conversations: false, dmConversations: false, voicemails: false, meetings: false, badData: false, notes: 'Legal opt-out' },
+  ];
+}
 
 // Positive reply categories
 export const POSITIVE_REPLY_CATEGORIES = ['meeting_request', 'interested'] as const;
