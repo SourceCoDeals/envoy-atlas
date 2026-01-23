@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Calendar } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Calendar, Info } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import type { WeeklyEnrollmentTrend } from '@/hooks/useEngagementReport';
 
@@ -15,6 +16,7 @@ export interface WeeklyPerformance {
 interface WeeklyPerformanceBreakdownProps {
   weeklyData: WeeklyPerformance[];
   enrollmentTrend?: WeeklyEnrollmentTrend[];
+  isEstimated?: boolean;
 }
 
 interface ChartDataPoint {
@@ -26,7 +28,7 @@ interface ChartDataPoint {
   positive: number;
 }
 
-export function WeeklyPerformanceBreakdown({ weeklyData, enrollmentTrend }: WeeklyPerformanceBreakdownProps) {
+export function WeeklyPerformanceBreakdown({ weeklyData, enrollmentTrend, isEstimated }: WeeklyPerformanceBreakdownProps) {
   // Merge performance and enrollment data by week
   const chartData: ChartDataPoint[] = weeklyData.map(week => {
     const enrollmentWeek = enrollmentTrend?.find(e => e.weekStart === week.weekStart);
@@ -115,9 +117,22 @@ export function WeeklyPerformanceBreakdown({ weeklyData, enrollmentTrend }: Week
         <CardTitle className="text-lg flex items-center gap-2">
           <Calendar className="h-5 w-5 text-primary" />
           Week-by-Week Performance
+          {isEstimated && (
+            <span className="text-xs font-normal text-warning bg-warning/10 px-2 py-0.5 rounded">
+              Estimated
+            </span>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {isEstimated && (
+          <Alert variant="default" className="mb-4 border-warning/30 bg-warning/10">
+            <Info className="h-4 w-4" />
+            <AlertDescription>
+              Weekly distribution is estimated from campaign totals. Actual day-by-day data was not available.
+            </AlertDescription>
+          </Alert>
+        )}
         <ResponsiveContainer width="100%" height={320}>
           <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <XAxis 

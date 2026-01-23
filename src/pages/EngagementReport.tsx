@@ -27,6 +27,7 @@ export default function EngagementReport() {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [unlinkedCampaigns, setUnlinkedCampaigns] = useState<UnlinkedCampaign[]>([]);
   const [isBackfilling, setIsBackfilling] = useState(false);
+  const [isGeneratingBreakdown, setIsGeneratingBreakdown] = useState(false);
   const dateRange = getDateRange(dateRangeOption);
   
   const { linkCampaignsToEngagement, fetchCampaignsNotInEngagement } = useCampaignLinking();
@@ -75,6 +76,32 @@ export default function EngagementReport() {
       toast.error('Failed to backfill enrollment data');
     } finally {
       setIsBackfilling(false);
+    }
+  }, [engagementId, refetch]);
+
+  // Handle generating weekly breakdown from campaign totals
+  const handleGenerateWeeklyBreakdown = useCallback(async () => {
+    if (!engagementId) return;
+    
+    setIsGeneratingBreakdown(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('backfill-daily-metrics', {
+        body: { engagement_id: engagementId },
+      });
+      
+      if (error) throw error;
+      
+      if (data?.daily_metrics_created > 0) {
+        toast.success(`Generated ${data.daily_metrics_created} weekly data points from ${data.campaigns_processed} campaigns`);
+        refetch();
+      } else {
+        toast.info(data?.message || 'No new metrics to generate');
+      }
+    } catch (err) {
+      console.error('Generate breakdown error:', err);
+      toast.error('Failed to generate weekly breakdown');
+    } finally {
+      setIsGeneratingBreakdown(false);
     }
   }, [engagementId, refetch]);
 
@@ -351,8 +378,13 @@ export default function EngagementReport() {
                 enrollmentMetrics,
                 weeklyEnrollmentTrend,
                 weeklyPerformance: data.weeklyPerformance,
-                dataAvailability: dataAvailability,
+                dataAvailability: {
+                  ...dataAvailability,
+                  isEstimated: data.weeklyPerformance?.some((w: any) => w.isEstimated) ?? false,
+                },
               }}
+              onGenerateWeeklyBreakdown={handleGenerateWeeklyBreakdown}
+              isGeneratingBreakdown={isGeneratingBreakdown}
             />
           </TabsContent>
 
