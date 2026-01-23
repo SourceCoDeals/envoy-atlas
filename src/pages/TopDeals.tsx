@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useEnhancedCallingAnalytics, DateRange, CallActivity } from '@/hooks/useEnhancedCallingAnalytics';
+import { useColdCallAnalytics, DateRange, ColdCall } from '@/hooks/useColdCallAnalytics';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { formatScore, formatCallingDuration, getScoreStatus, getScoreStatusColor } from '@/lib/callingConfig';
 import {
@@ -30,7 +30,6 @@ import {
   User,
   Play,
   FileText,
-  Building2,
   Flame,
   Clock,
   Target,
@@ -38,12 +37,12 @@ import {
   ChevronRight,
   Phone,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 
 export default function TopDeals() {
   const [dateRange, setDateRange] = useState<DateRange>('30d');
-  const [selectedCall, setSelectedCall] = useState<CallActivity | null>(null);
-  const { data, isLoading } = useEnhancedCallingAnalytics(dateRange);
+  const [selectedCall, setSelectedCall] = useState<ColdCall | null>(null);
+  const { data, isLoading } = useColdCallAnalytics(dateRange);
   const { config } = useCallingConfig();
 
   // Best Opportunities: Interest = "yes" AND Seller Interest Score >= config threshold
@@ -65,15 +64,13 @@ export default function TopDeals() {
     }).slice(0, 20);
   }, [data?.calls]);
 
-  // Extract deal intelligence from raw_data
-  const getDealIntel = (call: CallActivity) => {
-    const raw = call.raw_data || {};
+  // Extract deal intelligence from ColdCall fields
+  const getDealIntel = (call: ColdCall) => {
     return {
-      transactionGoals: raw.transaction_goals as string | null,
-      timelineToSell: raw.timeline_to_sell as string | null,
-      buyerTypePreference: raw.buyer_type_preference as string | null,
-      maDiscussions: raw.ma_discussions as string | null,
-      businessDescription: raw.business_description as string | null,
+      transactionGoals: call.target_pain_points || null,
+      timelineToSell: null, // Not available in cold_calls schema
+      buyerTypePreference: null, // Not available in cold_calls schema
+      keyInsights: call.call_summary || null,
     };
   };
 
@@ -233,14 +230,12 @@ export default function TopDeals() {
                         <TableHead>Rep</TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Interest Score</TableHead>
-                        <TableHead>Timeline</TableHead>
                         <TableHead>Summary</TableHead>
                         <TableHead></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {bestOpportunities.map((call) => {
-                        const intel = getDealIntel(call);
                         const status = getScoreStatus(call.seller_interest_score, config.sellerInterestThresholds);
                         return (
                           <TableRow
@@ -249,30 +244,30 @@ export default function TopDeals() {
                             onClick={() => setSelectedCall(call)}
                           >
                             <TableCell>
-                              <div className="font-medium">{call.to_name || call.to_phone}</div>
+                              <div className="font-medium">{call.to_name || call.to_number}</div>
+                              {call.to_company && (
+                                <div className="text-xs text-muted-foreground">{call.to_company}</div>
+                              )}
                             </TableCell>
                             <TableCell className="text-muted-foreground">
-                              {call.caller_name?.split('@')[0] || 'Unknown'}
+                              {call.analyst?.split('@')[0] || 'Unknown'}
                             </TableCell>
                             <TableCell>
-                              {call.started_at && format(new Date(call.started_at), 'MMM d')}
+                              {call.called_date && format(parseISO(call.called_date), 'MMM d')}
                             </TableCell>
                             <TableCell>
                               <Badge className={getScoreStatusColor(status)}>
                                 {formatScore(call.seller_interest_score, config)}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {intel.timelineToSell || '-'}
-                            </TableCell>
                             <TableCell className="max-w-[200px] truncate text-sm">
                               {call.call_summary || '-'}
                             </TableCell>
                             <TableCell>
                               <div className="flex gap-1">
-                                {call.recording_url && (
+                                {call.call_recording_url && (
                                   <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                                    <a href={call.recording_url} target="_blank" rel="noopener noreferrer">
+                                    <a href={call.call_recording_url} target="_blank" rel="noopener noreferrer">
                                       <Play className="h-4 w-4" />
                                     </a>
                                   </Button>
@@ -314,15 +309,12 @@ export default function TopDeals() {
                         <TableHead>Rep</TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Interest Score</TableHead>
-                        <TableHead>Next Steps Clarity</TableHead>
                         <TableHead>Summary</TableHead>
                         <TableHead></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {warmPipeline.map((call) => {
-                        const raw = call.raw_data || {};
-                        const nextStepsScore = raw.next_steps_clarity_score as number | null;
                         return (
                           <TableRow
                             key={call.id}
@@ -330,34 +322,30 @@ export default function TopDeals() {
                             onClick={() => setSelectedCall(call)}
                           >
                             <TableCell>
-                              <div className="font-medium">{call.to_name || call.to_phone}</div>
+                              <div className="font-medium">{call.to_name || call.to_number}</div>
+                              {call.to_company && (
+                                <div className="text-xs text-muted-foreground">{call.to_company}</div>
+                              )}
                             </TableCell>
                             <TableCell className="text-muted-foreground">
-                              {call.caller_name?.split('@')[0] || 'Unknown'}
+                              {call.analyst?.split('@')[0] || 'Unknown'}
                             </TableCell>
                             <TableCell>
-                              {call.started_at && format(new Date(call.started_at), 'MMM d')}
+                              {call.called_date && format(parseISO(call.called_date), 'MMM d')}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline">
                                 {formatScore(call.seller_interest_score, config)}
                               </Badge>
                             </TableCell>
-                            <TableCell>
-                              {nextStepsScore != null ? (
-                                <Badge variant="outline">
-                                  {formatScore(nextStepsScore, config)}
-                                </Badge>
-                              ) : '-'}
-                            </TableCell>
                             <TableCell className="max-w-[200px] truncate text-sm">
                               {call.call_summary || '-'}
                             </TableCell>
                             <TableCell>
                               <div className="flex gap-1">
-                                {call.recording_url && (
+                                {call.call_recording_url && (
                                   <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                                    <a href={call.recording_url} target="_blank" rel="noopener noreferrer">
+                                    <a href={call.call_recording_url} target="_blank" rel="noopener noreferrer">
                                       <Play className="h-4 w-4" />
                                     </a>
                                   </Button>
@@ -389,70 +377,74 @@ export default function TopDeals() {
             </CardHeader>
             <CardContent>
               <div className="grid gap-6 md:grid-cols-3">
-                {/* Transaction Goals */}
+                {/* Pain Points / Goals */}
                 <div>
                   <h4 className="font-medium mb-3 flex items-center gap-2">
                     <Target className="h-4 w-4" />
-                    Transaction Goals
+                    Pain Points / Goals
                   </h4>
                   <div className="space-y-2">
                     {bestOpportunities
-                      .filter(c => getDealIntel(c).transactionGoals)
+                      .filter(c => c.target_pain_points)
                       .slice(0, 5)
                       .map((call) => (
                         <div key={call.id} className="text-sm p-2 bg-muted/50 rounded">
                           <p className="font-medium">{call.to_name || 'Unknown'}</p>
                           <p className="text-muted-foreground truncate">
-                            {getDealIntel(call).transactionGoals}
+                            {call.target_pain_points}
                           </p>
                         </div>
                       ))}
-                    {bestOpportunities.filter(c => getDealIntel(c).transactionGoals).length === 0 && (
-                      <p className="text-sm text-muted-foreground">No transaction goals captured</p>
+                    {bestOpportunities.filter(c => c.target_pain_points).length === 0 && (
+                      <p className="text-sm text-muted-foreground">No pain points captured</p>
                     )}
                   </div>
                 </div>
 
-                {/* Timeline to Sell */}
+                {/* Key Concerns */}
                 <div>
                   <h4 className="font-medium mb-3 flex items-center gap-2">
                     <Clock className="h-4 w-4" />
-                    Timeline to Sell
+                    Key Concerns
                   </h4>
                   <div className="space-y-2">
                     {bestOpportunities
-                      .filter(c => getDealIntel(c).timelineToSell)
+                      .filter(c => c.key_concerns && c.key_concerns.length > 0)
                       .slice(0, 5)
                       .map((call) => (
                         <div key={call.id} className="text-sm p-2 bg-muted/50 rounded">
                           <p className="font-medium">{call.to_name || 'Unknown'}</p>
-                          <p className="text-muted-foreground">{getDealIntel(call).timelineToSell}</p>
+                          <p className="text-muted-foreground truncate">
+                            {call.key_concerns?.join(', ')}
+                          </p>
                         </div>
                       ))}
-                    {bestOpportunities.filter(c => getDealIntel(c).timelineToSell).length === 0 && (
-                      <p className="text-sm text-muted-foreground">No timelines captured</p>
+                    {bestOpportunities.filter(c => c.key_concerns && c.key_concerns.length > 0).length === 0 && (
+                      <p className="text-sm text-muted-foreground">No key concerns captured</p>
                     )}
                   </div>
                 </div>
 
-                {/* Buyer Type Preference */}
+                {/* Interest Reasons */}
                 <div>
                   <h4 className="font-medium mb-3 flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    Buyer Type Preference
+                    <TrendingUp className="h-4 w-4" />
+                    Interest Reasoning
                   </h4>
                   <div className="space-y-2">
                     {bestOpportunities
-                      .filter(c => getDealIntel(c).buyerTypePreference)
+                      .filter(c => c.interest_rating_reasoning)
                       .slice(0, 5)
                       .map((call) => (
                         <div key={call.id} className="text-sm p-2 bg-muted/50 rounded">
                           <p className="font-medium">{call.to_name || 'Unknown'}</p>
-                          <p className="text-muted-foreground">{getDealIntel(call).buyerTypePreference}</p>
+                          <p className="text-muted-foreground truncate">
+                            {call.interest_rating_reasoning}
+                          </p>
                         </div>
                       ))}
-                    {bestOpportunities.filter(c => getDealIntel(c).buyerTypePreference).length === 0 && (
-                      <p className="text-sm text-muted-foreground">No preferences captured</p>
+                    {bestOpportunities.filter(c => c.interest_rating_reasoning).length === 0 && (
+                      <p className="text-sm text-muted-foreground">No interest reasoning captured</p>
                     )}
                   </div>
                 </div>
@@ -469,7 +461,7 @@ export default function TopDeals() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  {selectedCall.to_name || selectedCall.to_phone}
+                  {selectedCall.to_name || selectedCall.to_number}
                   <Badge className={getScoreStatusColor(getScoreStatus(selectedCall.seller_interest_score, config.sellerInterestThresholds))}>
                     Interest: {formatScore(selectedCall.seller_interest_score, config)}
                   </Badge>
@@ -481,19 +473,19 @@ export default function TopDeals() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div className="flex items-center gap-2">
                     <User className="h-4 w-4 text-muted-foreground" />
-                    <span>Rep: {selectedCall.caller_name?.split('@')[0]}</span>
+                    <span>Rep: {selectedCall.analyst?.split('@')[0]}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span>{selectedCall.started_at && format(new Date(selectedCall.started_at), 'MMM d, yyyy')}</span>
+                    <span>{selectedCall.called_date && format(parseISO(selectedCall.called_date), 'MMM d, yyyy')}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-muted-foreground" />
-                    <span>Duration: {formatCallingDuration(selectedCall.talk_duration)}</span>
+                    <span>Duration: {formatCallingDuration(selectedCall.call_duration_sec)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span>{selectedCall.to_phone}</span>
+                    <span>{selectedCall.to_number}</span>
                   </div>
                 </div>
 
@@ -509,22 +501,22 @@ export default function TopDeals() {
                 <div>
                   <h4 className="font-medium mb-2">Extracted Intelligence</h4>
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    {getDealIntel(selectedCall).timelineToSell && (
-                      <div>
-                        <span className="text-muted-foreground">Timeline:</span>{' '}
-                        {getDealIntel(selectedCall).timelineToSell}
-                      </div>
-                    )}
-                    {getDealIntel(selectedCall).buyerTypePreference && (
-                      <div>
-                        <span className="text-muted-foreground">Buyer Preference:</span>{' '}
-                        {getDealIntel(selectedCall).buyerTypePreference}
-                      </div>
-                    )}
-                    {getDealIntel(selectedCall).transactionGoals && (
+                    {selectedCall.target_pain_points && (
                       <div className="col-span-2">
-                        <span className="text-muted-foreground">Transaction Goals:</span>{' '}
-                        {getDealIntel(selectedCall).transactionGoals}
+                        <span className="text-muted-foreground">Pain Points:</span>{' '}
+                        {selectedCall.target_pain_points}
+                      </div>
+                    )}
+                    {selectedCall.key_concerns && selectedCall.key_concerns.length > 0 && (
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Key Concerns:</span>{' '}
+                        {selectedCall.key_concerns.join(', ')}
+                      </div>
+                    )}
+                    {selectedCall.interest_rating_reasoning && (
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Interest Reasoning:</span>{' '}
+                        {selectedCall.interest_rating_reasoning}
                       </div>
                     )}
                   </div>
@@ -532,15 +524,15 @@ export default function TopDeals() {
 
                 {/* Actions */}
                 <div className="flex gap-2">
-                  {selectedCall.recording_url && (
+                  {selectedCall.call_recording_url && (
                     <Button variant="outline" className="flex-1" asChild>
-                      <a href={selectedCall.recording_url} target="_blank" rel="noopener noreferrer">
+                      <a href={selectedCall.call_recording_url} target="_blank" rel="noopener noreferrer">
                         <Play className="h-4 w-4 mr-2" />
                         Listen
                       </a>
                     </Button>
                   )}
-                  {selectedCall.transcription && (
+                  {selectedCall.call_transcript && (
                     <Button variant="outline" className="flex-1">
                       <FileText className="h-4 w-4 mr-2" />
                       View Transcript

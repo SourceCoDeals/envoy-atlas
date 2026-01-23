@@ -283,13 +283,14 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         dateFilterStr = format(filterDate, 'yyyy-MM-dd');
       }
 
-      // Fetch cold calls - no limit to get accurate counts
+      // Fetch cold calls - use range to override Supabase's default 1000 row limit
       // Filter by called_date column which stores dates as YYYY-MM-DD
       let query = supabase
         .from('cold_calls')
         .select('*')
         .eq('client_id', currentWorkspace.id)
-        .order('called_date', { ascending: false, nullsFirst: false });
+        .order('called_date', { ascending: false, nullsFirst: false })
+        .range(0, 49999); // Fetch up to 50k records to ensure complete data
 
       if (dateFilterStr) {
         query = query.gte('called_date', dateFilterStr);

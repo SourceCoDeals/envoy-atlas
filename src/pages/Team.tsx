@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useEnhancedCallingAnalytics, DateRange } from '@/hooks/useEnhancedCallingAnalytics';
+import { useColdCallAnalytics, DateRange } from '@/hooks/useColdCallAnalytics';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { 
   formatScore, 
@@ -48,7 +48,7 @@ import {
 
 export default function Team() {
   const [dateRange, setDateRange] = useState<DateRange>('30d');
-  const { data, isLoading } = useEnhancedCallingAnalytics(dateRange);
+  const { data, isLoading } = useColdCallAnalytics(dateRange);
   const { config } = useCallingConfig();
 
   // Calculate coaching flags from config thresholds
