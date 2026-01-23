@@ -180,6 +180,8 @@ interface DataAvailability {
   hasHistoricalEmailMetrics: boolean;
   historicalEmailMinDate: string | null;
   historicalEmailMaxDate: string | null;
+  /** True when we are showing weekly data generated from campaign totals (synthetic rows). */
+  isEstimated: boolean;
   callingData: boolean;
   infrastructureData: boolean;
   syncInProgress: boolean;
@@ -253,7 +255,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       // Fetch linked campaigns from unified campaigns table with stats and settings
       const { data: campaigns } = await supabase
         .from('campaigns')
-        .select('id, name, campaign_type, status, total_sent, total_replied, reply_rate, positive_replies, positive_rate, settings')
+        .select('id, name, campaign_type, status, total_sent, total_replied, total_bounced, reply_rate, positive_replies, positive_rate, settings')
         .eq('engagement_id', engagementId)
         .order('total_sent', { ascending: false });
 
@@ -398,30 +400,34 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         sent: acc.sent + (c.total_sent || 0),
         replied: acc.replied + (c.total_replied || 0),
         positive: acc.positive + (c.positive_replies || 0),
-      }), { sent: 0, replied: 0, positive: 0 });
+        bounced: acc.bounced + ((c as any).total_bounced || 0),
+      }), { sent: 0, replied: 0, positive: 0, bounced: 0 });
 
-      // Use daily_metrics if available AND has meaningful data, otherwise fall back to campaign totals
-      // This ensures we show accurate totals even when date filter excludes historical data
-      const useDailyMetrics = dailyTotals.sent > 0 && !startDateStr; // Only use daily if no date filter or has data
-      const emailTotals = {
-        sent: startDateStr ? dailyTotals.sent : Math.max(dailyTotals.sent, campaignTotals.sent),
-        delivered: dailyTotals.delivered || 0,
-        replied: startDateStr ? dailyTotals.replied : Math.max(dailyTotals.replied, campaignTotals.replied),
-        bounced: dailyTotals.bounced || 0,
-        positive: startDateStr ? dailyTotals.positive : Math.max(dailyTotals.positive, campaignTotals.positive),
-      };
+      // If we have *no* daily metrics in the selected range but campaign totals exist,
+      // treat this as a campaign fallback and surface All-Time totals instead of 0s.
+      const isCampaignFallbackInRange = Boolean(startDateStr && dailyTotals.sent === 0 && campaignTotals.sent > 0);
 
-      // For "All Time" view, always use campaign totals as source of truth
-      const allTimeEmailTotals = !startDateStr ? {
+      const allTimeEmailTotals = {
         sent: campaignTotals.sent,
         replied: campaignTotals.replied,
         positive: campaignTotals.positive,
-        delivered: campaignTotals.sent - dailyTotals.bounced, // Estimate delivered from sent - bounced
-        bounced: dailyTotals.bounced,
-      } : emailTotals;
+        bounced: campaignTotals.bounced,
+        delivered: Math.max(0, campaignTotals.sent - campaignTotals.bounced),
+      };
 
-      const finalEmailTotals = startDateStr ? emailTotals : allTimeEmailTotals;
-      const delivered = finalEmailTotals.delivered || (finalEmailTotals.sent - finalEmailTotals.bounced);
+      const rangeEmailTotals = {
+        sent: dailyTotals.sent,
+        replied: dailyTotals.replied,
+        positive: dailyTotals.positive,
+        bounced: dailyTotals.bounced,
+        delivered: Math.max(0, dailyTotals.delivered || (dailyTotals.sent - dailyTotals.bounced)),
+      };
+
+      const finalEmailTotals = startDateStr
+        ? (isCampaignFallbackInRange ? allTimeEmailTotals : rangeEmailTotals)
+        : allTimeEmailTotals;
+
+      const delivered = finalEmailTotals.delivered;
 
       // Calculate calling metrics
       const totalCalls = calls.length;
@@ -812,6 +818,8 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         });
       }
 
+      const isEstimated = (metricsForWeeklyBreakdown as any[]).some((m) => Boolean(m.is_estimated));
+
       setData({
         engagement: engagement as EngagementDetails,
         keyMetrics,
@@ -844,6 +852,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           hasHistoricalEmailMetrics,
           historicalEmailMinDate,
           historicalEmailMaxDate,
+          isEstimated,
           callingData: calls.length > 0,
           infrastructureData: emailAccounts.length > 0,
           syncInProgress: false,

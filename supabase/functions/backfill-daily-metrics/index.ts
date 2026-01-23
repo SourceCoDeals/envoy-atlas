@@ -15,7 +15,17 @@ interface BackfillResult {
   campaigns_processed: number;
   daily_metrics_created: number;
   weeks_generated: number;
+  insert_errors?: number;
   message: string;
+}
+
+function startOfWeekMondayUTC(date: Date) {
+  // Normalize to Monday 00:00:00 UTC
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay(); // 0=Sun
+  const diff = (day + 6) % 7; // Mon=0 ... Sun=6
+  d.setUTCDate(d.getUTCDate() - diff);
+  return d;
 }
 
 Deno.serve(async (req) => {
@@ -80,6 +90,7 @@ Deno.serve(async (req) => {
 
     let totalMetricsCreated = 0;
     let totalWeeksGenerated = 0;
+    let insertErrors = 0;
 
     for (const campaign of campaigns) {
       // Determine date range from campaign created_at and updated_at
@@ -111,10 +122,10 @@ Deno.serve(async (req) => {
 
       const metricsToInsert = [];
 
+      const baseMonday = startOfWeekMondayUTC(createdDate);
+
       for (let weekIndex = 0; weekIndex < weeksDiff; weekIndex++) {
-        // Calculate the Monday of this week
-        const weekStart = new Date(createdDate.getTime() + weekIndex * msPerWeek);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Move to Monday
+        const weekStart = new Date(baseMonday.getTime() + weekIndex * msPerWeek);
         const dateStr = weekStart.toISOString().split('T')[0];
 
         const key = `${campaign.id}:${dateStr}`;
@@ -145,6 +156,7 @@ Deno.serve(async (req) => {
 
         if (insertError) {
           console.error(`[backfill-daily-metrics] Error inserting metrics for campaign ${campaign.id}:`, insertError);
+            insertErrors += 1;
           // Continue with other campaigns
         } else {
           totalMetricsCreated += metricsToInsert.length;
@@ -160,9 +172,12 @@ Deno.serve(async (req) => {
       campaigns_processed: campaigns.length,
       daily_metrics_created: totalMetricsCreated,
       weeks_generated: totalWeeksGenerated,
+      insert_errors: insertErrors,
       message: totalMetricsCreated > 0
         ? `Successfully generated ${totalMetricsCreated} weekly data points from ${campaigns.length} campaigns`
-        : 'No new metrics to generate (data already exists)',
+        : insertErrors > 0
+          ? 'Failed to generate metrics due to insert errors'
+          : 'No new metrics to generate (data already exists)',
     };
 
     console.log(`[backfill-daily-metrics] Complete:`, result);

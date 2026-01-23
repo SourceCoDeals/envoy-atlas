@@ -1746,6 +1746,7 @@ export type Database = {
           engagement_id: string | null
           hard_bounces: number | null
           id: string
+          is_estimated: boolean
           meetings_booked: number | null
           not_interested_replies: number | null
           open_rate: number | null
@@ -1779,6 +1780,7 @@ export type Database = {
           engagement_id?: string | null
           hard_bounces?: number | null
           id?: string
+          is_estimated?: boolean
           meetings_booked?: number | null
           not_interested_replies?: number | null
           open_rate?: number | null
@@ -1812,6 +1814,7 @@ export type Database = {
           engagement_id?: string | null
           hard_bounces?: number | null
           id?: string
+          is_estimated?: boolean
           meetings_booked?: number | null
           not_interested_replies?: number | null
           open_rate?: number | null
