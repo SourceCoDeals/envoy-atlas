@@ -1154,6 +1154,173 @@ export type Database = {
         }
         Relationships: []
       }
+      cold_calls: {
+        Row: {
+          analyst: string | null
+          call_duration_sec: number | null
+          call_recording_url: string | null
+          call_summary: string | null
+          call_transcript: string | null
+          called_date: string | null
+          called_date_time: string | null
+          category: string | null
+          client_id: string
+          composite_score: number | null
+          conversation_quality_reasoning: string | null
+          created_at: string
+          decision_maker_identified_score: number | null
+          decision_maker_reasoning: string | null
+          direction: string | null
+          engagement_score: number | null
+          from_name: string | null
+          from_number: string | null
+          gatekeeper_handling_score: number | null
+          id: string
+          interest_rating_reasoning: string | null
+          key_concerns: string[] | null
+          next_step_clarity_score: number | null
+          nocodb_created_at: string | null
+          nocodb_id: number | null
+          nocodb_updated_at: string | null
+          not_interested_reason: string | null
+          objection_handling_reasoning: string | null
+          objection_handling_score: number | null
+          objections: string | null
+          opening_type: string | null
+          primary_opportunity: string | null
+          quality_of_conversation_score: number | null
+          rapport_building_score: number | null
+          referral_rate_reasoning: string | null
+          referral_rate_score: number | null
+          resolution_rate: number | null
+          resolution_rate_reasoning: string | null
+          salesforce_url: string | null
+          script_adherence_reasoning: string | null
+          script_adherence_score: number | null
+          seller_interest_score: number | null
+          target_pain_points: string | null
+          to_company: string | null
+          to_email: string | null
+          to_name: string | null
+          to_number: string | null
+          updated_at: string
+          value_clarity_reasoning: string | null
+          value_proposition_score: number | null
+        }
+        Insert: {
+          analyst?: string | null
+          call_duration_sec?: number | null
+          call_recording_url?: string | null
+          call_summary?: string | null
+          call_transcript?: string | null
+          called_date?: string | null
+          called_date_time?: string | null
+          category?: string | null
+          client_id: string
+          composite_score?: number | null
+          conversation_quality_reasoning?: string | null
+          created_at?: string
+          decision_maker_identified_score?: number | null
+          decision_maker_reasoning?: string | null
+          direction?: string | null
+          engagement_score?: number | null
+          from_name?: string | null
+          from_number?: string | null
+          gatekeeper_handling_score?: number | null
+          id?: string
+          interest_rating_reasoning?: string | null
+          key_concerns?: string[] | null
+          next_step_clarity_score?: number | null
+          nocodb_created_at?: string | null
+          nocodb_id?: number | null
+          nocodb_updated_at?: string | null
+          not_interested_reason?: string | null
+          objection_handling_reasoning?: string | null
+          objection_handling_score?: number | null
+          objections?: string | null
+          opening_type?: string | null
+          primary_opportunity?: string | null
+          quality_of_conversation_score?: number | null
+          rapport_building_score?: number | null
+          referral_rate_reasoning?: string | null
+          referral_rate_score?: number | null
+          resolution_rate?: number | null
+          resolution_rate_reasoning?: string | null
+          salesforce_url?: string | null
+          script_adherence_reasoning?: string | null
+          script_adherence_score?: number | null
+          seller_interest_score?: number | null
+          target_pain_points?: string | null
+          to_company?: string | null
+          to_email?: string | null
+          to_name?: string | null
+          to_number?: string | null
+          updated_at?: string
+          value_clarity_reasoning?: string | null
+          value_proposition_score?: number | null
+        }
+        Update: {
+          analyst?: string | null
+          call_duration_sec?: number | null
+          call_recording_url?: string | null
+          call_summary?: string | null
+          call_transcript?: string | null
+          called_date?: string | null
+          called_date_time?: string | null
+          category?: string | null
+          client_id?: string
+          composite_score?: number | null
+          conversation_quality_reasoning?: string | null
+          created_at?: string
+          decision_maker_identified_score?: number | null
+          decision_maker_reasoning?: string | null
+          direction?: string | null
+          engagement_score?: number | null
+          from_name?: string | null
+          from_number?: string | null
+          gatekeeper_handling_score?: number | null
+          id?: string
+          interest_rating_reasoning?: string | null
+          key_concerns?: string[] | null
+          next_step_clarity_score?: number | null
+          nocodb_created_at?: string | null
+          nocodb_id?: number | null
+          nocodb_updated_at?: string | null
+          not_interested_reason?: string | null
+          objection_handling_reasoning?: string | null
+          objection_handling_score?: number | null
+          objections?: string | null
+          opening_type?: string | null
+          primary_opportunity?: string | null
+          quality_of_conversation_score?: number | null
+          rapport_building_score?: number | null
+          referral_rate_reasoning?: string | null
+          referral_rate_score?: number | null
+          resolution_rate?: number | null
+          resolution_rate_reasoning?: string | null
+          salesforce_url?: string | null
+          script_adherence_reasoning?: string | null
+          script_adherence_score?: number | null
+          seller_interest_score?: number | null
+          target_pain_points?: string | null
+          to_company?: string | null
+          to_email?: string | null
+          to_name?: string | null
+          to_number?: string | null
+          updated_at?: string
+          value_clarity_reasoning?: string | null
+          value_proposition_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cold_calls_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           address_city: string | null

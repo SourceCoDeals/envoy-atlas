@@ -9,7 +9,7 @@ const corsHeaders = {
 const NOCODB_BASE_URL = "https://nocodb-1b0ku-u5603.vm.elestio.app";
 const NOCODB_TABLE_ID = "m9klgus7som6u7q";
 
-// Column mapping from NocoDB to cold_calls table
+// Complete column mapping from NocoDB to cold_calls table (all 38 columns)
 const COLUMN_MAP: Record<string, string> = {
   // NocoDB system columns
   "Id": "nocodb_id",
@@ -19,35 +19,45 @@ const COLUMN_MAP: Record<string, string> = {
   // Call metadata
   "Direction": "direction",
   "From Number (CallerID)": "from_number",
-  "From Name": "from_name",
-  "To Number": "to_number",
   "To Name": "to_name",
   "To Company": "to_company",
-  "To Email": "to_email",
+  "To Number": "to_number",
   "Salesforce URL": "salesforce_url",
+  "Call Recording": "call_recording_url",
   "Call Duration (sec)": "call_duration_sec",
   "Called Date": "called_date",
   "Called Date Time": "called_date_time",
   "Call Transcript": "call_transcript",
+  "Call Summary": "call_summary",
   "Category": "category",
   "Analyst": "analyst",
+  "Primary Opportunity": "primary_opportunity",
   
-  // AI Scores
+  // AI Scores (1-10 scale)
   "Interest Rating": "seller_interest_score",
   "Objection Handling Rating": "objection_handling_score",
   "Conversation Quality": "quality_of_conversation_score",
   "Value Clarity": "value_proposition_score",
-  "Rapport Building": "rapport_building_score",
-  "Engagement Score": "engagement_score",
-  "Next Step Clarity": "next_step_clarity_score",
-  "Gatekeeper Handling": "gatekeeper_handling_score",
+  "Script Adherence": "script_adherence_score",
+  "Decision Maker Identified": "decision_maker_identified_score",
+  "Referral Rate": "referral_rate_score",
   
-  // Other fields
-  "Opening Type": "opening_type",
-  "Primary Opportunity": "primary_opportunity",
-  "Call Summary": "call_summary",
-  "Key Concerns": "key_concerns",
-  "Target Pain Points": "target_pain_points",
+  // Resolution rate (percentage)
+  "Resolution Rate": "resolution_rate",
+  
+  // AI Reasoning fields
+  "Interest Rating (Reasoning)": "interest_rating_reasoning",
+  "Objection Handling Rating (Reasoning)": "objection_handling_reasoning",
+  "Resolution Rate (Reasoning)": "resolution_rate_reasoning",
+  "Conversation Quality (Reasoning)": "conversation_quality_reasoning",
+  "Script Adherence (Reasoning)": "script_adherence_reasoning",
+  "Decision Maker Identified (Reasoning)": "decision_maker_reasoning",
+  "Value Clarity (Reasoning)": "value_clarity_reasoning",
+  "Referral Rate (Reasoning)": "referral_rate_reasoning",
+  
+  // Objection tracking
+  "Objections": "objections",
+  "Not Interested (Reason)": "not_interested_reason",
 };
 
 function parseDateTime(value: string | null): string | null {
@@ -80,9 +90,31 @@ function parseDateTime(value: string | null): string | null {
   return null;
 }
 
-function mapNocoDBRecord(record: Record<string, any>, workspaceId: string): Record<string, any> {
+function parseDate(value: string | null): string | null {
+  if (!value) return null;
+  
+  try {
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split('T')[0];
+    }
+  } catch {
+    // Return null
+  }
+  
+  return null;
+}
+
+function extractFromName(direction: string | null): string | null {
+  if (!direction) return null;
+  // Direction format: "Name to Name" - extract the first part
+  const parts = direction.split(' to ');
+  return parts[0]?.trim() || null;
+}
+
+function mapNocoDBRecord(record: Record<string, any>, clientId: string): Record<string, any> {
   const mapped: Record<string, any> = {
-    workspace_id: workspaceId,
+    client_id: clientId,
   };
 
   for (const [nocoKey, dbKey] of Object.entries(COLUMN_MAP)) {
@@ -94,20 +126,20 @@ function mapNocoDBRecord(record: Record<string, any>, workspaceId: string): Reco
       mapped[dbKey] = parseInt(value, 10) || null;
     } else if (dbKey === "call_duration_sec") {
       mapped[dbKey] = parseInt(value, 10) || null;
-    } else if (dbKey.includes("_score")) {
+    } else if (dbKey.includes("_score") || dbKey === "resolution_rate") {
       mapped[dbKey] = parseFloat(value) || null;
-    } else if (dbKey === "called_date" || dbKey === "called_date_time" || dbKey === "nocodb_created_at" || dbKey === "nocodb_updated_at") {
+    } else if (dbKey === "called_date_time" || dbKey === "nocodb_created_at" || dbKey === "nocodb_updated_at") {
       mapped[dbKey] = parseDateTime(value);
-    } else if (dbKey === "key_concerns") {
-      // Handle array field - could be string or already array
-      if (Array.isArray(value)) {
-        mapped[dbKey] = value;
-      } else if (typeof value === "string") {
-        mapped[dbKey] = value.split(",").map((s: string) => s.trim()).filter(Boolean);
-      }
+    } else if (dbKey === "called_date") {
+      mapped[dbKey] = parseDate(value);
     } else {
       mapped[dbKey] = value;
     }
+  }
+
+  // Extract from_name from Direction field
+  if (record["Direction"]) {
+    mapped.from_name = extractFromName(record["Direction"]);
   }
 
   // Calculate composite_score as average of available scores
@@ -116,10 +148,9 @@ function mapNocoDBRecord(record: Record<string, any>, workspaceId: string): Reco
     mapped.quality_of_conversation_score,
     mapped.objection_handling_score,
     mapped.value_proposition_score,
-    mapped.rapport_building_score,
-    mapped.engagement_score,
-    mapped.next_step_clarity_score,
-    mapped.gatekeeper_handling_score,
+    mapped.script_adherence_score,
+    mapped.decision_maker_identified_score,
+    mapped.referral_rate_score,
   ].filter(s => s !== null && s !== undefined);
   
   if (scores.length > 0) {
@@ -141,42 +172,42 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = await req.json().catch(() => ({}));
-    const { workspace_id, action = "sync" } = body;
+    const { client_id, action = "sync" } = body;
 
-    console.log(`[cold-calls-sync] Action: ${action}, workspace: ${workspace_id || "all"}`);
+    console.log(`[cold-calls-sync] Action: ${action}, client: ${client_id || "default"}`);
 
     if (!nocodbApiToken) {
       throw new Error("NOCODB_API_TOKEN is not configured");
     }
 
-    // If no workspace_id provided, sync for all workspaces with nocodb connections
-    let workspaceIds: string[] = [];
+    // Get client ID - use provided or get default
+    let clientIds: string[] = [];
     
-    if (workspace_id) {
-      workspaceIds = [workspace_id];
+    if (client_id) {
+      clientIds = [client_id];
     } else {
-      // Get all workspaces with nocodb connections
-      const { data: connections } = await supabase
-        .from("api_connections")
-        .select("workspace_id")
-        .eq("platform", "nocodb")
-        .eq("is_active", true);
+      // Get the default client (sourceco)
+      const { data: clients } = await supabase
+        .from("clients")
+        .select("id")
+        .eq("slug", "sourceco")
+        .limit(1);
       
-      workspaceIds = connections?.map(c => c.workspace_id) || [];
+      clientIds = clients?.map(c => c.id) || [];
       
-      // If no connections found, try to get any workspace
-      if (workspaceIds.length === 0) {
-        const { data: workspaces } = await supabase
-          .from("workspaces")
+      // If no default client, get any client
+      if (clientIds.length === 0) {
+        const { data: anyClients } = await supabase
+          .from("clients")
           .select("id")
           .limit(1);
-        workspaceIds = workspaces?.map(w => w.id) || [];
+        clientIds = anyClients?.map(c => c.id) || [];
       }
     }
 
-    if (workspaceIds.length === 0) {
+    if (clientIds.length === 0) {
       return new Response(
-        JSON.stringify({ success: false, error: "No workspaces found to sync" }),
+        JSON.stringify({ success: false, error: "No clients found to sync" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -220,15 +251,16 @@ serve(async (req) => {
 
     console.log(`[cold-calls-sync] Total records fetched: ${allRecords.length}`);
 
-    // Process for each workspace
+    // Process for each client
     const results: Record<string, any>[] = [];
     
-    for (const wsId of workspaceIds) {
-      console.log(`[cold-calls-sync] Processing workspace: ${wsId}`);
+    for (const cId of clientIds) {
+      console.log(`[cold-calls-sync] Processing client: ${cId}`);
       
-      const mappedRecords = allRecords.map(r => mapNocoDBRecord(r, wsId));
+      const mappedRecords = allRecords.map(r => mapNocoDBRecord(r, cId));
       
       let inserted = 0;
+      let updated = 0;
       let errors = 0;
       const errorDetails: string[] = [];
 
@@ -255,21 +287,33 @@ serve(async (req) => {
       }
 
       results.push({
-        workspace_id: wsId,
+        client_id: cId,
         fetched: allRecords.length,
-        inserted,
+        upserted: inserted,
         errors,
         error_details: errorDetails.slice(0, 5),
       });
 
-      console.log(`[cold-calls-sync] Workspace ${wsId}: ${inserted} upserted, ${errors} errors`);
+      console.log(`[cold-calls-sync] Client ${cId}: ${inserted} upserted, ${errors} errors`);
     }
+
+    // Calculate total errors across all results
+    const totalErrors = results.reduce((sum, r) => sum + (r.errors || 0), 0);
+
+    // Log sync to function_logs
+    await supabase.from("function_logs").insert({
+      function_name: "cold-calls-sync",
+      status: totalErrors > 0 ? "partial" : "success",
+      records_processed: allRecords.length,
+      details: { results },
+    });
 
     return new Response(
       JSON.stringify({
         success: true,
         action,
         synced_at: new Date().toISOString(),
+        total_records: allRecords.length,
         results,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
