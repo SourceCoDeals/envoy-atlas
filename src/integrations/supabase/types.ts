@@ -28,6 +28,10 @@ export type Database = {
           composite_score: number | null
           contact_id: string
           conversation_outcome: string | null
+          counts_as_bad_data: boolean | null
+          counts_as_connection: boolean | null
+          counts_as_conversation: boolean | null
+          counts_as_meeting: boolean | null
           created_at: string | null
           data_source_id: string | null
           disposition: string
@@ -75,6 +79,10 @@ export type Database = {
           composite_score?: number | null
           contact_id: string
           conversation_outcome?: string | null
+          counts_as_bad_data?: boolean | null
+          counts_as_connection?: boolean | null
+          counts_as_conversation?: boolean | null
+          counts_as_meeting?: boolean | null
           created_at?: string | null
           data_source_id?: string | null
           disposition: string
@@ -122,6 +130,10 @@ export type Database = {
           composite_score?: number | null
           contact_id?: string
           conversation_outcome?: string | null
+          counts_as_bad_data?: boolean | null
+          counts_as_connection?: boolean | null
+          counts_as_conversation?: boolean | null
+          counts_as_meeting?: boolean | null
           created_at?: string | null
           data_source_id?: string | null
           disposition?: string

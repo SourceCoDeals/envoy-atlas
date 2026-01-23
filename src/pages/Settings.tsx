@@ -17,6 +17,7 @@ import { ConnectionsSection } from '@/components/settings/ConnectionsSection';
 import { SyncStatusPanel } from '@/components/settings/SyncStatusPanel';
 import { SyncProgressCard } from '@/components/dashboard/SyncProgressCard';
 import { MetricsReferenceSection } from '@/components/settings/MetricsReferenceSection';
+import { DispositionReferenceSection } from '@/components/settings/DispositionReferenceSection';
 import { Loader2, User, Building2, Users, Shield, Plug, Check, UserCircle, Calculator, Phone } from 'lucide-react';
 import { CallingMetricsSettings } from '@/components/settings/CallingMetricsSettings';
 
@@ -291,9 +292,12 @@ export default function Settings() {
           </TabsContent>
 
           {/* Calling Metrics Tab */}
-          <TabsContent value="calling" className="mt-6">
+          <TabsContent value="calling" className="mt-6 space-y-6">
             {currentWorkspace ? (
-              <CallingMetricsSettings />
+              <>
+                <CallingMetricsSettings />
+                <DispositionReferenceSection />
+              </>
             ) : (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
