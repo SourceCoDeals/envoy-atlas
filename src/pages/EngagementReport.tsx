@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useEngagementReport } from '@/hooks/useEngagementReport';
 import { useCampaignLinking, UnlinkedCampaign } from '@/hooks/useCampaignLinking';
@@ -36,6 +36,18 @@ export default function EngagementReport() {
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
   });
+
+  // Auto-switch to All Time when the selected range has no daily_metrics rows but campaign totals exist.
+  useEffect(() => {
+    if (!data?.dataAvailability) return;
+    if (dateRangeOption === 'all') return;
+
+    const shouldAutoSwitch =
+      data.dataAvailability.emailCampaignFallback &&
+      !data.dataAvailability.emailDailyMetrics;
+
+    if (shouldAutoSwitch) setDateRangeOption('all');
+  }, [data?.dataAvailability, dateRangeOption]);
 
   // Fetch unlinked campaigns when opening dialog
   const handleOpenLinkDialog = useCallback(async () => {
@@ -378,10 +390,7 @@ export default function EngagementReport() {
                 enrollmentMetrics,
                 weeklyEnrollmentTrend,
                 weeklyPerformance: data.weeklyPerformance,
-                dataAvailability: {
-                  ...dataAvailability,
-                  isEstimated: data.weeklyPerformance?.some((w: any) => w.isEstimated) ?? false,
-                },
+                  dataAvailability,
               }}
               onGenerateWeeklyBreakdown={handleGenerateWeeklyBreakdown}
               isGeneratingBreakdown={isGeneratingBreakdown}
