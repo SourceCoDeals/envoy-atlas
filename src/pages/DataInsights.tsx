@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -12,20 +11,8 @@ import { ProspectStrategyTab } from '@/components/datainsights/ProspectStrategyT
 import { GatekeeperTrackingTab } from '@/components/datainsights/GatekeeperTrackingTab';
 import { WrongNumberTrackingTab } from '@/components/datainsights/WrongNumberTrackingTab';
 import { Loader2, Activity, Users, Target, Compass, UserCheck, PhoneOff, Filter, Settings } from 'lucide-react';
-import { useWorkspace } from '@/hooks/useWorkspace';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
-import { getDurationStatus, formatCallingDuration } from '@/lib/callingConfig';
-import {
-  useExternalCalls,
-  filterCalls,
-  isConnection,
-  isVoicemail,
-  isMeeting,
-  isQualityConversation,
-  DATE_RANGE_OPTIONS,
-  DateRangeOption,
-  ExternalCall,
-} from '@/hooks/useExternalCalls';
+import { useColdCallAnalytics, DateRange } from '@/hooks/useColdCallAnalytics';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 
@@ -39,21 +26,28 @@ interface Benchmark {
   description: string | null;
 }
 
+// Map DateRange to display labels
+const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: '7d', label: 'Last 7 Days' },
+  { value: '14d', label: 'Last 14 Days' },
+  { value: '30d', label: 'Last 30 Days' },
+  { value: '90d', label: 'Last 90 Days' },
+  { value: 'all', label: 'All Time' },
+];
+
 export default function DataInsights() {
-  const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
-  const { currentWorkspace } = useWorkspace();
-  const { calls, analysts, loading: callsLoading, totalCount } = useExternalCalls();
+  const { loading: authLoading } = useAuth();
   const { config, isLoading: configLoading } = useCallingConfig();
   
-  const [dateRange, setDateRange] = useState<DateRangeOption>('last_month');
+  const [dateRange, setDateRange] = useState<DateRange>('30d');
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>('all');
+  
+  const { data, isLoading: callsLoading } = useColdCallAnalytics(dateRange);
 
   // Build benchmarks from config
   const benchmarks = useMemo(() => {
     const benchmarkMap: Record<string, Benchmark> = {};
     
-    // Use config values for benchmarks
     benchmarkMap['calls_per_hour'] = {
       metric_name: 'Calls Per Hour',
       metric_key: 'calls_per_hour',
@@ -84,7 +78,6 @@ export default function DataInsights() {
       description: 'Target attempts per lead',
     };
 
-    // Connect rate benchmark
     benchmarkMap['connect_rate'] = {
       metric_name: 'Connect Rate',
       metric_key: 'connect_rate',
@@ -95,7 +88,6 @@ export default function DataInsights() {
       description: 'Target connect rate',
     };
 
-    // Call duration from config
     benchmarkMap['avg_call_duration'] = {
       metric_name: 'Avg Call Duration',
       metric_key: 'avg_call_duration',
@@ -109,9 +101,26 @@ export default function DataInsights() {
     return benchmarkMap;
   }, [config]);
 
-  // Compute all metrics from filtered calls using config thresholds
+  // Get analysts from data
+  const analysts = useMemo(() => {
+    if (!data?.calls) return [];
+    const uniqueAnalysts = new Set<string>();
+    data.calls.forEach(c => {
+      if (c.analyst && c.analyst !== 'Unknown') {
+        uniqueAnalysts.add(c.analyst);
+      }
+    });
+    return Array.from(uniqueAnalysts).sort();
+  }, [data?.calls]);
+
+  // Compute all metrics from cold_calls data
   const { activityMetrics, engagementMetrics, outcomeMetrics, prospectMetrics, gatekeeperMetrics, wrongNumberMetrics } = useMemo(() => {
-    const filtered = filterCalls(calls, dateRange, selectedAnalyst);
+    const allCalls = data?.calls || [];
+    
+    // Filter by selected analyst if needed
+    const filtered = selectedAnalyst === 'all' 
+      ? allCalls
+      : allCalls.filter(c => c.analyst === selectedAnalyst);
     
     // Activity Metrics
     const totalDials = filtered.length;
@@ -119,41 +128,38 @@ export default function DataInsights() {
     const hourlyMap = new Map<number, { calls: number; connects: number }>();
     
     filtered.forEach(call => {
-      let date: string | null = null;
-      if (call.date_time) {
-        date = new Date(call.date_time).toISOString().split('T')[0];
-      }
+      const date = call.called_date;
       
       if (date) {
         const existing = dateMap.get(date) || { calls: 0, connects: 0, voicemails: 0 };
         existing.calls += 1;
-        if (isConnection(call)) existing.connects += 1;
-        if (isVoicemail(call)) existing.voicemails += 1;
+        if (call.is_connection) existing.connects += 1;
+        if (call.is_voicemail) existing.voicemails += 1;
         dateMap.set(date, existing);
       }
       
-      if (call.date_time) {
-        const hour = new Date(call.date_time).getHours();
+      if (call.called_date_time) {
+        const hour = new Date(call.called_date_time).getHours();
         const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
         hourExisting.calls += 1;
-        if (isConnection(call)) hourExisting.connects += 1;
+        if (call.is_connection) hourExisting.connects += 1;
         hourlyMap.set(hour, hourExisting);
       }
     });
 
     const dailyTrend = Array.from(dateMap.entries())
-      .map(([date, data]) => ({ date, calls: data.calls, voicemails: data.voicemails, connects: data.connects }))
+      .map(([date, d]) => ({ date, calls: d.calls, voicemails: d.voicemails, connects: d.connects }))
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-30);
 
     const hourlyDistribution = Array.from(hourlyMap.entries())
-      .map(([hour, data]) => ({ hour, calls: data.calls, connects: data.connects }))
+      .map(([hour, d]) => ({ hour, calls: d.calls, connects: d.connects }))
       .sort((a, b) => a.hour - b.hour);
 
     const uniqueDays = dateMap.size || 1;
-    const totalConnects = filtered.filter(c => isConnection(c)).length;
-    const voicemailCount = filtered.filter(c => isVoicemail(c)).length;
-    const uniqueCompanies = new Set(filtered.map(c => c.company_name).filter(Boolean)).size || 1;
+    const totalConnects = filtered.filter(c => c.is_connection).length;
+    const voicemailCount = filtered.filter(c => c.is_voicemail).length;
+    const uniqueCompanies = new Set(filtered.map(c => c.to_company).filter(Boolean)).size || 1;
 
     const activityMetrics = {
       totalDials,
@@ -165,11 +171,11 @@ export default function DataInsights() {
       hourlyDistribution,
     };
 
-    // Engagement Metrics - use config for duration classification
+    // Engagement Metrics
     const connectRate = totalDials > 0 ? (totalConnects / totalDials) * 100 : 0;
-    const callsWithDuration = filtered.filter(c => c.talk_duration != null && c.talk_duration > 0);
+    const callsWithDuration = filtered.filter(c => (c.call_duration_sec || 0) > 0);
     const avgDuration = callsWithDuration.length
-      ? callsWithDuration.reduce((sum, c) => sum + (c.talk_duration || 0), 0) / callsWithDuration.length
+      ? callsWithDuration.reduce((sum, c) => sum + (c.call_duration_sec || 0), 0) / callsWithDuration.length
       : 0;
 
     // Duration buckets based on config thresholds
@@ -182,18 +188,19 @@ export default function DataInsights() {
     ];
     const durationDistribution = durationBuckets.map(bucket => ({
       range: bucket.range,
-      count: callsWithDuration.filter(c => (c.talk_duration || 0) >= bucket.min && (c.talk_duration || 0) < bucket.max).length
+      count: callsWithDuration.filter(c => (c.call_duration_sec || 0) >= bucket.min && (c.call_duration_sec || 0) < bucket.max).length
     }));
 
     const connectTrend = Array.from(dateMap.entries())
-      .map(([date, data]) => ({
+      .map(([date, d]) => ({
         date,
-        rate: data.calls > 0 ? Math.round((data.connects / data.calls) * 100) : 0
+        rate: d.calls > 0 ? Math.round((d.connects / d.calls) * 100) : 0
       }))
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-14);
 
-    const meaningfulConversations = filtered.filter(c => isQualityConversation(c)).length;
+    // Meaningful conversations - use config threshold
+    const meaningfulConversations = filtered.filter(c => (c.call_duration_sec || 0) >= config.callDurationMinOptimal).length;
     const meaningfulRate = totalConnects > 0 ? (meaningfulConversations / totalConnects) * 100 : 0;
 
     const engagementMetrics = {
@@ -207,11 +214,11 @@ export default function DataInsights() {
       dayHourHeatmap: [],
     };
 
-    // Outcome Metrics
-    const highInterest = filtered.filter(c => isMeeting(c)).length;
+    // Outcome Metrics - use pre-computed flags
+    const willingToSellCount = filtered.filter(c => c.interest_in_selling === 'yes').length;
     const meetingsByDate = new Map<string, number>();
-    filtered.filter(c => isMeeting(c) && c.date_time).forEach(call => {
-      const date = new Date(call.date_time!).toISOString().split('T')[0];
+    filtered.filter(c => c.is_meeting && c.called_date).forEach(call => {
+      const date = call.called_date!;
       meetingsByDate.set(date, (meetingsByDate.get(date) || 0) + 1);
     });
     const meetingTrend = Array.from(meetingsByDate.entries())
@@ -223,13 +230,13 @@ export default function DataInsights() {
       { stage: 'Total Dials', count: totalDials },
       { stage: 'Connections', count: totalConnects },
       { stage: 'Quality Conversations', count: meaningfulConversations },
-      { stage: 'High Interest', count: highInterest },
+      { stage: 'Owners Willing to Sell', count: willingToSellCount },
     ];
 
     const outcomeMetrics = {
-      meetingsBooked: highInterest,
-      conversationToMeetingRate: totalConnects > 0 ? Math.round((highInterest / totalConnects) * 100) : 0,
-      leadQualityConversionRate: meaningfulConversations > 0 ? Math.round((highInterest / meaningfulConversations) * 100) : 0,
+      meetingsBooked: willingToSellCount,
+      conversationToMeetingRate: totalConnects > 0 ? Math.round((willingToSellCount / totalConnects) * 100) : 0,
+      leadQualityConversionRate: meaningfulConversations > 0 ? Math.round((willingToSellCount / meaningfulConversations) * 100) : 0,
       conversionToSale: 0,
       followUpSuccessRate: 0,
       funnel,
@@ -239,25 +246,25 @@ export default function DataInsights() {
     // Prospect/Rep Metrics
     const repMap = new Map<string, { calls: number; connects: number; meetings: number }>();
     filtered.forEach(call => {
-      let rep = call.caller_name || 'Unknown';
-      if (rep.includes('Salesforce') || rep === 'Unknown') return;
+      const rep = call.analyst || 'Unknown';
+      if (rep === 'Unknown') return;
 
       const existing = repMap.get(rep) || { calls: 0, connects: 0, meetings: 0 };
       existing.calls += 1;
-      if (isConnection(call)) existing.connects += 1;
-      if (isMeeting(call)) existing.meetings += 1;
+      if (call.is_connection) existing.connects += 1;
+      if (call.interest_in_selling === 'yes') existing.meetings += 1;
       repMap.set(rep, existing);
     });
 
     const industryBreakdown = Array.from(repMap.entries())
-      .map(([industry, data]) => ({ industry, ...data }))
+      .map(([industry, d]) => ({ industry, ...d }))
       .sort((a, b) => b.calls - a.calls)
       .slice(0, 10);
 
     const prospectMetrics = {
       industryBreakdown,
       openingTypeEffectiveness: [
-        { type: 'Standard', successRate: highInterest > 0 ? Math.round((highInterest / totalDials) * 100) : 0, count: totalDials }
+        { type: 'Standard', successRate: willingToSellCount > 0 ? Math.round((willingToSellCount / totalDials) * 100) : 0, count: totalDials }
       ],
       topPainPoints: [],
       pendingFollowUps: 0
@@ -265,11 +272,11 @@ export default function DataInsights() {
 
     // Gatekeeper Metrics
     const gatekeeperCalls = filtered.filter(c => {
-      const disposition = (c.disposition || '').toLowerCase();
+      const disposition = (c.normalized_category || '').toLowerCase();
       return disposition.includes('gatekeeper') || disposition === 'receptionist';
     });
-    const transferred = gatekeeperCalls.filter(c => isConnection(c)).length;
-    const blocked = gatekeeperCalls.filter(c => !isConnection(c)).length;
+    const transferred = gatekeeperCalls.filter(c => c.is_connection).length;
+    const blocked = gatekeeperCalls.filter(c => !c.is_connection).length;
     const info = gatekeeperCalls.length - transferred - blocked;
 
     const gatekeeperOutcomes = [
@@ -287,26 +294,23 @@ export default function DataInsights() {
       blockedRate: gatekeeperCalls.length > 0 ? Math.round((blocked / gatekeeperCalls.length) * 100) : 0,
     };
 
-    // Wrong Number Metrics - use config duration threshold
-    const wrongNumbers = filtered.filter(c =>
-      (c.talk_duration || 0) < config.callDurationTooShort && 
-      (c.disposition?.toLowerCase().includes('wrong') || c.call_title?.toLowerCase().includes('wrong'))
-    );
+    // Wrong Number Metrics - use is_bad_data flag
+    const wrongNumbers = filtered.filter(c => c.is_bad_data);
 
     const sourceMap = new Map<string, { wrong: number; total: number }>();
     filtered.forEach(call => {
-      const source = call.caller_name || 'Unknown';
+      const source = call.analyst || 'Unknown';
       const existing = sourceMap.get(source) || { wrong: 0, total: 0 };
       existing.total += 1;
-      if (wrongNumbers.some(w => w.id === call.id)) existing.wrong += 1;
+      if (call.is_bad_data) existing.wrong += 1;
       sourceMap.set(source, existing);
     });
     const sourceQuality = Array.from(sourceMap.entries())
-      .map(([source, data]) => ({
+      .map(([source, d]) => ({
         source,
-        wrongCount: data.wrong,
-        totalCount: data.total,
-        rate: data.total > 0 ? Math.round((data.wrong / data.total) * 100) : 0
+        wrongCount: d.wrong,
+        totalCount: d.total,
+        rate: d.total > 0 ? Math.round((d.wrong / d.total) * 100) : 0
       }))
       .sort((a, b) => b.rate - a.rate)
       .slice(0, 10);
@@ -321,10 +325,11 @@ export default function DataInsights() {
     };
 
     return { activityMetrics, engagementMetrics, outcomeMetrics, prospectMetrics, gatekeeperMetrics, wrongNumberMetrics };
-  }, [calls, dateRange, selectedAnalyst, config]);
+  }, [data?.calls, selectedAnalyst, config]);
 
   const loading = authLoading || callsLoading || configLoading;
   const dateRangeLabel = DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label || 'Selected Period';
+  const totalCount = data?.totalCalls || 0;
 
   if (loading) {
     return (
@@ -363,7 +368,7 @@ export default function DataInsights() {
                 <span className="text-sm font-medium">Filters:</span>
               </div>
 
-              <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRangeOption)}>
+              <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
                 <SelectTrigger className="w-[160px]">
                   <SelectValue placeholder="Date range" />
                 </SelectTrigger>
@@ -423,18 +428,23 @@ export default function DataInsights() {
           <TabsContent value="activity">
             <ActivityMetricsTab metrics={activityMetrics} benchmarks={benchmarks} />
           </TabsContent>
+
           <TabsContent value="engagement">
             <EngagementQualityTab metrics={engagementMetrics} benchmarks={benchmarks} />
           </TabsContent>
+
           <TabsContent value="outcomes">
             <OutcomeMetricsTab metrics={outcomeMetrics} benchmarks={benchmarks} />
           </TabsContent>
+
           <TabsContent value="strategy">
             <ProspectStrategyTab metrics={prospectMetrics} />
           </TabsContent>
+
           <TabsContent value="gatekeeper">
             <GatekeeperTrackingTab metrics={gatekeeperMetrics} />
           </TabsContent>
+
           <TabsContent value="wrongnumber">
             <WrongNumberTrackingTab metrics={wrongNumberMetrics} />
           </TabsContent>
