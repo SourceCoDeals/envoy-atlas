@@ -92,15 +92,13 @@ export default function CallerDashboard() {
     setSelectedRep(rep);
   };
 
-  // Map cold calls to format expected by WeeklyTrendChart
+  // Map cold calls to format expected by WeeklyTrendChart (uses called_date + pre-computed flags)
   const chartCalls = useMemo(() => {
     if (!data?.calls) return [];
     return data.calls.map(c => ({
-      started_at: c.called_date_time,
-      disposition: c.normalized_category,
-      talk_duration: c.call_duration_sec,
-      conversation_outcome: c.is_meeting ? 'meeting_booked' : null,
-      callback_scheduled: c.is_meeting,
+      called_date: c.called_date,
+      is_connection: c.is_connection,
+      is_meeting: c.is_meeting,
     }));
   }, [data?.calls]);
 
