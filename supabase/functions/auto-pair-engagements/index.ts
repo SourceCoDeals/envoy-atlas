@@ -19,6 +19,11 @@ interface Engagement {
   portfolio_company: string | null;
 }
 
+interface SponsorAlias {
+  alias: string;
+  canonical_name: string;
+}
+
 /**
  * Strips status prefixes from campaign names like [Ended], [paused], {PAUSED}, (Archive), etc.
  */
@@ -47,31 +52,54 @@ function normalizeText(text: string): string {
 }
 
 /**
+ * Expands abbreviations using alias map
+ */
+function expandAbbreviations(text: string, aliasMap: Map<string, string>): string {
+  let expanded = text;
+  
+  // Try exact alias match first
+  const textLower = text.toLowerCase().trim();
+  const aliasMatch = aliasMap.get(textLower);
+  if (aliasMatch) {
+    return aliasMatch.toLowerCase();
+  }
+  
+  // Try word-by-word expansion
+  const words = text.split(/[\s\-]+/);
+  const expandedWords = words.map(word => {
+    const wordLower = word.toLowerCase();
+    return aliasMap.get(wordLower) || word;
+  });
+  
+  return expandedWords.join(' ').toLowerCase();
+}
+
+/**
  * Check if two strings match with high confidence
  * Handles:
  * - Exact match (case insensitive)
  * - Abbreviations (Capital vs Cap, Education vs Ed)
  * - One contained in the other (Baum matches Baum Capital)
  */
-function isHighConfidenceMatch(a: string, b: string): boolean {
-  const normA = normalizeText(a);
-  const normB = normalizeText(b);
+function isHighConfidenceMatch(a: string, b: string, aliasMap: Map<string, string>): boolean {
+  const normA = normalizeText(expandAbbreviations(a, aliasMap));
+  const normB = normalizeText(expandAbbreviations(b, aliasMap));
   
   if (!normA || !normB) return false;
   
-  // Exact match after normalization
+  // Exact match after normalization and alias expansion
   if (normA === normB) return true;
   
   // One contained in the other (for short forms)
   if (normA.length >= 3 && normB.includes(normA)) return true;
   if (normB.length >= 3 && normA.includes(normB)) return true;
   
-  // Handle common abbreviations
+  // Handle common built-in abbreviations
   const abbreviations: Record<string, string[]> = {
     'capital': ['cap', 'capitol'],
     'investment': ['inv', 'invest', 'investments'],
     'partners': ['ptnrs', 'part'],
-    'management': ['mgmt', 'mgt'],
+    'management': ['mgmt', 'mgt', 'prop mgmt', 'property management'],
     'associates': ['assoc', 'assocs'],
     'technology': ['tech'],
     'services': ['svcs', 'svc'],
@@ -79,12 +107,15 @@ function isHighConfidenceMatch(a: string, b: string): boolean {
     'industries': ['ind', 'indus'],
     'international': ['intl', 'int'],
     'american': ['amer'],
-    'education': ['edu', 'ed'],
-    'senior': ['sr'],
-    'junior': ['jr'],
+    'education': ['edu', 'ed', 'k12', 'k-12'],
+    'senior': ['sr', 'sr.'],
+    'junior': ['jr', 'jr.'],
     'living': ['liv'],
-    'nexcore': ['nexcore', 'nex core', 'nex-core'],
-    'touchsuite': ['touch suite', 'touch-suite'],
+    'property': ['prop'],
+    'heritage': ['her'],
+    'new heritage': ['nh', 'new her'],
+    'gp partners': ['gp'],
+    'o2 investment partners': ['o2'],
   };
   
   let expandedA = normA;
@@ -114,7 +145,7 @@ function parseCampaignSegments(name: string): string[] {
   
   // Filter out common non-entity parts (initials, tier indicators, etc.)
   const skipPatterns = [
-    /^[A-Z]{1,3}$/,                    // Single initials like JF, SD, TM
+    /^[A-Z]{1,2}$/,                    // Single initials like JF, SD (but allow NH, GP which are 2 chars)
     /^tier\s*\d/i,                     // Tier 1, Tier 2, etc.
     /^t\d/i,                           // T1, T2, etc.
     /^all\s*tiers/i,                   // All Tiers
@@ -139,6 +170,8 @@ function parseCampaignSegments(name: string): string[] {
   
   return parts.filter(part => {
     const cleaned = part.replace(/\|.*$/, '').trim(); // Remove pipe and after
+    // Special case: allow known sponsor abbreviations like NH, GP, O2
+    if (/^(NH|GP|O2|FMS)$/i.test(cleaned)) return true;
     return !skipPatterns.some(pattern => pattern.test(cleaned));
   });
 }
@@ -151,7 +184,8 @@ function parseCampaignSegments(name: string): string[] {
 function findMatchingEngagement(
   segments: string[], 
   rawCampaignName: string,
-  engagements: Engagement[]
+  engagements: Engagement[],
+  aliasMap: Map<string, string>
 ): { match: Engagement | null; ambiguous: boolean; reason?: string } {
   if (segments.length < 2) {
     return { match: null, ambiguous: false, reason: 'Need at least 2 segments for sponsor+client' };
@@ -167,14 +201,14 @@ function findMatchingEngagement(
     
     let score = 0;
     
-    // Segment 0 MUST match sponsor_name
-    const sponsorMatches = isHighConfidenceMatch(sponsorSegment, eng.sponsor_name);
+    // Segment 0 MUST match sponsor_name (with alias expansion)
+    const sponsorMatches = isHighConfidenceMatch(sponsorSegment, eng.sponsor_name, aliasMap);
     if (sponsorMatches) {
       score += 10;
     }
     
-    // Segment 1 MUST match portfolio_company
-    const clientMatches = isHighConfidenceMatch(clientSegment, eng.portfolio_company);
+    // Segment 1 MUST match portfolio_company (with alias expansion)
+    const clientMatches = isHighConfidenceMatch(clientSegment, eng.portfolio_company, aliasMap);
     if (clientMatches) {
       score += 20;
     }
@@ -229,6 +263,18 @@ Deno.serve(async (req) => {
 
     console.log(`Auto-pairing campaigns for client ${client_id}, dry_run: ${dry_run}`);
 
+    // Step 0: Fetch sponsor aliases for this workspace
+    const { data: aliases } = await supabase
+      .from('sponsor_aliases')
+      .select('alias, canonical_name')
+      .eq('workspace_id', client_id);
+
+    const aliasMap = new Map<string, string>();
+    (aliases || []).forEach((a: SponsorAlias) => {
+      aliasMap.set(a.alias.toLowerCase(), a.canonical_name.toLowerCase());
+    });
+    console.log(`Loaded ${aliasMap.size} sponsor aliases`);
+
     // Step 1: Upsert NocoDB campaigns into campaigns table WITH METRICS
     const [smartleadRes, replyioRes] = await Promise.all([
       supabase.from('nocodb_smartlead_campaigns').select(`
@@ -276,6 +322,7 @@ Deno.serve(async (req) => {
             leads_blocked: row.leads_blocked || 0,
             leads_paused: row.leads_paused || 0,
             leads_interested: row.leads_interested || 0,
+            campaign_created_date: row.campaign_created_date,
           },
         });
       }
@@ -298,6 +345,7 @@ Deno.serve(async (req) => {
           settings: {
             deliveries: row.deliveries || 0,
             bounces: row.bounces || 0,
+            campaign_created_date: row.campaign_created_date,
           },
         });
       }
@@ -441,7 +489,12 @@ Deno.serve(async (req) => {
 
       console.log(`Parsing: "${campaign.name}" → Segments: [${segments.join(' | ')}]`);
 
-      const { match, ambiguous, reason } = findMatchingEngagement(segments, campaign.name, existingEngagements || []);
+      const { match, ambiguous, reason } = findMatchingEngagement(
+        segments, 
+        campaign.name, 
+        existingEngagements || [],
+        aliasMap
+      );
 
       if (ambiguous) {
         result.campaignsUnlinked++;
@@ -500,17 +553,18 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         dry_run,
-        nocodbSynced: syncedCount,
-        nocodbUpdated: updatedCount,
+        nocodb_synced: syncedCount,
+        nocodb_updated: updatedCount,
+        aliases_loaded: aliasMap.size,
         ...result,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Error in auto-pair-engagements:', errorMessage);
+
+  } catch (error) {
+    console.error('Auto-pair error:', error);
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

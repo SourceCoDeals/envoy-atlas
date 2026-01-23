@@ -136,6 +136,7 @@ export function useCampaignLinking() {
 
   /**
    * Fetches campaigns not linked to a specific engagement
+   * Now includes unassigned campaigns (engagement_id = '00000000-0000-0000-0000-000000000000')
    */
   const fetchCampaignsNotInEngagement = useCallback(async (
     excludeEngagementId: string
@@ -143,31 +144,57 @@ export function useCampaignLinking() {
     if (!currentWorkspace?.id) return [];
 
     try {
-      // Get all engagement IDs for this workspace
+      // Get campaigns that are either:
+      // 1. In the "Unassigned" placeholder engagement
+      // 2. In other engagements of this workspace (for re-linking)
+      
+      // First get unassigned campaigns
+      const { data: unassignedCampaigns } = await supabase
+        .from('campaigns')
+        .select('id, name, campaign_type, status, total_sent')
+        .eq('engagement_id', '00000000-0000-0000-0000-000000000000')
+        .order('total_sent', { ascending: false });
+
+      // Then get campaigns from other engagements in this workspace
       const { data: engagements } = await supabase
         .from('engagements')
         .select('id')
-        .eq('client_id', currentWorkspace.id);
+        .eq('client_id', currentWorkspace.id)
+        .neq('id', excludeEngagementId)
+        .neq('id', '00000000-0000-0000-0000-000000000000');
 
       const engagementIds = (engagements || []).map(e => e.id);
 
-      if (engagementIds.length === 0) return [];
+      let otherCampaigns: any[] = [];
+      if (engagementIds.length > 0) {
+        const { data } = await supabase
+          .from('campaigns')
+          .select('id, name, campaign_type, status, total_sent, engagement_id')
+          .in('engagement_id', engagementIds)
+          .order('name');
+        otherCampaigns = data || [];
+      }
 
-      // Get campaigns in workspace engagements but NOT in the specified engagement
-      const { data: campaigns } = await supabase
-        .from('campaigns')
-        .select('id, name, campaign_type, status, total_sent, engagement_id')
-        .in('engagement_id', engagementIds)
-        .neq('engagement_id', excludeEngagementId)
-        .order('name');
+      // Combine and deduplicate
+      const allCampaigns = [
+        ...(unassignedCampaigns || []).map(c => ({
+          id: c.id,
+          name: c.name,
+          platform: c.campaign_type as 'smartlead' | 'replyio',
+          status: c.status,
+          totalSent: c.total_sent || 0,
+        })),
+        ...otherCampaigns.map(c => ({
+          id: c.id,
+          name: c.name,
+          platform: c.campaign_type as 'smartlead' | 'replyio',
+          status: c.status,
+          totalSent: c.total_sent || 0,
+        })),
+      ];
 
-      return (campaigns || []).map(c => ({
-        id: c.id,
-        name: c.name,
-        platform: c.campaign_type as 'smartlead' | 'replyio',
-        status: c.status,
-        totalSent: c.total_sent || 0,
-      }));
+      // Sort by total_sent descending
+      return allCampaigns.sort((a, b) => b.totalSent - a.totalSent);
     } catch (err) {
       console.error('Error fetching campaigns:', err);
       return [];

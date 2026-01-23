@@ -525,14 +525,14 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       ];
 
       // Build trend data from filtered daily metrics
+      // Use Monday-based weeks for consistency
       const trendMap = new Map<string, TrendDataPoint>();
       
       dailyMetrics.forEach(m => {
         const date = new Date(m.date);
-        const weekStart = new Date(date);
-        weekStart.setDate(date.getDate() - date.getDay());
-        const weekKey = weekStart.toISOString().split('T')[0];
-        const weekLabel = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+        const weekKey = format(weekStart, 'yyyy-MM-dd');
+        const weekLabel = `Week of ${format(weekStart, 'MMM d')}`;
         
         // Build trend data
         const existing = trendMap.get(weekKey) || {
@@ -551,14 +551,15 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       });
       
       // Build weekly performance data from metricsForWeeklyBreakdown (includes historical data if current filter is empty)
+      // Use Monday-based weeks for consistency with backfill-daily-metrics
       const weeklyPerfMap = new Map<string, { sent: number; replied: number; positive: number; bounced: number; weekLabel: string }>();
       
       metricsForWeeklyBreakdown.forEach(m => {
         const date = new Date(m.date);
-        const weekStart = new Date(date);
-        weekStart.setDate(date.getDate() - date.getDay());
-        const weekKey = weekStart.toISOString().split('T')[0];
-        const weekLabel = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        // Use startOfWeek with Monday as start (weekStartsOn: 1)
+        const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+        const weekKey = format(weekStart, 'yyyy-MM-dd');
+        const weekLabel = `Week of ${format(weekStart, 'MMM d')}`;
         
         const existingPerf = weeklyPerfMap.get(weekKey) || {
           sent: 0,
