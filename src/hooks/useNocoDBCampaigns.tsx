@@ -99,11 +99,9 @@ export function useNocoDBCampaigns() {
       const smartleadCampaigns = (smartleadRes.data || []).map((row): NocoDBCampaign => {
         const sent = row.total_emails_sent || 0;
         const replied = row.total_replies || 0;
-        // SmartLead doesn't have direct bounce/delivered - estimate from unique sends
-        const uniqueSent = row.unique_emails_sent || sent;
-        // No bounce data available in SmartLead NocoDB - will need to add
-        const bounced = 0;
-        const delivered = sent - bounced;
+        // Use the new total_bounces column from NocoDB
+        const bounced = row.total_bounces || 0;
+        const delivered = Math.max(0, sent - bounced);
         const positive = row.leads_interested || 0;
 
         return {

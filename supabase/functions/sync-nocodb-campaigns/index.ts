@@ -46,6 +46,7 @@ interface SmartLeadRecord {
   "Total Emails Sent": number | null;
   "Total Leads": number | null;
   "Total Replies": number | null;
+  "Total Bounces": number | null;
   "Unique Emails Sent": number | null;
   CreatedAt: string;
   UpdatedAt: string;
@@ -127,6 +128,7 @@ function mapSmartLeadRecord(record: SmartLeadRecord) {
     total_emails_sent: record["Total Emails Sent"] || 0,
     total_leads: record["Total Leads"] || 0,
     total_replies: record["Total Replies"] || 0,
+    total_bounces: record["Total Bounces"] || 0,
     unique_emails_sent: record["Unique Emails Sent"] || 0,
     // Links and metadata
     link_to_campaign: record["Link to Campaign"],

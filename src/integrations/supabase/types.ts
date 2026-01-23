@@ -3773,6 +3773,7 @@ export type Database = {
           step9_subject: string | null
           steps_count: number | null
           synced_at: string
+          total_bounces: number | null
           total_emails_sent: number | null
           total_leads: number | null
           total_replies: number | null
@@ -3817,6 +3818,7 @@ export type Database = {
           step9_subject?: string | null
           steps_count?: number | null
           synced_at?: string
+          total_bounces?: number | null
           total_emails_sent?: number | null
           total_leads?: number | null
           total_replies?: number | null
@@ -3861,6 +3863,7 @@ export type Database = {
           step9_subject?: string | null
           steps_count?: number | null
           synced_at?: string
+          total_bounces?: number | null
           total_emails_sent?: number | null
           total_leads?: number | null
           total_replies?: number | null
