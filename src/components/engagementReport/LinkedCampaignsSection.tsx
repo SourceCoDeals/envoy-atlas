@@ -44,12 +44,10 @@ export function LinkedCampaignsSection({
   const [linking, setLinking] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(linkedCampaigns.length <= 5);
 
-  // Fetch suggested campaigns when no linked campaigns exist
+  // Always fetch suggested campaigns - useful even when campaigns exist
   useEffect(() => {
-    if (linkedCampaigns.length === 0) {
-      fetchSuggestedCampaigns();
-    }
-  }, [linkedCampaigns.length, engagementId, engagementName, sponsorName, portfolioCompany]);
+    fetchSuggestedCampaigns();
+  }, [engagementId, engagementName, sponsorName, portfolioCompany]);
 
   const fetchSuggestedCampaigns = async () => {
     setLoadingSuggested(true);
@@ -246,7 +244,7 @@ export function LinkedCampaignsSection({
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <div className="space-y-2">
           {displayedCampaigns.map(campaign => (
             <div 
@@ -291,7 +289,7 @@ export function LinkedCampaignsSection({
           <Button 
             variant="ghost" 
             size="sm" 
-            className="w-full mt-2"
+            className="w-full"
             onClick={() => setExpanded(!expanded)}
           >
             {expanded ? (
@@ -306,6 +304,63 @@ export function LinkedCampaignsSection({
               </>
             )}
           </Button>
+        )}
+
+        {/* Additional Suggested Matches - shown even when campaigns exist */}
+        {suggested.length > 0 && (
+          <div className="border-t pt-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles className="h-4 w-4 text-warning" />
+              <h4 className="font-medium text-sm">Additional Matches Found</h4>
+              <Badge variant="outline" className="text-[10px]">
+                {suggested.length} more
+              </Badge>
+            </div>
+            <div className="space-y-2">
+              {suggested.slice(0, 3).map(campaign => (
+                <div 
+                  key={campaign.id}
+                  className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{campaign.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {campaign.totalSent.toLocaleString()} sent • {campaign.matchReason}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="shrink-0">
+                    {campaign.platform === 'smartlead' ? 'SL' : 'R.io'}
+                  </Badge>
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={() => handleQuickLink(campaign.id)}
+                    disabled={linking === campaign.id}
+                  >
+                    {linking === campaign.id ? (
+                      <span className="animate-spin">⏳</span>
+                    ) : (
+                      <>
+                        <Link2 className="h-3 w-3 mr-1" />
+                        Link
+                      </>
+                    )}
+                  </Button>
+                </div>
+              ))}
+            </div>
+            {suggested.length > 3 && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="w-full mt-2"
+                onClick={onLinkCampaigns}
+              >
+                View all {suggested.length} suggestions
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
