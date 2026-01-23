@@ -14,10 +14,12 @@ import { DateRangeFilter, getDateRange, type DateRangeOption } from '@/component
 import { EmailReportTab } from '@/components/engagementReport/EmailReportTab';
 import { CallingReportTab } from '@/components/engagementReport/CallingReportTab';
 import { CampaignSummaryCard } from '@/components/engagementReport/CampaignSummaryCard';
+import { LinkedCampaignsSection } from '@/components/engagementReport/LinkedCampaignsSection';
 import { LinkCampaignsDialog, UnlinkedCampaign as DialogCampaign } from '@/components/engagements/LinkCampaignsDialog';
-import { ArrowLeft, Share2, Mail, Phone, Target, Calendar, Building2, Briefcase, Building, Link2, Plus, History, Loader2 } from 'lucide-react';
+import { ArrowLeft, Share2, Mail, Phone, Target, Calendar, Building2, Briefcase, Building, Link2, Plus, History, Loader2, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function EngagementReport() {
   const navigate = useNavigate();
@@ -449,33 +451,26 @@ export default function EngagementReport() {
           </TabsContent>
         </Tabs>
 
-        {/* Linked Campaigns - Summary Cards */}
-        {linkedCampaignsWithStats.length > 0 && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <Briefcase className="h-5 w-5" />
-                  Linked Campaigns
-                </CardTitle>
-                <Badge variant="outline">{linkedCampaignsWithStats.length} campaigns</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {linkedCampaignsWithStats.slice(0, 6).map(campaign => (
-                  <CampaignSummaryCard key={campaign.id} campaign={campaign} />
-                ))}
-              </div>
-              {linkedCampaignsWithStats.length > 6 && (
-                <div className="mt-4 text-center">
-                  <Button variant="outline" onClick={() => navigate('/campaigns')}>
-                    View All {linkedCampaignsWithStats.length} Campaigns
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        {/* Linked Campaigns Section - Always visible */}
+        <LinkedCampaignsSection
+          linkedCampaigns={linkedCampaignsWithStats}
+          engagementId={engagementId || ''}
+          engagementName={engagement.name}
+          sponsorName={(engagement as any).sponsor_name}
+          portfolioCompany={(engagement as any).portfolio_company}
+          onLinkCampaigns={handleOpenLinkDialog}
+          onRefresh={refetch}
+        />
+
+        {/* Empty metrics alert when no campaigns */}
+        {linkedCampaignsWithStats.length === 0 && (
+          <Alert className="border-warning/30 bg-warning/10">
+            <AlertTriangle className="h-4 w-4 text-warning" />
+            <AlertDescription>
+              <span className="font-medium">No campaigns linked.</span>{' '}
+              Link campaigns above to see email performance metrics, weekly trends, and infrastructure health.
+            </AlertDescription>
+          </Alert>
         )}
 
         {/* Link Campaigns Dialog */}

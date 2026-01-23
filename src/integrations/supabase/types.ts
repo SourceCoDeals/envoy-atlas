@@ -4380,6 +4380,41 @@ export type Database = {
           },
         ]
       }
+      sponsor_aliases: {
+        Row: {
+          alias: string
+          canonical_name: string
+          created_at: string | null
+          id: string
+          updated_at: string | null
+          workspace_id: string | null
+        }
+        Insert: {
+          alias: string
+          canonical_name: string
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          workspace_id?: string | null
+        }
+        Update: {
+          alias?: string
+          canonical_name?: string
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sponsor_aliases_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_errors: {
         Row: {
           created_at: string

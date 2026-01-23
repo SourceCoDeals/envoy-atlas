@@ -9,6 +9,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfolioOverview';
 import { EnhancedCampaignTable } from '@/components/campaigns/EnhancedCampaignTable';
 import { AutoLinkPreviewModal } from '@/components/campaigns/AutoLinkPreviewModal';
+import { UnassignedCampaignsAlert } from '@/components/campaigns/UnassignedCampaignsAlert';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -144,6 +145,9 @@ export default function Campaigns() {
           </Card>
         ) : (
           <div className="space-y-6">
+            {/* Unassigned Campaigns Alert */}
+            <UnassignedCampaignsAlert onOpenAutoLink={() => setAutoLinkOpen(true)} />
+
             {/* Phase B: Critical Metrics Broken Alert */}
             {hasMetricsBroken && (
               <Alert className="border-destructive/50 bg-destructive/10">
