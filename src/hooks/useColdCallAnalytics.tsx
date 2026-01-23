@@ -283,22 +283,46 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         dateFilterStr = format(filterDate, 'yyyy-MM-dd');
       }
 
-      // Fetch cold calls - use range to override Supabase's default 1000 row limit
-      // Filter by called_date column which stores dates as YYYY-MM-DD
-      let query = supabase
-        .from('cold_calls')
-        .select('*')
-        .eq('client_id', currentWorkspace.id)
-        .order('called_date', { ascending: false, nullsFirst: false })
-        .range(0, 49999); // Fetch up to 50k records to ensure complete data
+      // Fetch cold calls with pagination to bypass Supabase's default 1000 row limit
+      // PostgREST server-side max_rows defaults to 1000, so we need to paginate
+      const PAGE_SIZE = 1000;
+      let allCalls: any[] = [];
+      let page = 0;
+      let hasMore = true;
 
-      if (dateFilterStr) {
-        query = query.gte('called_date', dateFilterStr);
+      while (hasMore) {
+        const start = page * PAGE_SIZE;
+        const end = start + PAGE_SIZE - 1;
+
+        let query = supabase
+          .from('cold_calls')
+          .select('*')
+          .eq('client_id', currentWorkspace.id)
+          .order('called_date', { ascending: false, nullsFirst: false })
+          .range(start, end);
+
+        if (dateFilterStr) {
+          query = query.gte('called_date', dateFilterStr);
+        }
+
+        const { data: pageData, error } = await query;
+
+        if (error) throw error;
+
+        if (pageData && pageData.length > 0) {
+          allCalls = [...allCalls, ...pageData];
+          hasMore = pageData.length === PAGE_SIZE;
+          page++;
+        } else {
+          hasMore = false;
+        }
+
+        // Safety limit: max 50 pages = 50,000 records
+        if (page >= 50) hasMore = false;
       }
 
-      const { data: rawCalls, error } = await query;
+      const rawCalls = allCalls;
 
-      if (error) throw error;
       if (!rawCalls?.length) return emptyData(config);
 
       // Map to ColdCall with computed interest_in_selling from score
