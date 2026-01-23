@@ -275,25 +275,27 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         throw new Error('No workspace selected');
       }
 
-      // Calculate date filter
-      let dateFilter: Date | null = null;
+      // Calculate date filter using called_date (YYYY-MM-DD format)
+      let dateFilterStr: string | null = null;
       if (dateRange !== 'all') {
         const daysMap: Record<string, number> = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 };
-        dateFilter = startOfDay(subDays(new Date(), daysMap[dateRange]));
+        const filterDate = startOfDay(subDays(new Date(), daysMap[dateRange]));
+        dateFilterStr = format(filterDate, 'yyyy-MM-dd');
       }
 
-      // Fetch cold calls directly by client_id
+      // Fetch cold calls - no limit to get accurate counts
+      // Filter by called_date column which stores dates as YYYY-MM-DD
       let query = supabase
         .from('cold_calls')
         .select('*')
         .eq('client_id', currentWorkspace.id)
-        .order('called_date', { ascending: false });
+        .order('called_date', { ascending: false, nullsFirst: false });
 
-      if (dateFilter) {
-        query = query.gte('called_date', dateFilter.toISOString().split('T')[0]);
+      if (dateFilterStr) {
+        query = query.gte('called_date', dateFilterStr);
       }
 
-      const { data: rawCalls, error } = await query.limit(5000);
+      const { data: rawCalls, error } = await query;
 
       if (error) throw error;
       if (!rawCalls?.length) return emptyData(config);
