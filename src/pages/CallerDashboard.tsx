@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { useEnhancedCallingAnalytics, DateRange } from '@/hooks/useEnhancedCallingAnalytics';
+import { useColdCallAnalytics, DateRange } from '@/hooks/useColdCallAnalytics';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
 import {
   Users,
@@ -27,7 +27,7 @@ export default function CallerDashboard() {
   const [dateRange, setDateRange] = useState<DateRange>('30d');
   const [selectedRep, setSelectedRep] = useState<string>('all');
   
-  const { data, isLoading } = useEnhancedCallingAnalytics(dateRange);
+  const { data, isLoading } = useColdCallAnalytics(dateRange);
   const { config } = useCallingConfig();
 
   // Get unique reps for filter
@@ -36,11 +36,11 @@ export default function CallerDashboard() {
     return data.repPerformance.map(r => r.rep);
   }, [data?.repPerformance]);
 
-  // Filter calls by selected rep
+  // Filter calls by selected rep (using analyst field)
   const filteredCalls = useMemo(() => {
     if (!data?.calls) return [];
     if (selectedRep === 'all') return data.calls;
-    return data.calls.filter(c => c.caller_name === selectedRep);
+    return data.calls.filter(c => c.analyst === selectedRep);
   }, [data?.calls, selectedRep]);
 
   // Calculate funnel metrics for filtered data
@@ -61,10 +61,10 @@ export default function CallerDashboard() {
     if (!repData) {
       return {
         totalCalls: filteredCalls.length,
-        connections: filteredCalls.filter(c => c.disposition === 'connected' || (c.talk_duration && c.talk_duration > 30)).length,
-        completed: filteredCalls.filter(c => c.conversation_outcome).length,
-        meetings: filteredCalls.filter(c => c.conversation_outcome === 'meeting_booked' || c.callback_scheduled).length,
-        talkTime: filteredCalls.reduce((sum, c) => sum + (c.duration_seconds || 0), 0),
+        connections: filteredCalls.filter(c => c.is_connection).length,
+        completed: filteredCalls.filter(c => c.is_connection).length,
+        meetings: filteredCalls.filter(c => c.is_meeting).length,
+        talkTime: filteredCalls.reduce((sum, c) => sum + (c.call_duration_sec || 0), 0),
         avgScore: null,
         activated: 0,
       };
@@ -92,6 +92,26 @@ export default function CallerDashboard() {
     setSelectedRep(rep);
   };
 
+  // Map cold calls to format expected by WeeklyTrendChart
+  const chartCalls = useMemo(() => {
+    if (!data?.calls) return [];
+    return data.calls.map(c => ({
+      started_at: c.called_date_time,
+      disposition: c.normalized_category,
+      talk_duration: c.call_duration_sec,
+      conversation_outcome: c.is_meeting ? 'meeting_booked' : null,
+      callback_scheduled: c.is_meeting,
+    }));
+  }, [data?.calls]);
+
+  // Map cold calls to format expected by DispositionPieChart
+  const dispositionCalls = useMemo(() => {
+    if (!filteredCalls) return [];
+    return filteredCalls.map(c => ({
+      disposition: c.normalized_category,
+    }));
+  }, [filteredCalls]);
+
   if (authLoading || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
@@ -107,7 +127,7 @@ export default function CallerDashboard() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              {selectedRep !== 'all' ? selectedRep.split('@')[0] : 'Caller Dashboard'}
+              {selectedRep !== 'all' ? selectedRep : 'Caller Dashboard'}
             </h1>
             <p className="text-muted-foreground">
               {funnelStats.totalCalls} calls • Using workspace thresholds
@@ -142,7 +162,7 @@ export default function CallerDashboard() {
                   <SelectItem value="all">All Reps</SelectItem>
                   {uniqueReps.map(rep => (
                     <SelectItem key={rep} value={rep}>
-                      {rep.includes('@') ? rep.split('@')[0] : rep}
+                      {rep}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -171,13 +191,13 @@ export default function CallerDashboard() {
         />
 
         {/* Section 2: 10-Week Trend (always shows full 10 weeks regardless of date filter) */}
-        {data?.calls && (
-          <WeeklyTrendChart calls={data.calls} />
+        {chartCalls.length > 0 && (
+          <WeeklyTrendChart calls={chartCalls} />
         )}
 
         {/* Section 3 & 7: Disposition Pie + Interest Breakdown (side by side) */}
         <div className="grid gap-6 lg:grid-cols-2">
-          <DispositionPieChart calls={filteredCalls} />
+          <DispositionPieChart calls={dispositionCalls} />
           
           {data?.interestBreakdown && (
             <InterestBreakdownCards
@@ -203,13 +223,13 @@ export default function CallerDashboard() {
             topCalls={data.topCalls.map(c => ({
               id: c.id,
               to_name: c.to_name,
-              caller_name: c.caller_name,
+              caller_name: c.analyst,
               composite_score: c.composite_score,
             }))}
             needsCoaching={data.needsCoaching.map(c => ({
               id: c.id,
               to_name: c.to_name,
-              caller_name: c.caller_name,
+              caller_name: c.analyst,
               composite_score: c.composite_score,
             }))}
             topCallsThreshold={config.topCallsMinScore}
