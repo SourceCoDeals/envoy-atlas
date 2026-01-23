@@ -43,6 +43,17 @@ export function WeeklyPerformanceBreakdown({ weeklyData, enrollmentTrend }: Week
   // Sort by date
   chartData.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
 
+  // Calculate totals for the summary
+  const totals = chartData.reduce(
+    (acc, week) => ({
+      sent: acc.sent + week.sent,
+      enrolled: acc.enrolled + week.enrolled,
+      replied: acc.replied + week.replied,
+      positive: acc.positive + week.positive,
+    }),
+    { sent: 0, enrolled: 0, replied: 0, positive: 0 }
+  );
+
   if (chartData.length === 0) {
     return (
       <Card>
@@ -61,16 +72,42 @@ export function WeeklyPerformanceBreakdown({ weeklyData, enrollmentTrend }: Week
     );
   }
 
-  // Calculate totals for the summary
-  const totals = chartData.reduce(
-    (acc, week) => ({
-      sent: acc.sent + week.sent,
-      enrolled: acc.enrolled + week.enrolled,
-      replied: acc.replied + week.replied,
-      positive: acc.positive + week.positive,
-    }),
-    { sent: 0, enrolled: 0, replied: 0, positive: 0 }
-  );
+  // If only 1 week of data, show summary view instead of a mostly empty chart
+  if (chartData.length === 1) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-primary" />
+            Week-by-Week Performance
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="p-4 rounded-lg bg-muted/30 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground">Total Sent</p>
+              <p className="text-lg font-bold">{totals.sent.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Total Enrolled</p>
+              <p className="text-lg font-bold">{totals.enrolled.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Total Replies</p>
+              <p className="text-lg font-bold">{totals.replied.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Total Positive</p>
+              <p className="text-lg font-bold text-success">{totals.positive.toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="mt-4 p-3 rounded border border-warning/30 bg-warning/10 text-sm text-warning-foreground">
+            Weekly trend chart requires at least 2 weeks of historical data. Currently showing cumulative totals from campaign metrics.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
