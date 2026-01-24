@@ -74,11 +74,18 @@ export function useDataHealth() {
       let copyLibraryCount = 0;
       let patternsCount = 0;
 
+      // Fetch cold_calls count separately (uses client_id, not engagement_id)
+      const coldCallsResult = await supabase
+        .from('cold_calls')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', currentWorkspace.id);
+      
+      callsCount = coldCallsResult.count || 0;
+
       if (engagementIds.length > 0) {
         const [
           campaignsResult,
           metricsResult,
-          callsResult,
           contactsResult,
           dealsResult,
           variantsResult,
@@ -87,7 +94,6 @@ export function useDataHealth() {
         ] = await Promise.all([
           supabase.from('campaigns').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
           supabase.from('daily_metrics').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
-          supabase.from('call_activities').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
           supabase.from('contacts').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
           supabase.from('deals').select('id', { count: 'exact', head: true }).in('engagement_id', engagementIds),
           supabase.from('campaign_variants').select('id, campaign_id', { count: 'exact', head: true }),
@@ -97,7 +103,6 @@ export function useDataHealth() {
 
         campaignsCount = campaignsResult.count || 0;
         metricsCount = metricsResult.count || 0;
-        callsCount = callsResult.count || 0;
         contactsCount = contactsResult.count || 0;
         dealsCount = dealsResult.count || 0;
         copyVariantsCount = variantsResult.count || 0;
@@ -137,11 +142,11 @@ export function useDataHealth() {
         calling: {
           calls: {
             name: 'Calls',
-            table: 'call_activities',
+            table: 'cold_calls',
             rowCount: callsCount,
             hasData: callsCount > 0,
             status: callsCount > 0 ? 'healthy' : 'empty',
-            details: callsCount > 0 ? `${callsCount} calls` : 'Not connected',
+            details: callsCount > 0 ? `${callsCount.toLocaleString()} calls` : 'Not connected',
           },
         },
         insights: {
