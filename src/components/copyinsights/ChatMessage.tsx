@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils';
 import { Bot, User, Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import DOMPurify from 'dompurify';
 
 interface ChatMessageProps {
   role: 'user' | 'assistant';
@@ -152,7 +153,13 @@ export function ChatMessage({ role, content }: ChatMessageProps) {
     processed = processed.replace(/✓/g, '<span class="text-green-600 dark:text-green-400">✓</span>');
     processed = processed.replace(/✗/g, '<span class="text-red-600 dark:text-red-400">✗</span>');
     
-    return <span dangerouslySetInnerHTML={{ __html: processed }} />;
+    // Sanitize HTML to prevent XSS attacks
+    const sanitized = DOMPurify.sanitize(processed, {
+      ALLOWED_TAGS: ['strong', 'em', 'code', 'span'],
+      ALLOWED_ATTR: ['class'],
+    });
+    
+    return <span dangerouslySetInnerHTML={{ __html: sanitized }} />;
   };
 
   return (
