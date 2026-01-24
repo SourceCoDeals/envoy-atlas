@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
+import { format, subDays, startOfDay } from 'date-fns';
 
 interface FunnelStage {
   stage: string;
@@ -38,6 +39,9 @@ interface CallAnalyticsData {
   avgConnectRate: number;
 }
 
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 50;
+
 export function useCallAnalytics() {
   const { currentWorkspace } = useWorkspace();
   const [data, setData] = useState<CallAnalyticsData | null>(null);
@@ -52,49 +56,47 @@ export function useCallAnalytics() {
       setError(null);
 
       try {
-        // First get engagements for this client
-        const { data: engagements } = await supabase
-          .from('engagements')
-          .select('id')
-          .eq('client_id', currentWorkspace.id);
+        // Paginated fetch from cold_calls
+        let allCalls: any[] = [];
+        let page = 0;
+        let hasMore = true;
 
-        if (!engagements || engagements.length === 0) {
+        // Date filter: last 30 days
+        const thirtyDaysAgo = format(startOfDay(subDays(new Date(), 30)), 'yyyy-MM-dd');
+
+        while (hasMore && page < MAX_PAGES) {
+          const { data: pageData, error: fetchError } = await supabase
+            .from('cold_calls')
+            .select('*')
+            .eq('client_id', currentWorkspace.id)
+            .gte('called_date', thirtyDaysAgo)
+            .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+            .order('called_date', { ascending: false });
+
+          if (fetchError) throw fetchError;
+
+          if (pageData && pageData.length > 0) {
+            allCalls = [...allCalls, ...pageData];
+            hasMore = pageData.length === PAGE_SIZE;
+            page++;
+          } else {
+            hasMore = false;
+          }
+        }
+
+        if (!allCalls.length) {
           setData(null);
           setIsLoading(false);
           return;
         }
 
-        const engagementIds = engagements.map(e => e.id);
-
-        // Fetch call activities for these engagements
-        const { data: calls, error: callsError } = await supabase
-          .from('call_activities')
-          .select('*')
-          .in('engagement_id', engagementIds);
-
-        if (callsError) throw callsError;
-
-        if (!calls || calls.length === 0) {
-          setData(null);
-          setIsLoading(false);
-          return;
-        }
-
-        // Build funnel data based on call dispositions
-        const totalDials = calls.length;
-        const connections = calls.filter(c => 
-          c.disposition === 'connected' || 
-          c.disposition === 'conversation' ||
-          (c.talk_duration && c.talk_duration > 30)
+        // Build funnel data based on pre-computed flags
+        const totalDials = allCalls.length;
+        const connections = allCalls.filter(c => c.is_connection).length;
+        const qualityConvos = allCalls.filter(c => 
+          c.interest === 'yes' || c.interest === 'maybe'
         ).length;
-        const qualityConvos = calls.filter(c => 
-          c.conversation_outcome === 'interested' ||
-          c.conversation_outcome === 'qualified'
-        ).length;
-        const meetingsSet = calls.filter(c => 
-          c.conversation_outcome === 'meeting_booked' ||
-          c.callback_scheduled
-        ).length;
+        const meetingsSet = allCalls.filter(c => c.is_meeting).length;
 
         const funnel: FunnelStage[] = [
           { stage: 'Total Dials', count: totalDials },
@@ -103,21 +105,19 @@ export function useCallAnalytics() {
           { stage: 'Meetings Set', count: meetingsSet },
         ];
 
-        // Build hourly data using started_at
+        // Build hourly data using called_date_time
         const hourlyMap = new Map<number, { calls: number; connects: number }>();
         for (let h = 6; h <= 20; h++) {
           hourlyMap.set(h, { calls: 0, connects: 0 });
         }
 
-        calls.forEach(call => {
-          const dateField = call.started_at || call.created_at;
-          if (dateField) {
-            const date = new Date(dateField);
-            const hour = date.getHours();
+        allCalls.forEach(call => {
+          if (call.called_date_time) {
+            const hour = new Date(call.called_date_time).getHours();
             if (hourlyMap.has(hour)) {
               const current = hourlyMap.get(hour)!;
               current.calls++;
-              if (call.disposition === 'connected' || call.disposition === 'conversation') {
+              if (call.is_connection) {
                 current.connects++;
               }
             }
@@ -128,19 +128,19 @@ export function useCallAnalytics() {
           .map(([hour, data]) => ({ hour, ...data }))
           .sort((a, b) => a.hour - b.hour);
 
-        // Build team performance using caller_name
-        const repMap = new Map<string, { calls: number; connects: number; totalDuration: number; displayName: string }>();
-        calls.forEach(call => {
-          const repKey = call.caller_name || 'Unknown';
-          const displayName = call.caller_name || 'Unknown';
+        // Build team performance using analyst field
+        const repMap = new Map<string, { calls: number; connects: number; totalScore: number; displayName: string }>();
+        allCalls.forEach(call => {
+          const repKey = call.analyst || 'Unknown';
+          const displayName = call.analyst || 'Unknown';
           
           if (!repMap.has(repKey)) {
-            repMap.set(repKey, { calls: 0, connects: 0, totalDuration: 0, displayName });
+            repMap.set(repKey, { calls: 0, connects: 0, totalScore: 0, displayName });
           }
           const current = repMap.get(repKey)!;
           current.calls++;
-          current.totalDuration += call.talk_duration || 0;
-          if (call.disposition === 'connected' || call.disposition === 'conversation') {
+          current.totalScore += call.composite_score || 0;
+          if (call.is_connection) {
             current.connects++;
           }
         });
@@ -151,31 +151,25 @@ export function useCallAnalytics() {
             totalCalls: data.calls,
             connects: data.connects,
             connectRate: data.calls > 0 ? (data.connects / data.calls) * 100 : 0,
-            avgScore: data.calls > 0 ? data.totalDuration / data.calls : 0,
+            avgScore: data.calls > 0 ? data.totalScore / data.calls : 0,
           }))
           .sort((a, b) => b.totalCalls - a.totalCalls)
           .slice(0, 10);
 
-        // Build weekly trends (last 30 days)
-        const dailyMap = new Map<string, { calls: number; connects: number; totalDuration: number }>();
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        // Build daily trends using called_date
+        const dailyMap = new Map<string, { calls: number; connects: number; totalScore: number }>();
 
-        calls.forEach(call => {
-          const dateField = call.started_at || call.created_at;
-          if (dateField) {
-            const callDate = new Date(dateField);
-            if (callDate >= thirtyDaysAgo) {
-              const dateKey = callDate.toISOString().split('T')[0];
-              if (!dailyMap.has(dateKey)) {
-                dailyMap.set(dateKey, { calls: 0, connects: 0, totalDuration: 0 });
-              }
-              const current = dailyMap.get(dateKey)!;
-              current.calls++;
-              current.totalDuration += call.talk_duration || 0;
-              if (call.disposition === 'connected' || call.disposition === 'conversation') {
-                current.connects++;
-              }
+        allCalls.forEach(call => {
+          if (call.called_date) {
+            const dateKey = call.called_date;
+            if (!dailyMap.has(dateKey)) {
+              dailyMap.set(dateKey, { calls: 0, connects: 0, totalScore: 0 });
+            }
+            const current = dailyMap.get(dateKey)!;
+            current.calls++;
+            current.totalScore += call.composite_score || 0;
+            if (call.is_connection) {
+              current.connects++;
             }
           }
         });
@@ -185,7 +179,7 @@ export function useCallAnalytics() {
             date,
             calls: data.calls,
             connects: data.connects,
-            avgScore: data.calls > 0 ? data.totalDuration / data.calls : 0,
+            avgScore: data.calls > 0 ? data.totalScore / data.calls : 0,
           }))
           .sort((a, b) => a.date.localeCompare(b.date));
 

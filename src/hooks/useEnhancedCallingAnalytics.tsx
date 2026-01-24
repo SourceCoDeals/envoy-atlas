@@ -8,67 +8,72 @@ import {
   isHotLead,
   needsCoachingReview,
   isPositiveInterest,
-  getScoreStatus,
-  formatScore,
-  formatCallingDuration,
   CallingMetricsConfig,
 } from '@/lib/callingConfig';
-import { startOfDay, subDays, parseISO, getHours, format } from 'date-fns';
+import { startOfDay, subDays, format } from 'date-fns';
 
 export type DateRange = '7d' | '14d' | '30d' | '90d' | 'all';
 
-export interface CallActivity {
+// cold_calls schema-aligned interface
+export interface ColdCall {
   id: string;
-  contact_id: string;
-  company_id: string;
-  engagement_id: string;
-  campaign_id: string | null;
-  data_source_id: string | null;
-  external_id: string | null;
-  caller_user_id: string | null;
-  caller_name: string | null;
-  caller_phone: string | null;
-  to_phone: string;
-  to_name: string | null;
-  scheduled_at: string | null;
-  started_at: string | null;
-  ended_at: string | null;
-  duration_seconds: number | null;
-  ring_duration: number | null;
-  talk_duration: number | null;
-  disposition: string | null;
-  conversation_outcome: string | null;
-  notes: string | null;
-  recording_url: string | null;
-  recording_duration: number | null;
-  transcription: string | null;
-  callback_scheduled: boolean | null;
-  callback_datetime: string | null;
-  callback_notes: string | null;
-  voicemail_left: boolean | null;
-  voicemail_template: string | null;
-  synced_at: string | null;
-  raw_data: Record<string, unknown> | null;
-  created_at: string | null;
-  updated_at: string | null;
-  is_dm_conversation: boolean | null;
+  client_id: string;
+  nocodb_row_id: string | null;
+  
+  // Core call info
+  prospect_name: string | null;
+  prospect_company: string | null;
+  prospect_phone: string | null;
+  analyst: string | null;
+  engagement_name: string | null;
+  
+  // Timing
+  called_date: string | null;
+  called_date_time: string | null;
+  call_duration_sec: number | null;
+  
+  // Category and outcomes
+  category: string | null;
+  normalized_category: string | null;
+  interest: string | null;
+  
+  // Pre-computed flags
+  is_connection: boolean | null;
+  is_meeting: boolean | null;
+  is_voicemail: boolean | null;
+  is_bad_data: boolean | null;
   
   // AI Scores
+  composite_score: number | null;
   seller_interest_score: number | null;
   quality_of_conversation_score: number | null;
   objection_handling_score: number | null;
   script_adherence_score: number | null;
+  question_adherence_score: number | null;
   value_proposition_score: number | null;
-  composite_score: number | null;
-  call_summary: string | null;
-  objections_list: string[] | null;
-  source: string | null;
+  rapport_building_score: number | null;
   
-  // Extended fields from raw_data (if available)
-  interest_in_selling?: string | null;
-  questions_covered_count?: number | null;
-  objections_resolved_count?: number | null;
-  number_of_objections?: number | null;
+  // Reasoning fields
+  seller_interest_reasoning: string | null;
+  quality_of_conversation_reasoning: string | null;
+  objection_handling_reasoning: string | null;
+  script_adherence_reasoning: string | null;
+  question_adherence_reasoning: string | null;
+  
+  // Extracted intel
+  number_of_objections: number | null;
+  objections_resolved: number | null;
+  questions_covered: number | null;
+  
+  // Media
+  recording_url: string | null;
+  call_transcript: string | null;
+  call_summary: string | null;
+  
+  // Timestamps
+  synced_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 interface HourlyData {
@@ -124,41 +129,26 @@ interface ScoreAverages {
 }
 
 export interface EnhancedCallingAnalyticsData {
-  // Raw data
-  calls: CallActivity[];
-  
-  // Summary metrics
+  calls: ColdCall[];
   totalCalls: number;
   totalDuration: number;
   avgDuration: number;
   avgScores: ScoreAverages;
-  
-  // Interest breakdown (uses config values)
   interestBreakdown: InterestBreakdown;
   positiveInterestCount: number;
   positiveInterestRate: number;
-  
-  // Flagged calls (uses config thresholds)
-  topCalls: CallActivity[];
-  worstCalls: CallActivity[];
-  hotLeads: CallActivity[];
-  needsCoaching: CallActivity[];
-  
-  // Question coverage
+  topCalls: ColdCall[];
+  worstCalls: ColdCall[];
+  hotLeads: ColdCall[];
+  needsCoaching: ColdCall[];
   avgQuestionsCovered: number;
   questionCoverageRate: number;
-  
-  // Objections
   totalObjections: number;
   totalResolved: number;
   objectionResolutionRate: number;
-  
-  // Breakdowns
   repPerformance: RepPerformanceEnhanced[];
   dailyTrends: DailyTrend[];
   hourlyData: HourlyData[];
-  
-  // Connections and funnel
   connections: number;
   conversations: number;
   dmConversations: number;
@@ -166,11 +156,7 @@ export interface EnhancedCallingAnalyticsData {
   connectRate: number;
   conversationRate: number;
   meetingRate: number;
-  
-  // Config reference
   config: CallingMetricsConfig;
-  
-  // State
   isLoading: boolean;
   error: string | null;
 }
@@ -228,6 +214,9 @@ function emptyData(config: CallingMetricsConfig): EnhancedCallingAnalyticsData {
   };
 }
 
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 50;
+
 export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
   const { currentWorkspace } = useWorkspace();
   const { config } = useCallingConfig();
@@ -239,176 +228,151 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         throw new Error('No workspace selected');
       }
 
-      // Get engagements for this workspace
-      const { data: engagements } = await supabase
-        .from('engagements')
-        .select('id')
-        .eq('client_id', currentWorkspace.id);
-
-      if (!engagements?.length) {
-        return emptyData(config);
-      }
-
-      const engagementIds = engagements.map(e => e.id);
-
       // Calculate date filter
-      let dateFilter: Date | null = null;
+      let dateFilterStr: string | null = null;
       if (dateRange !== 'all') {
         const daysMap: Record<string, number> = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 };
-        dateFilter = startOfDay(subDays(new Date(), daysMap[dateRange]));
+        const startDate = startOfDay(subDays(new Date(), daysMap[dateRange]));
+        dateFilterStr = format(startDate, 'yyyy-MM-dd');
       }
 
-      // Fetch call activities
-      let query = supabase
-        .from('call_activities')
-        .select('*')
-        .in('engagement_id', engagementIds)
-        .order('started_at', { ascending: false });
+      // Paginated fetch from cold_calls
+      let allCalls: any[] = [];
+      let page = 0;
+      let hasMore = true;
 
-      if (dateFilter) {
-        query = query.gte('started_at', dateFilter.toISOString());
+      while (hasMore && page < MAX_PAGES) {
+        let query = supabase
+          .from('cold_calls')
+          .select('*')
+          .eq('client_id', currentWorkspace.id)
+          .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+          .order('called_date', { ascending: false });
+
+        if (dateFilterStr) {
+          query = query.gte('called_date', dateFilterStr);
+        }
+
+        const { data, error } = await query;
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allCalls = [...allCalls, ...data];
+          hasMore = data.length === PAGE_SIZE;
+          page++;
+        } else {
+          hasMore = false;
+        }
       }
 
-      const { data: calls, error } = await query.limit(2000);
+      if (!allCalls.length) return emptyData(config);
 
-      if (error) throw error;
-      if (!calls?.length) return emptyData(config);
-
-      // Extract extended data from raw_data where available
-      const enrichedCalls: CallActivity[] = calls.map(call => {
-        const rawData = call.raw_data as Record<string, unknown> | null;
-        return {
-          ...call,
-          interest_in_selling: rawData?.interest_in_selling as string | null ?? null,
-          questions_covered_count: rawData?.questions_covered_count as number | null ?? null,
-          objections_resolved_count: rawData?.objections_resolved_count as number | null ?? null,
-          number_of_objections: rawData?.number_of_objections as number | null ?? call.objections_list?.length ?? null,
-          // Use composite_score as overall quality since that's what we have
-          overall_quality_score: call.composite_score,
-          question_adherence_score: rawData?.question_adherence_score as number | null ?? null,
-        } as CallActivity;
-      });
-
-      const totalCalls = enrichedCalls.length;
-      const totalDuration = enrichedCalls.reduce((sum, c) => sum + (c.duration_seconds || 0), 0);
+      const totalCalls = allCalls.length;
+      const totalDuration = allCalls.reduce((sum, c) => sum + (c.call_duration_sec || 0), 0);
       const avgDuration = totalCalls > 0 ? totalDuration / totalCalls : 0;
 
       // Score averages
       const avgScores: ScoreAverages = {
-        overallQuality: avg(enrichedCalls.map(c => c.composite_score)),
-        sellerInterest: avg(enrichedCalls.map(c => c.seller_interest_score)),
-        scriptAdherence: avg(enrichedCalls.map(c => c.script_adherence_score)),
-        objectionHandling: avg(enrichedCalls.map(c => c.objection_handling_score)),
-        conversationQuality: avg(enrichedCalls.map(c => c.quality_of_conversation_score)),
-        valueProposition: avg(enrichedCalls.map(c => c.value_proposition_score)),
+        overallQuality: avg(allCalls.map(c => c.composite_score)),
+        sellerInterest: avg(allCalls.map(c => c.seller_interest_score)),
+        scriptAdherence: avg(allCalls.map(c => c.script_adherence_score)),
+        objectionHandling: avg(allCalls.map(c => c.objection_handling_score)),
+        conversationQuality: avg(allCalls.map(c => c.quality_of_conversation_score)),
+        valueProposition: avg(allCalls.map(c => c.value_proposition_score)),
       };
 
-      // Interest breakdown - USE CONFIG VALUES
+      // Interest breakdown
       const interestBreakdown: InterestBreakdown = {
-        yes: enrichedCalls.filter(c => (c.interest_in_selling || '').toLowerCase() === 'yes').length,
-        maybe: enrichedCalls.filter(c => (c.interest_in_selling || '').toLowerCase() === 'maybe').length,
-        no: enrichedCalls.filter(c => (c.interest_in_selling || '').toLowerCase() === 'no').length,
-        unknown: enrichedCalls.filter(c => !c.interest_in_selling).length,
+        yes: allCalls.filter(c => (c.interest || '').toLowerCase() === 'yes').length,
+        maybe: allCalls.filter(c => (c.interest || '').toLowerCase() === 'maybe').length,
+        no: allCalls.filter(c => (c.interest || '').toLowerCase() === 'no').length,
+        unknown: allCalls.filter(c => !c.interest).length,
       };
 
-      // Positive interest count - USE CONFIG
-      const positiveInterestCount = enrichedCalls.filter(c => 
-        isPositiveInterest(c.interest_in_selling, config)
+      // Positive interest count
+      const positiveInterestCount = allCalls.filter(c => 
+        isPositiveInterest(c.interest, config)
       ).length;
 
-      // For top/worst/hot/coaching - create wrapper objects with expected fields
-      const callsWithOverall = enrichedCalls.map(c => ({
-        ...c,
-        overall_quality_score: c.composite_score,
-        question_adherence_score: c.script_adherence_score, // fallback
-      }));
-
-      // Top calls - USE CONFIG THRESHOLD
-      const topCalls = callsWithOverall
+      // Top calls
+      const topCalls = allCalls
         .filter(c => isTopCall(c.composite_score, config))
         .slice(0, 20);
 
-      // Worst calls - USE CONFIG THRESHOLD
-      const worstCalls = callsWithOverall
+      // Worst calls
+      const worstCalls = allCalls
         .filter(c => isWorstCall(c.composite_score, config))
         .slice(0, 20);
 
-      // Hot leads - USE CONFIG
-      const hotLeads = callsWithOverall.filter(c => isHotLead({
+      // Hot leads
+      const hotLeads = allCalls.filter(c => isHotLead({
         seller_interest_score: c.seller_interest_score,
-        interest_in_selling: c.interest_in_selling,
+        interest_in_selling: c.interest,
       }, config));
 
-      // Needs coaching - USE CONFIG THRESHOLDS
-      const needsCoaching = callsWithOverall.filter(c => needsCoachingReview({
+      // Needs coaching
+      const needsCoaching = allCalls.filter(c => needsCoachingReview({
         overall_quality_score: c.composite_score,
         script_adherence_score: c.script_adherence_score,
-        question_adherence_score: c.script_adherence_score, // fallback
+        question_adherence_score: c.question_adherence_score,
         objection_handling_score: c.objection_handling_score,
       }, config));
 
       // Question coverage
-      const avgQuestionsCovered = avgNumber(enrichedCalls.map(c => c.questions_covered_count));
+      const avgQuestionsCovered = avgNumber(allCalls.map(c => c.questions_covered));
       const questionCoverageRate = config.questionCoverageTotal > 0 
         ? (avgQuestionsCovered / config.questionCoverageTotal) * 100 
         : 0;
 
       // Objection stats
-      const totalObjections = enrichedCalls.reduce((sum, c) => sum + (c.number_of_objections || c.objections_list?.length || 0), 0);
-      const totalResolved = enrichedCalls.reduce((sum, c) => sum + (c.objections_resolved_count || 0), 0);
+      const totalObjections = allCalls.reduce((sum, c) => sum + (c.number_of_objections || 0), 0);
+      const totalResolved = allCalls.reduce((sum, c) => sum + (c.objections_resolved || 0), 0);
       const objectionResolutionRate = totalObjections > 0 
         ? (totalResolved / totalObjections) * 100 
         : 0;
 
-      // Connection/conversation metrics
-      const connections = enrichedCalls.filter(c => 
-        c.disposition === 'connected' || (c.talk_duration && c.talk_duration > 30)
+      // Connection/meeting metrics using pre-computed flags
+      const connections = allCalls.filter(c => c.is_connection).length;
+      const conversations = connections; // conversations = connections in this context
+      const dmConversations = allCalls.filter(c => 
+        c.is_connection && (c.interest === 'yes' || c.interest === 'maybe')
       ).length;
-      const conversations = enrichedCalls.filter(c => 
-        c.conversation_outcome && c.conversation_outcome !== 'no_answer'
-      ).length;
-      const dmConversations = enrichedCalls.filter(c => c.is_dm_conversation).length;
-      const meetings = enrichedCalls.filter(c => 
-        c.conversation_outcome === 'meeting_booked' || c.callback_scheduled
-      ).length;
+      const meetings = allCalls.filter(c => c.is_meeting).length;
 
       const connectRate = totalCalls > 0 ? (connections / totalCalls) * 100 : 0;
       const conversationRate = totalCalls > 0 ? (conversations / totalCalls) * 100 : 0;
       const meetingRate = totalCalls > 0 ? (meetings / totalCalls) * 100 : 0;
 
-      // By rep
-      const repMap = new Map<string, CallActivity[]>();
-      enrichedCalls.forEach(call => {
-        const rep = call.caller_name || call.caller_phone || 'Unknown';
+      // By rep (analyst)
+      const repMap = new Map<string, ColdCall[]>();
+      allCalls.forEach(call => {
+        const rep = call.analyst || 'Unknown';
         if (!repMap.has(rep)) repMap.set(rep, []);
         repMap.get(rep)!.push(call);
       });
 
       const repPerformance: RepPerformanceEnhanced[] = Array.from(repMap.entries()).map(([rep, repCalls]) => {
-        const repConnections = repCalls.filter(c => 
-          c.disposition === 'connected' || (c.talk_duration && c.talk_duration > 30)
-        ).length;
-        const repMeetings = repCalls.filter(c => 
-          c.conversation_outcome === 'meeting_booked' || c.callback_scheduled
-        ).length;
+        const repConnections = repCalls.filter(c => c.is_connection).length;
+        const repMeetings = repCalls.filter(c => c.is_meeting).length;
 
         return {
           rep,
           totalCalls: repCalls.length,
-          avgDuration: avgNumber(repCalls.map(c => c.duration_seconds)),
+          avgDuration: avgNumber(repCalls.map(c => c.call_duration_sec)),
           avgOverallScore: avg(repCalls.map(c => c.composite_score)),
-          avgQuestionsCovered: avg(repCalls.map(c => c.questions_covered_count)),
+          avgQuestionsCovered: avg(repCalls.map(c => c.questions_covered)),
           avgScriptAdherence: avg(repCalls.map(c => c.script_adherence_score)),
-          avgQuestionAdherence: avg(repCalls.map(c => c.script_adherence_score)), // fallback
+          avgQuestionAdherence: avg(repCalls.map(c => c.question_adherence_score)),
           avgObjectionHandling: avg(repCalls.map(c => c.objection_handling_score)),
           avgSellerInterest: avg(repCalls.map(c => c.seller_interest_score)),
           avgConversationQuality: avg(repCalls.map(c => c.quality_of_conversation_score)),
           avgValueProposition: avg(repCalls.map(c => c.value_proposition_score)),
-          positiveInterestCount: repCalls.filter(c => isPositiveInterest(c.interest_in_selling, config)).length,
+          positiveInterestCount: repCalls.filter(c => isPositiveInterest(c.interest, config)).length,
           needsCoachingCount: repCalls.filter(c => needsCoachingReview({
             overall_quality_score: c.composite_score,
             script_adherence_score: c.script_adherence_score,
-            question_adherence_score: c.script_adherence_score,
+            question_adherence_score: c.question_adherence_score,
             objection_handling_score: c.objection_handling_score,
           }, config)).length,
           connections: repConnections,
@@ -416,11 +380,11 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         };
       }).sort((a, b) => (b.avgOverallScore || 0) - (a.avgOverallScore || 0));
 
-      // Daily trends
-      const dailyMap = new Map<string, CallActivity[]>();
-      enrichedCalls.forEach(call => {
-        if (call.started_at) {
-          const dateKey = format(parseISO(call.started_at), 'yyyy-MM-dd');
+      // Daily trends using called_date
+      const dailyMap = new Map<string, ColdCall[]>();
+      allCalls.forEach(call => {
+        if (call.called_date) {
+          const dateKey = call.called_date;
           if (!dailyMap.has(dateKey)) dailyMap.set(dateKey, []);
           dailyMap.get(dateKey)!.push(call);
         }
@@ -428,16 +392,12 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
 
       const dailyTrends: DailyTrend[] = Array.from(dailyMap.entries())
         .map(([date, dayCalls]) => {
-          const dayConnections = dayCalls.filter(c => 
-            c.disposition === 'connected' || (c.talk_duration && c.talk_duration > 30)
-          ).length;
-          const dayMeetings = dayCalls.filter(c => 
-            c.conversation_outcome === 'meeting_booked' || c.callback_scheduled
-          ).length;
+          const dayConnections = dayCalls.filter(c => c.is_connection).length;
+          const dayMeetings = dayCalls.filter(c => c.is_meeting).length;
           
           return {
             date,
-            dateLabel: format(parseISO(date), 'MMM d'),
+            dateLabel: format(new Date(date), 'MMM d'),
             calls: dayCalls.length,
             connections: dayConnections,
             meetings: dayMeetings,
@@ -447,19 +407,19 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         })
         .sort((a, b) => a.date.localeCompare(b.date));
 
-      // Hourly data
+      // Hourly data (extract from called_date_time)
       const hourlyMap = new Map<number, { calls: number; connections: number }>();
       for (let h = 6; h <= 20; h++) {
         hourlyMap.set(h, { calls: 0, connections: 0 });
       }
 
-      enrichedCalls.forEach(call => {
-        if (call.started_at) {
-          const hour = getHours(parseISO(call.started_at));
+      allCalls.forEach(call => {
+        if (call.called_date_time) {
+          const hour = new Date(call.called_date_time).getHours();
           if (hourlyMap.has(hour)) {
             const current = hourlyMap.get(hour)!;
             current.calls++;
-            if (call.disposition === 'connected' || (call.talk_duration && call.talk_duration > 30)) {
+            if (call.is_connection) {
               current.connections++;
             }
           }
@@ -476,7 +436,7 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         }));
 
       return {
-        calls: enrichedCalls,
+        calls: allCalls,
         totalCalls,
         totalDuration,
         avgDuration,
@@ -484,10 +444,10 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         interestBreakdown,
         positiveInterestCount,
         positiveInterestRate: totalCalls > 0 ? (positiveInterestCount / totalCalls) * 100 : 0,
-        topCalls: topCalls as CallActivity[],
-        worstCalls: worstCalls as CallActivity[],
-        hotLeads: hotLeads as CallActivity[],
-        needsCoaching: needsCoaching as CallActivity[],
+        topCalls,
+        worstCalls,
+        hotLeads,
+        needsCoaching,
         avgQuestionsCovered,
         questionCoverageRate,
         totalObjections,
@@ -512,6 +472,3 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
     staleTime: 5 * 60 * 1000,
   });
 }
-
-// Re-export utilities for convenience
-export { formatScore, formatCallingDuration, getScoreStatus };
