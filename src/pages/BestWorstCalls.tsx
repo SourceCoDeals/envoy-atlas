@@ -63,9 +63,9 @@ export default function BestWorstCalls() {
               #{rank}
             </div>
             <div>
-              <p className="font-medium">{call.to_name || call.to_phone || 'Unknown'}</p>
+              <p className="font-medium">{call.prospect_name || call.prospect_phone || 'Unknown'}</p>
               <p className="text-sm text-muted-foreground">
-                {call.started_at ? format(new Date(call.started_at), 'MMM d, yyyy h:mm a') : 'Unknown date'}
+                {call.called_date ? format(new Date(call.called_date), 'MMM d, yyyy') : 'Unknown date'}
               </p>
             </div>
           </div>
@@ -92,15 +92,15 @@ export default function BestWorstCalls() {
             <p className="text-xs text-muted-foreground">Script</p>
           </div>
           <div className="bg-muted/50 rounded p-2">
-            <p className="text-lg font-bold">{formatCallingDuration(call.talk_duration)}</p>
+            <p className="text-lg font-bold">{formatCallingDuration(call.call_duration_sec)}</p>
             <p className="text-xs text-muted-foreground">Duration</p>
           </div>
         </div>
 
         {/* Rep info */}
-        {call.caller_name && (
+        {call.analyst && (
           <div className="text-sm text-muted-foreground">
-            Rep: {call.caller_name.split('@')[0]}
+            Rep: {call.analyst.split('@')[0]}
           </div>
         )}
 
