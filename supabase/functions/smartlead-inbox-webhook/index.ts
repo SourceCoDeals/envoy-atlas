@@ -52,6 +52,7 @@ Respond in JSON format only:
 {"category": "<category>", "sentiment": "<sentiment>", "is_positive": <boolean>, "confidence": <0.0-1.0>, "reasoning": "<brief explanation>"}`;
 
   try {
+    console.log('[smartlead-inbox-webhook] Calling OpenRouter with model openai/gpt-4.1-mini');
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {

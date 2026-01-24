@@ -107,3 +107,6 @@ verify_jwt = false
 
 [functions.smartlead-inbox-webhook]
 verify_jwt = false
+
+[functions.reclassify-inbox]
+verify_jwt = false
