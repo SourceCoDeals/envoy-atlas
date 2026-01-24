@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface ChatMessage {
   id: string;
@@ -171,11 +172,15 @@ export function useCopyInsightsChat() {
         content: m.content,
       }));
 
+      // Get user's JWT token for proper authorization
+      const { data: { session } } = await supabase.auth.getSession();
+      const authToken = session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           messages: allMessages,

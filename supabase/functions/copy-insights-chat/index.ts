@@ -27,6 +27,30 @@ serve(async (req) => {
   }
 
   try {
+    // Validate authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Missing authorization' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    // Create client with user's token to validate authentication
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    // Validate user authentication
+    const { data: { user }, error: authError } = await userClient.auth.getUser();
+    
+    // If no authenticated user, check if it's a valid anon key (for public access mode)
+    const isAnonAccess = !user && !authError;
+    
     const { messages, workspaceId, context } = await req.json() as {
       messages: Array<{ role: string; content: string }>;
       workspaceId: string;
@@ -40,14 +64,38 @@ serve(async (req) => {
       });
     }
 
+    // If authenticated user, verify workspace membership
+    if (user) {
+      const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
+      const { data: membership } = await serviceClient
+        .from('client_members')
+        .select('id')
+        .eq('client_id', workspaceId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      // Also check workspace_members table
+      const { data: workspaceMembership } = await serviceClient
+        .from('workspace_members')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!membership && !workspaceMembership) {
+        return new Response(JSON.stringify({ error: 'Access denied to this workspace' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     console.log('Fetching comprehensive analytics for workspace:', workspaceId, 'context:', context);
 
