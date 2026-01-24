@@ -4533,6 +4533,126 @@ export type Database = {
           },
         ]
       }
+      smartlead_inbox_webhooks: {
+        Row: {
+          app_url: string | null
+          campaign_id: number | null
+          campaign_name: string | null
+          campaign_status: string | null
+          cc_emails: Json | null
+          client_id: string | null
+          created_at: string
+          description: string | null
+          event_timestamp: string | null
+          event_type: string | null
+          from_email: string | null
+          id: string
+          lead_correspondence: Json | null
+          message_id: string | null
+          metadata: Json | null
+          preview_text: string | null
+          processed: boolean | null
+          processed_at: string | null
+          raw_payload: Json | null
+          reply_body: string | null
+          reply_message: Json | null
+          secret_key: string | null
+          sent_message: Json | null
+          sent_message_body: string | null
+          sequence_number: number | null
+          sl_email_lead_id: string | null
+          sl_email_lead_map_id: number | null
+          sl_lead_email: string | null
+          stats_id: string | null
+          subject: string | null
+          time_replied: string | null
+          to_email: string | null
+          to_name: string | null
+          ui_master_inbox_link: string | null
+          webhook_id: number | null
+          webhook_name: string | null
+          webhook_url: string | null
+        }
+        Insert: {
+          app_url?: string | null
+          campaign_id?: number | null
+          campaign_name?: string | null
+          campaign_status?: string | null
+          cc_emails?: Json | null
+          client_id?: string | null
+          created_at?: string
+          description?: string | null
+          event_timestamp?: string | null
+          event_type?: string | null
+          from_email?: string | null
+          id?: string
+          lead_correspondence?: Json | null
+          message_id?: string | null
+          metadata?: Json | null
+          preview_text?: string | null
+          processed?: boolean | null
+          processed_at?: string | null
+          raw_payload?: Json | null
+          reply_body?: string | null
+          reply_message?: Json | null
+          secret_key?: string | null
+          sent_message?: Json | null
+          sent_message_body?: string | null
+          sequence_number?: number | null
+          sl_email_lead_id?: string | null
+          sl_email_lead_map_id?: number | null
+          sl_lead_email?: string | null
+          stats_id?: string | null
+          subject?: string | null
+          time_replied?: string | null
+          to_email?: string | null
+          to_name?: string | null
+          ui_master_inbox_link?: string | null
+          webhook_id?: number | null
+          webhook_name?: string | null
+          webhook_url?: string | null
+        }
+        Update: {
+          app_url?: string | null
+          campaign_id?: number | null
+          campaign_name?: string | null
+          campaign_status?: string | null
+          cc_emails?: Json | null
+          client_id?: string | null
+          created_at?: string
+          description?: string | null
+          event_timestamp?: string | null
+          event_type?: string | null
+          from_email?: string | null
+          id?: string
+          lead_correspondence?: Json | null
+          message_id?: string | null
+          metadata?: Json | null
+          preview_text?: string | null
+          processed?: boolean | null
+          processed_at?: string | null
+          raw_payload?: Json | null
+          reply_body?: string | null
+          reply_message?: Json | null
+          secret_key?: string | null
+          sent_message?: Json | null
+          sent_message_body?: string | null
+          sequence_number?: number | null
+          sl_email_lead_id?: string | null
+          sl_email_lead_map_id?: number | null
+          sl_lead_email?: string | null
+          stats_id?: string | null
+          subject?: string | null
+          time_replied?: string | null
+          to_email?: string | null
+          to_name?: string | null
+          ui_master_inbox_link?: string | null
+          webhook_id?: number | null
+          webhook_name?: string | null
+          webhook_url?: string | null
+        }
+        Relationships: []
+      }
       source_id_mappings: {
         Row: {
           created_at: string | null
