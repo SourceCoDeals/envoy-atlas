@@ -4535,10 +4535,16 @@ export type Database = {
       }
       smartlead_inbox_webhooks: {
         Row: {
+          ai_category: string | null
+          ai_confidence: number | null
+          ai_is_positive: boolean | null
+          ai_reasoning: string | null
+          ai_sentiment: string | null
           app_url: string | null
           campaign_id: number | null
           campaign_name: string | null
           campaign_status: string | null
+          categorized_at: string | null
           cc_emails: Json | null
           client_id: string | null
           created_at: string
@@ -4574,10 +4580,16 @@ export type Database = {
           webhook_url: string | null
         }
         Insert: {
+          ai_category?: string | null
+          ai_confidence?: number | null
+          ai_is_positive?: boolean | null
+          ai_reasoning?: string | null
+          ai_sentiment?: string | null
           app_url?: string | null
           campaign_id?: number | null
           campaign_name?: string | null
           campaign_status?: string | null
+          categorized_at?: string | null
           cc_emails?: Json | null
           client_id?: string | null
           created_at?: string
@@ -4613,10 +4625,16 @@ export type Database = {
           webhook_url?: string | null
         }
         Update: {
+          ai_category?: string | null
+          ai_confidence?: number | null
+          ai_is_positive?: boolean | null
+          ai_reasoning?: string | null
+          ai_sentiment?: string | null
           app_url?: string | null
           campaign_id?: number | null
           campaign_name?: string | null
           campaign_status?: string | null
+          categorized_at?: string | null
           cc_emails?: Json | null
           client_id?: string | null
           created_at?: string

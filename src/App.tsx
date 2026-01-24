@@ -17,6 +17,7 @@ import Campaigns from "./pages/Campaigns";
 import CampaignDetail from "./pages/CampaignDetail";
 import CampaignSummary from "./pages/CampaignSummary";
 import Inbox from "./pages/Inbox";
+import InboxDetail from "./pages/InboxDetail";
 import Deliverability from "./pages/Deliverability";
 import Audience from "./pages/Audience";
 import AudienceInsights from "./pages/AudienceInsights";
@@ -83,6 +84,7 @@ const App = () => (
                   <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
                   <Route path="/campaigns/:platform/:campaignId/summary" element={<CampaignSummary />} />
                   <Route path="/inbox" element={<Inbox />} />
+                  <Route path="/inbox/:inboxId" element={<InboxDetail />} />
                   <Route path="/deliverability" element={<Deliverability />} />
                   <Route path="/audience" element={<Audience />} />
                   <Route path="/audience-insights" element={<AudienceInsights />} />
