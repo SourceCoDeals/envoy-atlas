@@ -14,9 +14,12 @@ import {
   Legend,
 } from 'recharts';
 import type { WeeklyData } from '@/hooks/useOverviewDashboard';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 interface WeeklyPerformanceChartProps {
   data: WeeklyData[];
+  dataCompleteness?: { dailyTotal: number; campaignTotal: number };
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -49,11 +52,17 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-export function WeeklyPerformanceChart({ data }: WeeklyPerformanceChartProps) {
+export function WeeklyPerformanceChart({ data, dataCompleteness }: WeeklyPerformanceChartProps) {
   const [showVolume, setShowVolume] = useState(true);
   const [showReplies, setShowReplies] = useState(true);
   const [showPositive, setShowPositive] = useState(true);
   const [showMeetings, setShowMeetings] = useState(false);
+
+  // Calculate data completeness percentage
+  const completenessPercent = dataCompleteness && dataCompleteness.campaignTotal > 0
+    ? Math.round((dataCompleteness.dailyTotal / dataCompleteness.campaignTotal) * 100)
+    : 100;
+  const isComplete = completenessPercent >= 95;
 
   // Check if we have any weeks with actual data
   const weeksWithData = data.filter(w => w.emailsSent > 0);
@@ -82,13 +91,27 @@ export function WeeklyPerformanceChart({ data }: WeeklyPerformanceChartProps) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <CardTitle className="text-lg">Week-by-Week Performance</CardTitle>
-            <CardDescription>
-              {hasLimitedData 
-                ? `${weeksWithData.length} week${weeksWithData.length !== 1 ? 's' : ''} with activity`
-                : 'Last 12 weeks'}
-            </CardDescription>
+          <div className="flex items-center gap-2">
+            <div>
+              <CardTitle className="text-lg">Week-by-Week Performance</CardTitle>
+              <CardDescription>
+                {hasLimitedData 
+                  ? `${weeksWithData.length} week${weeksWithData.length !== 1 ? 's' : ''} with activity`
+                  : 'Last 12 weeks'}
+              </CardDescription>
+            </div>
+            {dataCompleteness && dataCompleteness.campaignTotal > 0 && (
+              <Badge 
+                variant={isComplete ? "outline" : "secondary"} 
+                className={`text-xs gap-1 ${isComplete ? 'text-success border-success/50' : 'text-warning border-warning/50'}`}
+              >
+                {isComplete ? (
+                  <><CheckCircle2 className="h-3 w-3" /> Complete</>
+                ) : (
+                  <><AlertTriangle className="h-3 w-3" /> {completenessPercent}% synced</>
+                )}
+              </Badge>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5">

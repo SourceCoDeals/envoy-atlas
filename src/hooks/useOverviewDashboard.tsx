@@ -50,6 +50,11 @@ export interface TodaysPulse {
   meetingsBooked: number;
 }
 
+export interface DataCompleteness {
+  dailyTotal: number;
+  campaignTotal: number;
+}
+
 export interface OverviewDashboardData {
   loading: boolean;
   hasData: boolean;
@@ -58,6 +63,7 @@ export interface OverviewDashboardData {
   weeklyData: WeeklyData[];
   alertCampaigns: AlertCampaign[];
   topCampaigns: TopCampaign[];
+  dataCompleteness: DataCompleteness;
   refetch: () => void;
 }
 
@@ -88,6 +94,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
     prev7: { sent: number; replied: number; positive: number; meetings: number };
     last7: { sent: number; replied: number; positive: number; meetings: number };
     weeklyBreakdown: WeeklyData[];
+    dataCompleteness: DataCompleteness;
     campaigns: Array<{
       id: string;
       name: string;
@@ -105,6 +112,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
     prev7: { sent: 0, replied: 0, positive: 0, meetings: 0 },
     last7: { sent: 0, replied: 0, positive: 0, meetings: 0 },
     weeklyBreakdown: [],
+    dataCompleteness: { dailyTotal: 0, campaignTotal: 0 },
     campaigns: [],
   });
 
@@ -269,6 +277,10 @@ export function useOverviewDashboard(): OverviewDashboardData {
           positiveRate: w.emailsSent > 0 ? (w.positiveReplies / w.emailsSent) * 100 : 0,
         }));
 
+      // Calculate data completeness (daily_metrics positive vs campaigns positive)
+      const dailyPositiveTotal = dailyMetrics.reduce((sum, m) => sum + (m.positive_replies || 0), 0);
+      const campaignPositiveTotal = campaignTotals.positive;
+
       // Process campaigns for alerts
       const campaignMetrics = campaigns.map(c => {
         const sent7d = c.total_sent || 0; // Would need daily breakdown for accurate 7d
@@ -299,6 +311,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
         prev7: prev7Agg,
         last7: last7Agg,
         weeklyBreakdown,
+        dataCompleteness: { dailyTotal: dailyPositiveTotal, campaignTotal: campaignPositiveTotal },
         campaigns: campaignMetrics,
       });
 
@@ -462,6 +475,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
     weeklyData: rawMetrics.weeklyBreakdown,
     alertCampaigns,
     topCampaigns,
+    dataCompleteness: rawMetrics.dataCompleteness,
     refetch: fetchData,
   };
 }
