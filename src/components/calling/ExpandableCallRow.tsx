@@ -6,7 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Textarea } from '@/components/ui/textarea';
 import { AudioPlayer } from './AudioPlayer';
 import { ScoreBreakdownPanel } from './ScoreBreakdownPanel';
-import { calculateScoreBreakdown, getEnhancedScoreStatus, formatEnhancedScore } from '@/lib/callScoring';
+import { calculateScoreBreakdown, getEnhancedScoreStatus, formatEnhancedScore, ScoreBreakdown } from '@/lib/callScoring';
 import { formatCallingDuration } from '@/lib/callingConfig';
 import { 
   ChevronDown, 
@@ -22,11 +22,92 @@ import {
   Flag,
   Flame,
   Star,
-  Building
+  Building,
+  Sparkles,
+  TrendingUp
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
+
+// Sub-component: Top Call Reason
+function TopCallReason({ call, scoreBreakdown }: { call: ColdCall; scoreBreakdown: ScoreBreakdown }) {
+  const reasons: string[] = [];
+  
+  // Determine why this is a top call
+  if (call.is_meeting) {
+    reasons.push('Meeting successfully set with prospect');
+  }
+  if ((call.seller_interest_score || 0) >= 7) {
+    reasons.push('Hot lead - high seller interest detected');
+  }
+  if (scoreBreakdown.qualityTotal >= 3.5) {
+    reasons.push('Excellent conversation quality score');
+  }
+  if (scoreBreakdown.outcomeTotal >= 6) {
+    reasons.push('Strong outcome metrics achieved');
+  }
+  if (call.is_connection && (call.call_duration_sec || 0) >= 300) {
+    reasons.push('Extended DM conversation (5+ minutes)');
+  }
+  if ((call.objection_handling_score || 0) >= 8) {
+    reasons.push('Excellent objection handling demonstrated');
+  }
+  if ((call.value_proposition_score || 0) >= 8) {
+    reasons.push('Strong value proposition delivery');
+  }
+  
+  // Fallback if no specific reasons
+  if (reasons.length === 0) {
+    reasons.push('High composite score across multiple dimensions');
+  }
+
+  return (
+    <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg">
+      <h4 className="text-sm font-medium mb-2 flex items-center gap-2 text-primary">
+        <Sparkles className="h-4 w-4" />
+        Why This Is a Top Call
+      </h4>
+      <ul className="space-y-1">
+        {reasons.map((reason, idx) => (
+          <li key={idx} className="text-sm flex items-start gap-2">
+            <TrendingUp className="h-3.5 w-3.5 mt-0.5 text-primary/70 flex-shrink-0" />
+            <span>{reason}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Sub-component: Expandable Summary
+function ExpandableSummary({ summary }: { summary: string }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isLong = summary.length > 250;
+  const displayText = isLong && !isExpanded ? summary.slice(0, 250) + '...' : summary;
+
+  return (
+    <div>
+      <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+        <Star className="h-4 w-4" />
+        AI Summary
+      </h4>
+      <div className="p-3 bg-muted/50 rounded-lg text-sm">
+        <p className="leading-relaxed">{displayText}</p>
+        {isLong && (
+          <Button
+            variant="link"
+            size="sm"
+            className="p-0 h-auto mt-1 text-primary"
+            onClick={() => setIsExpanded(!isExpanded)}
+          >
+            {isExpanded ? 'Show less' : 'Read more'}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface ExpandableCallRowProps {
   call: ColdCall;
@@ -188,17 +269,12 @@ export function ExpandableCallRow({ call, rank, onNoteSave, onFlag }: Expandable
                   </div>
                 )}
 
-                {/* AI Summary */}
+                {/* Top Call Reason */}
+                <TopCallReason call={call} scoreBreakdown={scoreBreakdown} />
+
+                {/* AI Summary - Collapsible */}
                 {call.call_summary && (
-                  <div>
-                    <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                      <Star className="h-4 w-4" />
-                      AI Summary
-                    </h4>
-                    <div className="p-3 bg-muted/50 rounded-lg text-sm">
-                      {call.call_summary}
-                    </div>
-                  </div>
+                  <ExpandableSummary summary={call.call_summary} />
                 )}
 
                 {/* Transcript */}
