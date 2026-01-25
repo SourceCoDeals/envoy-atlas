@@ -284,22 +284,10 @@ export function EnhancedCampaignTable({
     setSelectedCampaigns(newSelected);
   };
 
-  const SortIcon = ({ field }: { field: SortField }) => {
+  const getSortIcon = (field: SortField) => {
     if (sortField !== field) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
     return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
   };
-
-  const SortableHeader = ({ field, children, className }: { field: SortField; children: React.ReactNode; className?: string }) => (
-    <TableHead
-      className={`cursor-pointer hover:bg-muted/50 transition-colors ${className || ''}`}
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center">
-        {children}
-        <SortIcon field={field} />
-      </div>
-    </TableHead>
-  );
 
   const getTierBadge = (tier: CampaignTier['tier']) => {
     switch (tier) {
@@ -460,20 +448,42 @@ export function EnhancedCampaignTable({
                   }}
                 />
               </TableHead>
-              <SortableHeader field="name" className="min-w-[200px]">Campaign</SortableHeader>
-              <SortableHeader field="engagement_name" className="min-w-[120px]">Engagement</SortableHeader>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors min-w-[200px]" onClick={() => handleSort('name')}>
+                <div className="flex items-center">Campaign{getSortIcon('name')}</div>
+              </TableHead>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors min-w-[120px]" onClick={() => handleSort('engagement_name')}>
+                <div className="flex items-center">Engagement{getSortIcon('engagement_name')}</div>
+              </TableHead>
               <TableHead className="w-[70px] text-center">Health</TableHead>
-              <SortableHeader field="score" className="w-[70px] text-center">Score</SortableHeader>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors w-[70px] text-center" onClick={() => handleSort('score')}>
+                <div className="flex items-center justify-center">Score{getSortIcon('score')}</div>
+              </TableHead>
               <TableHead className="w-[90px] text-center">Tier</TableHead>
-              <SortableHeader field="confidence" className="w-[60px] text-center">Conf</SortableHeader>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors w-[60px] text-center" onClick={() => handleSort('confidence')}>
+                <div className="flex items-center justify-center">Conf{getSortIcon('confidence')}</div>
+              </TableHead>
               <TableHead className="w-[80px] text-center">Status</TableHead>
-              <SortableHeader field="total_leads" className="text-right">Leads</SortableHeader>
-              <SortableHeader field="created_at" className="text-right">Created</SortableHeader>
-              <SortableHeader field="updated_at" className="text-right">Updated</SortableHeader>
-              <SortableHeader field="total_sent" className="text-right">Sent</SortableHeader>
-              <SortableHeader field="reply_rate" className="text-right">Reply %</SortableHeader>
-              <SortableHeader field="positive_rate" className="text-right">Pos %</SortableHeader>
-              <SortableHeader field="meetings" className="text-right">Mtgs</SortableHeader>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors text-right" onClick={() => handleSort('total_leads')}>
+                <div className="flex items-center justify-end">Leads{getSortIcon('total_leads')}</div>
+              </TableHead>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors text-right" onClick={() => handleSort('created_at')}>
+                <div className="flex items-center justify-end">Created{getSortIcon('created_at')}</div>
+              </TableHead>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors text-right" onClick={() => handleSort('updated_at')}>
+                <div className="flex items-center justify-end">Updated{getSortIcon('updated_at')}</div>
+              </TableHead>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors text-right" onClick={() => handleSort('total_sent')}>
+                <div className="flex items-center justify-end">Sent{getSortIcon('total_sent')}</div>
+              </TableHead>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors text-right" onClick={() => handleSort('reply_rate')}>
+                <div className="flex items-center justify-end">Reply %{getSortIcon('reply_rate')}</div>
+              </TableHead>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors text-right" onClick={() => handleSort('positive_rate')}>
+                <div className="flex items-center justify-end">Pos %{getSortIcon('positive_rate')}</div>
+              </TableHead>
+              <TableHead className="cursor-pointer hover:bg-muted/50 transition-colors text-right" onClick={() => handleSort('meetings')}>
+                <div className="flex items-center justify-end">Mtgs{getSortIcon('meetings')}</div>
+              </TableHead>
               <TableHead className="text-center">Action</TableHead>
             </TableRow>
           </TableHeader>
