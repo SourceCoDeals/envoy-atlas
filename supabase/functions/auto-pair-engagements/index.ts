@@ -383,18 +383,27 @@ Deno.serve(async (req) => {
       // Insert new campaigns in batches of 100
       for (let i = 0; i < toInsert.length; i += 100) {
         const batch = toInsert.slice(i, i + 100);
-        const insertData = batch.map(c => ({
-          external_id: c.external_id,
-          name: c.name,
-          status: c.status,
-          campaign_type: c.campaign_type,
-          created_at: c.created_at,
-          updated_at: c.updated_at,
-          total_sent: c.total_sent,
-          total_replied: c.total_replied,
-          settings: c.settings,
-          engagement_id: '00000000-0000-0000-0000-000000000000',
-        }));
+        const insertData = batch.map(c => {
+          // Extract positive_replies from settings.leads_interested
+          const leadsInterested = (c.settings?.leads_interested as number) || 0;
+          const totalSent = c.total_sent || 0;
+          
+          return {
+            external_id: c.external_id,
+            name: c.name,
+            status: c.status,
+            campaign_type: c.campaign_type,
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+            total_sent: totalSent,
+            total_replied: c.total_replied,
+            positive_replies: leadsInterested, // Map leads_interested → positive_replies
+            positive_rate: totalSent > 0 ? leadsInterested / totalSent : 0,
+            reply_rate: totalSent > 0 ? (c.total_replied || 0) / totalSent : 0,
+            settings: c.settings,
+            engagement_id: '00000000-0000-0000-0000-000000000000',
+          };
+        });
 
         const { data: inserted, error: insertError } = await supabase
           .from('campaigns')
@@ -416,11 +425,18 @@ Deno.serve(async (req) => {
           const existing = existingByExternalId.get(c.external_id);
           if (!existing) continue;
 
+          // Extract positive_replies from settings.leads_interested
+          const leadsInterested = (c.settings?.leads_interested as number) || 0;
+          const totalSent = c.total_sent || 0;
+
           const { error: updateError } = await supabase
             .from('campaigns')
             .update({
-              total_sent: c.total_sent,
+              total_sent: totalSent,
               total_replied: c.total_replied,
+              positive_replies: leadsInterested, // Map leads_interested → positive_replies
+              positive_rate: totalSent > 0 ? leadsInterested / totalSent : 0,
+              reply_rate: totalSent > 0 ? (c.total_replied || 0) / totalSent : 0,
               settings: c.settings,
               updated_at: new Date().toISOString(),
             })

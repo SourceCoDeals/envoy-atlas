@@ -117,7 +117,6 @@ export function useOverviewDashboard(): OverviewDashboardData {
       const todayStr = format(today, 'yyyy-MM-dd');
       const last7Start = format(subDays(today, 7), 'yyyy-MM-dd');
       const prev7Start = format(subDays(today, 14), 'yyyy-MM-dd');
-      const last30Start = format(subDays(today, 30), 'yyyy-MM-dd');
       const week12Start = format(subWeeks(today, 12), 'yyyy-MM-dd');
 
       // Get engagement IDs
@@ -145,7 +144,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
           .lte('date', todayStr)
           .order('date', { ascending: true }),
         
-        // Campaign-level data for alerts and top performers
+        // Campaign-level data for HERO metrics (more reliable than daily_metrics)
+        // Also used for alerts and top performers
         supabase
           .from('campaigns')
           .select('id, name, total_sent, total_replied, positive_replies, total_meetings, reply_rate, positive_rate, updated_at')
@@ -164,7 +164,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
       const campaigns = campaignsRes.data || [];
       const todayMetrics = todayMetricsRes.data || [];
 
-      if (dailyMetrics.length === 0 && campaigns.length === 0) {
+      // Use campaigns table as the source of truth for data availability
+      if (campaigns.length === 0) {
         setHasData(false);
         setLoading(false);
         return;
@@ -182,8 +183,16 @@ export function useOverviewDashboard(): OverviewDashboardData {
       
       setTodaysPulse(todayTotals);
 
-      // Aggregate daily metrics by time period
-      const last30Agg = { sent: 0, replied: 0, positive: 0, meetings: 0 };
+      // ===== HERO METRICS: Use campaigns table (source of truth) =====
+      // The campaigns table has complete aggregate data vs daily_metrics which has gaps
+      const campaignTotals = campaigns.reduce((acc, c) => ({
+        sent: acc.sent + (c.total_sent || 0),
+        replied: acc.replied + (c.total_replied || 0),
+        positive: acc.positive + (c.positive_replies || 0),
+        meetings: acc.meetings + (c.total_meetings || 0),
+      }), { sent: 0, replied: 0, positive: 0, meetings: 0 });
+
+      // For WoW comparison, we still use daily_metrics (but with safeguards)
       const last7Agg = { sent: 0, replied: 0, positive: 0, meetings: 0 };
       const prev7Agg = { sent: 0, replied: 0, positive: 0, meetings: 0 };
 
@@ -193,14 +202,6 @@ export function useOverviewDashboard(): OverviewDashboardData {
         const replied = m.emails_replied || 0;
         const positive = m.positive_replies || 0;
         const meetings = m.meetings_booked || 0;
-
-        // Last 30 days
-        if (date >= last30Start) {
-          last30Agg.sent += sent;
-          last30Agg.replied += replied;
-          last30Agg.positive += positive;
-          last30Agg.meetings += meetings;
-        }
 
         // Last 7 days
         if (date >= last7Start) {
@@ -218,6 +219,9 @@ export function useOverviewDashboard(): OverviewDashboardData {
           prev7Agg.meetings += meetings;
         }
       });
+      
+      // Use campaign totals for main metrics display
+      const last30Agg = campaignTotals;
 
       // Build weekly breakdown (last 12 weeks)
       const weeklyMap = new Map<string, WeeklyData>();
@@ -307,15 +311,25 @@ export function useOverviewDashboard(): OverviewDashboardData {
     fetchData();
   }, [fetchData]);
 
-  // Compute hero metrics with WoW comparison
+  // Compute hero metrics with WoW comparison (capped at 999%)
   const heroMetrics = useMemo((): HeroMetric[] => {
     const { last30, last7, prev7 } = rawMetrics;
     
+    // Helper to calculate WoW change with safeguards:
+    // - Cap at 999% to prevent layout-breaking numbers
+    // - Show "neutral" trend when previous period has no data
     const calcChange = (current: number, previous: number): { change: number; trend: 'up' | 'down' | 'neutral' } => {
-      if (previous === 0) return { change: 0, trend: 'neutral' };
+      // If no previous data, show neutral (not a valid comparison)
+      if (previous === 0) {
+        return { change: 0, trend: 'neutral' };
+      }
+      
       const pctChange = ((current - previous) / previous) * 100;
+      // Cap at 999% to prevent extreme numbers from breaking layout
+      const cappedChange = Math.min(Math.abs(pctChange), 999);
+      
       return {
-        change: Math.abs(pctChange),
+        change: cappedChange,
         trend: pctChange > 1 ? 'up' : pctChange < -1 ? 'down' : 'neutral',
       };
     };
