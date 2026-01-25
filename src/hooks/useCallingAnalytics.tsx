@@ -200,7 +200,14 @@ export function useCallingAnalytics(dateRange: DateRange = '30d') {
 
       allCalls.forEach(call => {
         if (call.called_date_time) {
-          const hour = new Date(call.called_date_time).getHours();
+          // Convert UTC to Eastern Time (UTC-5 for EST)
+          const dt = new Date(call.called_date_time);
+          const utcHour = dt.getUTCHours();
+          const easternOffset = -5;
+          let hour = utcHour + easternOffset;
+          if (hour < 0) hour += 24;
+          if (hour >= 24) hour -= 24;
+          
           if (hourlyMap.has(hour)) {
             const current = hourlyMap.get(hour)!;
             current.calls++;

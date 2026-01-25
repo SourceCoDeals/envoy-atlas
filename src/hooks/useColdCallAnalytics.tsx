@@ -500,7 +500,13 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         if (call.called_date_time) {
           try {
             const dt = parseISO(call.called_date_time);
-            const hour = dt.getHours();
+            // Convert UTC to Eastern Time (UTC-5 for EST, UTC-4 for EDT)
+            // Using EST offset of -5 hours as the standard business timezone
+            const easternOffset = -5;
+            const utcHour = dt.getUTCHours();
+            let hour = utcHour + easternOffset;
+            if (hour < 0) hour += 24;
+            if (hour >= 24) hour -= 24;
             
             if (hourlyMap.has(hour)) {
               const current = hourlyMap.get(hour)!;
