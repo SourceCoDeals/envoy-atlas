@@ -28,7 +28,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2,
-  Phone, Target, Archive, DollarSign, Search, Filter, X
+  Phone, Target, Archive, DollarSign, Search, Filter, X,
+  Mail, ThumbsUp, Calendar
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
@@ -71,6 +72,8 @@ interface EngagementMetrics {
   interestedLeads: number;
   conversations: number;
   meetingsSet: number;
+  emailsSent: number;
+  positiveReplies: number;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
@@ -184,17 +187,34 @@ export default function EngagementDashboard() {
     try {
       const engagementIds = engagementList.map(e => e.id);
       
-      // Fetch all call activities in a single query
-      const { data: allCalls } = await supabase
-        .from('call_activities')
-        .select('engagement_id, disposition, talk_duration, conversation_outcome')
-        .in('engagement_id', engagementIds);
+      // Fetch all data in parallel
+      const [callsRes, meetingsRes, campaignsRes, coldCallsRes] = await Promise.all([
+        // Call activities
+        supabase
+          .from('call_activities')
+          .select('engagement_id, disposition, talk_duration, conversation_outcome')
+          .in('engagement_id', engagementIds),
+        // Meetings
+        supabase
+          .from('meetings')
+          .select('id, engagement_id')
+          .in('engagement_id', engagementIds),
+        // Campaigns for email metrics
+        supabase
+          .from('campaigns')
+          .select('engagement_id, total_sent, positive_replies, total_meetings')
+          .in('engagement_id', engagementIds),
+        // Cold calls for additional call/meeting data
+        supabase
+          .from('cold_calls')
+          .select('engagement_id, is_meeting, is_connection')
+          .in('engagement_id', engagementIds),
+      ]);
 
-      // Fetch all meetings in a single query
-      const { data: allMeetings } = await supabase
-        .from('meetings')
-        .select('id, engagement_id')
-        .in('engagement_id', engagementIds);
+      const allCalls = callsRes.data || [];
+      const allMeetings = meetingsRes.data || [];
+      const allCampaigns = campaignsRes.data || [];
+      const allColdCalls = coldCallsRes.data || [];
 
       const metricsMap: Record<string, EngagementMetrics> = {};
       
@@ -205,11 +225,13 @@ export default function EngagementDashboard() {
           interestedLeads: 0,
           conversations: 0,
           meetingsSet: 0,
+          emailsSent: 0,
+          positiveReplies: 0,
         };
       }
 
-      // Aggregate call data
-      for (const call of (allCalls || [])) {
+      // Aggregate call_activities data
+      for (const call of allCalls) {
         const m = metricsMap[call.engagement_id];
         if (m) {
           m.totalCalls++;
@@ -226,10 +248,30 @@ export default function EngagementDashboard() {
       }
 
       // Aggregate meetings data
-      for (const meeting of (allMeetings || [])) {
+      for (const meeting of allMeetings) {
         const m = metricsMap[meeting.engagement_id];
         if (m) {
           m.meetingsSet++;
+        }
+      }
+
+      // Aggregate campaign/email data
+      for (const campaign of allCampaigns) {
+        const m = metricsMap[campaign.engagement_id];
+        if (m) {
+          m.emailsSent += campaign.total_sent || 0;
+          m.positiveReplies += campaign.positive_replies || 0;
+          m.meetingsSet += campaign.total_meetings || 0;
+        }
+      }
+
+      // Aggregate cold_calls data (if engagement_id is set)
+      for (const call of allColdCalls) {
+        if (!call.engagement_id) continue;
+        const m = metricsMap[call.engagement_id];
+        if (m) {
+          m.totalCalls++;
+          if (call.is_meeting) m.meetingsSet++;
         }
       }
       
@@ -439,8 +481,10 @@ export default function EngagementDashboard() {
         calls: acc.calls + m.totalCalls,
         interested: acc.interested + m.interestedLeads,
         meetings: acc.meetings + m.meetingsSet,
+        emailsSent: acc.emailsSent + m.emailsSent,
+        positiveReplies: acc.positiveReplies + m.positiveReplies,
       }),
-      { calls: 0, interested: 0, meetings: 0 }
+      { calls: 0, interested: 0, meetings: 0, emailsSent: 0, positiveReplies: 0 }
     );
   }, [engagementMetrics]);
 
@@ -485,7 +529,7 @@ export default function EngagementDashboard() {
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Active Engagements</CardTitle>
@@ -493,6 +537,26 @@ export default function EngagementDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{statusCounts.active}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Emails Sent</CardTitle>
+              <Mail className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totals.emailsSent.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Positive Replies</CardTitle>
+              <ThumbsUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totals.positiveReplies.toLocaleString()}</div>
             </CardContent>
           </Card>
 
@@ -508,8 +572,8 @@ export default function EngagementDashboard() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Meetings Set</CardTitle>
-              <Target className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Meetings Booked</CardTitle>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{totals.meetings.toLocaleString()}</div>
