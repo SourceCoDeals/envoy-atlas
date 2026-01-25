@@ -31,22 +31,29 @@ Deno.serve(async (req) => {
 
     console.log("Starting metrics recalculation...");
 
-    // Step 1: Count positive replies from email_activities and update daily_metrics
-    console.log("Step 1: Aggregating positive replies from email_activities...");
+    // Step 1: Distribute positive_replies from campaigns to daily_metrics
+    // Since email_activities may not have classified replies, use campaigns as source of truth
+    // (campaigns.positive_replies comes from NocoDB sync - leads_interested)
+    console.log("Step 1: Distributing positive replies from campaigns to daily_metrics...");
     
-    const { data: positiveReplies, error: prError } = await supabase
+    // First, try to find positive replies from email_activities (if available)
+    const { data: emailPositives, error: emailError } = await supabase
       .from("email_activities")
       .select("campaign_id, engagement_id, sent_at, replied_at, reply_category")
-      .in("reply_category", ["meeting_request", "interested"])
+      .in("reply_category", ["meeting_request", "interested", "positive", "meeting_booked"])
       .not("campaign_id", "is", null);
 
-    if (prError) {
-      result.errors.push(`Error fetching positive replies: ${prError.message}`);
-    } else if (positiveReplies) {
-      result.positiveRepliesFound = positiveReplies.length;
-      console.log(`Found ${positiveReplies.length} positive replies`);
+    if (emailError) {
+      console.log(`Note: Could not fetch from email_activities: ${emailError.message}`);
+    }
+    
+    const hasEmailPositives = emailPositives && emailPositives.length > 0;
+    
+    if (hasEmailPositives) {
+      // Use email_activities as source (real data with timestamps)
+      console.log(`Found ${emailPositives.length} positive replies in email_activities`);
+      result.positiveRepliesFound = emailPositives.length;
 
-      // Group by campaign_id and date
       const groupedByDate: Record<string, { 
         campaign_id: string; 
         engagement_id: string; 
@@ -54,7 +61,7 @@ Deno.serve(async (req) => {
         count: number 
       }> = {};
 
-      for (const reply of positiveReplies) {
+      for (const reply of emailPositives) {
         const date = (reply.replied_at || reply.sent_at || new Date().toISOString()).split("T")[0];
         const key = `${reply.campaign_id}-${reply.engagement_id}-${date}`;
         
@@ -69,7 +76,6 @@ Deno.serve(async (req) => {
         groupedByDate[key].count++;
       }
 
-      // Update daily_metrics with positive_replies counts
       for (const entry of Object.values(groupedByDate)) {
         const { error: updateError } = await supabase
           .from("daily_metrics")
@@ -83,6 +89,64 @@ Deno.serve(async (req) => {
 
         if (updateError) {
           result.errors.push(`Error updating daily_metrics for ${entry.campaign_id}: ${updateError.message}`);
+        }
+      }
+    } else {
+      // Fallback: Distribute campaign.positive_replies proportionally to daily_metrics
+      // This is less accurate but ensures data visibility
+      console.log("No email_activities positives found, distributing from campaigns...");
+      
+      const { data: campaignsWithPositives, error: cwpError } = await supabase
+        .from("campaigns")
+        .select("id, engagement_id, positive_replies")
+        .gt("positive_replies", 0);
+      
+      if (cwpError) {
+        result.errors.push(`Error fetching campaigns with positives: ${cwpError.message}`);
+      } else if (campaignsWithPositives) {
+        console.log(`Found ${campaignsWithPositives.length} campaigns with positive_replies`);
+        result.positiveRepliesFound = campaignsWithPositives.reduce((sum, c) => sum + (c.positive_replies || 0), 0);
+        
+        for (const campaign of campaignsWithPositives) {
+          // Get all daily_metrics for this campaign
+          const { data: dailyRows, error: drError } = await supabase
+            .from("daily_metrics")
+            .select("id, emails_replied, positive_replies")
+            .eq("campaign_id", campaign.id)
+            .order("date", { ascending: true });
+          
+          if (drError || !dailyRows || dailyRows.length === 0) continue;
+          
+          // Distribute positive_replies proportionally to emails_replied
+          const totalReplied = dailyRows.reduce((sum, r) => sum + (r.emails_replied || 0), 0);
+          
+          if (totalReplied === 0) {
+            // If no replied data, distribute evenly
+            const perRow = Math.floor((campaign.positive_replies || 0) / dailyRows.length);
+            const remainder = (campaign.positive_replies || 0) % dailyRows.length;
+            
+            for (let i = 0; i < dailyRows.length; i++) {
+              const positiveCount = perRow + (i === dailyRows.length - 1 ? remainder : 0);
+              if (positiveCount > 0) {
+                await supabase
+                  .from("daily_metrics")
+                  .update({ positive_replies: positiveCount, updated_at: new Date().toISOString() })
+                  .eq("id", dailyRows[i].id);
+              }
+            }
+          } else {
+            // Distribute proportionally to replies
+            for (const row of dailyRows) {
+              const proportion = (row.emails_replied || 0) / totalReplied;
+              const positiveCount = Math.round(proportion * (campaign.positive_replies || 0));
+              if (positiveCount > 0) {
+                await supabase
+                  .from("daily_metrics")
+                  .update({ positive_replies: positiveCount, updated_at: new Date().toISOString() })
+                  .eq("id", row.id);
+              }
+            }
+          }
         }
       }
     }
