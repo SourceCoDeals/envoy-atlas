@@ -110,3 +110,6 @@ verify_jwt = false
 
 [functions.reclassify-inbox]
 verify_jwt = false
+
+[functions.export-table-data]
+verify_jwt = false
