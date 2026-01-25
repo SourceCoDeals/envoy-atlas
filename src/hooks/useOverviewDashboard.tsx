@@ -258,8 +258,10 @@ export function useOverviewDashboard(): OverviewDashboardData {
         }
       });
 
-      // Calculate rates for each week
+      // Calculate rates for each week - ONLY include weeks with actual activity
+      // Filter out weeks with no emails sent (true time-series only, no estimated data)
       const weeklyBreakdown = Array.from(weeklyMap.values())
+        .filter(w => w.emailsSent > 0) // Only show weeks with real data
         .sort((a, b) => a.weekEnding.localeCompare(b.weekEnding))
         .map(w => ({
           ...w,

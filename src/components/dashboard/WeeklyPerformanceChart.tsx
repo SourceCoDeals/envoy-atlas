@@ -55,7 +55,10 @@ export function WeeklyPerformanceChart({ data }: WeeklyPerformanceChartProps) {
   const [showPositive, setShowPositive] = useState(true);
   const [showMeetings, setShowMeetings] = useState(false);
 
-  if (data.length === 0) {
+  // Check if we have any weeks with actual data
+  const weeksWithData = data.filter(w => w.emailsSent > 0);
+  
+  if (weeksWithData.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -63,13 +66,17 @@ export function WeeklyPerformanceChart({ data }: WeeklyPerformanceChartProps) {
           <CardDescription>Last 12 weeks</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-            No weekly data available
+          <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground gap-2">
+            <span>No weekly data available</span>
+            <span className="text-xs">Data will appear after syncing campaigns</span>
           </div>
         </CardContent>
       </Card>
     );
   }
+
+  // Show data coverage warning if less than 4 weeks
+  const hasLimitedData = weeksWithData.length < 4;
 
   return (
     <Card>
@@ -77,7 +84,11 @@ export function WeeklyPerformanceChart({ data }: WeeklyPerformanceChartProps) {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle className="text-lg">Week-by-Week Performance</CardTitle>
-            <CardDescription>Last 12 weeks</CardDescription>
+            <CardDescription>
+              {hasLimitedData 
+                ? `${weeksWithData.length} week${weeksWithData.length !== 1 ? 's' : ''} with activity`
+                : 'Last 12 weeks'}
+            </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5">
