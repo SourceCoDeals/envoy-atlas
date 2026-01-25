@@ -14,12 +14,21 @@ import {
   Legend,
 } from 'recharts';
 import type { WeeklyData } from '@/hooks/useOverviewDashboard';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Database, Info } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+
+export type DataSourceType = 'nocodb_aggregate' | 'activity_level' | 'mixed';
 
 interface WeeklyPerformanceChartProps {
   data: WeeklyData[];
   dataCompleteness?: { dailyTotal: number; campaignTotal: number };
+  dataSource?: DataSourceType;
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -52,7 +61,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-export function WeeklyPerformanceChart({ data, dataCompleteness }: WeeklyPerformanceChartProps) {
+export function WeeklyPerformanceChart({ data, dataCompleteness, dataSource = 'nocodb_aggregate' }: WeeklyPerformanceChartProps) {
   const [showVolume, setShowVolume] = useState(true);
   const [showReplies, setShowReplies] = useState(true);
   const [showPositive, setShowPositive] = useState(true);
@@ -63,6 +72,27 @@ export function WeeklyPerformanceChart({ data, dataCompleteness }: WeeklyPerform
     ? Math.round((dataCompleteness.dailyTotal / dataCompleteness.campaignTotal) * 100)
     : 100;
   const isComplete = completenessPercent >= 95;
+
+  // Data source labels
+  const dataSourceInfo = {
+    nocodb_aggregate: {
+      label: 'NocoDB',
+      description: 'Campaign totals from NocoDB. Time-series distribution is estimated.',
+      icon: Database,
+    },
+    activity_level: {
+      label: 'Real-time',
+      description: 'Individual email activities with actual timestamps.',
+      icon: CheckCircle2,
+    },
+    mixed: {
+      label: 'Mixed',
+      description: 'Combination of NocoDB aggregates and real-time activity data.',
+      icon: Info,
+    },
+  };
+  
+  const sourceInfo = dataSourceInfo[dataSource];
 
   // Check if we have any weeks with actual data
   const weeksWithData = data.filter(w => w.emailsSent > 0);
@@ -100,18 +130,39 @@ export function WeeklyPerformanceChart({ data, dataCompleteness }: WeeklyPerform
                   : 'Last 12 weeks'}
               </CardDescription>
             </div>
-            {dataCompleteness && dataCompleteness.campaignTotal > 0 && (
-              <Badge 
-                variant={isComplete ? "outline" : "secondary"} 
-                className={`text-xs gap-1 ${isComplete ? 'text-success border-success/50' : 'text-warning border-warning/50'}`}
-              >
-                {isComplete ? (
-                  <><CheckCircle2 className="h-3 w-3" /> Complete</>
-                ) : (
-                  <><AlertTriangle className="h-3 w-3" /> {completenessPercent}% synced</>
-                )}
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {/* Data Source Indicator */}
+              <TooltipProvider>
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Badge 
+                      variant="outline" 
+                      className="text-xs gap-1 text-muted-foreground border-border cursor-help"
+                    >
+                      <sourceInfo.icon className="h-3 w-3" />
+                      {sourceInfo.label}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs">
+                    <p className="text-xs">{sourceInfo.description}</p>
+                  </TooltipContent>
+                </UITooltip>
+              </TooltipProvider>
+              
+              {/* Data Completeness Indicator */}
+              {dataCompleteness && dataCompleteness.campaignTotal > 0 && (
+                <Badge 
+                  variant={isComplete ? "outline" : "secondary"} 
+                  className={`text-xs gap-1 ${isComplete ? 'text-success border-success/50' : 'text-warning border-warning/50'}`}
+                >
+                  {isComplete ? (
+                    <><CheckCircle2 className="h-3 w-3" /> Complete</>
+                  ) : (
+                    <><AlertTriangle className="h-3 w-3" /> {completenessPercent}% synced</>
+                  )}
+                </Badge>
+              )}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5">
