@@ -28,8 +28,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2,
-  Phone, Target, Archive, DollarSign, Search, Filter, X,
-  ThumbsUp, Calendar, Layers, LayoutGrid
+  Archive, DollarSign, Search, Filter, X,
+  ThumbsUp, Calendar, Layers, LayoutGrid,
+  ArrowUp, ArrowDown, Minus
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
@@ -76,6 +77,23 @@ interface EngagementMetrics {
   positiveReplies: number;
 }
 
+interface WeeklyComparison {
+  positiveReplies: { thisWeek: number; lastWeek: number };
+  meetings: { thisWeek: number; lastWeek: number };
+}
+
+// Helper to calculate trend
+const calculateTrend = (current: number, previous: number) => {
+  if (previous === 0) {
+    return { direction: current > 0 ? 'up' as const : 'neutral' as const, change: current > 0 ? 100 : 0 };
+  }
+  const change = ((current - previous) / previous) * 100;
+  return {
+    direction: change > 0.5 ? 'up' as const : change < -0.5 ? 'down' as const : 'neutral' as const,
+    change: Math.min(Math.abs(change), 999),
+  };
+};
+
 const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
   active: { label: 'Live', variant: 'default' },
   contracted: { label: 'Contracted', variant: 'outline' },
@@ -92,6 +110,10 @@ export default function EngagementDashboard() {
   const [loading, setLoading] = useState(true);
   const [engagements, setEngagements] = useState<Engagement[]>([]);
   const [engagementMetrics, setEngagementMetrics] = useState<Record<string, EngagementMetrics>>({});
+  const [weeklyComparison, setWeeklyComparison] = useState<WeeklyComparison>({
+    positiveReplies: { thisWeek: 0, lastWeek: 0 },
+    meetings: { thisWeek: 0, lastWeek: 0 },
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -276,8 +298,83 @@ export default function EngagementDashboard() {
       }
       
       setEngagementMetrics(metricsMap);
+      
+      // Also fetch weekly comparison data
+      await fetchWeeklyComparison(engagementList.map(e => e.id));
     } catch (err) {
       console.error('Error fetching engagement metrics:', err);
+    }
+  };
+
+  const fetchWeeklyComparison = async (engagementIds: string[]) => {
+    try {
+      const today = new Date();
+      const thisWeekStart = new Date(today);
+      thisWeekStart.setDate(today.getDate() - 7);
+      const lastWeekStart = new Date(today);
+      lastWeekStart.setDate(today.getDate() - 14);
+      
+      const thisWeekISO = thisWeekStart.toISOString();
+      const lastWeekISO = lastWeekStart.toISOString();
+      const todayISO = today.toISOString();
+
+      // Fetch weekly data in parallel
+      const [
+        thisWeekDailyMetrics,
+        lastWeekDailyMetrics,
+        thisWeekMeetings,
+        lastWeekMeetings,
+      ] = await Promise.all([
+        // This week's positive replies from daily_metrics
+        supabase
+          .from('daily_metrics')
+          .select('positive_replies')
+          .in('engagement_id', engagementIds)
+          .gte('date', thisWeekStart.toISOString().split('T')[0])
+          .lt('date', todayISO.split('T')[0]),
+        // Last week's positive replies
+        supabase
+          .from('daily_metrics')
+          .select('positive_replies')
+          .in('engagement_id', engagementIds)
+          .gte('date', lastWeekStart.toISOString().split('T')[0])
+          .lt('date', thisWeekStart.toISOString().split('T')[0]),
+        // This week's meetings
+        supabase
+          .from('meetings')
+          .select('id')
+          .in('engagement_id', engagementIds)
+          .gte('scheduled_datetime', thisWeekISO),
+        // Last week's meetings
+        supabase
+          .from('meetings')
+          .select('id')
+          .in('engagement_id', engagementIds)
+          .gte('scheduled_datetime', lastWeekISO)
+          .lt('scheduled_datetime', thisWeekISO),
+      ]);
+
+      const thisWeekPositive = (thisWeekDailyMetrics.data || []).reduce(
+        (sum, row) => sum + (row.positive_replies || 0),
+        0
+      );
+      const lastWeekPositive = (lastWeekDailyMetrics.data || []).reduce(
+        (sum, row) => sum + (row.positive_replies || 0),
+        0
+      );
+
+      setWeeklyComparison({
+        positiveReplies: {
+          thisWeek: thisWeekPositive,
+          lastWeek: lastWeekPositive,
+        },
+        meetings: {
+          thisWeek: thisWeekMeetings.data?.length || 0,
+          lastWeek: lastWeekMeetings.data?.length || 0,
+        },
+      });
+    } catch (err) {
+      console.error('Error fetching weekly comparison:', err);
     }
   };
 
@@ -537,6 +634,7 @@ export default function EngagementDashboard() {
         </div>
 
         <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+          {/* Active Engagements - no weekly trend (static) */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Active Engagements</CardTitle>
@@ -544,21 +642,23 @@ export default function EngagementDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{statusCounts.active}</div>
+              <p className="text-xs text-muted-foreground mt-1">This week</p>
             </CardContent>
           </Card>
 
+          {/* Monthly Retainer - no weekly trend (static) */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Monthly Retainer</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                ${totalRetainer.toLocaleString()}
-              </div>
+              <div className="text-2xl font-bold">${totalRetainer.toLocaleString()}</div>
+              <p className="text-xs text-muted-foreground mt-1">This week</p>
             </CardContent>
           </Card>
 
+          {/* Platforms - no weekly trend */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium"># of Platforms</CardTitle>
@@ -566,9 +666,11 @@ export default function EngagementDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{typeCounts.platforms}</div>
+              <p className="text-xs text-muted-foreground mt-1">This week</p>
             </CardContent>
           </Card>
 
+          {/* Add-ons - no weekly trend */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium"># of Add-ons</CardTitle>
@@ -576,28 +678,93 @@ export default function EngagementDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{typeCounts.addons}</div>
+              <p className="text-xs text-muted-foreground mt-1">This week</p>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Positive Replies</CardTitle>
-              <ThumbsUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totals.positiveReplies.toLocaleString()}</div>
-            </CardContent>
-          </Card>
+          {/* Positive Replies - with weekly trend */}
+          {(() => {
+            const trend = calculateTrend(
+              weeklyComparison.positiveReplies.thisWeek,
+              weeklyComparison.positiveReplies.lastWeek
+            );
+            return (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Positive Replies</CardTitle>
+                  <div className="flex items-center gap-1.5">
+                    {trend.direction === 'up' && (
+                      <>
+                        <ArrowUp className="h-4 w-4 text-success" />
+                        <span className="text-xs font-medium text-success">
+                          +{trend.change.toFixed(0)}%
+                        </span>
+                      </>
+                    )}
+                    {trend.direction === 'down' && (
+                      <>
+                        <ArrowDown className="h-4 w-4 text-destructive" />
+                        <span className="text-xs font-medium text-destructive">
+                          -{trend.change.toFixed(0)}%
+                        </span>
+                      </>
+                    )}
+                    {trend.direction === 'neutral' && (
+                      <Minus className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {weeklyComparison.positiveReplies.thisWeek.toLocaleString()}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">This week</p>
+                </CardContent>
+              </Card>
+            );
+          })()}
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Meetings Booked</CardTitle>
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totals.meetings.toLocaleString()}</div>
-            </CardContent>
-          </Card>
+          {/* Meetings Booked - with weekly trend */}
+          {(() => {
+            const trend = calculateTrend(
+              weeklyComparison.meetings.thisWeek,
+              weeklyComparison.meetings.lastWeek
+            );
+            return (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Meetings Booked</CardTitle>
+                  <div className="flex items-center gap-1.5">
+                    {trend.direction === 'up' && (
+                      <>
+                        <ArrowUp className="h-4 w-4 text-success" />
+                        <span className="text-xs font-medium text-success">
+                          +{trend.change.toFixed(0)}%
+                        </span>
+                      </>
+                    )}
+                    {trend.direction === 'down' && (
+                      <>
+                        <ArrowDown className="h-4 w-4 text-destructive" />
+                        <span className="text-xs font-medium text-destructive">
+                          -{trend.change.toFixed(0)}%
+                        </span>
+                      </>
+                    )}
+                    {trend.direction === 'neutral' && (
+                      <Minus className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {weeklyComparison.meetings.thisWeek.toLocaleString()}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">This week</p>
+                </CardContent>
+              </Card>
+            );
+          })()}
         </div>
 
         {/* Engagements Table with Tabs */}
