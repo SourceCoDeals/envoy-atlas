@@ -30,22 +30,18 @@ import Settings from "./pages/Settings";
 import CopywritingStudio from "./pages/CopywritingStudio";
 import CallerDashboard from "./pages/CallerDashboard";
 import EngagementDashboard from "./pages/EngagementDashboard";
-import TopDeals from "./pages/TopDeals";
 import TopCallsWeek from "./pages/TopCallsWeek";
 import DataInsights from "./pages/DataInsights";
 import CallLibrary from "./pages/CallLibrary";
 import CallInsights from "./pages/CallInsights";
 
-
 import EngagementReport from "./pages/EngagementReport";
 import { Navigate } from "react-router-dom";
 import CallSessions from "./pages/CallSessions";
-import CallAnalytics from "./pages/CallAnalytics";
 import CallSearch from "./pages/CallSearch";
 import BestWorstCalls from "./pages/BestWorstCalls";
 import RepInsights from "./pages/RepInsights";
 import PatternAnalysis from "./pages/PatternAnalysis";
-import TimingInsights from "./pages/TimingInsights";
 import TrainingQueue from "./pages/TrainingQueue";
 import OnboardingProgress from "./pages/OnboardingProgress";
 import Contacts from "./pages/Contacts";
@@ -101,26 +97,26 @@ const App = () => (
                   <Route path="/engagements/performance" element={<EngagementDashboard />} />
                   <Route path="/engagements/:engagementId/report" element={<EngagementReport />} />
 
-                  {/* Calling routes - New 9 pages from requirements */}
+                  {/* Calling routes - Consolidated structure */}
                   <Route path="/calling" element={<CallerDashboard />} />
-                  
-                  <Route path="/calling/deals" element={<TopDeals />} />
                   <Route path="/calling/top-calls" element={<TopCallsWeek />} />
                   <Route path="/calling/insights" element={<DataInsights />} />
                   <Route path="/calling/call-insights" element={<CallInsights />} />
                   <Route path="/calling/library" element={<CallLibrary />} />
                   
-                  
+                  {/* Redirects for removed pages */}
+                  <Route path="/calling/deals" element={<Navigate to="/calling" replace />} />
+                  <Route path="/calling/analytics" element={<Navigate to="/calling/insights" replace />} />
+                  <Route path="/calling/timing" element={<Navigate to="/calling/insights" replace />} />
                   <Route path="/calling/chatbot" element={<Navigate to="/calling" replace />} />
                   <Route path="/calling/engagements" element={<Navigate to="/engagements" replace />} />
+                  
                   {/* Legacy calling routes */}
                   <Route path="/calling/search" element={<CallSearch />} />
                   <Route path="/calling/best-worst" element={<BestWorstCalls />} />
                   <Route path="/calling/sessions" element={<CallSessions />} />
-                  <Route path="/calling/analytics" element={<CallAnalytics />} />
                   <Route path="/calling/reps" element={<RepInsights />} />
                   <Route path="/calling/patterns" element={<PatternAnalysis />} />
-                  <Route path="/calling/timing" element={<TimingInsights />} />
                   <Route path="/calling/training" element={<TrainingQueue />} />
                   <Route path="/calling/onboarding" element={<OnboardingProgress />} />
                   <Route path="/calling/team" element={<Team />} />
