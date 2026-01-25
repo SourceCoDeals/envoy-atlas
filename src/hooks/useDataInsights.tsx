@@ -172,7 +172,14 @@ export function useDataInsights() {
         }
         
         if (call.started_at) {
-          const hour = new Date(call.started_at).getHours();
+          // Convert UTC to Eastern Time (UTC-5 for EST)
+          const dt = new Date(call.started_at);
+          const utcHour = dt.getUTCHours();
+          const easternOffset = -5;
+          let hour = utcHour + easternOffset;
+          if (hour < 0) hour += 24;
+          if (hour >= 24) hour -= 24;
+          
           const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
           hourExisting.calls += 1;
           if ((call.talk_duration || 0) > 60) {
