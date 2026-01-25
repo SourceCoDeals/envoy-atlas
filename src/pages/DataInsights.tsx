@@ -2,20 +2,22 @@ import { useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ActivityMetricsTab } from '@/components/datainsights/ActivityMetricsTab';
-import { EngagementQualityTab } from '@/components/datainsights/EngagementQualityTab';
-import { OutcomeMetricsTab } from '@/components/datainsights/OutcomeMetricsTab';
-import { ProspectStrategyTab } from '@/components/datainsights/ProspectStrategyTab';
-import { GatekeeperTrackingTab } from '@/components/datainsights/GatekeeperTrackingTab';
-import { WrongNumberTrackingTab } from '@/components/datainsights/WrongNumberTrackingTab';
-import { Loader2, Activity, Users, Target, Compass, UserCheck, PhoneOff, Filter, Settings } from 'lucide-react';
+import { Loader2, Activity, Users, Clock, Filter, Settings } from 'lucide-react';
 import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { useColdCallAnalytics, DateRange } from '@/hooks/useColdCallAnalytics';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
-import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
+import { MetricCardWithBenchmark } from '@/components/datainsights/MetricCardWithBenchmark';
+import { CallTimingHeatmap } from '@/components/datainsights/CallTimingHeatmap';
+import { ConversionFunnel } from '@/components/datainsights/ConversionFunnel';
+import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour, formatHourLabel } from '@/lib/timezone';
+import { 
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+  BarChart, Bar, Cell
+} from 'recharts';
+
 interface Benchmark {
   metric_name: string;
   metric_key: string;
@@ -68,16 +70,6 @@ export default function DataInsights() {
       description: 'Target calls per day',
     };
     
-    benchmarkMap['attempts_per_lead'] = {
-      metric_name: 'Attempts Per Lead',
-      metric_key: 'attempts_per_lead',
-      benchmark_value: 6,
-      benchmark_unit: 'attempts',
-      benchmark_range_low: 4,
-      benchmark_range_high: 8,
-      description: 'Target attempts per lead',
-    };
-
     benchmarkMap['connect_rate'] = {
       metric_name: 'Connect Rate',
       metric_key: 'connect_rate',
@@ -113,8 +105,8 @@ export default function DataInsights() {
     return Array.from(uniqueAnalysts).sort();
   }, [data?.calls]);
 
-  // Compute all metrics from cold_calls data
-  const { activityMetrics, engagementMetrics, outcomeMetrics, prospectMetrics, gatekeeperMetrics, wrongNumberMetrics } = useMemo(() => {
+  // Compute all metrics from cold_calls data - filtered by analyst
+  const metrics = useMemo(() => {
     const allCalls = data?.calls || [];
     
     // Filter by selected analyst if needed
@@ -122,40 +114,48 @@ export default function DataInsights() {
       ? allCalls
       : allCalls.filter(c => c.analyst === selectedAnalyst);
     
-    // Activity Metrics
+    // === ACTIVITY METRICS ===
     const totalDials = filtered.length;
-    const dateMap = new Map<string, { calls: number; connects: number; voicemails: number }>();
+    const dateMap = new Map<string, { calls: number; connects: number; voicemails: number; meetings: number }>();
     const hourlyMap = new Map<number, { calls: number; connects: number }>();
+    
+    // Initialize business hours
+    BUSINESS_HOURS_ARRAY.forEach(h => hourlyMap.set(h, { calls: 0, connects: 0 }));
     
     filtered.forEach(call => {
       const date = call.called_date;
       
       if (date) {
-        const existing = dateMap.get(date) || { calls: 0, connects: 0, voicemails: 0 };
+        const existing = dateMap.get(date) || { calls: 0, connects: 0, voicemails: 0, meetings: 0 };
         existing.calls += 1;
         if (call.is_connection) existing.connects += 1;
         if (call.is_voicemail) existing.voicemails += 1;
+        if (call.is_meeting) existing.meetings += 1;
         dateMap.set(date, existing);
       }
       
+      // Parse time from called_date_time for hourly distribution
       if (call.called_date_time) {
-        const hour = toEasternHour(new Date(call.called_date_time));
-        // Only track business hours (8 AM - 7 PM ET)
-        if (isBusinessHour(hour)) {
-          const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
-          hourExisting.calls += 1;
-          if (call.is_connection) hourExisting.connects += 1;
-          hourlyMap.set(hour, hourExisting);
+        try {
+          const dt = new Date(call.called_date_time);
+          const hour = toEasternHour(dt);
+          if (isBusinessHour(hour)) {
+            const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
+            hourExisting.calls += 1;
+            if (call.is_connection) hourExisting.connects += 1;
+            hourlyMap.set(hour, hourExisting);
+          }
+        } catch {
+          // Skip invalid dates
         }
       }
     });
 
     const dailyTrend = Array.from(dateMap.entries())
-      .map(([date, d]) => ({ date, calls: d.calls, voicemails: d.voicemails, connects: d.connects }))
+      .map(([date, d]) => ({ date, calls: d.calls, voicemails: d.voicemails, connects: d.connects, meetings: d.meetings }))
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-30);
 
-    // Ensure all business hours are represented, even if zero
     const hourlyDistribution = BUSINESS_HOURS_ARRAY.map(hour => {
       const d = hourlyMap.get(hour) || { calls: 0, connects: 0 };
       return { hour, calls: d.calls, connects: d.connects };
@@ -164,19 +164,9 @@ export default function DataInsights() {
     const uniqueDays = dateMap.size || 1;
     const totalConnects = filtered.filter(c => c.is_connection).length;
     const voicemailCount = filtered.filter(c => c.is_voicemail).length;
-    const uniqueCompanies = new Set(filtered.map(c => c.to_company).filter(Boolean)).size || 1;
+    const meetingsCount = filtered.filter(c => c.is_meeting).length;
 
-    const activityMetrics = {
-      totalDials,
-      callsPerHour: Math.round((totalDials / uniqueDays / 8) * 10) / 10,
-      callsPerDay: Math.round(totalDials / uniqueDays),
-      voicemailsLeft: voicemailCount,
-      attemptsPerLead: Math.round((totalDials / uniqueCompanies) * 10) / 10,
-      dailyTrend,
-      hourlyDistribution,
-    };
-
-    // Engagement Metrics
+    // === ENGAGEMENT METRICS ===
     const connectRate = totalDials > 0 ? (totalConnects / totalDials) * 100 : 0;
     const callsWithDuration = filtered.filter(c => (c.call_duration_sec || 0) > 0);
     const avgDuration = callsWithDuration.length
@@ -187,13 +177,14 @@ export default function DataInsights() {
     const durationBuckets = [
       { range: `0-${Math.round(config.callDurationTooShort / 60)}m`, min: 0, max: config.callDurationTooShort },
       { range: `${Math.round(config.callDurationTooShort / 60)}-${Math.round(config.callDurationMinOptimal / 60)}m`, min: config.callDurationTooShort, max: config.callDurationMinOptimal },
-      { range: `${Math.round(config.callDurationMinOptimal / 60)}-${Math.round(config.callDurationMaxOptimal / 60)}m (Optimal)`, min: config.callDurationMinOptimal, max: config.callDurationMaxOptimal },
+      { range: `${Math.round(config.callDurationMinOptimal / 60)}-${Math.round(config.callDurationMaxOptimal / 60)}m`, min: config.callDurationMinOptimal, max: config.callDurationMaxOptimal },
       { range: `${Math.round(config.callDurationMaxOptimal / 60)}-${Math.round(config.callDurationTooLong / 60)}m`, min: config.callDurationMaxOptimal, max: config.callDurationTooLong },
       { range: `${Math.round(config.callDurationTooLong / 60)}m+`, min: config.callDurationTooLong, max: Infinity },
     ];
     const durationDistribution = durationBuckets.map(bucket => ({
       range: bucket.range,
-      count: callsWithDuration.filter(c => (c.call_duration_sec || 0) >= bucket.min && (c.call_duration_sec || 0) < bucket.max).length
+      count: callsWithDuration.filter(c => (c.call_duration_sec || 0) >= bucket.min && (c.call_duration_sec || 0) < bucket.max).length,
+      isOptimal: bucket.min === config.callDurationMinOptimal,
     }));
 
     const connectTrend = Array.from(dateMap.entries())
@@ -208,29 +199,8 @@ export default function DataInsights() {
     const meaningfulConversations = filtered.filter(c => (c.call_duration_sec || 0) >= config.callDurationMinOptimal).length;
     const meaningfulRate = totalConnects > 0 ? (meaningfulConversations / totalConnects) * 100 : 0;
 
-    const engagementMetrics = {
-      connectRate: Math.round(connectRate * 10) / 10,
-      decisionMakerConnectRate: 0,
-      meaningfulConversationRate: Math.round(meaningfulRate * 10) / 10,
-      avgCallDuration: Math.round(avgDuration),
-      objectionHandlingRate: 0,
-      connectTrend,
-      durationDistribution,
-      dayHourHeatmap: [],
-    };
-
-    // Outcome Metrics - use pre-computed flags
+    // === OUTCOME METRICS ===
     const willingToSellCount = filtered.filter(c => c.interest_in_selling === 'yes').length;
-    const meetingsByDate = new Map<string, number>();
-    filtered.filter(c => c.is_meeting && c.called_date).forEach(call => {
-      const date = call.called_date!;
-      meetingsByDate.set(date, (meetingsByDate.get(date) || 0) + 1);
-    });
-    const meetingTrend = Array.from(meetingsByDate.entries())
-      .map(([date, meetings]) => ({ date, meetings }))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-14);
-
     const funnel = [
       { stage: 'Total Dials', count: totalDials },
       { stage: 'Connections', count: totalConnects },
@@ -238,103 +208,74 @@ export default function DataInsights() {
       { stage: 'Owners Willing to Sell', count: willingToSellCount },
     ];
 
-    const outcomeMetrics = {
-      meetingsBooked: willingToSellCount,
-      conversationToMeetingRate: totalConnects > 0 ? Math.round((willingToSellCount / totalConnects) * 100) : 0,
-      leadQualityConversionRate: meaningfulConversations > 0 ? Math.round((willingToSellCount / meaningfulConversations) * 100) : 0,
-      conversionToSale: 0,
-      followUpSuccessRate: 0,
+    // Day of week performance
+    const dayOfWeekMap = new Map<number, { calls: number; connects: number }>();
+    filtered.forEach(call => {
+      if (call.called_date) {
+        try {
+          const dt = new Date(call.called_date);
+          const dow = dt.getDay(); // 0-6
+          const existing = dayOfWeekMap.get(dow) || { calls: 0, connects: 0 };
+          existing.calls += 1;
+          if (call.is_connection) existing.connects += 1;
+          dayOfWeekMap.set(dow, existing);
+        } catch {
+          // Skip
+        }
+      }
+    });
+
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dayOfWeekData = dayLabels.map((label, i) => {
+      const d = dayOfWeekMap.get(i) || { calls: 0, connects: 0 };
+      return {
+        day: label,
+        calls: d.calls,
+        connects: d.connects,
+        connectRate: d.calls > 0 ? Math.round((d.connects / d.calls) * 100) : 0,
+      };
+    });
+
+    return {
+      // Activity
+      totalDials,
+      callsPerHour: Math.round((totalDials / uniqueDays / 8) * 10) / 10,
+      callsPerDay: Math.round(totalDials / uniqueDays),
+      voicemailsLeft: voicemailCount,
+      dailyTrend,
+      hourlyDistribution,
+      // Engagement
+      connectRate: Math.round(connectRate * 10) / 10,
+      meaningfulConversationRate: Math.round(meaningfulRate * 10) / 10,
+      avgCallDuration: Math.round(avgDuration),
+      durationDistribution,
+      connectTrend,
+      // Outcomes
+      meetings: meetingsCount,
+      willingToSell: willingToSellCount,
       funnel,
-      meetingTrend
+      // Timing
+      dayOfWeekData,
     };
-
-    // Prospect/Rep Metrics
-    const repMap = new Map<string, { calls: number; connects: number; meetings: number }>();
-    filtered.forEach(call => {
-      const rep = call.analyst || 'Unknown';
-      if (rep === 'Unknown') return;
-
-      const existing = repMap.get(rep) || { calls: 0, connects: 0, meetings: 0 };
-      existing.calls += 1;
-      if (call.is_connection) existing.connects += 1;
-      if (call.interest_in_selling === 'yes') existing.meetings += 1;
-      repMap.set(rep, existing);
-    });
-
-    const industryBreakdown = Array.from(repMap.entries())
-      .map(([industry, d]) => ({ industry, ...d }))
-      .sort((a, b) => b.calls - a.calls)
-      .slice(0, 10);
-
-    const prospectMetrics = {
-      industryBreakdown,
-      openingTypeEffectiveness: [
-        { type: 'Standard', successRate: willingToSellCount > 0 ? Math.round((willingToSellCount / totalDials) * 100) : 0, count: totalDials }
-      ],
-      topPainPoints: [],
-      pendingFollowUps: 0
-    };
-
-    // Gatekeeper Metrics
-    const gatekeeperCalls = filtered.filter(c => {
-      const disposition = (c.normalized_category || '').toLowerCase();
-      return disposition.includes('gatekeeper') || disposition === 'receptionist';
-    });
-    const transferred = gatekeeperCalls.filter(c => c.is_connection).length;
-    const blocked = gatekeeperCalls.filter(c => !c.is_connection).length;
-    const info = gatekeeperCalls.length - transferred - blocked;
-
-    const gatekeeperOutcomes = [
-      { outcome: 'Transferred', count: transferred, percentage: gatekeeperCalls.length > 0 ? Math.round((transferred / gatekeeperCalls.length) * 100) : 0 },
-      { outcome: 'Got Info', count: Math.max(0, info), percentage: gatekeeperCalls.length > 0 ? Math.round((Math.max(0, info) / gatekeeperCalls.length) * 100) : 0 },
-      { outcome: 'Blocked', count: blocked, percentage: gatekeeperCalls.length > 0 ? Math.round((blocked / gatekeeperCalls.length) * 100) : 0 },
-    ].filter(o => o.count > 0);
-
-    const gatekeeperMetrics = {
-      totalGatekeeperCalls: gatekeeperCalls.length,
-      outcomes: gatekeeperOutcomes,
-      techniques: [],
-      avgHandlingScore: 6.5,
-      transferRate: gatekeeperCalls.length > 0 ? Math.round((transferred / gatekeeperCalls.length) * 100) : 0,
-      blockedRate: gatekeeperCalls.length > 0 ? Math.round((blocked / gatekeeperCalls.length) * 100) : 0,
-    };
-
-    // Wrong Number Metrics - use is_bad_data flag
-    const wrongNumbers = filtered.filter(c => c.is_bad_data);
-
-    const sourceMap = new Map<string, { wrong: number; total: number }>();
-    filtered.forEach(call => {
-      const source = call.analyst || 'Unknown';
-      const existing = sourceMap.get(source) || { wrong: 0, total: 0 };
-      existing.total += 1;
-      if (call.is_bad_data) existing.wrong += 1;
-      sourceMap.set(source, existing);
-    });
-    const sourceQuality = Array.from(sourceMap.entries())
-      .map(([source, d]) => ({
-        source,
-        wrongCount: d.wrong,
-        totalCount: d.total,
-        rate: d.total > 0 ? Math.round((d.wrong / d.total) * 100) : 0
-      }))
-      .sort((a, b) => b.rate - a.rate)
-      .slice(0, 10);
-
-    const wrongNumberMetrics = {
-      totalWrongNumbers: wrongNumbers.length,
-      wrongNumberRate: totalDials > 0 ? Math.round((wrongNumbers.length / totalDials) * 100) : 0,
-      typeBreakdown: [],
-      sourceQuality,
-      correctedCount: 0,
-      timeWasted: wrongNumbers.length * 30,
-    };
-
-    return { activityMetrics, engagementMetrics, outcomeMetrics, prospectMetrics, gatekeeperMetrics, wrongNumberMetrics };
   }, [data?.calls, selectedAnalyst, config]);
 
   const loading = authLoading || callsLoading || configLoading;
   const dateRangeLabel = DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label || 'Selected Period';
   const totalCount = data?.totalCalls || 0;
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Duration distribution colors
+  const durationColors = [
+    'hsl(var(--muted-foreground))',
+    'hsl(45 93% 47%)',
+    'hsl(142 76% 36%)',
+    'hsl(45 93% 47%)',
+    'hsl(var(--muted-foreground))',
+  ];
 
   if (loading) {
     return (
@@ -402,56 +343,329 @@ export default function DataInsights() {
               </Select>
 
               <div className="ml-auto text-sm text-muted-foreground">
-                Showing {activityMetrics.totalDials.toLocaleString()} calls
+                Showing {metrics.totalDials.toLocaleString()} calls
               </div>
             </div>
           </CardContent>
         </Card>
 
+        {/* Consolidated 3-Tab Layout */}
         <Tabs defaultValue="activity" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid">
             <TabsTrigger value="activity" className="gap-2">
               <Activity className="h-4 w-4 hidden sm:block" />Activity
             </TabsTrigger>
             <TabsTrigger value="engagement" className="gap-2">
               <Users className="h-4 w-4 hidden sm:block" />Engagement
             </TabsTrigger>
-            <TabsTrigger value="outcomes" className="gap-2">
-              <Target className="h-4 w-4 hidden sm:block" />Outcomes
-            </TabsTrigger>
-            <TabsTrigger value="strategy" className="gap-2">
-              <Compass className="h-4 w-4 hidden sm:block" />Strategy
-            </TabsTrigger>
-            <TabsTrigger value="gatekeeper" className="gap-2">
-              <UserCheck className="h-4 w-4 hidden sm:block" />Gatekeeper
-            </TabsTrigger>
-            <TabsTrigger value="wrongnumber" className="gap-2">
-              <PhoneOff className="h-4 w-4 hidden sm:block" />Wrong #
+            <TabsTrigger value="timing" className="gap-2">
+              <Clock className="h-4 w-4 hidden sm:block" />Timing
             </TabsTrigger>
           </TabsList>
 
+          {/* ACTIVITY TAB */}
           <TabsContent value="activity">
-            <ActivityMetricsTab metrics={activityMetrics} benchmarks={benchmarks} />
+            <div className="space-y-6">
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <MetricCardWithBenchmark
+                  label="Total Dials"
+                  value={metrics.totalDials}
+                  unit="calls"
+                />
+                <MetricCardWithBenchmark
+                  label="Calls Per Day"
+                  value={metrics.callsPerDay}
+                  unit="calls"
+                  benchmark={benchmarks.calls_per_day?.benchmark_value}
+                  benchmarkRangeLow={benchmarks.calls_per_day?.benchmark_range_low}
+                  benchmarkRangeHigh={benchmarks.calls_per_day?.benchmark_range_high}
+                />
+                <MetricCardWithBenchmark
+                  label="Voicemails Left"
+                  value={metrics.voicemailsLeft}
+                  unit="calls"
+                />
+                <MetricCardWithBenchmark
+                  label="Meetings Booked"
+                  value={metrics.meetings}
+                  unit="meetings"
+                />
+              </div>
+
+              {/* Charts Row */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Call Volume Trend */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Call Volume Trend</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[280px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={metrics.dailyTrend}>
+                          <XAxis 
+                            dataKey="date" 
+                            tickFormatter={formatDate}
+                            tick={{ fontSize: 12 }}
+                            stroke="hsl(var(--muted-foreground))"
+                          />
+                          <YAxis 
+                            tick={{ fontSize: 12 }}
+                            stroke="hsl(var(--muted-foreground))"
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--background))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '6px',
+                            }}
+                            labelFormatter={formatDate}
+                          />
+                          <Legend />
+                          <Line 
+                            type="monotone" 
+                            dataKey="calls" 
+                            stroke="hsl(var(--primary))" 
+                            strokeWidth={2}
+                            dot={false}
+                            name="Calls"
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="connects" 
+                            stroke="hsl(142 76% 36%)" 
+                            strokeWidth={2}
+                            dot={false}
+                            name="Connects"
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="meetings" 
+                            stroke="hsl(var(--chart-4))" 
+                            strokeWidth={2}
+                            dot={false}
+                            name="Meetings"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Conversion Funnel */}
+                <ConversionFunnel data={metrics.funnel} />
+              </div>
+            </div>
           </TabsContent>
 
+          {/* ENGAGEMENT TAB */}
           <TabsContent value="engagement">
-            <EngagementQualityTab metrics={engagementMetrics} benchmarks={benchmarks} />
+            <div className="space-y-6">
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <MetricCardWithBenchmark
+                  label="Connect Rate"
+                  value={metrics.connectRate}
+                  unit="percent"
+                  benchmark={benchmarks.connect_rate?.benchmark_value}
+                  benchmarkRangeLow={benchmarks.connect_rate?.benchmark_range_low}
+                  benchmarkRangeHigh={benchmarks.connect_rate?.benchmark_range_high}
+                />
+                <MetricCardWithBenchmark
+                  label="Meaningful Conv Rate"
+                  value={metrics.meaningfulConversationRate}
+                  unit="percent"
+                  benchmark={50}
+                  benchmarkRangeLow={40}
+                  benchmarkRangeHigh={60}
+                />
+                <MetricCardWithBenchmark
+                  label="Avg Call Duration"
+                  value={Math.round(metrics.avgCallDuration / 60)}
+                  unit="min"
+                  benchmark={Math.round(config.callDurationMinOptimal / 60)}
+                  benchmarkRangeLow={Math.round(config.callDurationMinOptimal / 60)}
+                  benchmarkRangeHigh={Math.round(config.callDurationMaxOptimal / 60)}
+                />
+                <MetricCardWithBenchmark
+                  label="Owners Willing to Sell"
+                  value={metrics.willingToSell}
+                  unit="leads"
+                />
+              </div>
+
+              {/* Charts Row */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Connect Rate Trend */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Connect Rate Trend</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[280px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={metrics.connectTrend}>
+                          <XAxis 
+                            dataKey="date" 
+                            tickFormatter={formatDate}
+                            tick={{ fontSize: 12 }}
+                            stroke="hsl(var(--muted-foreground))"
+                          />
+                          <YAxis 
+                            tick={{ fontSize: 12 }}
+                            stroke="hsl(var(--muted-foreground))"
+                            domain={[0, 'auto']}
+                            tickFormatter={(v) => `${v}%`}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--background))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '6px',
+                            }}
+                            labelFormatter={formatDate}
+                            formatter={(value: number) => [`${value.toFixed(1)}%`, 'Connect Rate']}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="rate" 
+                            stroke="hsl(var(--primary))" 
+                            strokeWidth={2}
+                            dot={{ r: 3, fill: 'hsl(var(--primary))' }}
+                            name="Connect Rate"
+                          />
+                          {/* Benchmark line */}
+                          <Line 
+                            type="monotone" 
+                            dataKey={() => benchmarks.connect_rate?.benchmark_value || 15}
+                            stroke="hsl(142 76% 36%)"
+                            strokeWidth={1}
+                            strokeDasharray="5 5"
+                            dot={false}
+                            name="Target"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Call Duration Distribution */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Call Duration Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[280px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={metrics.durationDistribution}>
+                          <XAxis 
+                            dataKey="range"
+                            tick={{ fontSize: 11 }}
+                            stroke="hsl(var(--muted-foreground))"
+                          />
+                          <YAxis 
+                            tick={{ fontSize: 12 }}
+                            stroke="hsl(var(--muted-foreground))"
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--background))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '6px',
+                            }}
+                            formatter={(value: number) => [value, 'Calls']}
+                          />
+                          <Bar 
+                            dataKey="count" 
+                            radius={[4, 4, 0, 0]}
+                          >
+                            {metrics.durationDistribution.map((entry, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={entry.isOptimal ? 'hsl(142 76% 36%)' : durationColors[index]} 
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground text-center">
+                      Optimal duration: {Math.round(config.callDurationMinOptimal / 60)}-{Math.round(config.callDurationMaxOptimal / 60)} minutes
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </TabsContent>
 
-          <TabsContent value="outcomes">
-            <OutcomeMetricsTab metrics={outcomeMetrics} benchmarks={benchmarks} />
-          </TabsContent>
+          {/* TIMING TAB */}
+          <TabsContent value="timing">
+            <div className="space-y-6">
+              {/* Best Time to Call Heatmap */}
+              <CallTimingHeatmap data={metrics.hourlyDistribution} />
 
-          <TabsContent value="strategy">
-            <ProspectStrategyTab metrics={prospectMetrics} />
-          </TabsContent>
-
-          <TabsContent value="gatekeeper">
-            <GatekeeperTrackingTab metrics={gatekeeperMetrics} />
-          </TabsContent>
-
-          <TabsContent value="wrongnumber">
-            <WrongNumberTrackingTab metrics={wrongNumberMetrics} />
+              {/* Day of Week Performance */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Performance by Day of Week</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[280px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={metrics.dayOfWeekData}>
+                        <XAxis 
+                          dataKey="day"
+                          tick={{ fontSize: 12 }}
+                          stroke="hsl(var(--muted-foreground))"
+                        />
+                        <YAxis 
+                          yAxisId="left"
+                          tick={{ fontSize: 12 }}
+                          stroke="hsl(var(--muted-foreground))"
+                        />
+                        <YAxis 
+                          yAxisId="right"
+                          orientation="right"
+                          tick={{ fontSize: 12 }}
+                          stroke="hsl(var(--muted-foreground))"
+                          tickFormatter={(v) => `${v}%`}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(var(--background))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '6px',
+                          }}
+                          formatter={(value: number, name: string) => {
+                            if (name === 'Connect Rate') return [`${value}%`, name];
+                            return [value, name];
+                          }}
+                        />
+                        <Legend />
+                        <Bar 
+                          yAxisId="left"
+                          dataKey="calls" 
+                          fill="hsl(var(--primary))" 
+                          radius={[4, 4, 0, 0]}
+                          name="Calls"
+                        />
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey="connectRate" 
+                          stroke="hsl(142 76% 36%)" 
+                          strokeWidth={2}
+                          dot={{ r: 4, fill: 'hsl(142 76% 36%)' }}
+                          name="Connect Rate"
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>

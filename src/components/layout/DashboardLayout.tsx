@@ -83,13 +83,11 @@ const emailExperimentNavItems: NavItem[] = [
   { title: 'Playbook', href: '/playbook', icon: BookOpen },
 ];
 
-// Calling channel navigation - 9 pages from requirements
+// Calling channel navigation - Consolidated structure
 const callingMainNavItems: NavItem[] = [
-  { title: 'Caller Dashboard', href: '/calling', icon: LayoutDashboard },
+  { title: 'Dashboard', href: '/calling', icon: LayoutDashboard },
   { title: 'Team', href: '/calling/team', icon: Users },
-  { title: 'Top Deals', href: '/calling/deals', icon: BarChart3 },
   { title: 'Top Calls', href: '/calling/top-calls', icon: PhoneCall },
-  { title: 'Data Insights', href: '/calling/insights', icon: PieChart },
   { title: 'Call Insights', href: '/calling/call-insights', icon: Brain },
   { title: 'Call Library', href: '/calling/library', icon: Library },
 ];
@@ -111,11 +109,10 @@ const engagementsReportsNavItems: NavItem[] = [
 
 const callingCoachingNavItems: NavItem[] = [
   { title: 'Training Queue', href: '/calling/training', icon: BookOpen },
-  { title: 'Onboarding', href: '/calling/onboarding', icon: Sparkles },
 ];
 
 const callingReportsNavItems: NavItem[] = [
-  { title: 'Call Analytics', href: '/calling/analytics', icon: BarChart3 },
+  { title: 'Analytics', href: '/calling/insights', icon: PieChart },
 ];
 
 // Shared navigation - only Alerts now, Settings is in Channel Rail
