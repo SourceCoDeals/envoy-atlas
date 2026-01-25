@@ -910,6 +910,10 @@ export default function EngagementDashboard() {
                       <TableHead>Client</TableHead>
                       <TableHead>Start</TableHead>
                       <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Emails</TableHead>
+                      <TableHead className="text-right">+Replies</TableHead>
+                      <TableHead className="text-right">Calls</TableHead>
+                      <TableHead className="text-right">Meetings</TableHead>
                       <TableHead>Deal Lead</TableHead>
                       <TableHead>Associate</TableHead>
                       <TableHead>Analyst</TableHead>
@@ -959,6 +963,18 @@ export default function EngagementDashboard() {
                             <Badge variant={engagement.is_platform ? 'default' : 'secondary'}>
                               {engagement.is_platform ? 'Platform' : 'Add-on'}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {(engagementMetrics[engagement.id]?.emailsSent || 0).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {engagementMetrics[engagement.id]?.positiveReplies || 0}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {engagementMetrics[engagement.id]?.totalCalls || 0}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {engagementMetrics[engagement.id]?.meetingsSet || 0}
                           </TableCell>
                           <TableCell>
                             {dealLead ? (
