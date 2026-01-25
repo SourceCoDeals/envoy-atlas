@@ -29,7 +29,7 @@ import { toast } from 'sonner';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2,
   Phone, Target, Archive, DollarSign, Search, Filter, X,
-  Mail, ThumbsUp, Calendar
+  ThumbsUp, Calendar, Layers, LayoutGrid
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
@@ -478,15 +478,22 @@ export default function EngagementDashboard() {
   const totals = useMemo(() => {
     return Object.values(engagementMetrics).reduce(
       (acc, m) => ({
-        calls: acc.calls + m.totalCalls,
-        interested: acc.interested + m.interestedLeads,
         meetings: acc.meetings + m.meetingsSet,
-        emailsSent: acc.emailsSent + m.emailsSent,
         positiveReplies: acc.positiveReplies + m.positiveReplies,
       }),
-      { calls: 0, interested: 0, meetings: 0, emailsSent: 0, positiveReplies: 0 }
+      { meetings: 0, positiveReplies: 0 }
     );
   }, [engagementMetrics]);
+
+  // Count platforms vs add-ons (active only)
+  const typeCounts = useMemo(() => {
+    const activeEngagements = engagements.filter(e => 
+      ['active', 'contracted', 'paused'].includes(e.status || 'active')
+    );
+    const platforms = activeEngagements.filter(e => e.is_platform === true).length;
+    const addons = activeEngagements.filter(e => e.is_platform === false).length;
+    return { platforms, addons };
+  }, [engagements]);
 
   const totalRetainer = useMemo(() => {
     return engagements
@@ -542,11 +549,33 @@ export default function EngagementDashboard() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Emails Sent</CardTitle>
-              <Mail className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Monthly Retainer</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{totals.emailsSent.toLocaleString()}</div>
+              <div className="text-2xl font-bold">
+                ${totalRetainer.toLocaleString()}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium"># of Platforms</CardTitle>
+              <LayoutGrid className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{typeCounts.platforms}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium"># of Add-ons</CardTitle>
+              <Layers className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{typeCounts.addons}</div>
             </CardContent>
           </Card>
 
@@ -562,33 +591,11 @@ export default function EngagementDashboard() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Calls</CardTitle>
-              <Phone className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totals.calls.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Meetings Booked</CardTitle>
               <Calendar className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{totals.meetings.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Monthly Retainer</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                ${totalRetainer.toLocaleString()}
-              </div>
             </CardContent>
           </Card>
         </div>
