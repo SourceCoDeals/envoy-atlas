@@ -1163,6 +1163,7 @@ export type Database = {
           call_transcript: string | null
           called_date: string | null
           called_date_time: string | null
+          campaign_id: string | null
           category: string | null
           client_id: string
           composite_score: number | null
@@ -1171,7 +1172,12 @@ export type Database = {
           decision_maker_identified_score: number | null
           decision_maker_reasoning: string | null
           direction: string | null
+          engagement_id: string | null
           engagement_score: number | null
+          enhanced_score: number | null
+          flag_reason: string | null
+          flagged_for_review: boolean | null
+          follow_up_date: string | null
           from_name: string | null
           from_number: string | null
           gatekeeper_handling_score: number | null
@@ -1179,6 +1185,7 @@ export type Database = {
           interest_rating_reasoning: string | null
           is_bad_data: boolean | null
           is_connection: boolean | null
+          is_first_attempt_dm: boolean | null
           is_meeting: boolean | null
           is_voicemail: boolean | null
           key_concerns: string[] | null
@@ -1197,9 +1204,11 @@ export type Database = {
           rapport_building_score: number | null
           referral_rate_reasoning: string | null
           referral_rate_score: number | null
+          rep_notes: string | null
           resolution_rate: number | null
           resolution_rate_reasoning: string | null
           salesforce_url: string | null
+          score_breakdown: Json | null
           script_adherence_reasoning: string | null
           script_adherence_score: number | null
           seller_interest_score: number | null
@@ -1220,6 +1229,7 @@ export type Database = {
           call_transcript?: string | null
           called_date?: string | null
           called_date_time?: string | null
+          campaign_id?: string | null
           category?: string | null
           client_id: string
           composite_score?: number | null
@@ -1228,7 +1238,12 @@ export type Database = {
           decision_maker_identified_score?: number | null
           decision_maker_reasoning?: string | null
           direction?: string | null
+          engagement_id?: string | null
           engagement_score?: number | null
+          enhanced_score?: number | null
+          flag_reason?: string | null
+          flagged_for_review?: boolean | null
+          follow_up_date?: string | null
           from_name?: string | null
           from_number?: string | null
           gatekeeper_handling_score?: number | null
@@ -1236,6 +1251,7 @@ export type Database = {
           interest_rating_reasoning?: string | null
           is_bad_data?: boolean | null
           is_connection?: boolean | null
+          is_first_attempt_dm?: boolean | null
           is_meeting?: boolean | null
           is_voicemail?: boolean | null
           key_concerns?: string[] | null
@@ -1254,9 +1270,11 @@ export type Database = {
           rapport_building_score?: number | null
           referral_rate_reasoning?: string | null
           referral_rate_score?: number | null
+          rep_notes?: string | null
           resolution_rate?: number | null
           resolution_rate_reasoning?: string | null
           salesforce_url?: string | null
+          score_breakdown?: Json | null
           script_adherence_reasoning?: string | null
           script_adherence_score?: number | null
           seller_interest_score?: number | null
@@ -1277,6 +1295,7 @@ export type Database = {
           call_transcript?: string | null
           called_date?: string | null
           called_date_time?: string | null
+          campaign_id?: string | null
           category?: string | null
           client_id?: string
           composite_score?: number | null
@@ -1285,7 +1304,12 @@ export type Database = {
           decision_maker_identified_score?: number | null
           decision_maker_reasoning?: string | null
           direction?: string | null
+          engagement_id?: string | null
           engagement_score?: number | null
+          enhanced_score?: number | null
+          flag_reason?: string | null
+          flagged_for_review?: boolean | null
+          follow_up_date?: string | null
           from_name?: string | null
           from_number?: string | null
           gatekeeper_handling_score?: number | null
@@ -1293,6 +1317,7 @@ export type Database = {
           interest_rating_reasoning?: string | null
           is_bad_data?: boolean | null
           is_connection?: boolean | null
+          is_first_attempt_dm?: boolean | null
           is_meeting?: boolean | null
           is_voicemail?: boolean | null
           key_concerns?: string[] | null
@@ -1311,9 +1336,11 @@ export type Database = {
           rapport_building_score?: number | null
           referral_rate_reasoning?: string | null
           referral_rate_score?: number | null
+          rep_notes?: string | null
           resolution_rate?: number | null
           resolution_rate_reasoning?: string | null
           salesforce_url?: string | null
+          score_breakdown?: Json | null
           script_adherence_reasoning?: string | null
           script_adherence_score?: number | null
           seller_interest_score?: number | null
@@ -1328,10 +1355,24 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "cold_calls_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "cold_calls_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cold_calls_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
             referencedColumns: ["id"]
           },
         ]
