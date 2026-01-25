@@ -55,6 +55,8 @@ export interface DataCompleteness {
   campaignTotal: number;
 }
 
+export type DataSourceType = 'nocodb_aggregate' | 'activity_level' | 'mixed';
+
 export interface OverviewDashboardData {
   loading: boolean;
   hasData: boolean;
@@ -64,6 +66,7 @@ export interface OverviewDashboardData {
   alertCampaigns: AlertCampaign[];
   topCampaigns: TopCampaign[];
   dataCompleteness: DataCompleteness;
+  dataSource: DataSourceType;
   refetch: () => void;
 }
 
@@ -116,6 +119,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
     campaigns: [],
   });
 
+  const [dataSource, setDataSource] = useState<DataSourceType>('nocodb_aggregate');
+
   const fetchData = useCallback(async () => {
     if (!currentWorkspace?.id) return;
     setLoading(true);
@@ -142,7 +147,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       }
 
       // Fetch all data in parallel
-      const [dailyMetricsRes, campaignsRes, todayMetricsRes] = await Promise.all([
+      const [dailyMetricsRes, campaignsRes, todayMetricsRes, activityCountRes] = await Promise.all([
         // Last 12 weeks of daily metrics for trend chart
         supabase
           .from('daily_metrics')
@@ -166,11 +171,26 @@ export function useOverviewDashboard(): OverviewDashboardData {
           .select('emails_sent, emails_replied, positive_replies, meetings_booked')
           .in('engagement_id', engagementIds)
           .eq('date', todayStr),
+        
+        // Check if we have any email_activities (determines data source type)
+        supabase
+          .from('email_activities')
+          .select('id', { count: 'exact', head: true })
+          .in('engagement_id', engagementIds)
+          .limit(1),
       ]);
 
       const dailyMetrics = dailyMetricsRes.data || [];
       const campaigns = campaignsRes.data || [];
       const todayMetrics = todayMetricsRes.data || [];
+      const activityCount = activityCountRes.count || 0;
+      
+      // Determine data source type
+      if (activityCount > 0) {
+        setDataSource(activityCount > 1000 ? 'activity_level' : 'mixed');
+      } else {
+        setDataSource('nocodb_aggregate');
+      }
 
       // Use campaigns table as the source of truth for data availability
       if (campaigns.length === 0) {
@@ -476,6 +496,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
     alertCampaigns,
     topCampaigns,
     dataCompleteness: rawMetrics.dataCompleteness,
+    dataSource,
     refetch: fetchData,
   };
 }
