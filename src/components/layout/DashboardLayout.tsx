@@ -83,13 +83,19 @@ const emailExperimentNavItems: NavItem[] = [
   { title: 'Playbook', href: '/playbook', icon: BookOpen },
 ];
 
-// Calling channel navigation - Consolidated structure
+// Calling channel navigation - Full 8-item structure
 const callingMainNavItems: NavItem[] = [
-  { title: 'Dashboard', href: '/calling', icon: LayoutDashboard },
+  { title: 'Caller Dashboard', href: '/calling', icon: LayoutDashboard },
   { title: 'Team', href: '/calling/team', icon: Users },
+  { title: 'Top Deals', href: '/calling/top-calls', icon: Briefcase },
   { title: 'Top Calls', href: '/calling/top-calls', icon: PhoneCall },
+  { title: 'Data Insights', href: '/calling/insights', icon: BarChart3 },
   { title: 'Call Insights', href: '/calling/call-insights', icon: Brain },
   { title: 'Call Library', href: '/calling/library', icon: Library },
+];
+
+const callingAnalyticsNavItems: NavItem[] = [
+  { title: 'Call Analytics', href: '/calling/analytics', icon: PieChart },
 ];
 
 // Contacts channel navigation
@@ -109,10 +115,6 @@ const engagementsReportsNavItems: NavItem[] = [
 
 const callingCoachingNavItems: NavItem[] = [
   { title: 'Training Queue', href: '/calling/training', icon: BookOpen },
-];
-
-const callingReportsNavItems: NavItem[] = [
-  { title: 'Analytics', href: '/calling/insights', icon: PieChart },
 ];
 
 // Shared navigation - only Alerts now, Settings is in Channel Rail
@@ -156,7 +158,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const getNavItems = () => {
     switch (channel) {
       case 'calling':
-        return { main: callingMainNavItems, reports: callingReportsNavItems, experiments: callingCoachingNavItems };
+        return { main: callingMainNavItems, reports: callingAnalyticsNavItems, experiments: callingCoachingNavItems };
       case 'contacts':
         return { main: contactsMainNavItems, reports: [], experiments: [] };
       case 'engagements':
