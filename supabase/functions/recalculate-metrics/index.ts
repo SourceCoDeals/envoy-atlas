@@ -31,6 +31,36 @@ Deno.serve(async (req) => {
 
     console.log("Starting metrics recalculation...");
 
+    // Step 0: Sync leads_interested from nocodb_smartlead_campaigns to campaigns.positive_replies
+    console.log("Step 0: Syncing positive_replies from NocoDB SmartLead campaigns...");
+    
+    const { data: nocodbCampaigns, error: nocoErr } = await supabase
+      .from("nocodb_smartlead_campaigns")
+      .select("campaign_id, leads_interested")
+      .gt("leads_interested", 0);
+    
+    if (nocoErr) {
+      console.log(`Could not fetch nocodb_smartlead_campaigns: ${nocoErr.message}`);
+    } else if (nocodbCampaigns && nocodbCampaigns.length > 0) {
+      console.log(`Found ${nocodbCampaigns.length} NocoDB campaigns with leads_interested`);
+      
+      for (const noco of nocodbCampaigns) {
+        // Update campaigns table where external_id matches
+        const { error: updateErr } = await supabase
+          .from("campaigns")
+          .update({ 
+            positive_replies: noco.leads_interested,
+            updated_at: new Date().toISOString()
+          })
+          .eq("external_id", noco.campaign_id)
+          .eq("positive_replies", 0); // Only update if not already set
+        
+        if (updateErr) {
+          result.errors.push(`Error updating positive_replies for external_id ${noco.campaign_id}: ${updateErr.message}`);
+        }
+      }
+    }
+
     // Step 1: Distribute positive_replies from campaigns to daily_metrics
     // Since email_activities may not have classified replies, use campaigns as source of truth
     // (campaigns.positive_replies comes from NocoDB sync - leads_interested)
