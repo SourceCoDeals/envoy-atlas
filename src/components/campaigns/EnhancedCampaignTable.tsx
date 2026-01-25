@@ -192,15 +192,8 @@ export function EnhancedCampaignTable({
       result = result.filter(c => c.engagement_id === localEngagementFilter);
     }
 
-    // Sort: active statuses first, then by selected field
-    const activeStatuses = ['active', 'started', 'running'];
+    // Sort by selected field
     result.sort((a, b) => {
-      const aIsActive = activeStatuses.includes(a.status.toLowerCase());
-      const bIsActive = activeStatuses.includes(b.status.toLowerCase());
-      
-      if (aIsActive && !bIsActive) return -1;
-      if (!aIsActive && bIsActive) return 1;
-      
       let aVal: number | string | null;
       let bVal: number | string | null;
 
@@ -210,44 +203,67 @@ export function EnhancedCampaignTable({
           bVal = b.tier.score ?? -1;
           break;
         case 'positive_rate':
-          aVal = a.estimatedPositiveRate;
-          bVal = b.estimatedPositiveRate;
+          aVal = a.estimatedPositiveRate ?? 0;
+          bVal = b.estimatedPositiveRate ?? 0;
           break;
         case 'meetings':
-          aVal = a.estimatedMeetings;
-          bVal = b.estimatedMeetings;
+          aVal = a.estimatedMeetings ?? 0;
+          bVal = b.estimatedMeetings ?? 0;
           break;
         case 'confidence':
-          const confOrder = { high: 5, good: 4, medium: 3, low: 2, none: 1 };
-          aVal = confOrder[a.tier.confidence];
-          bVal = confOrder[b.tier.confidence];
+          const confOrder: Record<string, number> = { high: 5, good: 4, medium: 3, low: 2, none: 1 };
+          aVal = confOrder[a.tier.confidence] ?? 0;
+          bVal = confOrder[b.tier.confidence] ?? 0;
           break;
         case 'created_at':
-          aVal = new Date(a.created_at).getTime();
-          bVal = new Date(b.created_at).getTime();
+          aVal = a.created_at ? new Date(a.created_at).getTime() : 0;
+          bVal = b.created_at ? new Date(b.created_at).getTime() : 0;
           break;
         case 'updated_at':
-          aVal = new Date(a.updated_at).getTime();
-          bVal = new Date(b.updated_at).getTime();
+          aVal = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+          bVal = b.updated_at ? new Date(b.updated_at).getTime() : 0;
           break;
         case 'engagement_name':
           aVal = a.engagement_name || '';
           bVal = b.engagement_name || '';
           break;
+        case 'name':
+          aVal = a.name || '';
+          bVal = b.name || '';
+          break;
+        case 'reply_rate':
+          aVal = a.reply_rate ?? 0;
+          bVal = b.reply_rate ?? 0;
+          break;
+        case 'total_leads':
+          aVal = a.total_leads ?? 0;
+          bVal = b.total_leads ?? 0;
+          break;
+        case 'total_sent':
+          aVal = a.total_sent ?? 0;
+          bVal = b.total_sent ?? 0;
+          break;
+        case 'health':
+          // Sort by health - no metricsStatus.overall, just use a simplified approach
+          aVal = a.total_sent ?? 0;
+          bVal = b.total_sent ?? 0;
+          break;
         default:
-          aVal = a[sortField as keyof CampaignWithMetrics] as number | string;
-          bVal = b[sortField as keyof CampaignWithMetrics] as number | string;
+          aVal = (a as any)[sortField] ?? 0;
+          bVal = (b as any)[sortField] ?? 0;
       }
 
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       }
 
-      return sortDirection === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+      const numA = typeof aVal === 'number' ? aVal : 0;
+      const numB = typeof bVal === 'number' ? bVal : 0;
+      return sortDirection === 'asc' ? numA - numB : numB - numA;
     });
 
     return result;
-  }, [campaignsWithScores, searchQuery, statusFilter, localTierFilter, sortField, sortDirection]);
+  }, [campaignsWithScores, searchQuery, statusFilter, localTierFilter, localEngagementFilter, sortField, sortDirection]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
