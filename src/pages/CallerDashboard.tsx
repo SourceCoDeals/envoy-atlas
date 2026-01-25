@@ -106,7 +106,12 @@ export default function CallerDashboard() {
   const dispositionCalls = useMemo(() => {
     if (!filteredCalls) return [];
     return filteredCalls.map(c => ({
-      disposition: c.normalized_category,
+      normalized_category: c.normalized_category,
+      category: c.category,
+      is_connection: c.is_connection,
+      is_meeting: c.is_meeting,
+      is_voicemail: c.is_voicemail,
+      is_bad_data: c.is_bad_data,
     }));
   }, [filteredCalls]);
 
