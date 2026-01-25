@@ -14,6 +14,7 @@ import {
   CallingMetricsConfig,
 } from '@/lib/callingConfig';
 import { startOfDay, subDays, parseISO, format } from 'date-fns';
+import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
 
 export type DateRange = '7d' | '14d' | '30d' | '90d' | 'all';
 
@@ -490,25 +491,22 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         })
         .sort((a, b) => a.date.localeCompare(b.date));
 
-      // Hourly data - parse from called_date_time
+      // Hourly data - parse from called_date_time, filter to business hours only
       const hourlyMap = new Map<number, { calls: number; connections: number }>();
-      for (let h = 6; h <= 20; h++) {
+      // Initialize only business hours (8 AM - 7 PM)
+      BUSINESS_HOURS_ARRAY.forEach(h => {
         hourlyMap.set(h, { calls: 0, connections: 0 });
-      }
+      });
 
       coldCalls.forEach(call => {
         if (call.called_date_time) {
           try {
             const dt = parseISO(call.called_date_time);
-            // Convert UTC to Eastern Time (UTC-5 for EST, UTC-4 for EDT)
-            // Using EST offset of -5 hours as the standard business timezone
-            const easternOffset = -5;
-            const utcHour = dt.getUTCHours();
-            let hour = utcHour + easternOffset;
-            if (hour < 0) hour += 24;
-            if (hour >= 24) hour -= 24;
+            // Use DST-aware Eastern Time conversion
+            const hour = toEasternHour(dt);
             
-            if (hourlyMap.has(hour)) {
+            // Only track business hours
+            if (isBusinessHour(hour) && hourlyMap.has(hour)) {
               const current = hourlyMap.get(hour)!;
               current.calls++;
               if (call.is_connection) {
@@ -521,14 +519,16 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         }
       });
 
-      const hourlyData: HourlyData[] = Array.from(hourlyMap.entries())
-        .map(([hour, data]) => ({
+      const hourlyData: HourlyData[] = BUSINESS_HOURS_ARRAY.map(hour => {
+        const data = hourlyMap.get(hour) || { calls: 0, connections: 0 };
+        return {
           hour,
           hourLabel: `${hour}:00`,
           calls: data.calls,
           connections: data.connections,
           connectRate: data.calls > 0 ? (data.connections / data.calls) * 100 : 0,
-        }));
+        };
+      });
 
       return {
         calls: coldCalls,

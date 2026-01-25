@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
 import { COLD_CALLING_BENCHMARKS } from '@/lib/coldCallingBenchmarks';
+import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
 
 interface Benchmark {
   metric_name: string;
@@ -172,20 +173,19 @@ export function useDataInsights() {
         }
         
         if (call.started_at) {
-          // Convert UTC to Eastern Time (UTC-5 for EST)
+          // Use DST-aware Eastern Time conversion
           const dt = new Date(call.started_at);
-          const utcHour = dt.getUTCHours();
-          const easternOffset = -5;
-          let hour = utcHour + easternOffset;
-          if (hour < 0) hour += 24;
-          if (hour >= 24) hour -= 24;
+          const hour = toEasternHour(dt);
           
-          const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
-          hourExisting.calls += 1;
-          if ((call.talk_duration || 0) > 60) {
-            hourExisting.connects += 1;
+          // Only track business hours (8 AM - 7 PM ET)
+          if (isBusinessHour(hour)) {
+            const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
+            hourExisting.calls += 1;
+            if ((call.talk_duration || 0) > 60) {
+              hourExisting.connects += 1;
+            }
+            hourlyMap.set(hour, hourExisting);
           }
-          hourlyMap.set(hour, hourExisting);
         }
       });
 
@@ -194,10 +194,11 @@ export function useDataInsights() {
         .sort((a, b) => a.date.localeCompare(b.date))
         .slice(-30);
 
-      const hourlyDistribution = Array.from(hourlyMap.entries())
-        .map(([hour, data]) => ({ hour, calls: data.calls, connects: data.connects }))
-        .sort((a, b) => a.hour - b.hour);
-
+      // Ensure all business hours are represented
+      const hourlyDistribution = BUSINESS_HOURS_ARRAY.map(hour => {
+        const data = hourlyMap.get(hour) || { calls: 0, connects: 0 };
+        return { hour, calls: data.calls, connects: data.connects };
+      });
       const uniqueDays = dateMap.size || 1;
       const totalConnects = calls.filter(c => (c.talk_duration || 0) > 60).length;
       const voicemailCount = calls.filter(c => c.voicemail_left).length;
