@@ -32,7 +32,8 @@ export default function Dashboard() {
     heroMetrics, 
     weeklyData, 
     alertCampaigns, 
-    topCampaigns, 
+    topCampaigns,
+    dataCompleteness,
     refetch 
   } = useOverviewDashboard();
   const { syncing, triggerSync } = useSyncData();
@@ -128,7 +129,7 @@ export default function Dashboard() {
             </div>
 
             {/* 3. Week-by-Week Performance Chart */}
-            <WeeklyPerformanceChart data={weeklyData} />
+            <WeeklyPerformanceChart data={weeklyData} dataCompleteness={dataCompleteness} />
 
             {/* 4. Campaign Tables: Alerts + Top Performers */}
             <div className="grid gap-4 lg:grid-cols-2">

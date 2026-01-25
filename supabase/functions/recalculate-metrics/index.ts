@@ -111,11 +111,38 @@ Deno.serve(async (req) => {
           // Get all daily_metrics for this campaign
           const { data: dailyRows, error: drError } = await supabase
             .from("daily_metrics")
-            .select("id, emails_replied, positive_replies")
+            .select("id, emails_replied, positive_replies, date")
             .eq("campaign_id", campaign.id)
             .order("date", { ascending: true });
           
-          if (drError || !dailyRows || dailyRows.length === 0) continue;
+          if (drError) {
+            result.errors.push(`Error fetching daily_metrics for ${campaign.id}: ${drError.message}`);
+            continue;
+          }
+          
+          // NEW: If no daily_metrics rows exist, CREATE one with the full positive count
+          if (!dailyRows || dailyRows.length === 0) {
+            console.log(`Creating missing daily_metrics row for campaign ${campaign.id} with ${campaign.positive_replies} positives`);
+            const { error: insertError } = await supabase
+              .from("daily_metrics")
+              .insert({
+                engagement_id: campaign.engagement_id,
+                campaign_id: campaign.id,
+                date: new Date().toISOString().split('T')[0],
+                positive_replies: campaign.positive_replies || 0,
+                emails_sent: 0,
+                emails_delivered: 0,
+                emails_opened: 0,
+                emails_replied: 0,
+                emails_bounced: 0,
+                is_estimated: true,
+              });
+            
+            if (insertError) {
+              result.errors.push(`Error creating daily_metrics for ${campaign.id}: ${insertError.message}`);
+            }
+            continue;
+          }
           
           // Distribute positive_replies proportionally to emails_replied
           const totalReplied = dailyRows.reduce((sum, r) => sum + (r.emails_replied || 0), 0);
