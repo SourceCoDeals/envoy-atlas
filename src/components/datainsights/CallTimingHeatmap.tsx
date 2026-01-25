@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { formatHourLabel, BUSINESS_HOURS_ARRAY } from '@/lib/timezone';
 
 interface HourlyData {
   hour: number;
@@ -13,14 +14,20 @@ interface CallTimingHeatmapProps {
 }
 
 export function CallTimingHeatmap({ data, className }: CallTimingHeatmapProps) {
-  const maxConnects = Math.max(...data.map(d => d.connects), 1);
+  // Filter to business hours only and ensure all hours are represented
+  const businessHoursData = BUSINESS_HOURS_ARRAY.map(hour => {
+    const existing = data.find(d => d.hour === hour);
+    return existing || { hour, calls: 0, connects: 0 };
+  });
+
+  const maxConnects = Math.max(...businessHoursData.map(d => d.connects), 1);
   
   const getIntensity = (connects: number) => {
     const ratio = connects / maxConnects;
-    if (ratio >= 0.8) return 'bg-green-500';
-    if (ratio >= 0.6) return 'bg-green-400';
-    if (ratio >= 0.4) return 'bg-yellow-400';
-    if (ratio >= 0.2) return 'bg-orange-400';
+    if (ratio >= 0.8) return 'bg-primary';
+    if (ratio >= 0.6) return 'bg-primary/80';
+    if (ratio >= 0.4) return 'bg-chart-2';
+    if (ratio >= 0.2) return 'bg-chart-4';
     return 'bg-muted';
   };
 
@@ -34,25 +41,25 @@ export function CallTimingHeatmap({ data, className }: CallTimingHeatmapProps) {
     d.calls > 0 ? ((d.connects / d.calls) * 100).toFixed(0) : '0';
 
   // Find best time
-  const bestHour = data.reduce((best, current) => 
+  const bestHour = businessHoursData.reduce((best, current) => 
     current.connects > best.connects ? current : best
-  , data[0] || { hour: 10, connects: 0, calls: 0 });
+  , businessHoursData[0]);
 
   return (
     <Card className={className}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Best Time to Call</CardTitle>
-          {bestHour && (
+          <CardTitle className="text-base">Best Time to Call (ET)</CardTitle>
+          {bestHour && bestHour.connects > 0 && (
             <span className="text-sm text-muted-foreground">
-              Peak: <span className="font-medium text-green-500">{formatHour(bestHour.hour)}</span>
+              Peak: <span className="font-medium text-primary">{formatHour(bestHour.hour)}</span>
             </span>
           )}
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-6 gap-2 md:grid-cols-11">
-          {data.map((d) => (
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-12">
+          {businessHoursData.map((d) => (
             <div 
               key={d.hour}
               className="flex flex-col items-center"
@@ -61,15 +68,14 @@ export function CallTimingHeatmap({ data, className }: CallTimingHeatmapProps) {
                 className={cn(
                   'w-full aspect-square rounded-md flex items-center justify-center text-xs font-medium transition-colors',
                   getIntensity(d.connects),
-                  d.connects > 0 ? 'text-white' : 'text-muted-foreground'
+                  d.connects > 0 ? 'text-primary-foreground' : 'text-muted-foreground'
                 )}
-                title={`${formatHour(d.hour)}: ${d.connects} connects (${connectRate(d)}% rate)`}
+                title={`${formatHour(d.hour)} ET: ${d.connects} connects / ${d.calls} calls (${connectRate(d)}% rate)`}
               >
                 {d.connects}
               </div>
               <span className="text-xs text-muted-foreground mt-1">
-                {d.hour > 12 ? d.hour - 12 : d.hour || 12}
-                {d.hour >= 12 ? 'p' : 'a'}
+                {formatHourLabel(d.hour)}
               </span>
             </div>
           ))}
@@ -81,11 +87,11 @@ export function CallTimingHeatmap({ data, className }: CallTimingHeatmapProps) {
             <span>Low</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-yellow-400" />
+            <div className="w-3 h-3 rounded bg-chart-2" />
             <span>Medium</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-green-500" />
+            <div className="w-3 h-3 rounded bg-primary" />
             <span>High</span>
           </div>
         </div>

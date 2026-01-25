@@ -15,7 +15,7 @@ import { useCallingConfig } from '@/hooks/useCallingConfig';
 import { useColdCallAnalytics, DateRange } from '@/hooks/useColdCallAnalytics';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
-
+import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
 interface Benchmark {
   metric_name: string;
   metric_key: string;
@@ -139,11 +139,14 @@ export default function DataInsights() {
       }
       
       if (call.called_date_time) {
-        const hour = new Date(call.called_date_time).getHours();
-        const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
-        hourExisting.calls += 1;
-        if (call.is_connection) hourExisting.connects += 1;
-        hourlyMap.set(hour, hourExisting);
+        const hour = toEasternHour(new Date(call.called_date_time));
+        // Only track business hours (8 AM - 7 PM ET)
+        if (isBusinessHour(hour)) {
+          const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
+          hourExisting.calls += 1;
+          if (call.is_connection) hourExisting.connects += 1;
+          hourlyMap.set(hour, hourExisting);
+        }
       }
     });
 
@@ -152,9 +155,11 @@ export default function DataInsights() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-30);
 
-    const hourlyDistribution = Array.from(hourlyMap.entries())
-      .map(([hour, d]) => ({ hour, calls: d.calls, connects: d.connects }))
-      .sort((a, b) => a.hour - b.hour);
+    // Ensure all business hours are represented, even if zero
+    const hourlyDistribution = BUSINESS_HOURS_ARRAY.map(hour => {
+      const d = hourlyMap.get(hour) || { calls: 0, connects: 0 };
+      return { hour, calls: d.calls, connects: d.connects };
+    });
 
     const uniqueDays = dateMap.size || 1;
     const totalConnects = filtered.filter(c => c.is_connection).length;

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
 import { format, subDays, startOfDay } from 'date-fns';
+import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
 
 interface FunnelStage {
   stage: string;
@@ -105,23 +106,20 @@ export function useCallAnalytics() {
           { stage: 'Meetings Set', count: meetingsSet },
         ];
 
-        // Build hourly data using called_date_time
+        // Build hourly data - business hours only (8 AM - 7 PM ET)
         const hourlyMap = new Map<number, { calls: number; connects: number }>();
-        for (let h = 6; h <= 20; h++) {
+        BUSINESS_HOURS_ARRAY.forEach(h => {
           hourlyMap.set(h, { calls: 0, connects: 0 });
-        }
+        });
 
         allCalls.forEach(call => {
           if (call.called_date_time) {
-            // Convert UTC to Eastern Time (UTC-5 for EST)
+            // Use DST-aware Eastern Time conversion
             const dt = new Date(call.called_date_time);
-            const utcHour = dt.getUTCHours();
-            const easternOffset = -5;
-            let hour = utcHour + easternOffset;
-            if (hour < 0) hour += 24;
-            if (hour >= 24) hour -= 24;
+            const hour = toEasternHour(dt);
             
-            if (hourlyMap.has(hour)) {
+            // Only track business hours
+            if (isBusinessHour(hour) && hourlyMap.has(hour)) {
               const current = hourlyMap.get(hour)!;
               current.calls++;
               if (call.is_connection) {
@@ -131,9 +129,10 @@ export function useCallAnalytics() {
           }
         });
 
-        const hourlyData: HourlyData[] = Array.from(hourlyMap.entries())
-          .map(([hour, data]) => ({ hour, ...data }))
-          .sort((a, b) => a.hour - b.hour);
+        const hourlyData: HourlyData[] = BUSINESS_HOURS_ARRAY.map(hour => {
+          const data = hourlyMap.get(hour) || { calls: 0, connects: 0 };
+          return { hour, ...data };
+        });
 
         // Build team performance using analyst field
         const repMap = new Map<string, { calls: number; connects: number; totalScore: number; displayName: string }>();

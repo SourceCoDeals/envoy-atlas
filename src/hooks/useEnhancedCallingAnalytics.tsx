@@ -11,6 +11,7 @@ import {
   CallingMetricsConfig,
 } from '@/lib/callingConfig';
 import { startOfDay, subDays, format } from 'date-fns';
+import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
 
 export type DateRange = '7d' | '14d' | '30d' | '90d' | 'all';
 
@@ -407,23 +408,20 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         })
         .sort((a, b) => a.date.localeCompare(b.date));
 
-      // Hourly data (extract from called_date_time)
+      // Hourly data - business hours only (8 AM - 7 PM ET)
       const hourlyMap = new Map<number, { calls: number; connections: number }>();
-      for (let h = 6; h <= 20; h++) {
+      BUSINESS_HOURS_ARRAY.forEach(h => {
         hourlyMap.set(h, { calls: 0, connections: 0 });
-      }
+      });
 
       allCalls.forEach(call => {
         if (call.called_date_time) {
-          // Convert UTC to Eastern Time (UTC-5 for EST)
+          // Use DST-aware Eastern Time conversion
           const dt = new Date(call.called_date_time);
-          const utcHour = dt.getUTCHours();
-          const easternOffset = -5;
-          let hour = utcHour + easternOffset;
-          if (hour < 0) hour += 24;
-          if (hour >= 24) hour -= 24;
+          const hour = toEasternHour(dt);
           
-          if (hourlyMap.has(hour)) {
+          // Only track business hours
+          if (isBusinessHour(hour) && hourlyMap.has(hour)) {
             const current = hourlyMap.get(hour)!;
             current.calls++;
             if (call.is_connection) {
@@ -433,14 +431,16 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         }
       });
 
-      const hourlyData: HourlyData[] = Array.from(hourlyMap.entries())
-        .map(([hour, data]) => ({
+      const hourlyData: HourlyData[] = BUSINESS_HOURS_ARRAY.map(hour => {
+        const data = hourlyMap.get(hour) || { calls: 0, connections: 0 };
+        return {
           hour,
           hourLabel: `${hour}:00`,
           calls: data.calls,
           connections: data.connections,
           connectRate: data.calls > 0 ? (data.connections / data.calls) * 100 : 0,
-        }));
+        };
+      });
 
       return {
         calls: allCalls,
