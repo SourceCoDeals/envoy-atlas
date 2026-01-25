@@ -78,6 +78,18 @@ export interface ColdCall {
   key_concerns: string[] | null;
   target_pain_points: string | null;
   not_interested_reason: string | null;
+  next_steps?: string | null;
+  
+  // New enhanced fields
+  campaign_id?: string | null;
+  engagement_id?: string | null;
+  enhanced_score?: number | null;
+  score_breakdown?: any;
+  flagged_for_review?: boolean;
+  flag_reason?: string | null;
+  rep_notes?: string | null;
+  follow_up_date?: string | null;
+  is_first_attempt_dm?: boolean;
   opening_type: string | null;
   
   // For compatibility with interest breakdown
