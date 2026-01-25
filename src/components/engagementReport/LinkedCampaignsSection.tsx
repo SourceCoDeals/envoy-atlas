@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,7 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { 
   Mail, Link2, Plus, ArrowRight, Sparkles, 
-  ChevronDown, ChevronUp, ExternalLink 
+  ChevronDown, ChevronUp, ExternalLink, X 
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import type { LinkedCampaignWithStats } from '@/hooks/useEngagementReport';
@@ -30,6 +30,28 @@ interface LinkedCampaignsSectionProps {
   onRefresh: () => void;
 }
 
+// Helper to manage dismissed suggestions per engagement
+function getDismissedKey(engagementId: string) {
+  return `dismissed-suggestions-${engagementId}`;
+}
+
+function getDismissedCampaigns(engagementId: string): string[] {
+  try {
+    const stored = localStorage.getItem(getDismissedKey(engagementId));
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function addDismissedCampaign(engagementId: string, campaignId: string) {
+  const current = getDismissedCampaigns(engagementId);
+  if (!current.includes(campaignId)) {
+    current.push(campaignId);
+    localStorage.setItem(getDismissedKey(engagementId), JSON.stringify(current));
+  }
+}
+
 export function LinkedCampaignsSection({
   linkedCampaigns,
   engagementId,
@@ -43,6 +65,12 @@ export function LinkedCampaignsSection({
   const [loadingSuggested, setLoadingSuggested] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(linkedCampaigns.length <= 5);
+  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
+
+  // Load dismissed IDs on mount
+  useEffect(() => {
+    setDismissedIds(getDismissedCampaigns(engagementId));
+  }, [engagementId]);
 
   // Always fetch suggested campaigns - useful even when campaigns exist
   useEffect(() => {
@@ -131,6 +159,15 @@ export function LinkedCampaignsSection({
     }
   };
 
+  const handleDismiss = useCallback((campaignId: string) => {
+    addDismissedCampaign(engagementId, campaignId);
+    setDismissedIds(prev => [...prev, campaignId]);
+    setSuggested(prev => prev.filter(c => c.id !== campaignId));
+  }, [engagementId]);
+
+  // Filter out dismissed suggestions
+  const visibleSuggested = suggested.filter(c => !dismissedIds.includes(c.id));
+
   const displayedCampaigns = expanded ? linkedCampaigns : linkedCampaigns.slice(0, 5);
   const hasMore = linkedCampaigns.length > 5;
 
@@ -168,17 +205,17 @@ export function LinkedCampaignsSection({
               <Skeleton className="h-12 w-full" />
               <Skeleton className="h-12 w-full" />
             </div>
-          ) : suggested.length > 0 ? (
+          ) : visibleSuggested.length > 0 ? (
             <div className="mt-6 border-t pt-4">
               <div className="flex items-center gap-2 mb-3">
                 <Sparkles className="h-4 w-4 text-warning" />
                 <h4 className="font-medium text-sm">Suggested Matches</h4>
                 <Badge variant="outline" className="text-[10px]">
-                  {suggested.length} found
+                  {visibleSuggested.length} found
                 </Badge>
               </div>
               <div className="space-y-2">
-                {suggested.slice(0, 5).map(campaign => (
+                {visibleSuggested.slice(0, 5).map(campaign => (
                   <div 
                     key={campaign.id}
                     className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
@@ -192,6 +229,15 @@ export function LinkedCampaignsSection({
                     <Badge variant="outline" className="shrink-0">
                       {campaign.platform === 'smartlead' ? 'SL' : 'R.io'}
                     </Badge>
+                    <Button 
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                      onClick={() => handleDismiss(campaign.id)}
+                      title="Dismiss this suggestion"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
                     <Button 
                       size="sm" 
                       variant="outline"
@@ -210,14 +256,14 @@ export function LinkedCampaignsSection({
                   </div>
                 ))}
               </div>
-              {suggested.length > 5 && (
+              {visibleSuggested.length > 5 && (
                 <Button 
                   variant="ghost" 
                   size="sm" 
                   className="w-full mt-2"
                   onClick={onLinkCampaigns}
                 >
-                  View all {suggested.length} suggestions
+                  View all {visibleSuggested.length} suggestions
                   <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
               )}
@@ -307,17 +353,17 @@ export function LinkedCampaignsSection({
         )}
 
         {/* Additional Suggested Matches - shown even when campaigns exist */}
-        {suggested.length > 0 && (
+        {visibleSuggested.length > 0 && (
           <div className="border-t pt-4">
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="h-4 w-4 text-warning" />
               <h4 className="font-medium text-sm">Additional Matches Found</h4>
               <Badge variant="outline" className="text-[10px]">
-                {suggested.length} more
+                {visibleSuggested.length} more
               </Badge>
             </div>
             <div className="space-y-2">
-              {suggested.slice(0, 3).map(campaign => (
+              {visibleSuggested.slice(0, 3).map(campaign => (
                 <div 
                   key={campaign.id}
                   className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
@@ -331,6 +377,15 @@ export function LinkedCampaignsSection({
                   <Badge variant="outline" className="shrink-0">
                     {campaign.platform === 'smartlead' ? 'SL' : 'R.io'}
                   </Badge>
+                  <Button 
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                    onClick={() => handleDismiss(campaign.id)}
+                    title="Dismiss this suggestion"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                   <Button 
                     size="sm" 
                     variant="outline"
@@ -349,14 +404,14 @@ export function LinkedCampaignsSection({
                 </div>
               ))}
             </div>
-            {suggested.length > 3 && (
+            {visibleSuggested.length > 3 && (
               <Button 
                 variant="ghost" 
                 size="sm" 
                 className="w-full mt-2"
                 onClick={onLinkCampaigns}
               >
-                View all {suggested.length} suggestions
+                View all {visibleSuggested.length} suggestions
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
             )}
