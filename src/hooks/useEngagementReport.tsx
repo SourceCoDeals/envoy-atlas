@@ -185,6 +185,11 @@ interface DataAvailability {
   callingData: boolean;
   infrastructureData: boolean;
   syncInProgress: boolean;
+  /** NEW: True when we have NocoDB snapshot data for this engagement's campaigns */
+  hasSnapshotData: boolean;
+  snapshotDateRange: { min: string; max: string } | null;
+  /** NEW: Data source type for transparency */
+  dataSource: 'snapshots' | 'daily_metrics' | 'campaign_totals' | 'estimated';
 }
 
 export interface LinkedCampaignWithStats {
@@ -253,14 +258,17 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       if (!engagement) throw new Error('Engagement not found');
 
       // Fetch linked campaigns from unified campaigns table with stats and settings
+      // Include external_id for snapshot joining
       const { data: campaigns } = await supabase
         .from('campaigns')
-        .select('id, name, campaign_type, status, total_sent, total_replied, total_bounced, reply_rate, positive_replies, positive_rate, settings')
+        .select('id, name, campaign_type, status, total_sent, total_replied, total_bounced, reply_rate, positive_replies, positive_rate, settings, external_id')
         .eq('engagement_id', engagementId)
         .order('total_sent', { ascending: false });
 
       // Fetch campaign variants for sequence performance
       const campaignIds = (campaigns || []).map(c => c.id);
+      const externalCampaignIds = (campaigns || []).map(c => c.external_id).filter(Boolean) as string[];
+      
       let variantsData: any[] = [];
       if (campaignIds.length > 0) {
         const { data: variants } = await supabase
@@ -268,6 +276,22 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           .select('id, campaign_id, subject_line, step_number, total_sent, total_replied, positive_replies, reply_rate')
           .in('campaign_id', campaignIds);
         variantsData = variants || [];
+      }
+      
+      // Fetch NocoDB snapshots for linked campaigns via external_id
+      let snapshotData: any[] = [];
+      if (externalCampaignIds.length > 0) {
+        let snapshotQuery = supabase
+          .from('nocodb_campaign_daily_snapshots')
+          .select('*')
+          .in('campaign_id', externalCampaignIds)
+          .order('snapshot_date', { ascending: true });
+        
+        if (startDateStr) snapshotQuery = snapshotQuery.gte('snapshot_date', startDateStr);
+        if (endDateStr) snapshotQuery = snapshotQuery.lte('snapshot_date', endDateStr);
+        
+        const { data: snapshots } = await snapshotQuery;
+        snapshotData = snapshots || [];
       }
 
       const linkedCampaigns = (campaigns || []).map(c => ({ 
@@ -857,6 +881,20 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           callingData: calls.length > 0,
           infrastructureData: emailAccounts.length > 0,
           syncInProgress: false,
+          hasSnapshotData: snapshotData.length > 0,
+          snapshotDateRange: snapshotData.length > 0 
+            ? {
+                min: snapshotData[0]?.snapshot_date || '',
+                max: snapshotData[snapshotData.length - 1]?.snapshot_date || '',
+              }
+            : null,
+          dataSource: snapshotData.length > 0 
+            ? 'snapshots' 
+            : isEstimated 
+              ? 'estimated' 
+              : dailyMetrics.length > 0 
+                ? 'daily_metrics' 
+                : 'campaign_totals',
         },
       });
 

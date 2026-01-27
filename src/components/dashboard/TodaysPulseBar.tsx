@@ -1,4 +1,4 @@
-import { Mail, MessageSquare, ThumbsUp, Calendar } from 'lucide-react';
+import { Mail, MessageSquare, ThumbsUp, Calendar, BarChart3 } from 'lucide-react';
 import type { TodaysPulse } from '@/hooks/useOverviewDashboard';
 
 interface TodaysPulseBarProps {
@@ -12,6 +12,16 @@ export function TodaysPulseBar({ pulse }: TodaysPulseBarProps) {
     { icon: ThumbsUp, label: 'positive', value: pulse.positive, color: 'text-success' },
     { icon: Calendar, label: 'meetings booked', value: pulse.meetingsBooked, color: 'text-chart-4' },
   ];
+
+  // Add active campaigns if available (from snapshots)
+  if (pulse.activeCampaigns && pulse.activeCampaigns > 0) {
+    items.push({ 
+      icon: BarChart3, 
+      label: 'active campaigns', 
+      value: pulse.activeCampaigns, 
+      color: 'text-muted-foreground' 
+    });
+  }
 
   return (
     <div className="w-full bg-card border border-border rounded-lg px-4 py-2.5 overflow-x-auto">

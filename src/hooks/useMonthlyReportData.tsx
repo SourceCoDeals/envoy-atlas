@@ -57,6 +57,8 @@ export interface DailyTrend {
   replyRate: number;
 }
 
+export type MonthlyDataSource = 'snapshots' | 'daily_metrics' | 'campaign_totals';
+
 export interface MonthlyReportData {
   selectedMonth: Date;
   currentMetrics: MonthlyMetrics;
@@ -67,6 +69,7 @@ export interface MonthlyReportData {
   dailyTrends: DailyTrend[];
   loading: boolean;
   hasData: boolean;
+  dataSource: MonthlyDataSource;
 }
 
 export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyReportData & { setSelectedMonth: (date: Date) => void } {
@@ -88,6 +91,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
     totalMailboxes: 0, activeMailboxes: 0, totalDailyCapacity: 0, warmupEnabled: 0
   });
   const [dailyTrends, setDailyTrends] = useState<DailyTrend[]>([]);
+  const [dataSource, setDataSource] = useState<MonthlyDataSource>('daily_metrics');
 
   const monthStart = useMemo(() => startOfMonth(month), [month]);
   const monthEnd = useMemo(() => endOfMonth(month), [month]);
@@ -122,6 +126,16 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
           .gte('date', format(monthStart, 'yyyy-MM-dd'))
           .lte('date', format(monthEnd, 'yyyy-MM-dd'));
 
+        // NEW: Also fetch NocoDB daily totals for the month range
+        const { data: nocodbTotals } = await supabase
+          .from('nocodb_daily_totals')
+          .select('*')
+          .gte('snapshot_date', format(monthStart, 'yyyy-MM-dd'))
+          .lte('snapshot_date', format(monthEnd, 'yyyy-MM-dd'))
+          .order('snapshot_date', { ascending: true });
+
+        const hasSnapshotData = (nocodbTotals || []).length > 0;
+
         const currentData = (currentDailyMetrics || []).map(d => ({
           ...d,
           sent_count: d.emails_sent || 0,
@@ -144,6 +158,15 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
           positive_reply_count: d.positive_replies || 0,
           bounced_count: d.emails_bounced || 0,
         }));
+
+        // Determine data source
+        if (hasSnapshotData) {
+          setDataSource('snapshots');
+        } else if (currentData.length > 0) {
+          setDataSource('daily_metrics');
+        } else {
+          setDataSource('campaign_totals');
+        }
 
         // Aggregate current month
         const current = currentData.reduce((acc, row) => ({
@@ -287,6 +310,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
     dailyTrends,
     loading,
     hasData,
+    dataSource,
     setSelectedMonth,
   };
 }

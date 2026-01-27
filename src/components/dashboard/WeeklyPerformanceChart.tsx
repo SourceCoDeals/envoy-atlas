@@ -23,7 +23,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 
-export type DataSourceType = 'nocodb_aggregate' | 'activity_level' | 'mixed';
+export type DataSourceType = 'snapshots' | 'nocodb_aggregate' | 'activity_level' | 'daily_metrics' | 'mixed';
 
 interface WeeklyPerformanceChartProps {
   data: WeeklyData[];
@@ -74,7 +74,12 @@ export function WeeklyPerformanceChart({ data, dataCompleteness, dataSource = 'n
   const isComplete = completenessPercent >= 95;
 
   // Data source labels
-  const dataSourceInfo = {
+  const dataSourceInfo: Record<DataSourceType, { label: string; description: string; icon: typeof Database }> = {
+    snapshots: {
+      label: 'Snapshots',
+      description: 'Real-time daily snapshots from NocoDB sync with accurate day-over-day tracking.',
+      icon: CheckCircle2,
+    },
     nocodb_aggregate: {
       label: 'NocoDB',
       description: 'Campaign totals from NocoDB. Time-series distribution is estimated.',
@@ -84,6 +89,11 @@ export function WeeklyPerformanceChart({ data, dataCompleteness, dataSource = 'n
       label: 'Real-time',
       description: 'Individual email activities with actual timestamps.',
       icon: CheckCircle2,
+    },
+    daily_metrics: {
+      label: 'Daily Metrics',
+      description: 'Aggregated daily metrics from sync.',
+      icon: Database,
     },
     mixed: {
       label: 'Mixed',
