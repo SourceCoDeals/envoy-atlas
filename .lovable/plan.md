@@ -1,265 +1,318 @@
 
 
-# Daily Campaign Metrics Snapshot Tracking
+# Updated Integration Plan: NocoDB Campaign Snapshots into Email Dashboard Reports
 
-## Overview
+## Data Analysis Summary
 
-This plan creates a system to track daily snapshots of NocoDB campaign metrics, enabling trend analysis and historical progress tracking for both SmartLead and Reply.io campaigns.
+Based on the newly synced snapshot data from January 27, 2026:
 
-## Current State
+### Snapshot Metrics Available
 
-**Existing Tables (to remain unchanged):**
-- `nocodb_smartlead_campaigns` - 189 campaigns (47 ACTIVE, 89 COMPLETED, 30 PAUSED)
-- `nocodb_replyio_campaigns` - 643 campaigns (62 Active, 547 Paused)
+| Metric | SmartLead | Reply.io | Combined |
+|--------|-----------|----------|----------|
+| Active Campaigns | 47 | 62 | 109 |
+| Emails Sent | 107,436 | 115,789 | 223,225 |
+| Emails Replied | 1,251 | 1,770 | 3,021 |
+| Positive Replies | 470 | 0* | 470 |
+| Total Leads | 37,386 | 26,659 | 64,045 |
 
-**Sync Process:**
-- The `sync-nocodb-campaigns` edge function runs daily
-- Uses upsert on `campaign_id` - overwrites previous values
-- No historical data is preserved
+*Reply.io doesn't track "positive" sentiment directly in NocoDB
 
-**Key Metrics to Track:**
+### Data Linkage Status
 
-| Platform | Metric Columns |
-|----------|---------------|
-| SmartLead | `total_emails_sent`, `total_replies`, `total_bounces`, `leads_interested`, `leads_in_progress`, `leads_completed`, `leads_paused` |
-| Reply.io | `deliveries`, `bounces`, `replies`, `people_count`, `people_active`, `people_finished`, `people_paused`, `optouts`, `ooos` |
+- **110 snapshot records** captured for active campaigns
+- **110 matched** to internal `campaigns` table via `external_id`
+- **39 matched** to specific engagements (non-unassigned)
+- Remaining 71 are "Unassigned Campaigns"
+
+### Current Data Gap Analysis
+
+| Source | Sent | Replied | Positive | Days Coverage |
+|--------|------|---------|----------|---------------|
+| `daily_metrics` (30d) | 297,290 | 3,446 | 699 | 7 days with data |
+| Snapshots (Jan 27) | 223,225 | 3,021 | 470 | 1 day (first sync) |
+
+**Key Insight**: The snapshot system now captures daily cumulative totals. As syncs continue over time, the deltas will show real day-over-day changes. Currently, since this is the first snapshot, all deltas equal the cumulative values (no previous snapshot to compare against).
 
 ---
 
-## Implementation Plan
+## Updated Implementation Strategy
 
-### 1. Create Unified Daily Snapshot Table
+### Phase 1: Enhance the Trends Hook with Engagement Filtering
 
-A single table to track both platforms with a normalized schema:
+The `useNocoDBCampaignTrends` hook currently fetches global snapshot data. We need to add the ability to filter by engagement via the campaign join path.
+
+**Changes to `src/hooks/useNocoDBCampaignTrends.tsx`:**
+
+1. Add `engagementId` filter option
+2. Add helper to aggregate snapshots by week
+3. Add helper to convert snapshots to `WeeklyData` format for chart compatibility
+4. Add method to get engagement-specific totals via campaign join
 
 ```text
-nocodb_campaign_daily_snapshots
-+------------------------+----------+----------------------------------------+
-| Column                 | Type     | Description                            |
-+------------------------+----------+----------------------------------------+
-| id                     | uuid     | Primary key                            |
-| snapshot_date          | date     | Date of the snapshot                   |
-| platform               | text     | 'smartlead' or 'replyio'               |
-| campaign_id            | text     | External campaign ID (matches source)  |
-| campaign_name          | text     | Campaign name at time of snapshot      |
-| status                 | text     | Campaign status                        |
-+------------------------+----------+----------------------------------------+
-| emails_sent            | integer  | Cumulative emails sent                 |
-| emails_delivered       | integer  | Cumulative delivered                   |
-| emails_bounced         | integer  | Cumulative bounces                     |
-| emails_replied         | integer  | Cumulative replies                     |
-| positive_replies       | integer  | Positive/interested count              |
-+------------------------+----------+----------------------------------------+
-| total_leads            | integer  | Total leads enrolled                   |
-| leads_active           | integer  | Currently in progress                  |
-| leads_completed        | integer  | Finished sequence                      |
-| leads_paused           | integer  | Paused leads                           |
-+------------------------+----------+----------------------------------------+
-| optouts                | integer  | Opt-outs (Reply.io)                    |
-| ooos                   | integer  | Out of office (Reply.io)               |
-+------------------------+----------+----------------------------------------+
-| created_at             | timestamptz | Record creation time                |
-+------------------------+----------+----------------------------------------+
-| UNIQUE                 |          | (snapshot_date, platform, campaign_id) |
-+------------------------+----------+----------------------------------------+
+New filter option:
+engagementId?: string  // Filter snapshots to campaigns linked to this engagement
 ```
 
-**Deduplication Strategy:** Unique constraint on `(snapshot_date, platform, campaign_id)` prevents duplicate entries for the same campaign on the same day.
-
----
-
-### 2. Modify Sync Function
-
-Update `sync-nocodb-campaigns` to capture snapshots after each sync:
-
+**Join Logic**:
 ```text
-Sync Flow (Updated)
-+------------------+     +------------------------+     +---------------------------+
-| Fetch from       | --> | Upsert to main         | --> | Insert into daily         |
-| NocoDB API       |     | campaign tables        |     | snapshots table           |
-+------------------+     +------------------------+     +---------------------------+
-                                                               |
-                                                               v
-                                                        Only for campaigns
-                                                        with status = ACTIVE
-```
-
-**Logic:**
-1. After upserting to the main tables, iterate through synced campaigns
-2. Filter to only `ACTIVE` (SmartLead) or `Active` (Reply.io) status
-3. Insert snapshot row with today's date
-4. Use upsert with conflict on `(snapshot_date, platform, campaign_id)` to handle re-runs
-
----
-
-### 3. Create Delta Calculation View
-
-A database view to calculate daily changes (deltas) between snapshots:
-
-```text
-nocodb_campaign_daily_deltas (VIEW)
-+------------------------+----------------------------------------+
-| Column                 | Description                            |
-+------------------------+----------------------------------------+
-| snapshot_date          | Current snapshot date                  |
-| platform               | Platform identifier                    |
-| campaign_id            | Campaign ID                            |
-| campaign_name          | Campaign name                          |
-+------------------------+----------------------------------------+
-| emails_sent_delta      | Change from previous day               |
-| emails_replied_delta   | Change from previous day               |
-| bounced_delta          | Change from previous day               |
-| positive_delta         | Change from previous day               |
-+------------------------+----------------------------------------+
-| prev_snapshot_date     | Date of previous snapshot              |
-| days_since_last        | Days between snapshots                 |
-+------------------------+----------------------------------------+
-```
-
-This view uses `LAG()` window functions to compare each snapshot with the previous one for the same campaign.
-
----
-
-### 4. Create Aggregate Trend View
-
-A view for overall daily totals across all campaigns:
-
-```text
-nocodb_daily_totals (VIEW)
-+------------------------+----------------------------------------+
-| Column                 | Description                            |
-+------------------------+----------------------------------------+
-| snapshot_date          | Date                                   |
-| platform               | 'smartlead', 'replyio', or 'all'       |
-+------------------------+----------------------------------------+
-| total_campaigns        | Count of active campaigns              |
-| total_sent             | Sum of emails sent                     |
-| total_replied          | Sum of replies                         |
-| total_bounced          | Sum of bounces                         |
-| total_positive         | Sum of positive replies                |
-| total_leads            | Sum of all leads                       |
-+------------------------+----------------------------------------+
-| sent_delta             | Change from previous day               |
-| replied_delta          | Change from previous day               |
-+------------------------+----------------------------------------+
+nocodb_campaign_daily_snapshots.campaign_id
+   → campaigns.external_id
+   → campaigns.engagement_id
+   → engagements.id
 ```
 
 ---
 
-### 5. Create React Hook for Trend Data
+### Phase 2: Overview Dashboard Integration
 
-New hook `useNocoDBCampaignTrends` to fetch and display trend data:
+**File**: `src/hooks/useOverviewDashboard.tsx`
 
-**Features:**
-- Fetch daily snapshots for a date range
-- Calculate daily deltas client-side or use view
-- Support filtering by platform and campaign
-- Aggregate data for charts
+The Overview Dashboard currently:
+- Uses `campaigns` table for hero metrics (lines 216-221)
+- Uses `daily_metrics` for weekly chart (lines 275-298) - but this data is sparse
+- Uses `daily_metrics` for Today's Pulse (lines 205-212)
+
+**Proposed Changes**:
+
+1. **Today's Pulse Enhancement**
+   - Add parallel fetch for today's `nocodb_daily_totals`
+   - Use snapshot-based totals when available, falling back to `daily_metrics`
+   - Show "109 active campaigns" context from snapshot data
+
+2. **Weekly Chart Improvement** (Future - after multi-day snapshots accumulate)
+   - Once we have 7+ days of snapshots, aggregate delta values by week
+   - Replace sparse `daily_metrics` weekly buckets with snapshot-based deltas
+   - Add data source indicator: "Snapshot Trends" badge
+
+3. **Data Completeness Indicator**
+   - Show snapshot coverage: "39 of 109 campaigns linked to engagements"
+   - Alert if many campaigns are unassigned
+
+**New Data Flow**:
+```text
+Current:    campaigns → hero metrics
+            daily_metrics → weekly chart (sparse)
+            
+Proposed:   campaigns → hero metrics (unchanged)
+            nocodb_daily_totals → today's pulse (enhanced)
+            nocodb_campaign_daily_deltas (by week) → weekly chart (after multi-day data)
+```
 
 ---
 
-### 6. Backfill Historical Data (Optional)
+### Phase 3: Engagement Report Integration
 
-Since snapshots start from implementation date, consider:
-- Creating an initial snapshot with current cumulative data
-- Documenting that trend history begins from implementation date
+**File**: `src/hooks/useEngagementReport.tsx`
 
----
+Currently:
+- Fetches `daily_metrics` by `engagement_id` (line 304-309)
+- Falls back to campaign totals when date range returns empty (lines 406-428)
+- Weekly breakdown uses historical daily_metrics (line 387)
 
-## Technical Details
+**Proposed Changes**:
 
-### Database Migration SQL
+1. **Add Snapshot Fetching for Linked Campaigns**
+   - Join `nocodb_campaign_daily_snapshots` to campaigns via `external_id`
+   - Filter by `campaigns.engagement_id`
+   - This gives engagement-specific snapshot data
 
+2. **Email Metrics Hybrid Source**
+   - Primary: Sum of snapshots for linked campaigns (when available)
+   - Secondary: `daily_metrics` aggregation
+   - Tertiary: Campaign totals fallback
+
+3. **Weekly Performance from Snapshots**
+   - When snapshots span multiple weeks, use delta aggregation
+   - Remove "Estimated" banner when using real snapshot data
+
+4. **Data Source Indicator**
+   - "Snapshot Data" (green) when using real daily snapshots
+   - "Campaign Totals" (blue) when using cumulative fallback
+   - "Estimated" (amber) only for synthetic data
+
+**Sample Query for Engagement Snapshots**:
 ```sql
--- Create the daily snapshots table
-CREATE TABLE public.nocodb_campaign_daily_snapshots (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  snapshot_date DATE NOT NULL,
-  platform TEXT NOT NULL CHECK (platform IN ('smartlead', 'replyio')),
-  campaign_id TEXT NOT NULL,
-  campaign_name TEXT NOT NULL,
-  status TEXT,
-  
-  -- Email metrics (cumulative)
-  emails_sent INTEGER DEFAULT 0,
-  emails_delivered INTEGER DEFAULT 0,
-  emails_bounced INTEGER DEFAULT 0,
-  emails_replied INTEGER DEFAULT 0,
-  positive_replies INTEGER DEFAULT 0,
-  
-  -- Lead/people metrics
-  total_leads INTEGER DEFAULT 0,
-  leads_active INTEGER DEFAULT 0,
-  leads_completed INTEGER DEFAULT 0,
-  leads_paused INTEGER DEFAULT 0,
-  
-  -- Reply.io specific
-  optouts INTEGER DEFAULT 0,
-  ooos INTEGER DEFAULT 0,
-  
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  
-  UNIQUE(snapshot_date, platform, campaign_id)
-);
-
--- Indexes for common queries
-CREATE INDEX idx_snapshots_date ON nocodb_campaign_daily_snapshots(snapshot_date);
-CREATE INDEX idx_snapshots_campaign ON nocodb_campaign_daily_snapshots(campaign_id);
-CREATE INDEX idx_snapshots_platform_date ON nocodb_campaign_daily_snapshots(platform, snapshot_date);
+SELECT s.*
+FROM nocodb_campaign_daily_snapshots s
+JOIN campaigns c ON c.external_id = s.campaign_id
+WHERE c.engagement_id = '<engagement_uuid>'
+  AND s.snapshot_date BETWEEN '<start>' AND '<end>'
+ORDER BY s.snapshot_date;
 ```
 
-### Edge Function Updates
+---
 
-The `sync-nocodb-campaigns` function will be updated to:
+### Phase 4: Monthly Report Integration
 
-1. Accept an optional `capture_snapshot` parameter (default: true)
-2. After main sync, filter active campaigns
-3. Insert snapshot records using upsert
-4. Log snapshot capture counts in response
+**File**: `src/hooks/useMonthlyReportData.tsx`
 
-### React Hook Structure
+Currently:
+- Fetches `daily_metrics` for month range (lines 118-123)
+- Builds daily trend chart from `daily_metrics` rows (line 174)
+- Uses `daily_metrics` for MoM comparison (lines 134-146)
+
+**Proposed Changes**:
+
+1. **Monthly KPIs from Snapshots**
+   - Fetch `nocodb_daily_totals` for all dates in selected month
+   - Sum `sent_delta`, `replied_delta` columns for true monthly new activity
+   - Compare to previous month's delta sums for MoM
+
+2. **Daily Trend Chart**
+   - Build from `nocodb_daily_totals` (one row per date per platform)
+   - Show actual daily volumes instead of sparse daily_metrics
+
+3. **Campaign Performance Table**
+   - Enhanced with snapshot-based metrics per campaign
+   - Show which campaigns have snapshot data vs estimates
+
+**Note**: This becomes valuable after 30+ days of snapshots are collected. Initial implementation can fall back to current logic while snapshots accumulate.
+
+---
+
+### Phase 5: Campaign Detail Enhancement
+
+**File**: `src/hooks/useCampaignSummary.ts`
+
+Currently:
+- Fetches campaign from `campaigns` table
+- Uses `daily_metrics` for performance chart (often empty)
+
+**Proposed Changes**:
+
+1. **Campaign History Chart**
+   - Fetch `nocodb_campaign_daily_snapshots` for this `campaign_id`
+   - Build progression chart showing cumulative growth over time
+   - Show sent, replied, positive as stacked or multi-line chart
+
+2. **Delta Analysis**
+   - Fetch from `nocodb_campaign_daily_deltas` for this campaign
+   - Show "Yesterday: +150 sent, +3 replies" type metrics
+
+---
+
+## Technical Implementation Details
+
+### New Hook Enhancement: `useNocoDBCampaignTrends`
+
+Add these methods:
 
 ```typescript
-// New file: src/hooks/useNocoDBCampaignTrends.tsx
-interface CampaignSnapshot {
-  date: string;
-  platform: 'smartlead' | 'replyio';
-  campaignId: string;
-  campaignName: string;
-  sent: number;
-  replied: number;
-  bounced: number;
-  positive: number;
-  // ... deltas
-}
-
+// New filter
 interface TrendFilters {
   startDate?: Date;
   endDate?: Date;
   platform?: 'smartlead' | 'replyio' | 'all';
   campaignId?: string;
+  engagementId?: string;  // NEW: Filter via campaign join
 }
+
+// New helpers
+aggregateByWeek(deltas: CampaignDelta[]): WeeklyData[]
+getTotalsForEngagement(engagementId: string): Promise<DailyTotals[]>
+convertToWeeklyChartData(totals: DailyTotals[]): WeeklyData[]
 ```
+
+### Database Query: Engagement-Filtered Snapshots
+
+```sql
+-- Create a reusable query or view
+SELECT 
+  s.snapshot_date,
+  SUM(s.emails_sent) as total_sent,
+  SUM(s.emails_replied) as total_replied,
+  SUM(s.positive_replies) as total_positive,
+  SUM(s.emails_bounced) as total_bounced,
+  COUNT(DISTINCT s.campaign_id) as campaign_count
+FROM nocodb_campaign_daily_snapshots s
+JOIN campaigns c ON c.external_id = s.campaign_id
+WHERE c.engagement_id = $1
+  AND s.snapshot_date BETWEEN $2 AND $3
+GROUP BY s.snapshot_date
+ORDER BY s.snapshot_date;
+```
+
+### Fallback Strategy
+
+Each integration point should implement:
+
+1. **Check snapshot availability** - Are there snapshots for the date range?
+2. **Primary: Use snapshots** - When available, use real snapshot data
+3. **Secondary: Use daily_metrics** - Fall back to existing sparse data
+4. **Tertiary: Use campaign totals** - Final fallback for "All Time" view
+
+### Data Source Badge Component
+
+Create a reusable indicator showing data provenance:
+
+| Badge | Color | Meaning |
+|-------|-------|---------|
+| "Live Snapshots" | Green | Using real `nocodb_campaign_daily_snapshots` |
+| "NocoDB Sync" | Blue | Using aggregate campaign totals from NocoDB |
+| "Estimated" | Amber | Using synthetic/backfilled data |
+| "Activity Log" | Green | Using real `email_activities` data |
 
 ---
 
 ## Files to Create/Modify
 
-| File | Action | Purpose |
-|------|--------|---------|
-| Database migration | Create | Add `nocodb_campaign_daily_snapshots` table |
-| `supabase/functions/sync-nocodb-campaigns/index.ts` | Modify | Add snapshot capture logic |
-| `src/hooks/useNocoDBCampaignTrends.tsx` | Create | Hook for fetching trend data |
-| `src/hooks/useNocoDBCampaigns.tsx` | Modify | Add optional trend data integration |
+| File | Action | Priority |
+|------|--------|----------|
+| `src/hooks/useNocoDBCampaignTrends.tsx` | Enhance with engagement filter & aggregation helpers | High |
+| `src/hooks/useOverviewDashboard.tsx` | Add snapshot-based Today's Pulse | High |
+| `src/hooks/useEngagementReport.tsx` | Add engagement-snapshot join | Medium |
+| `src/hooks/useMonthlyReportData.tsx` | Add monthly snapshot aggregation | Medium |
+| `src/hooks/useCampaignSummary.ts` | Add campaign-specific snapshots | Low |
+| `src/components/ui/data-source-badge.tsx` | Create reusable indicator | High |
 
 ---
 
-## Benefits
+## Implementation Phases Summary
 
-1. **Historical Tracking** - See how campaigns progress over time
-2. **Trend Visualization** - Build charts showing sent/reply growth
-3. **Performance Analysis** - Identify which days have best engagement
-4. **No Data Loss** - Main tables remain unchanged with cumulative view
-5. **Efficient Storage** - Only active campaigns create daily rows
-6. **Deduplication** - Unique constraint prevents duplicate snapshots
+### Phase 1: Foundation (Immediate)
+- Enhance `useNocoDBCampaignTrends` with engagement filtering
+- Create `DataSourceBadge` component
+- Estimated: 1-2 hours
+
+### Phase 2: Overview Dashboard (After Phase 1)
+- Add snapshot-based Today's Pulse data
+- Add data source indicator to weekly chart
+- Estimated: 2 hours
+
+### Phase 3: Engagement Report (After Phase 1)
+- Add snapshot join for linked campaigns
+- Update weekly breakdown source
+- Estimated: 2-3 hours
+
+### Phase 4: Monthly Report (After 30+ days of snapshots)
+- Convert to snapshot-based monthly aggregation
+- Estimated: 2 hours
+
+### Phase 5: Campaign Detail (Lower priority)
+- Add campaign progression chart from snapshots
+- Estimated: 1-2 hours
+
+---
+
+## Expected Benefits
+
+1. **Real-time accuracy** - Snapshot data reflects actual NocoDB sync, not estimates
+2. **Day-over-day tracking** - Delta views show true daily activity
+3. **Platform visibility** - Filter by SmartLead vs Reply.io easily
+4. **Engagement attribution** - 39 engagements already linked to snapshot data
+5. **Historical trends** - As snapshots accumulate, rich trend analysis becomes possible
+6. **Reduced "Estimated" labels** - Real data replaces synthetic backfills
+
+---
+
+## Notes & Considerations
+
+1. **First Day of Snapshots**: Since this is the first sync, deltas equal cumulative values. After tomorrow's sync, we'll have real day-over-day changes.
+
+2. **Unassigned Campaigns**: 71 of 110 campaigns are unassigned to engagements. These won't appear in engagement-filtered reports but will appear in global Overview dashboard.
+
+3. **Reply.io Positive Replies**: NocoDB doesn't track positive sentiment for Reply.io campaigns (shows as 0). This is a data source limitation, not a bug.
+
+4. **Gradual Rollout**: Start with Today's Pulse (Phase 2), then expand as snapshot history accumulates.
 
