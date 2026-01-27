@@ -3834,6 +3834,69 @@ export type Database = {
           },
         ]
       }
+      nocodb_campaign_daily_snapshots: {
+        Row: {
+          campaign_id: string
+          campaign_name: string
+          created_at: string | null
+          emails_bounced: number | null
+          emails_delivered: number | null
+          emails_replied: number | null
+          emails_sent: number | null
+          id: string
+          leads_active: number | null
+          leads_completed: number | null
+          leads_paused: number | null
+          ooos: number | null
+          optouts: number | null
+          platform: string
+          positive_replies: number | null
+          snapshot_date: string
+          status: string | null
+          total_leads: number | null
+        }
+        Insert: {
+          campaign_id: string
+          campaign_name: string
+          created_at?: string | null
+          emails_bounced?: number | null
+          emails_delivered?: number | null
+          emails_replied?: number | null
+          emails_sent?: number | null
+          id?: string
+          leads_active?: number | null
+          leads_completed?: number | null
+          leads_paused?: number | null
+          ooos?: number | null
+          optouts?: number | null
+          platform: string
+          positive_replies?: number | null
+          snapshot_date: string
+          status?: string | null
+          total_leads?: number | null
+        }
+        Update: {
+          campaign_id?: string
+          campaign_name?: string
+          created_at?: string | null
+          emails_bounced?: number | null
+          emails_delivered?: number | null
+          emails_replied?: number | null
+          emails_sent?: number | null
+          id?: string
+          leads_active?: number | null
+          leads_completed?: number | null
+          leads_paused?: number | null
+          ooos?: number | null
+          optouts?: number | null
+          platform?: string
+          positive_replies?: number | null
+          snapshot_date?: string
+          status?: string | null
+          total_leads?: number | null
+        }
+        Relationships: []
+      }
       nocodb_replyio_campaigns: {
         Row: {
           bounces: number | null
@@ -5288,6 +5351,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      nocodb_campaign_daily_deltas: {
+        Row: {
+          campaign_id: string | null
+          campaign_name: string | null
+          days_since_last: number | null
+          emails_bounced: number | null
+          emails_bounced_delta: number | null
+          emails_replied: number | null
+          emails_replied_delta: number | null
+          emails_sent: number | null
+          emails_sent_delta: number | null
+          platform: string | null
+          positive_delta: number | null
+          positive_replies: number | null
+          prev_snapshot_date: string | null
+          snapshot_date: string | null
+          status: string | null
+          total_leads: number | null
+        }
+        Relationships: []
+      }
+      nocodb_daily_totals: {
+        Row: {
+          platform: string | null
+          replied_delta: number | null
+          sent_delta: number | null
+          snapshot_date: string | null
+          total_bounced: number | null
+          total_campaigns: number | null
+          total_leads: number | null
+          total_positive: number | null
+          total_replied: number | null
+          total_sent: number | null
+        }
+        Relationships: []
       }
       segment_performance: {
         Row: {
