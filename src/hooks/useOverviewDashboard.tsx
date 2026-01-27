@@ -158,7 +158,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       }
 
       // Fetch all data in parallel - including NocoDB snapshots
-      const [dailyMetricsRes, campaignsRes, todayMetricsRes, activityCountRes, snapshotTotalsRes] = await Promise.all([
+      const [dailyMetricsRes, campaignsRes, todayMetricsRes, activityCountRes, snapshotTotalsRes, allSnapshotTotalsRes] = await Promise.all([
         // Last 12 weeks of daily metrics for trend chart
         supabase
           .from('daily_metrics')
@@ -190,12 +190,22 @@ export function useOverviewDashboard(): OverviewDashboardData {
           .in('engagement_id', engagementIds)
           .limit(1),
         
-        // NEW: Fetch latest NocoDB daily totals for Today's Pulse enhancement
+      // NEW: Fetch latest NocoDB daily totals for Today's Pulse enhancement
         supabase
           .from('nocodb_daily_totals')
           .select('*')
           .order('snapshot_date', { ascending: false })
           .limit(10), // Get recent days to find the latest
+        
+        // NEW: Fetch all nocodb_daily_totals for weekly chart (with deltas)
+        // We need to detect first-day entries by checking if sent_delta equals total_sent
+        supabase
+          .from('nocodb_daily_totals')
+          .select('snapshot_date, platform, total_sent, total_replied, total_positive, sent_delta, replied_delta')
+          .eq('platform', 'all') // Use aggregated 'all' platform row for totals
+          .gte('snapshot_date', week12Start)
+          .lte('snapshot_date', todayStr)
+          .order('snapshot_date', { ascending: true }),
       ]);
 
       const dailyMetrics = dailyMetricsRes.data || [];
@@ -203,6 +213,15 @@ export function useOverviewDashboard(): OverviewDashboardData {
       const todayMetrics = todayMetricsRes.data || [];
       const activityCount = activityCountRes.count || 0;
       const snapshotTotals = snapshotTotalsRes.data || [];
+      const allSnapshotTotals = (allSnapshotTotalsRes.data || []) as Array<{
+        snapshot_date: string;
+        platform: string;
+        total_sent: number;
+        total_replied: number;
+        total_positive: number;
+        sent_delta: number;
+        replied_delta: number;
+      }>;
       
       // Find the most recent snapshot totals (aggregate across all platforms)
       const latestSnapshotDate = snapshotTotals.length > 0 ? snapshotTotals[0].snapshot_date : null;
@@ -308,6 +327,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       const last30Agg = campaignTotals;
 
       // Build weekly breakdown (last 12 weeks)
+      // Priority: Use snapshot deltas when available, fall back to daily_metrics
       const weeklyMap = new Map<string, WeeklyData>();
       
       for (let i = 0; i < 12; i++) {
@@ -328,14 +348,53 @@ export function useOverviewDashboard(): OverviewDashboardData {
         });
       }
 
-      dailyMetrics.forEach(m => {
-        const date = parseISO(m.date);
+      // First, populate from snapshot deltas (higher priority, more accurate)
+      // Skip first-day entries where sent_delta equals total_sent (no previous day comparison)
+      const validSnapshotDeltas = allSnapshotTotals.filter(s => 
+        s.sent_delta !== s.total_sent || s.sent_delta === 0
+      );
+      
+      validSnapshotDeltas.forEach(s => {
+        const date = parseISO(s.snapshot_date);
         const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
         const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
         
         const week = weeklyMap.get(weekEndStr);
         if (week) {
-          week.emailsSent += m.emails_sent || 0;
+          week.emailsSent += s.sent_delta || 0;
+          week.replies += s.replied_delta || 0;
+          // Use total_positive for now (no positive_delta in view)
+          // This will show cumulative, but it's better than nothing
+        }
+      });
+      
+      // Get weeks that have snapshot data
+      const weeksWithSnapshotData = new Set<string>();
+      validSnapshotDeltas.forEach(s => {
+        const date = parseISO(s.snapshot_date);
+        const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+        weeksWithSnapshotData.add(format(weekEnd, 'yyyy-MM-dd'));
+      });
+      
+      // Fall back to daily_metrics for weeks WITHOUT snapshot data
+      // Also apply a sanity cap to filter out anomalous values (>50k emails/day is suspicious)
+      const DAILY_SENT_CAP = 50000;
+      
+      dailyMetrics.forEach(m => {
+        const date = parseISO(m.date);
+        const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+        const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
+        
+        // Skip if this week already has snapshot data
+        if (weeksWithSnapshotData.has(weekEndStr)) {
+          return;
+        }
+        
+        const week = weeklyMap.get(weekEndStr);
+        if (week) {
+          // Apply cap to filter out anomalous spikes
+          const cappedSent = Math.min(m.emails_sent || 0, DAILY_SENT_CAP);
+          week.emailsSent += cappedSent;
           week.replies += m.emails_replied || 0;
           week.positiveReplies += m.positive_replies || 0;
           week.meetingsBooked += m.meetings_booked || 0;
