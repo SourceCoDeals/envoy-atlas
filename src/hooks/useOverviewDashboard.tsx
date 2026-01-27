@@ -403,11 +403,15 @@ export function useOverviewDashboard(): OverviewDashboardData {
 
       // Calculate rates for each week - ONLY include weeks with actual activity
       // Filter out weeks with no emails sent (true time-series only, no estimated data)
+      // NOTE: Reply rate uses emails sent as proxy for delivered in weekly charts
+      // (daily bounce data not available in current snapshot structure)
       const weeklyBreakdown = Array.from(weeklyMap.values())
         .filter(w => w.emailsSent > 0) // Only show weeks with real data
         .sort((a, b) => a.weekEnding.localeCompare(b.weekEnding))
         .map(w => ({
           ...w,
+          // Using sent as denominator here since we don't have weekly delivered totals
+          // For campaign-level metrics, we use delivered (see useCampaigns)
           replyRate: w.emailsSent > 0 ? (w.replies / w.emailsSent) * 100 : 0,
           positiveRate: w.emailsSent > 0 ? (w.positiveReplies / w.emailsSent) * 100 : 0,
         }));

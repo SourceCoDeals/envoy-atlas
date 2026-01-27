@@ -24,9 +24,9 @@ interface FormulaRow {
 const emailFormulas: FormulaRow[] = [
   {
     name: 'Reply Rate',
-    formula: '(replied / sent) × 100',
-    function: 'calculateReplyRate(sent, replied)',
-    description: 'Percentage of emails that received a reply',
+    formula: '(replied / delivered) × 100',
+    function: 'calculateReplyRateFromDelivered(delivered, replied)',
+    description: 'Percentage of delivered emails that received a reply. Uses delivered (sent - bounced) as denominator for accuracy.',
     benchmark: '> 5% good, > 2% average',
   },
   {
