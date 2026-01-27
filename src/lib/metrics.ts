@@ -31,9 +31,42 @@ export const calculateRateDecimal = (numerator: number | null | undefined, denom
 
 /**
  * Standard metric calculations - all return percentages (0-100)
+ * 
+ * IMPORTANT: Reply Rate Standard
+ * The industry-standard formula for email reply rate uses DELIVERED as denominator:
+ *   Reply Rate = (Replies / Delivered) × 100
+ *   Where: Delivered = Sent - Bounced
+ * 
+ * This is because bounced emails can never receive replies, so using "sent" 
+ * unfairly penalizes campaigns with high bounce rates. Use calculateReplyRateFromDelivered()
+ * for accurate reply rate calculations.
+ */
+
+/**
+ * @deprecated Use calculateReplyRateFromDelivered for accurate reply rates
+ * Legacy function that uses sent as denominator
  */
 export const calculateReplyRate = (sent: number | null | undefined, replied: number | null | undefined): number => 
   calculateRate(replied, sent);
+
+/**
+ * Calculate reply rate using delivered as denominator (industry standard)
+ * Formula: (Replies / Delivered) × 100
+ * @param delivered - Number of emails successfully delivered (sent - bounced)
+ * @param replied - Number of replies received
+ */
+export const calculateReplyRateFromDelivered = (delivered: number | null | undefined, replied: number | null | undefined): number => 
+  calculateRate(replied, delivered);
+
+/**
+ * Calculate delivered count from sent and bounced
+ * Delivered = Sent - Bounced
+ */
+export const calculateDelivered = (sent: number | null | undefined, bounced: number | null | undefined): number => {
+  const s = sent ?? 0;
+  const b = bounced ?? 0;
+  return Math.max(0, s - b);
+};
 
 export const calculateBounceRate = (sent: number | null | undefined, bounced: number | null | undefined): number => 
   calculateRate(bounced, sent);

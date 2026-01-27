@@ -4,96 +4,65 @@ import { Badge } from '@/components/ui/badge';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 /**
- * Disposition categories aligned with cold_calls.normalized_category values
- * Reference: src/lib/constants/dispositions.ts
+ * Simplified 4-category disposition grouping
+ * Aligned with cold_calls.normalized_category values
  */
-const DISPOSITION_CATEGORIES = {
-  // POSITIVE OUTCOMES - Decision maker conversations with interest
-  meeting_booked: {
-    label: 'Meeting Booked',
-    color: 'hsl(var(--chart-1))',
-    category: 'positive',
-    dispositions: ['meeting booked', 'meeting_booked', 'positive - blacklist co'],
+const SIMPLIFIED_CATEGORIES = {
+  positive: {
+    label: 'Positive Outcomes',
+    color: 'hsl(142, 76%, 36%)', // Green
+    dispositions: [
+      'meeting booked', 'meeting_booked', 
+      'callback requested', 'callback', 
+      'positive - blacklist co', 'interested',
+      'send email', 'send_email', 'connection'
+    ],
   },
-  callback: {
-    label: 'Callback Requested',
-    color: 'hsl(var(--chart-2))',
-    category: 'positive',
-    dispositions: ['callback requested', 'callback', 'interested'],
+  contact_made: {
+    label: 'Contact Made',
+    color: 'hsl(217, 91%, 60%)', // Blue
+    dispositions: [
+      'receptionist', 'gatekeeper', 'gk',
+      'not qualified', 'not_qualified',
+      'negative - blacklist co', 'negative - blacklist contact',
+      'hung up', 'hung_up', 'not interested', 'not_interested'
+    ],
   },
-  send_email: {
-    label: 'Send Email',
-    color: 'hsl(var(--chart-3))',
-    category: 'positive',
-    dispositions: ['send email', 'send_email', 'connection'],
+  no_contact: {
+    label: 'No Contact',
+    color: 'hsl(215, 16%, 47%)', // Gray
+    dispositions: [
+      'voicemail', 'voicemail drop', 'live voicemail', 'vm',
+      'no answer', 'no_answer', 'busy'
+    ],
   },
-  
-  // TARGETING/GATEKEEPER - Not reaching decision makers
-  gatekeeper: {
-    label: 'Gatekeeper',
-    color: 'hsl(var(--chart-4))',
-    category: 'targeting',
-    dispositions: ['receptionist', 'gatekeeper', 'gk'],
-  },
-  not_qualified: {
-    label: 'Not Qualified',
-    color: 'hsl(var(--chart-5))',
-    category: 'targeting',
-    dispositions: ['not qualified', 'not_qualified', 'negative - blacklist co', 'negative - blacklist contact'],
-  },
-  
-  // NO CONTACT - Didn't reach anyone
-  voicemail: {
-    label: 'Voicemail',
-    color: 'hsl(var(--muted-foreground))',
-    category: 'no_contact',
-    dispositions: ['voicemail', 'voicemail drop', 'live voicemail', 'vm'],
-  },
-  no_answer: {
-    label: 'No Answer',
-    color: 'hsl(var(--muted))',
-    category: 'no_contact',
-    dispositions: ['no answer', 'no_answer', 'busy'],
-  },
-  
-  // BAD DATA - Data quality issues
-  bad_data: {
-    label: 'Bad Data',
-    color: 'hsl(var(--destructive))',
-    category: 'bad_data',
-    dispositions: ['bad phone', 'wrong number', 'disconnected', 'bad_phone', 'wrong_number', 'do not call'],
-  },
-  
-  // REJECTION - Message/rep issues
-  hung_up: {
-    label: 'Hung Up',
-    color: 'hsl(var(--destructive)/0.7)',
-    category: 'rejection',
-    dispositions: ['hung up', 'hung_up', 'not interested', 'not_interested'],
+  data_issues: {
+    label: 'Data Issues',
+    color: 'hsl(0, 84%, 60%)', // Red
+    dispositions: [
+      'bad phone', 'wrong number', 'disconnected', 
+      'bad_phone', 'wrong_number', 'do not call'
+    ],
   },
 };
 
-function classifyDisposition(normalized_category: string | null): string {
+function classifyToSimplified(normalized_category: string | null): keyof typeof SIMPLIFIED_CATEGORIES | 'unknown' {
   if (!normalized_category) return 'unknown';
   const lower = normalized_category.toLowerCase().trim();
   
-  for (const [key, cat] of Object.entries(DISPOSITION_CATEGORIES)) {
+  for (const [key, cat] of Object.entries(SIMPLIFIED_CATEGORIES)) {
     if (cat.dispositions.some(d => lower === d || lower.startsWith(d))) {
-      return key;
+      return key as keyof typeof SIMPLIFIED_CATEGORIES;
     }
   }
   
   // Fuzzy matching for edge cases
-  if (lower.includes('voicemail') || lower.includes('vm')) return 'voicemail';
-  if (lower.includes('no answer')) return 'no_answer';
-  if (lower.includes('positive')) return 'meeting_booked';
-  if (lower.includes('negative')) return 'not_qualified';
-  if (lower.includes('callback')) return 'callback';
-  if (lower.includes('meeting') || lower.includes('booked')) return 'meeting_booked';
-  if (lower.includes('gatekeeper') || lower.includes('receptionist')) return 'gatekeeper';
-  if (lower.includes('bad') || lower.includes('wrong') || lower.includes('disconnect')) return 'bad_data';
+  if (lower.includes('voicemail') || lower.includes('vm') || lower.includes('no answer')) return 'no_contact';
+  if (lower.includes('positive') || lower.includes('meeting') || lower.includes('callback') || lower.includes('interested')) return 'positive';
+  if (lower.includes('negative') || lower.includes('gatekeeper') || lower.includes('receptionist') || lower.includes('hung')) return 'contact_made';
+  if (lower.includes('bad') || lower.includes('wrong') || lower.includes('disconnect') || lower.includes('do not call')) return 'data_issues';
   
-  return 'other';
+  return 'unknown';
 }
 
 interface DispositionPieChartProps {
@@ -109,88 +78,91 @@ interface DispositionPieChartProps {
 
 export function DispositionPieChart({ calls }: DispositionPieChartProps) {
   const { pieData, breakdown, summary } = useMemo(() => {
-    const counts: Record<string, number> = {};
+    const counts: Record<string, number> = {
+      positive: 0,
+      contact_made: 0,
+      no_contact: 0,
+      data_issues: 0,
+      unknown: 0,
+    };
+    
+    // Also track detailed dispositions for breakdown
+    const detailedCounts: Record<string, number> = {};
     
     calls.forEach(call => {
-      // Use normalized_category if available, otherwise fall back to category
       const disposition = call.normalized_category || call.category;
-      const category = classifyDisposition(disposition);
+      const category = classifyToSimplified(disposition);
       counts[category] = (counts[category] || 0) + 1;
+      
+      // Track detailed for breakdown
+      const displayName = disposition?.toLowerCase().trim() || 'unknown';
+      detailedCounts[displayName] = (detailedCounts[displayName] || 0) + 1;
     });
 
     const total = calls.length;
     
-    // Build pie data for visible slices only (exclude voicemail/no_answer for clarity)
-    const connectionDispositions = ['meeting_booked', 'callback', 'send_email', 'gatekeeper', 'not_qualified', 'hung_up', 'bad_data'];
-    const pieData = connectionDispositions
-      .map(key => {
-        const cat = DISPOSITION_CATEGORIES[key as keyof typeof DISPOSITION_CATEGORIES];
-        if (!cat) return null;
-        return {
-          name: cat.label,
-          value: counts[key] || 0,
-          color: cat.color,
-          category: cat.category,
-          percentage: total > 0 ? ((counts[key] || 0) / total) * 100 : 0,
-        };
-      })
-      .filter((d): d is NonNullable<typeof d> => d !== null && d.value > 0);
+    // Build simplified 4-slice pie data
+    const pieData = Object.entries(SIMPLIFIED_CATEGORIES).map(([key, cat]) => ({
+      name: cat.label,
+      value: counts[key] || 0,
+      color: cat.color,
+      key,
+      percentage: total > 0 ? ((counts[key] || 0) / total) * 100 : 0,
+    })).filter(d => d.value > 0);
 
-    // Calculate category totals
-    const positiveTotal = (counts.meeting_booked || 0) + (counts.callback || 0) + (counts.send_email || 0);
-    const targetingTotal = (counts.gatekeeper || 0) + (counts.not_qualified || 0);
-    const noContactTotal = (counts.voicemail || 0) + (counts.no_answer || 0);
-    const badDataTotal = counts.bad_data || 0;
-    const rejectionTotal = counts.hung_up || 0;
-    const connectionsTotal = calls.filter(c => c.is_connection).length;
+    // Build breakdown with top dispositions per category
+    const getTopDispositions = (categoryKey: string, limit = 3) => {
+      const categoryDisps = SIMPLIFIED_CATEGORIES[categoryKey as keyof typeof SIMPLIFIED_CATEGORIES]?.dispositions || [];
+      const items: { label: string; count: number }[] = [];
+      
+      Object.entries(detailedCounts).forEach(([disp, count]) => {
+        if (categoryDisps.some(d => disp === d || disp.startsWith(d))) {
+          items.push({ label: disp, count });
+        }
+      });
+      
+      return items.sort((a, b) => b.count - a.count).slice(0, limit);
+    };
 
     const breakdown = {
       positive: {
-        total: positiveTotal,
-        percentage: total > 0 ? (positiveTotal / total) * 100 : 0,
-        items: [
-          { label: 'Meeting Booked', count: counts.meeting_booked || 0, pct: total > 0 ? ((counts.meeting_booked || 0) / total) * 100 : 0 },
-          { label: 'Callback Requested', count: counts.callback || 0, pct: total > 0 ? ((counts.callback || 0) / total) * 100 : 0 },
-          { label: 'Send Email', count: counts.send_email || 0, pct: total > 0 ? ((counts.send_email || 0) / total) * 100 : 0 },
-        ],
+        total: counts.positive,
+        percentage: total > 0 ? (counts.positive / total) * 100 : 0,
+        items: getTopDispositions('positive'),
       },
-      targeting: {
-        total: targetingTotal,
-        percentage: total > 0 ? (targetingTotal / total) * 100 : 0,
-        items: [
-          { label: 'Gatekeeper', count: counts.gatekeeper || 0, pct: total > 0 ? ((counts.gatekeeper || 0) / total) * 100 : 0 },
-          { label: 'Not Qualified', count: counts.not_qualified || 0, pct: total > 0 ? ((counts.not_qualified || 0) / total) * 100 : 0 },
-        ],
+      contact_made: {
+        total: counts.contact_made,
+        percentage: total > 0 ? (counts.contact_made / total) * 100 : 0,
+        items: getTopDispositions('contact_made'),
       },
       no_contact: {
-        total: noContactTotal,
-        percentage: total > 0 ? (noContactTotal / total) * 100 : 0,
-        items: [
-          { label: 'Voicemail', count: counts.voicemail || 0, pct: total > 0 ? ((counts.voicemail || 0) / total) * 100 : 0 },
-          { label: 'No Answer', count: counts.no_answer || 0, pct: total > 0 ? ((counts.no_answer || 0) / total) * 100 : 0 },
-        ],
+        total: counts.no_contact,
+        percentage: total > 0 ? (counts.no_contact / total) * 100 : 0,
+        items: getTopDispositions('no_contact'),
       },
-      issues: {
-        total: badDataTotal + rejectionTotal,
-        percentage: total > 0 ? ((badDataTotal + rejectionTotal) / total) * 100 : 0,
-        items: [
-          { label: 'Bad Data', count: badDataTotal, pct: total > 0 ? (badDataTotal / total) * 100 : 0 },
-          { label: 'Hung Up / Rejected', count: rejectionTotal, pct: total > 0 ? (rejectionTotal / total) * 100 : 0 },
-        ],
+      data_issues: {
+        total: counts.data_issues,
+        percentage: total > 0 ? (counts.data_issues / total) * 100 : 0,
+        items: getTopDispositions('data_issues'),
       },
     };
 
-    // Generate insight summary
+    // Generate insight
+    const connectionsTotal = calls.filter(c => c.is_connection).length;
     const connectRate = total > 0 ? (connectionsTotal / total) * 100 : 0;
-    const summary = connectRate >= 15
-      ? `${connectRate.toFixed(0)}% connect rate. Strong performance!`
-      : breakdown.no_contact.percentage > 70
-        ? `${breakdown.no_contact.percentage.toFixed(0)}% no contact. Consider timing adjustments.`
-        : breakdown.targeting.percentage > 20
-          ? `${breakdown.targeting.percentage.toFixed(0)}% gatekeeper calls. Work on bypass strategies.`
-          : breakdown.issues.percentage > 10
-            ? `${breakdown.issues.percentage.toFixed(0)}% bad data/rejection. Review lead quality.`
-            : `Mixed results. Focus on improving positive outcomes.`;
+    
+    let summary = '';
+    if (breakdown.positive.percentage >= 5) {
+      summary = `🎯 ${breakdown.positive.percentage.toFixed(1)}% positive outcomes. Strong performance!`;
+    } else if (breakdown.no_contact.percentage > 65) {
+      summary = `📞 ${breakdown.no_contact.percentage.toFixed(0)}% no contact. Try different call times.`;
+    } else if (breakdown.data_issues.percentage > 10) {
+      summary = `⚠️ ${breakdown.data_issues.percentage.toFixed(0)}% data issues. Review lead quality.`;
+    } else if (connectRate >= 20) {
+      summary = `✓ ${connectRate.toFixed(0)}% connect rate. Focus on converting to outcomes.`;
+    } else {
+      summary = `Mixed results. ${breakdown.positive.total} positive outcomes from ${total} calls.`;
+    }
 
     return { pieData, breakdown, summary };
   }, [calls]);
@@ -200,7 +172,7 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
       <Card>
         <CardHeader>
           <CardTitle>Disposition Breakdown</CardTitle>
-          <CardDescription>How are completed calls ending?</CardDescription>
+          <CardDescription>How are calls ending?</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-center py-8">No call data available</p>
@@ -209,38 +181,44 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
     );
   }
 
+  const categoryConfig = [
+    { key: 'positive', ...SIMPLIFIED_CATEGORIES.positive, data: breakdown.positive },
+    { key: 'contact_made', ...SIMPLIFIED_CATEGORIES.contact_made, data: breakdown.contact_made },
+    { key: 'no_contact', ...SIMPLIFIED_CATEGORIES.no_contact, data: breakdown.no_contact },
+    { key: 'data_issues', ...SIMPLIFIED_CATEGORIES.data_issues, data: breakdown.data_issues },
+  ];
+
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base">
-          🥧 Disposition Breakdown
-        </CardTitle>
-        <CardDescription>How are completed calls ending? This tells you where to focus.</CardDescription>
+        <CardTitle className="text-base">Disposition Breakdown</CardTitle>
+        <CardDescription>Simplified view of call outcomes</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Pie Chart - Left side */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Simplified 4-slice Donut Chart */}
           <div className="flex items-center justify-center">
-            <div className="h-56 w-full">
+            <div className="h-48 w-full max-w-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={pieData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={45}
-                    outerRadius={75}
-                    paddingAngle={2}
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={3}
                     dataKey="value"
-                    label={({ name, percentage }) => percentage > 3 ? `${name} ${percentage.toFixed(0)}%` : ''}
-                    labelLine={false}
                   >
                     {pieData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value: number, name: string) => [`${value} (${((value / calls.length) * 100).toFixed(1)}%)`, name]}
+                    formatter={(value: number, name: string) => [
+                      `${value.toLocaleString()} (${((value / calls.length) * 100).toFixed(1)}%)`, 
+                      name
+                    ]}
                     contentStyle={{
                       backgroundColor: 'hsl(var(--card))',
                       border: '1px solid hsl(var(--border))',
@@ -252,85 +230,44 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
             </div>
           </div>
 
-          {/* Breakdown Table - Right side */}
-          <div className="space-y-3 text-sm">
-            {/* Positive Outcomes */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-green-600 dark:text-green-400">POSITIVE OUTCOMES</span>
-                <Badge variant="outline" className="text-green-600 dark:text-green-400 border-green-600/30">
-                  {breakdown.positive.percentage.toFixed(0)}%
-                </Badge>
-              </div>
-              <div className="space-y-0.5 pl-3 text-xs">
-                {breakdown.positive.items.map(item => (
-                  <div key={item.label} className="flex justify-between text-muted-foreground">
-                    <span>├── {item.label}</span>
-                    <span>{item.count.toLocaleString()} ({item.pct.toFixed(1)}%)</span>
+          {/* Category Breakdown */}
+          <div className="space-y-3">
+            {categoryConfig.map(({ key, label, color, data }) => (
+              <div key={key} className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="w-3 h-3 rounded-full" 
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="text-sm font-medium">{label}</span>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Targeting/Gatekeeper */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-amber-600 dark:text-amber-400">TARGETING ISSUES</span>
-                <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-600/30">
-                  {breakdown.targeting.percentage.toFixed(0)}%
-                </Badge>
-              </div>
-              <div className="space-y-0.5 pl-3 text-xs">
-                {breakdown.targeting.items.map(item => (
-                  <div key={item.label} className="flex justify-between text-muted-foreground">
-                    <span>├── {item.label}</span>
-                    <span>{item.count.toLocaleString()} ({item.pct.toFixed(1)}%)</span>
+                  <Badge 
+                    variant="outline" 
+                    className="text-xs"
+                    style={{ borderColor: color, color }}
+                  >
+                    {data.total.toLocaleString()} ({data.percentage.toFixed(1)}%)
+                  </Badge>
+                </div>
+                {data.items.length > 0 && (
+                  <div className="pl-5 text-xs text-muted-foreground space-y-0.5">
+                    {data.items.slice(0, 2).map((item, i) => (
+                      <div key={item.label} className="flex justify-between">
+                        <span className="capitalize">{item.label}</span>
+                        <span>{item.count.toLocaleString()}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-            </div>
-
-            {/* No Contact */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-muted-foreground">NO CONTACT</span>
-                <Badge variant="outline" className="text-muted-foreground border-muted-foreground/30">
-                  {breakdown.no_contact.percentage.toFixed(0)}%
-                </Badge>
-              </div>
-              <div className="space-y-0.5 pl-3 text-xs">
-                {breakdown.no_contact.items.map(item => (
-                  <div key={item.label} className="flex justify-between text-muted-foreground">
-                    <span>├── {item.label}</span>
-                    <span>{item.count.toLocaleString()} ({item.pct.toFixed(1)}%)</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Issues */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-red-600 dark:text-red-400">DATA/REP ISSUES</span>
-                <Badge variant="outline" className="text-red-600 dark:text-red-400 border-red-600/30">
-                  {breakdown.issues.percentage.toFixed(0)}%
-                </Badge>
-              </div>
-              <div className="space-y-0.5 pl-3 text-xs">
-                {breakdown.issues.items.map((item, i) => (
-                  <div key={item.label} className="flex justify-between text-muted-foreground">
-                    <span>{i === breakdown.issues.items.length - 1 ? '└──' : '├──'} {item.label}</span>
-                    <span>{item.count.toLocaleString()} ({item.pct.toFixed(1)}%)</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
-        {/* Summary */}
-        <div className="mt-3 p-2 bg-muted/50 rounded-lg">
-          <p className="text-xs">💡 {summary}</p>
+        {/* Summary Insight */}
+        <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+          <p className="text-sm">{summary}</p>
         </div>
       </CardContent>
     </Card>

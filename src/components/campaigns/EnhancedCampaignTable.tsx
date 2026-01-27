@@ -95,7 +95,8 @@ export function EnhancedCampaignTable({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [localTierFilter, setLocalTierFilter] = useState<string>(tierFilter);
   const [localEngagementFilter, setLocalEngagementFilter] = useState<string>(engagementFilter);
-  const [sortField, setSortField] = useState<SortField>('score');
+  // Default to no explicit sort - preserves hook's active-first ordering
+  const [sortField, setSortField] = useState<SortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
 

@@ -19,13 +19,14 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
     return ((data[index].count / data[index - 1].count) * 100).toFixed(1);
   };
 
+  // Colors for funnel stages - gradient from top to bottom
   const stageColors = [
-    'bg-blue-500',
-    'bg-blue-400',
-    'bg-cyan-500',
-    'bg-emerald-500',
-    'bg-green-500',
-    'bg-green-600',
+    'from-blue-500 to-blue-600',
+    'from-cyan-500 to-cyan-600',
+    'from-teal-500 to-teal-600',
+    'from-emerald-500 to-emerald-600',
+    'from-green-500 to-green-600',
+    'from-green-600 to-green-700',
   ];
 
   return (
@@ -34,54 +35,70 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
         <CardTitle className="text-base">Conversion Funnel</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
+        <div className="flex flex-col items-center space-y-1">
           {data.map((stage, index) => {
-            const widthPercentage = (stage.count / maxCount) * 100;
+            // Calculate width as percentage of max (minimum 20% for visibility)
+            const widthPercentage = Math.max((stage.count / maxCount) * 100, 20);
             const convRate = getConversionRate(index);
             
             return (
-              <div key={stage.stage} className="relative">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium">{stage.stage}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold">{stage.count.toLocaleString()}</span>
-                    {convRate && (
-                      <span className="text-xs text-muted-foreground">
-                        ({convRate}%)
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="h-8 bg-muted rounded-md overflow-hidden relative">
+              <div key={stage.stage} className="w-full flex flex-col items-center">
+                {/* Funnel segment - trapezoid shape using clip-path */}
+                <div 
+                  className="relative group cursor-default"
+                  style={{ 
+                    width: `${widthPercentage}%`,
+                    minWidth: '120px',
+                  }}
+                >
                   <div
                     className={cn(
-                      'h-full rounded-md transition-all duration-500 flex items-center justify-center',
-                      stageColors[index % stageColors.length]
+                      'h-12 bg-gradient-to-r flex items-center justify-center transition-all duration-300',
+                      stageColors[index % stageColors.length],
+                      'hover:brightness-110'
                     )}
-                    style={{ 
-                      width: `${Math.max(widthPercentage, 5)}%`,
-                      marginLeft: `${(100 - widthPercentage) / 2}%`,
-                      marginRight: `${(100 - widthPercentage) / 2}%`,
+                    style={{
+                      clipPath: index === data.length - 1 
+                        ? 'polygon(5% 0%, 95% 0%, 90% 100%, 10% 100%)' // Bottom stage - more tapered
+                        : 'polygon(0% 0%, 100% 0%, 95% 100%, 5% 100%)', // Regular trapezoid
                     }}
-                  />
-                </div>
-                {index < data.length - 1 && (
-                  <div className="flex justify-center my-1">
-                    <div className="w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-muted-foreground/30" />
+                  >
+                    <div className="text-center text-white px-4">
+                      <div className="font-semibold text-sm truncate">{stage.stage}</div>
+                      <div className="text-xs opacity-90">{stage.count.toLocaleString()}</div>
+                    </div>
                   </div>
-                )}
+                  
+                  {/* Conversion rate badge between stages */}
+                  {index < data.length - 1 && convRate && (
+                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 z-10">
+                      <div className="bg-background border border-border rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">
+                        {convRate}%
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Spacer for conversion rate badge */}
+                {index < data.length - 1 && <div className="h-3" />}
               </div>
             );
           })}
         </div>
 
+        {/* Overall conversion summary */}
         {data.length > 1 && data[0].count > 0 && (
-          <div className="mt-4 pt-4 border-t">
+          <div className="mt-6 pt-4 border-t">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Overall Conversion</span>
-              <span className="font-bold text-primary">
-                {((data[data.length - 1].count / data[0].count) * 100).toFixed(2)}%
+              <span className="text-muted-foreground">
+                {data[0].stage} → {data[data.length - 1].stage}
               </span>
+              <span className="font-bold text-primary">
+                {((data[data.length - 1].count / data[0].count) * 100).toFixed(2)}% overall
+              </span>
+            </div>
+            <div className="mt-2 text-xs text-muted-foreground">
+              {data[0].count.toLocaleString()} {data[0].stage.toLowerCase()} → {data[data.length - 1].count.toLocaleString()} {data[data.length - 1].stage.toLowerCase()}
             </div>
           </div>
         )}
