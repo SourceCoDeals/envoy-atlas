@@ -220,6 +220,98 @@ async function fetchAllRecords(tableId: string, apiToken: string): Promise<any[]
   return allRecords;
 }
 
+// Helper to capture daily snapshots for active campaigns
+async function captureSnapshots(
+  supabase: any,
+  smartleadRecords: SmartLeadRecord[],
+  replyioRecords: ReplyIORecord[]
+): Promise<{ smartlead: number; replyio: number; errors: number }> {
+  const today = new Date().toISOString().split("T")[0];
+  const result = { smartlead: 0, replyio: 0, errors: 0 };
+  
+  // Filter to active SmartLead campaigns and map to snapshot format
+  const activeSmartlead = smartleadRecords
+    .filter(r => r.Status?.toUpperCase() === "ACTIVE")
+    .map(r => ({
+      snapshot_date: today,
+      platform: "smartlead" as const,
+      campaign_id: r["Campaign Id"],
+      campaign_name: r["Campaign Name"],
+      status: r.Status,
+      emails_sent: r["Total Emails Sent"] || 0,
+      emails_delivered: Math.max(0, (r["Total Emails Sent"] || 0) - (r["Total Bounces"] || 0)),
+      emails_bounced: r["Total Bounces"] || 0,
+      emails_replied: r["Total Replies"] || 0,
+      positive_replies: r["Leads Interested"] || 0,
+      total_leads: r["Total Leads"] || 0,
+      leads_active: r["Leads in Progress"] || 0,
+      leads_completed: r["Leads Completed"] || 0,
+      leads_paused: r["Leads Paused"] || 0,
+      optouts: 0,
+      ooos: 0,
+    }));
+  
+  // Filter to active Reply.io campaigns and map to snapshot format
+  const activeReplyio = replyioRecords
+    .filter(r => r.Status === "Active")
+    .map(r => ({
+      snapshot_date: today,
+      platform: "replyio" as const,
+      campaign_id: r["Campaign Id"],
+      campaign_name: r["Campaign Name"],
+      status: r.Status,
+      emails_sent: (r["# of Deliveries"] || 0) + (r["# of Bounces"] || 0),
+      emails_delivered: r["# of Deliveries"] || 0,
+      emails_bounced: r["# of Bounces"] || 0,
+      emails_replied: r["# of Replies"] || 0,
+      positive_replies: 0, // Reply.io doesn't have positive flag
+      total_leads: r["People Count"] || 0,
+      leads_active: r["People Active"] || 0,
+      leads_completed: r["People Finished"] || 0,
+      leads_paused: r["People Paused"] || 0,
+      optouts: r["# of OptOuts"] || 0,
+      ooos: r["# of OOOs"] || 0,
+    }));
+  
+  console.log(`[sync-nocodb] Capturing snapshots: ${activeSmartlead.length} SmartLead, ${activeReplyio.length} Reply.io`);
+  
+  // Upsert SmartLead snapshots
+  if (activeSmartlead.length > 0) {
+    const { error } = await supabase
+      .from("nocodb_campaign_daily_snapshots")
+      .upsert(activeSmartlead, { 
+        onConflict: "snapshot_date,platform,campaign_id",
+        ignoreDuplicates: false 
+      });
+    
+    if (error) {
+      console.error("[sync-nocodb] SmartLead snapshot error:", error);
+      result.errors++;
+    } else {
+      result.smartlead = activeSmartlead.length;
+    }
+  }
+  
+  // Upsert Reply.io snapshots
+  if (activeReplyio.length > 0) {
+    const { error } = await supabase
+      .from("nocodb_campaign_daily_snapshots")
+      .upsert(activeReplyio, { 
+        onConflict: "snapshot_date,platform,campaign_id",
+        ignoreDuplicates: false 
+      });
+    
+    if (error) {
+      console.error("[sync-nocodb] Reply.io snapshot error:", error);
+      result.errors++;
+    } else {
+      result.replyio = activeReplyio.length;
+    }
+  }
+  
+  return result;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -239,23 +331,28 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
     const body = await req.json().catch(() => ({}));
-    const { platform = "all" } = body;
+    const { platform = "all", capture_snapshot = true } = body;
     
-    console.log(`[sync-nocodb] Starting sync for platform: ${platform}`);
+    console.log(`[sync-nocodb] Starting sync for platform: ${platform}, capture_snapshot: ${capture_snapshot}`);
     
     const results = {
       smartlead: { fetched: 0, upserted: 0, errors: 0 },
       replyio: { fetched: 0, upserted: 0, errors: 0 },
+      snapshots: { smartlead: 0, replyio: 0, errors: 0 },
     };
+    
+    // Store raw records for snapshot capture
+    let smartleadRecords: SmartLeadRecord[] = [];
+    let replyioRecords: ReplyIORecord[] = [];
 
     // Sync SmartLead campaigns
     if (platform === "all" || platform === "smartlead") {
       console.log("[sync-nocodb] Syncing SmartLead campaigns...");
       try {
-        const records = await fetchAllRecords(SMARTLEAD_TABLE_ID, nocodbApiToken);
-        results.smartlead.fetched = records.length;
+        smartleadRecords = await fetchAllRecords(SMARTLEAD_TABLE_ID, nocodbApiToken);
+        results.smartlead.fetched = smartleadRecords.length;
         
-        const mappedRecords = records.map((r: SmartLeadRecord) => mapSmartLeadRecord(r));
+        const mappedRecords = smartleadRecords.map((r: SmartLeadRecord) => mapSmartLeadRecord(r));
         
         // Upsert in batches
         const batchSize = 100;
@@ -284,10 +381,10 @@ serve(async (req) => {
     if (platform === "all" || platform === "replyio") {
       console.log("[sync-nocodb] Syncing Reply.io campaigns...");
       try {
-        const records = await fetchAllRecords(REPLYIO_TABLE_ID, nocodbApiToken);
-        results.replyio.fetched = records.length;
+        replyioRecords = await fetchAllRecords(REPLYIO_TABLE_ID, nocodbApiToken);
+        results.replyio.fetched = replyioRecords.length;
         
-        const mappedRecords = records.map((r: ReplyIORecord) => mapReplyIORecord(r));
+        const mappedRecords = replyioRecords.map((r: ReplyIORecord) => mapReplyIORecord(r));
         
         // Upsert in batches
         const batchSize = 100;
@@ -310,6 +407,13 @@ serve(async (req) => {
         console.error("[sync-nocodb] Reply.io sync failed:", error);
         results.replyio.errors++;
       }
+    }
+
+    // Capture daily snapshots for active campaigns
+    if (capture_snapshot) {
+      console.log("[sync-nocodb] Capturing daily snapshots...");
+      results.snapshots = await captureSnapshots(supabase, smartleadRecords, replyioRecords);
+      console.log(`[sync-nocodb] Snapshots captured: ${results.snapshots.smartlead} SmartLead, ${results.snapshots.replyio} Reply.io`);
     }
 
     const duration = Date.now() - startTime;
