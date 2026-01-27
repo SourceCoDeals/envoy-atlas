@@ -331,10 +331,10 @@ export function useOverviewDashboard(): OverviewDashboardData {
       const weeklyMap = new Map<string, WeeklyData>();
       
       for (let i = 0; i < 12; i++) {
-        const weekEnd = endOfWeek(subWeeks(today, i), { weekStartsOn: 0 });
-        const weekStart = startOfWeek(subWeeks(today, i), { weekStartsOn: 0 });
+        const weekEnd = endOfWeek(subWeeks(today, i), { weekStartsOn: 1 });
+        const weekStart = startOfWeek(subWeeks(today, i), { weekStartsOn: 1 });
         const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
-        const weekLabel = format(weekEnd, 'MMM d');
+        const weekLabel = format(weekStart, 'MMM d');
         
         weeklyMap.set(weekEndStr, {
           weekEnding: weekEndStr,
@@ -356,7 +356,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       
       validSnapshotDeltas.forEach(s => {
         const date = parseISO(s.snapshot_date);
-        const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+        const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
         const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
         
         const week = weeklyMap.get(weekEndStr);
@@ -372,7 +372,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       const weeksWithSnapshotData = new Set<string>();
       validSnapshotDeltas.forEach(s => {
         const date = parseISO(s.snapshot_date);
-        const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+        const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
         weeksWithSnapshotData.add(format(weekEnd, 'yyyy-MM-dd'));
       });
       
@@ -382,7 +382,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       
       dailyMetrics.forEach(m => {
         const date = parseISO(m.date);
-        const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+        const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
         const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
         
         // Skip if this week already has snapshot data
