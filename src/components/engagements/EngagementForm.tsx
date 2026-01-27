@@ -65,12 +65,15 @@ function TeamMemberSelect({
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <Select value={value || ''} onValueChange={(v) => onChange(v || null)}>
+      <Select 
+        value={value || '__unassigned__'} 
+        onValueChange={(v) => onChange(v === '__unassigned__' ? null : v)}
+      >
         <SelectTrigger>
           <SelectValue placeholder="Unassigned" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">Unassigned</SelectItem>
+          <SelectItem value="__unassigned__">Unassigned</SelectItem>
           {teamMembers.map((m) => (
             <SelectItem key={m.id} value={m.id}>
               {m.first_name} {m.last_name || ''}
