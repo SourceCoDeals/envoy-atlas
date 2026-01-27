@@ -48,6 +48,7 @@ export interface TodaysPulse {
   replies: number;
   positive: number;
   meetingsBooked: number;
+  activeCampaigns?: number; // NEW: from snapshots
 }
 
 export interface DataCompleteness {
@@ -55,7 +56,15 @@ export interface DataCompleteness {
   campaignTotal: number;
 }
 
-export type DataSourceType = 'nocodb_aggregate' | 'activity_level' | 'mixed';
+export type DataSourceType = 'snapshots' | 'nocodb_aggregate' | 'activity_level' | 'daily_metrics' | 'mixed';
+
+export interface SnapshotSummary {
+  totalCampaigns: number;
+  totalSent: number;
+  totalReplied: number;
+  totalPositive: number;
+  snapshotDate: string | null;
+}
 
 export interface OverviewDashboardData {
   loading: boolean;
@@ -67,6 +76,7 @@ export interface OverviewDashboardData {
   topCampaigns: TopCampaign[];
   dataCompleteness: DataCompleteness;
   dataSource: DataSourceType;
+  snapshotSummary: SnapshotSummary | null; // NEW: snapshot metadata
   refetch: () => void;
 }
 
@@ -120,6 +130,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
   });
 
   const [dataSource, setDataSource] = useState<DataSourceType>('nocodb_aggregate');
+  const [snapshotSummary, setSnapshotSummary] = useState<SnapshotSummary | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!currentWorkspace?.id) return;
@@ -146,8 +157,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
         return;
       }
 
-      // Fetch all data in parallel
-      const [dailyMetricsRes, campaignsRes, todayMetricsRes, activityCountRes] = await Promise.all([
+      // Fetch all data in parallel - including NocoDB snapshots
+      const [dailyMetricsRes, campaignsRes, todayMetricsRes, activityCountRes, snapshotTotalsRes] = await Promise.all([
         // Last 12 weeks of daily metrics for trend chart
         supabase
           .from('daily_metrics')
@@ -178,15 +189,50 @@ export function useOverviewDashboard(): OverviewDashboardData {
           .select('id', { count: 'exact', head: true })
           .in('engagement_id', engagementIds)
           .limit(1),
+        
+        // NEW: Fetch latest NocoDB daily totals for Today's Pulse enhancement
+        supabase
+          .from('nocodb_daily_totals')
+          .select('*')
+          .order('snapshot_date', { ascending: false })
+          .limit(10), // Get recent days to find the latest
       ]);
 
       const dailyMetrics = dailyMetricsRes.data || [];
       const campaigns = campaignsRes.data || [];
       const todayMetrics = todayMetricsRes.data || [];
       const activityCount = activityCountRes.count || 0;
+      const snapshotTotals = snapshotTotalsRes.data || [];
       
-      // Determine data source type
-      if (activityCount > 0) {
+      // Find the most recent snapshot totals (aggregate across all platforms)
+      const latestSnapshotDate = snapshotTotals.length > 0 ? snapshotTotals[0].snapshot_date : null;
+      const latestSnapshots = snapshotTotals.filter(s => s.snapshot_date === latestSnapshotDate);
+      
+      // Aggregate snapshot totals across platforms
+      const snapshotAggregate = latestSnapshots.reduce((acc, s) => ({
+        totalCampaigns: acc.totalCampaigns + (s.total_campaigns || 0),
+        totalSent: acc.totalSent + (s.total_sent || 0),
+        totalReplied: acc.totalReplied + (s.total_replied || 0),
+        totalPositive: acc.totalPositive + (s.total_positive || 0),
+      }), { totalCampaigns: 0, totalSent: 0, totalReplied: 0, totalPositive: 0 });
+      
+      // Update snapshot summary
+      if (latestSnapshotDate) {
+        setSnapshotSummary({
+          totalCampaigns: snapshotAggregate.totalCampaigns,
+          totalSent: snapshotAggregate.totalSent,
+          totalReplied: snapshotAggregate.totalReplied,
+          totalPositive: snapshotAggregate.totalPositive,
+          snapshotDate: latestSnapshotDate,
+        });
+      } else {
+        setSnapshotSummary(null);
+      }
+      
+      // Determine data source type - prioritize snapshots if available
+      if (latestSnapshotDate) {
+        setDataSource('snapshots');
+      } else if (activityCount > 0) {
         setDataSource(activityCount > 1000 ? 'activity_level' : 'mixed');
       } else {
         setDataSource('nocodb_aggregate');
@@ -201,13 +247,23 @@ export function useOverviewDashboard(): OverviewDashboardData {
 
       setHasData(true);
 
-      // Calculate today's pulse
-      const todayTotals = todayMetrics.reduce((acc, m) => ({
-        emailsSending: acc.emailsSending + (m.emails_sent || 0),
-        replies: acc.replies + (m.emails_replied || 0),
-        positive: acc.positive + (m.positive_replies || 0),
-        meetingsBooked: acc.meetingsBooked + (m.meetings_booked || 0),
-      }), { emailsSending: 0, replies: 0, positive: 0, meetingsBooked: 0 });
+      // Calculate today's pulse - use snapshot data when available, fallback to daily_metrics
+      const hasSnapshotPulse = latestSnapshotDate === todayStr && snapshotAggregate.totalSent > 0;
+      
+      const todayTotals = hasSnapshotPulse
+        ? {
+            emailsSending: snapshotAggregate.totalSent,
+            replies: snapshotAggregate.totalReplied,
+            positive: snapshotAggregate.totalPositive,
+            meetingsBooked: 0, // Snapshots don't track meetings yet
+            activeCampaigns: snapshotAggregate.totalCampaigns,
+          }
+        : todayMetrics.reduce((acc, m) => ({
+            emailsSending: acc.emailsSending + (m.emails_sent || 0),
+            replies: acc.replies + (m.emails_replied || 0),
+            positive: acc.positive + (m.positive_replies || 0),
+            meetingsBooked: acc.meetingsBooked + (m.meetings_booked || 0),
+          }), { emailsSending: 0, replies: 0, positive: 0, meetingsBooked: 0 });
       
       setTodaysPulse(todayTotals);
 
@@ -497,6 +553,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
     topCampaigns,
     dataCompleteness: rawMetrics.dataCompleteness,
     dataSource,
+    snapshotSummary,
     refetch: fetchData,
   };
 }
