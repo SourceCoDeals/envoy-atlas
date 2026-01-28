@@ -11,34 +11,41 @@ export interface UnlinkedCampaign {
   totalSent: number;
 }
 
+// Sentinel UUID for unassigned campaigns - maintains RLS relationship while marking as unassigned
+const UNASSIGNED_ENGAGEMENT_ID = '00000000-0000-0000-0000-000000000000';
+
 export function useCampaignLinking() {
   const { currentWorkspace } = useWorkspace();
   const [updating, setUpdating] = useState<string | null>(null);
 
   /**
    * Updates the engagement_id for a single campaign and redistributes contacts
+   * Uses sentinel UUID for unassigned state instead of null to maintain RLS relationships
    */
   const updateCampaignEngagement = useCallback(async (
     campaignId: string,
     engagementId: string | null,
     oldEngagementId?: string | null
   ): Promise<boolean> => {
+    // Convert null to sentinel UUID for unassigned state
+    const actualEngagementId = engagementId === null ? UNASSIGNED_ENGAGEMENT_ID : engagementId;
+    
     setUpdating(campaignId);
     try {
       const { error } = await supabase
         .from('campaigns')
-        .update({ engagement_id: engagementId })
+        .update({ engagement_id: actualEngagementId })
         .eq('id', campaignId);
 
       if (error) throw error;
 
       // Redistribute contacts if moving to a new engagement
-      if (engagementId && oldEngagementId && engagementId !== oldEngagementId) {
+      if (actualEngagementId && oldEngagementId && actualEngagementId !== oldEngagementId) {
         try {
           await supabase.functions.invoke('redistribute-contacts', {
             body: {
               campaign_id: campaignId,
-              new_engagement_id: engagementId,
+              new_engagement_id: actualEngagementId,
               old_engagement_id: oldEngagementId,
             },
           });
@@ -48,7 +55,8 @@ export function useCampaignLinking() {
         }
       }
       
-      toast.success(engagementId ? 'Campaign linked successfully' : 'Campaign unlinked');
+      const isUnassigned = actualEngagementId === UNASSIGNED_ENGAGEMENT_ID;
+      toast.success(isUnassigned ? 'Campaign unlinked' : 'Campaign linked successfully');
       return true;
     } catch (err) {
       console.error('Error updating campaign engagement:', err);
