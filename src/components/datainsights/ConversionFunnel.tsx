@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Info } from 'lucide-react';
 
 interface FunnelStage {
@@ -124,7 +123,6 @@ const getStageInfo = (stageName: string) => {
 
 export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const maxCount = Math.max(...data.map(d => d.count), 1);
 
   const getConversionRate = (index: number) => {
     if (index === 0 || data[index - 1].count === 0) return null;
@@ -133,17 +131,16 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
 
   // Funnel colors - warm to cool gradient
   const stageColors = [
-    { bg: 'hsl(0 55% 62%)', hover: 'hsl(0 55% 55%)' },      // Coral/Red
-    { bg: 'hsl(43 77% 70%)', hover: 'hsl(43 77% 63%)' },    // Yellow
-    { bg: 'hsl(195 25% 45%)', hover: 'hsl(195 25% 38%)' },  // Teal/Slate
-    { bg: 'hsl(25 30% 35%)', hover: 'hsl(25 30% 28%)' },    // Brown
-    { bg: 'hsl(142 50% 40%)', hover: 'hsl(142 50% 33%)' },  // Green
-    { bg: 'hsl(220 50% 50%)', hover: 'hsl(220 50% 43%)' },  // Blue
+    { bg: 'hsl(220 70% 55%)', hover: 'hsl(220 70% 48%)' },    // Blue (top)
+    { bg: 'hsl(180 50% 45%)', hover: 'hsl(180 50% 38%)' },    // Teal
+    { bg: 'hsl(160 55% 42%)', hover: 'hsl(160 55% 35%)' },    // Green-teal
+    { bg: 'hsl(142 50% 40%)', hover: 'hsl(142 50% 33%)' },    // Green
+    { bg: 'hsl(142 55% 35%)', hover: 'hsl(142 55% 28%)' },    // Darker green
   ];
 
   // Calculate widths - top is 100%, each subsequent stage is proportionally smaller
   const getWidth = (index: number) => {
-    const minWidth = 25;
+    const minWidth = 30;
     const maxWidth = 100;
     const step = (maxWidth - minWidth) / Math.max(data.length - 1, 1);
     return maxWidth - (step * index);
@@ -155,134 +152,105 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
         <CardTitle className="text-base">Conversion Funnel</CardTitle>
       </CardHeader>
       <CardContent>
-        <TooltipProvider delayDuration={0}>
-          <div className="flex gap-6">
-            {/* Funnel visualization */}
-            <div className="flex-1 flex flex-col items-center">
-              <svg 
-                viewBox="0 0 200 240" 
-                className="w-full max-w-[280px]"
-                preserveAspectRatio="xMidYMid meet"
-              >
-                {data.map((stage, index) => {
-                  const topWidth = getWidth(index);
-                  const bottomWidth = index < data.length - 1 ? getWidth(index + 1) : topWidth * 0.7;
-                  const segmentHeight = 200 / data.length;
-                  const y = index * segmentHeight + 10;
-                  
-                  const topLeft = (200 - (topWidth * 2)) / 2;
-                  const topRight = topLeft + (topWidth * 2);
-                  const bottomLeft = (200 - (bottomWidth * 2)) / 2;
-                  const bottomRight = bottomLeft + (bottomWidth * 2);
-                  
-                  const color = stageColors[index % stageColors.length];
-                  const isHovered = hoveredIndex === index;
-                  const stageInfo = getStageInfo(stage.stage);
-                  
-                  return (
-                    <Tooltip key={stage.stage}>
-                      <TooltipTrigger asChild>
-                        <g
-                          onMouseEnter={() => setHoveredIndex(index)}
-                          onMouseLeave={() => setHoveredIndex(null)}
-                          className="cursor-pointer"
-                        >
-                          <path
-                            d={`M ${topLeft} ${y} 
-                                L ${topRight} ${y} 
-                                L ${bottomRight} ${y + segmentHeight - 2} 
-                                L ${bottomLeft} ${y + segmentHeight - 2} Z`}
-                            fill={isHovered ? color.hover : color.bg}
-                            className="transition-all duration-200"
-                          />
-                        </g>
-                      </TooltipTrigger>
-                      <TooltipContent 
-                        side="right" 
-                        className="max-w-[280px] p-0"
-                        sideOffset={10}
+        <div className="flex flex-col items-center space-y-1">
+          {data.map((stage, index) => {
+            const widthPercent = getWidth(index);
+            const color = stageColors[index % stageColors.length];
+            const isHovered = hoveredIndex === index;
+            const stageInfo = getStageInfo(stage.stage);
+            const convRate = getConversionRate(index);
+            
+            return (
+              <div key={stage.stage} className="w-full flex flex-col items-center">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <div 
+                      className="relative cursor-pointer transition-all duration-200"
+                      style={{ width: `${widthPercent}%`, minWidth: '140px' }}
+                      onMouseEnter={() => setHoveredIndex(index)}
+                      onMouseLeave={() => setHoveredIndex(null)}
+                    >
+                      {/* Trapezoid shape */}
+                      <div
+                        className="h-14 flex items-center justify-center transition-all duration-200"
+                        style={{
+                          background: isHovered ? color.hover : color.bg,
+                          clipPath: index === data.length - 1 
+                            ? 'polygon(8% 0%, 92% 0%, 85% 100%, 15% 100%)' 
+                            : 'polygon(0% 0%, 100% 0%, 92% 100%, 8% 100%)',
+                        }}
                       >
-                        <div className="p-3 space-y-3">
-                          {/* Header */}
-                          <div className="border-b pb-2">
-                            <p className="font-semibold text-base">{stage.stage}</p>
-                            <p className="text-2xl font-bold text-primary">{stage.count.toLocaleString()}</p>
-                            {getConversionRate(index) && (
-                              <p className="text-xs text-muted-foreground">
-                                {getConversionRate(index)}% of previous stage
-                              </p>
-                            )}
-                          </div>
-                          
-                          {/* Calculation */}
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                              <Info className="h-3 w-3" />
-                              <span>How it's calculated</span>
-                            </div>
-                            <p className="text-sm">{stageInfo.calculation}</p>
-                            <p className="text-xs text-muted-foreground">{stageInfo.description}</p>
-                          </div>
-                          
-                          {/* Dispositions */}
-                          {stageInfo.dispositions && stageInfo.dispositions.length > 0 && (
-                            <div className="space-y-1.5">
-                              <p className="text-xs font-medium text-muted-foreground">
-                                Included Dispositions
-                              </p>
-                              <div className="flex flex-wrap gap-1">
-                                {stageInfo.dispositions.map((disp) => (
-                                  <span 
-                                    key={disp}
-                                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground"
-                                  >
-                                    {disp}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                        <div className="text-center text-white px-6">
+                          <div className="font-semibold text-sm">{stage.stage}</div>
+                          <div className="text-xs opacity-90">{stage.count.toLocaleString()}</div>
                         </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  );
-                })}
-              </svg>
-            </div>
-
-            {/* Labels on the right */}
-            <div className="flex flex-col justify-around py-2 min-w-[120px]">
-              {data.map((stage, index) => {
-                const convRate = getConversionRate(index);
-                const isHovered = hoveredIndex === index;
-                
-                return (
-                  <div 
-                    key={stage.stage}
-                    className={cn(
-                      "flex flex-col transition-opacity duration-200 cursor-pointer",
-                      hoveredIndex !== null && !isHovered && "opacity-50"
-                    )}
-                    onMouseEnter={() => setHoveredIndex(index)}
-                    onMouseLeave={() => setHoveredIndex(null)}
+                      </div>
+                      
+                      {/* Conversion rate badge */}
+                      {index < data.length - 1 && convRate && (
+                        <div className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-10">
+                          <div className="bg-background border border-border rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">
+                            {convRate}%
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </PopoverTrigger>
+                  <PopoverContent 
+                    side="right" 
+                    className="w-72 p-0"
+                    sideOffset={12}
                   >
-                    <span className="text-sm font-medium text-foreground truncate">
-                      {stage.stage}
-                    </span>
-                    <span className="text-lg font-bold text-foreground">
-                      {stage.count.toLocaleString()}
-                    </span>
-                    {convRate && (
-                      <span className="text-xs text-muted-foreground">
-                        {convRate}%
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </TooltipProvider>
+                    <div className="p-3 space-y-3">
+                      {/* Header */}
+                      <div className="border-b pb-2">
+                        <p className="font-semibold text-base">{stage.stage}</p>
+                        <p className="text-2xl font-bold text-primary">{stage.count.toLocaleString()}</p>
+                        {convRate && (
+                          <p className="text-xs text-muted-foreground">
+                            {convRate}% of previous stage
+                          </p>
+                        )}
+                      </div>
+                      
+                      {/* Calculation */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                          <Info className="h-3 w-3" />
+                          <span>How it's calculated</span>
+                        </div>
+                        <p className="text-sm font-medium">{stageInfo.calculation}</p>
+                        <p className="text-xs text-muted-foreground">{stageInfo.description}</p>
+                      </div>
+                      
+                      {/* Dispositions */}
+                      {stageInfo.dispositions && stageInfo.dispositions.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Included Dispositions
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {stageInfo.dispositions.map((disp) => (
+                              <span 
+                                key={disp}
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground"
+                              >
+                                {disp}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                
+                {/* Spacer for conversion rate badge */}
+                {index < data.length - 1 && <div className="h-2" />}
+              </div>
+            );
+          })}
+        </div>
 
         {/* Overall conversion summary */}
         {data.length > 1 && data[0].count > 0 && (
