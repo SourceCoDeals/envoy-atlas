@@ -1,155 +1,210 @@
 
-# Engagement Metrics Fix: Use NocoDB Data Source
+# Add Explanatory Tooltips to All Dashboard/Report Metrics
 
+## Overview
+Add informative tooltips to every metric value and column header across all dashboards and reports in both email and calling tabs. These tooltips will explain how each value is calculated, what data source it uses, and what thresholds/benchmarks apply.
 
-Right now it seems like it's fetching only the positive replies, but I want you to have two sections: one for positive replies and the other for all replies, added to the UI as well. 
+## Scope Analysis
 
-## Problem Summary
-The Engagement Dashboard's "+Replies" column shows **0** for most engagements because the `fetchEngagementMetrics` function in `EngagementDashboard.tsx` queries the internal `campaigns` table, which has `positive_replies = 0` for almost all records. 
+### Components Requiring Tooltips
 
-The actual positive reply data lives in the **NocoDB sync tables**:
-- `nocodb_smartlead_campaigns.leads_interested` (SmartLead positive replies)
-- `nocodb_replyio_campaigns.replies` (Reply.io replies - no positive flag)
+**Email Dashboards:**
+| Component | File | Metrics Needing Tooltips |
+|-----------|------|-------------------------|
+| HeroMetricsGrid | `src/components/dashboard/HeroMetricsGrid.tsx` | Emails Sent, Reply Rate, Positive Reply Rate, Meeting Booked Rate |
+| WeeklyPerformanceChart | `src/components/dashboard/WeeklyPerformanceChart.tsx` | Chart legend items (already has data source tooltip) |
+| CampaignAlertsTable | `src/components/dashboard/CampaignAlertsTable.tsx` | Column headers |
+| TopPerformersTable | `src/components/dashboard/TopPerformersTable.tsx` | Column headers |
+| TodaysPulseBar | `src/components/dashboard/TodaysPulseBar.tsx` | Today's metrics |
 
-### Evidence from Database
-| Engagement | NocoDB Positive | NocoDB Replies | Currently Displayed |
-|------------|-----------------|----------------|---------------------|
-| Alpine | 37 | 948 (replyio) | 0 |
-| O2 Investment Auto | 0 | 1,360 (replyio) | 0 |
-| LLCP | 0 | 328 (replyio) | 0 |
-| Arch City | 0 | 236 (replyio) | 0 |
-| New Heritage | 0 | 417 (replyio) | 0 |
+**Calling Dashboards:**
+| Component | File | Metrics Needing Tooltips |
+|-----------|------|-------------------------|
+| FunnelMetrics | `src/components/calling/FunnelMetrics.tsx` | Dials, Connects, Completed, Meetings, Activated, Talk Time, Avg Score |
+| CallerPerformanceTable | `src/components/calling/CallerPerformanceTable.tsx` | All column headers (Calls, Connects, Connect Rate, Meetings, Meeting Rate, Positive %, Avg Score, Status) |
+| InterestBreakdownCards | `src/components/calling/InterestBreakdownCards.tsx` | Yes/Maybe/No/Unknown cards |
+| DispositionPieChart | `src/components/calling/DispositionPieChart.tsx` | Category labels |
+| WeeklyTrendChart | `src/components/calling/WeeklyTrendChart.tsx` | Legend items |
+| CoachingInsightsPanel | `src/components/calling/CoachingInsightsPanel.tsx` | Top Calls, Needs Coaching thresholds |
+| ScoreCard | `src/components/callinsights/ScoreCard.tsx` | Score descriptions |
 
-## Solution Overview
-Rewrite the `fetchEngagementMetrics` function to join internal campaigns with NocoDB tables via the `external_id` field, pulling real metrics from the source of truth.
+**Data Insights:**
+| Component | File | Metrics Needing Tooltips |
+|-----------|------|-------------------------|
+| MetricCardWithBenchmark | `src/components/datainsights/MetricCardWithBenchmark.tsx` | All metric cards with benchmark context |
+| ConversionFunnel | `src/components/datainsights/ConversionFunnel.tsx` | Already has popover (recently added) |
+| CallTimingHeatmap | `src/components/datainsights/CallTimingHeatmap.tsx` | Hour cells, day labels |
+
+**Engagement Dashboard:**
+| Component | File | Metrics Needing Tooltips |
+|-----------|------|-------------------------|
+| EngagementDashboard | `src/pages/EngagementDashboard.tsx` | Table headers: Emails, Replies, +Replies, Calls, Meetings |
+| EngagementReport | `src/pages/EngagementReport.tsx` | All metric cards and chart labels |
+
+---
+
+## Implementation Strategy
+
+### 1. Create Reusable MetricTooltip Component
+Create a new shared component that wraps any metric label/value with a standardized tooltip format.
+
+**File:** `src/components/ui/metric-tooltip.tsx`
+
+```text
+Props:
+- metricKey: string (e.g., 'connect_rate', 'reply_rate')
+- children: ReactNode (the label/value to wrap)
+- variant?: 'label' | 'value' | 'icon' (display style)
+
+Behavior:
+- Looks up metric definition from a centralized METRIC_DEFINITIONS map
+- Shows on hover: name, formula, description, benchmark (if applicable)
+- Optional info icon indicator
+```
+
+### 2. Create Centralized Metric Definitions
+Consolidate all metric explanations in one file, leveraging existing `src/lib/metrics.ts` documentation.
+
+**File:** `src/lib/metricDefinitions.ts`
+
+```text
+Structure:
+{
+  [metricKey]: {
+    name: string,
+    formula: string,
+    description: string,
+    benchmark?: string,
+    dataSource?: string,
+    dispositions?: string[] // for calling metrics
+  }
+}
+
+Categories:
+- Email metrics (reply_rate, bounce_rate, positive_rate, etc.)
+- Calling metrics (connect_rate, meeting_rate, conversation_rate, etc.)
+- AI score metrics (composite_score, seller_interest, etc.)
+- Engagement metrics (emails_sent, total_replies, positive_replies)
+```
+
+### 3. Update Individual Components
+
+**Phase 1 - High Priority (most visible):**
+1. `HeroMetricsGrid.tsx` - Add tooltip to each metric label
+2. `FunnelMetrics.tsx` - Add tooltip to each funnel card label
+3. `CallerPerformanceTable.tsx` - Add tooltip to each column header
+4. `MetricCardWithBenchmark.tsx` - Add tooltip with formula explanation
+5. `ScoreCard.tsx` - Enhance description to show score thresholds
+
+**Phase 2 - Medium Priority:**
+6. `InterestBreakdownCards.tsx` - Add tooltip explaining Yes/Maybe/No thresholds
+7. `DispositionPieChart.tsx` - Add tooltip to category labels
+8. `EngagementDashboard.tsx` - Add tooltip to table column headers
+9. `TodaysPulseBar.tsx` - Add tooltip to pulse metrics
+
+**Phase 3 - Lower Priority:**
+10. Various chart legends and axis labels
+11. Report-specific metrics in EngagementReport
 
 ---
 
-## Technical Implementation
+## Technical Details
 
-### Step 1: Modify fetchEngagementMetrics Function
+### MetricTooltip Component Structure
 
-**File:** `src/pages/EngagementDashboard.tsx` (lines 213-333)
-
-**Current Logic (broken):**
 ```text
-1. Query campaigns table for engagement_id
-2. Read campaigns.total_sent, campaigns.positive_replies (both are 0)
-3. Sum and display
+<TooltipProvider>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="inline-flex items-center gap-1 cursor-help">
+        {children}
+        {showIcon && <Info className="h-3 w-3 text-muted-foreground" />}
+      </span>
+    </TooltipTrigger>
+    <TooltipContent className="max-w-xs">
+      <div className="space-y-1">
+        <p className="font-medium">{definition.name}</p>
+        <p className="text-xs text-muted-foreground">{definition.description}</p>
+        <code className="text-xs bg-muted px-1 rounded">{definition.formula}</code>
+        {definition.benchmark && (
+          <p className="text-xs text-success">Benchmark: {definition.benchmark}</p>
+        )}
+      </div>
+    </TooltipContent>
+  </Tooltip>
+</TooltipProvider>
 ```
 
-**New Logic (correct):**
+### Metric Definitions Sample
+
 ```text
-1. Query campaigns table to get id, external_id, engagement_id, name
-2. Query nocodb_smartlead_campaigns with all external_ids
-3. Query nocodb_replyio_campaigns with all external_ids
-4. Build a lookup map: external_id → NocoDB metrics
-5. For each engagement:
-   - Find linked campaigns via engagement_id
-   - Sum NocoDB metrics (leads_interested, total_emails_sent, total_replies, etc.)
-   - Calculate positiveReplies as: smartlead.leads_interested (Reply.io has no positive flag)
+// Email
+'reply_rate': {
+  name: 'Reply Rate',
+  formula: '(replied / delivered) × 100',
+  description: 'Percentage of delivered emails that received a reply. Uses delivered (sent - bounced) as denominator for accuracy.',
+  benchmark: '> 5% good, > 2% average'
+}
+
+// Calling  
+'connect_rate': {
+  name: 'Connect Rate',
+  formula: '(connections / totalCalls) × 100',
+  description: 'Percentage of calls that resulted in speaking with a human. Connections are calls with talk_duration > 30 seconds or specific dispositions.',
+  benchmark: '25-35% good, < 20% warning',
+  dispositions: ['Meeting Booked', 'Callback Requested', 'Send Email', 'Not Interested', ...]
+}
+
+// AI Scores
+'composite_score': {
+  name: 'Composite Score',
+  formula: 'avg(interest, quality, objection, value, script, dm, referral)',
+  description: 'Average of 7 AI-scored dimensions on a 1-10 scale.',
+  benchmark: '≥ 7 excellent, 5-6.9 good, < 5 needs coaching'
+}
 ```
-
-### Step 2: Update Query Strategy
-
-**New parallel queries:**
-```text
-[campaignsRes, smartleadRes, replyioRes, callsRes, meetingsRes, coldCallsRes]
-```
-
-Add two new queries to fetch NocoDB data:
-- `supabase.from('nocodb_smartlead_campaigns').select('campaign_id, total_emails_sent, total_replies, leads_interested, total_bounces')`
-- `supabase.from('nocodb_replyio_campaigns').select('campaign_id, deliveries, bounces, replies')`
-
-### Step 3: Build External ID Lookup Maps
-
-After fetching, create maps for O(1) lookups:
-```text
-smartleadByExternalId: Map<string, { sent, replies, positive }>
-replyioByExternalId: Map<string, { sent, replies }>
-campaignsByEngagement: Map<engagementId, Array<{ external_id }>>
-```
-
-### Step 4: Aggregate Metrics Per Engagement
-
-For each engagement:
-1. Get all campaigns linked to it
-2. For each campaign, look up its `external_id` in NocoDB maps
-3. Sum:
-   - `emailsSent` = SmartLead.total_emails_sent + Reply.io.(deliveries + bounces)
-   - `positiveReplies` = SmartLead.leads_interested
-   - `totalReplies` = SmartLead.total_replies + Reply.io.replies (for context)
-
-### Step 5: Remove Attribution Mismatch Filter
-
-The current code has a `KNOWN_SPONSORS` filter that skips campaigns based on name matching. This should be removed or refined since campaign-to-engagement linking is now done properly via database relationships.
 
 ---
+
+## Files to Create
+
+| File | Purpose |
+|------|---------|
+| `src/lib/metricDefinitions.ts` | Centralized metric definitions (~150 lines) |
+| `src/components/ui/metric-tooltip.tsx` | Reusable tooltip wrapper (~50 lines) |
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/pages/EngagementDashboard.tsx` | Rewrite `fetchEngagementMetrics` function (~100 lines) |
+| `src/components/dashboard/HeroMetricsGrid.tsx` | Wrap metric labels with MetricTooltip |
+| `src/components/calling/FunnelMetrics.tsx` | Wrap card labels with MetricTooltip |
+| `src/components/calling/CallerPerformanceTable.tsx` | Wrap TableHead cells with MetricTooltip |
+| `src/components/datainsights/MetricCardWithBenchmark.tsx` | Add info icon + tooltip to label |
+| `src/components/callinsights/ScoreCard.tsx` | Add threshold info to tooltip |
+| `src/components/calling/InterestBreakdownCards.tsx` | Add threshold explanations |
+| `src/components/calling/DispositionPieChart.tsx` | Add category tooltips |
+| `src/pages/EngagementDashboard.tsx` | Add tooltips to table headers (~10 lines) |
+| `src/components/dashboard/TodaysPulseBar.tsx` | Wrap metrics with tooltips |
 
 ---
 
-## Detailed Code Changes
+## Example Usage After Implementation
 
-### EngagementDashboard.tsx - fetchEngagementMetrics
+```text
+// Before:
+<TableHead>Connect Rate</TableHead>
 
-The function will be rewritten to:
+// After:
+<TableHead>
+  <MetricTooltip metricKey="connect_rate">
+    Connect Rate
+  </MetricTooltip>
+</TableHead>
+```
 
-1. **Fetch campaigns with external_id:**
-   ```text
-   Query: campaigns.id, campaigns.name, campaigns.engagement_id, campaigns.external_id
-   Filter: engagement_id IN (list of engagement IDs)
-   ```
-
-2. **Fetch NocoDB data (all records, not filtered):**
-   ```text
-   nocodb_smartlead_campaigns: campaign_id, total_emails_sent, total_replies, leads_interested
-   nocodb_replyio_campaigns: campaign_id, deliveries, bounces, replies
-   ```
-
-3. **Build lookup maps:**
-   ```text
-   smartleadMap[campaign_id] = { sent, replies, positive }
-   replyioMap[campaign_id] = { sent, delivered, replies }
-   ```
-
-4. **Aggregate per engagement:**
-   ```text
-   For each engagement:
-     - Filter campaigns where engagement_id matches
-     - For each campaign.external_id, lookup in smartleadMap OR replyioMap
-     - Sum emailsSent, positiveReplies, etc.
-   ```
-
-5. **Keep existing call/meeting aggregation unchanged** (call_activities, meetings, cold_calls work fine)
-
----
-
-## Expected Outcome
-
-After implementation:
-
-| Engagement | Expected +Replies |
-|------------|-------------------|
-| Alpine | 37 (from leads_interested) |
-| O2 Investment Auto | 0 (Reply.io has no positive flag) |
-| LLCP | 0 (Reply.io only) |
-| Arch City | 0 (Reply.io only) |
-| New Heritage | 0 (Reply.io only) |
-
-**Note:** Reply.io campaigns don't have a "positive" classification, so their positiveReplies will remain 0. Only SmartLead campaigns have `leads_interested` data.
-
----
-
-## Testing Checklist
-
-1. Verify Alpine engagement shows 37+ positive replies
-2. Verify email counts match NocoDB totals
-3. Confirm Reply.io-only engagements show 0 positive (expected behavior)
-4. Confirm call/meeting metrics still work correctly
-5. Verify weekly comparison trends still function
+This approach ensures:
+1. **Consistency**: All metrics use the same tooltip format
+2. **Maintainability**: Definitions live in one place, easy to update
+3. **Discoverability**: Users can learn about any metric by hovering
+4. **No UI clutter**: Tooltips appear on hover, not always visible
