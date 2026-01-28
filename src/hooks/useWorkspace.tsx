@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext, ReactNode } from 'react
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Database } from '@/integrations/supabase/types';
+import { logger } from '@/lib/logger';
 
 type Client = Database['public']['Tables']['clients']['Row'];
 
@@ -40,7 +41,7 @@ async function ensureSourceCoWorkspace(userId: string): Promise<void> {
   // Use a SECURITY DEFINER RPC so we don't need broad client-side insert permissions.
   const { error } = await supabase.rpc('join_default_client');
   if (error) {
-    console.error('Error joining default workspace:', error);
+    logger.error('Error joining default workspace', error);
   }
 }
 
@@ -53,7 +54,7 @@ async function fetchDefaultWorkspace(): Promise<ClientWithRole | null> {
     .single();
 
   if (error || !data) {
-    console.error('Error fetching default workspace:', error);
+    logger.error('Error fetching default workspace', error);
     return null;
   }
 
@@ -118,7 +119,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (err) {
-      console.error('Error fetching clients:', err);
+      logger.error('Error fetching clients', err);
       // Fallback for anonymous users on error
       if (!user) {
         const defaultWorkspace = await fetchDefaultWorkspace();

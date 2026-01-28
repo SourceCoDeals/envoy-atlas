@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
 import { toast } from 'sonner';
+import { logger } from '@/lib/logger';
 
 export interface TeamMember {
   id: string;
@@ -51,7 +52,7 @@ export function useTeamMembers() {
       if (fetchError) throw fetchError;
       setTeamMembers(data || []);
     } catch (err) {
-      console.error('Error fetching team members:', err);
+      logger.error('Error fetching team members', err);
       setError(err instanceof Error ? err : new Error('Failed to fetch team members'));
     } finally {
       setLoading(false);
@@ -89,7 +90,7 @@ export function useTeamMembers() {
       toast.success('Team member added');
       return newMember;
     } catch (err) {
-      console.error('Error creating team member:', err);
+      logger.error('Error creating team member', err);
       toast.error('Failed to add team member');
       return null;
     }
@@ -117,7 +118,7 @@ export function useTeamMembers() {
       toast.success('Team member updated');
       return updated;
     } catch (err) {
-      console.error('Error updating team member:', err);
+      logger.error('Error updating team member', err);
       toast.error('Failed to update team member');
       return null;
     }
@@ -136,7 +137,7 @@ export function useTeamMembers() {
       toast.success('Team member removed');
       return true;
     } catch (err) {
-      console.error('Error deleting team member:', err);
+      logger.error('Error deleting team member', err);
       toast.error('Failed to remove team member');
       return false;
     }

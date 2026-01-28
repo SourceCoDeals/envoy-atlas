@@ -7,6 +7,7 @@ import {
   ScoreThresholds 
 } from '@/lib/callingConfig';
 import { toast } from 'sonner';
+import { logger } from '@/lib/logger';
 
 interface DbCallingConfig {
   id: string;
@@ -158,7 +159,7 @@ export function useCallingConfig() {
         .maybeSingle();
 
       if (error) {
-        console.error('Error fetching calling config:', error);
+        logger.error('Error fetching calling config', error);
         return DEFAULT_CALLING_CONFIG;
       }
       
@@ -171,7 +172,7 @@ export function useCallingConfig() {
           .single();
           
         if (insertError || !newConfig) {
-          console.error('Error creating calling config:', insertError);
+          logger.error('Error creating calling config', insertError);
           return DEFAULT_CALLING_CONFIG;
         }
         
@@ -202,7 +203,7 @@ export function useCallingConfig() {
       toast.success('Calling metrics configuration saved');
     },
     onError: (error) => {
-      console.error('Failed to update calling config:', error);
+      logger.error('Failed to update calling config', error);
       toast.error('Failed to save configuration');
     },
   });
@@ -225,7 +226,7 @@ export function useCallingConfig() {
       toast.success('Configuration reset to defaults');
     },
     onError: (error) => {
-      console.error('Failed to reset calling config:', error);
+      logger.error('Failed to reset calling config', error);
       toast.error('Failed to reset configuration');
     },
   });

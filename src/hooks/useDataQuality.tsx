@@ -268,7 +268,7 @@ export function useDataQuality() {
       });
       
     } catch (error) {
-      console.error('Error fetching data quality metrics:', error);
+      logger.error('Error fetching data quality metrics', error);
     } finally {
       setLoading(false);
     }

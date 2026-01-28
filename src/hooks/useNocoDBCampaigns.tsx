@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 export interface NocoDBCampaign {
   id: string;
   campaignId: string;
@@ -61,10 +62,7 @@ export interface NocoDBCampaignStats {
   activeCampaigns: number;
 }
 
-const calculateRate = (numerator: number, denominator: number): number => {
-  if (denominator <= 0) return 0;
-  return (numerator / denominator) * 100;
-};
+// Use centralized calculateRate from @/lib/metrics
 
 export function useNocoDBCampaigns() {
   const [campaigns, setCampaigns] = useState<NocoDBCampaign[]>([]);
@@ -224,7 +222,7 @@ export function useNocoDBCampaigns() {
         deliveryRate: calculateRate(delivered, aggregateStats.totalSent),
       });
     } catch (err) {
-      console.error('Error fetching NocoDB campaigns:', err);
+      logger.error('Error fetching NocoDB campaigns', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch campaigns');
     } finally {
       setLoading(false);

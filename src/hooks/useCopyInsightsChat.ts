@@ -3,6 +3,7 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { logger } from '@/lib/logger';
 
 export interface ChatMessage {
   id: string;
@@ -254,7 +255,7 @@ export function useCopyInsightsChat() {
         }
       }
     } catch (error) {
-      console.error('Chat error:', error);
+      logger.error('Chat error', error);
       toast.error(error instanceof Error ? error.message : 'Failed to send message');
       // Remove the user message if we failed
       setMessages(prev => prev.filter(m => m.id !== userMessage.id));

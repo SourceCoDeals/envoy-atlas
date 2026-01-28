@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 export interface CampaignSummaryData {
   campaign: {
@@ -377,7 +378,7 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
         dailyData,
       });
     } catch (err) {
-      console.error('Error fetching campaign summary:', err);
+      logger.error('Error fetching campaign summary', err);
       setError('Failed to load campaign summary');
     } finally {
       setLoading(false);

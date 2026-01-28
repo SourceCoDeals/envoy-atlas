@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 // Metrics status to distinguish "zero" vs "missing/broken source"
 export type MetricsStatus = 'verified' | 'partial' | 'missing' | 'broken';
@@ -323,7 +324,7 @@ export function useCampaigns() {
 
       setCampaigns(allCampaigns);
     } catch (err: unknown) {
-      console.error('Error fetching campaigns:', err);
+      logger.error('Error fetching campaigns', err);
       let errorMessage = 'Failed to fetch campaigns';
       if (err && typeof err === 'object') {
         const e = err as { message?: string; details?: string; hint?: string; code?: string };

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 import {
   SeniorityLevel,
   DepartmentType,
@@ -143,7 +144,7 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
       setEmailActivities(activitiesData || []);
       setVariantFeatures(featuresData || []);
     } catch (err) {
-      console.error('Error fetching audience data:', err);
+      logger.error('Error fetching audience data', err);
       setError('Failed to load audience analytics');
     } finally {
       setLoading(false);
@@ -161,7 +162,7 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
       if (error) throw error;
       await fetchData();
     } catch (err) {
-      console.error('Enrichment error:', err);
+      logger.error('Enrichment error', err);
     }
   };
 

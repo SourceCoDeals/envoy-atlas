@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { startOfWeek, format, parseISO } from 'date-fns';
 import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 export interface EngagementDetails {
   id: string;
@@ -899,7 +900,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       });
 
     } catch (err) {
-      console.error('Error fetching engagement report:', err);
+      logger.error('Error fetching engagement report', err);
       setError(err instanceof Error ? err.message : 'Failed to load report');
     } finally {
       setLoading(false);

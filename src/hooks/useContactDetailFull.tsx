@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-
+import { logger } from '@/lib/logger';
 export interface ContactFull {
   id: string;
   email: string | null;
@@ -271,7 +271,7 @@ export function useContactDetailFull(contactId: string | undefined) {
       setTimeline(timelineItems);
 
     } catch (err) {
-      console.error('Error fetching contact detail:', err);
+      logger.error('Error fetching contact detail', err);
     } finally {
       setLoading(false);
     }

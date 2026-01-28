@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/table';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { logger } from '@/lib/logger';
 import { 
   Plus, Building2, Loader2, Pencil, Trash2,
   Archive, DollarSign, Search, Filter, X,
@@ -198,7 +199,7 @@ export default function EngagementDashboard() {
         await fetchEngagementMetrics(mappedEngagements);
       }
     } catch (err) {
-      console.error('Error fetching engagements:', err);
+      logger.error('Error fetching engagements', err);
       toast.error('Failed to load engagements');
     } finally {
       setLoading(false);
@@ -302,7 +303,7 @@ export default function EngagementDashboard() {
       // Also fetch weekly comparison data
       await fetchWeeklyComparison(engagementList.map(e => e.id));
     } catch (err) {
-      console.error('Error fetching engagement metrics:', err);
+      logger.error('Error fetching engagement metrics', err);
     }
   };
 
@@ -374,7 +375,7 @@ export default function EngagementDashboard() {
         },
       });
     } catch (err) {
-      console.error('Error fetching weekly comparison:', err);
+      logger.error('Error fetching weekly comparison', err);
     }
   };
 
@@ -460,7 +461,7 @@ export default function EngagementDashboard() {
       setDialogOpen(false);
       fetchEngagements();
     } catch (err) {
-      console.error('Error saving engagement:', err);
+      logger.error('Error saving engagement', err);
       toast.error('Failed to save engagement');
     } finally {
       setCreating(false);
@@ -476,7 +477,7 @@ export default function EngagementDashboard() {
       toast.success('Engagement deleted');
       fetchEngagements();
     } catch (err) {
-      console.error('Error deleting engagement:', err);
+      logger.error('Error deleting engagement', err);
       toast.error('Failed to delete engagement');
     }
   };
@@ -498,7 +499,7 @@ export default function EngagementDashboard() {
       );
       toast.success(`Engagement marked as ${newStatus === 'closed' ? 'complete' : 'live'}`);
     } catch (err) {
-      console.error('Error updating status:', err);
+      logger.error('Error updating status', err);
       toast.error('Failed to update status');
     }
   };

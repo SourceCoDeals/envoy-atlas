@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
+import { logger } from '@/lib/logger';
 
 export interface Alert {
   id: string;
@@ -55,7 +56,7 @@ export function useAlerts() {
         .limit(50);
 
       if (alertsError) {
-        console.error('Error fetching alerts:', alertsError);
+        logger.error('Error fetching alerts', alertsError);
         return [];
       }
 
@@ -93,7 +94,7 @@ export function useAlerts() {
       toast.success('Alert resolved');
     },
     onError: (error) => {
-      console.error('Error resolving alert:', error);
+      logger.error('Error resolving alert', error);
       toast.error('Failed to resolve alert');
     },
   });

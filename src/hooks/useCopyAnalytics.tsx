@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 // Subject line analysis patterns
 export type PersonalizationType = 'none' | 'first_name' | 'company' | 'title' | 'industry' | 'trigger';
@@ -415,7 +416,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
 
       setBodyCopy(bodyAnalysis);
     } catch (err) {
-      console.error('Error fetching copy analytics:', err);
+      logger.error('Error fetching copy analytics', err);
       setError(err instanceof Error ? err.message : 'Failed to load copy analytics');
     } finally {
       setLoading(false);
