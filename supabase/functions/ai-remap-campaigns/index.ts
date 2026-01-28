@@ -104,8 +104,11 @@ serve(async (req) => {
 
     console.log(`Found ${engagements.length} engagements`);
 
-    // Fetch ALL campaigns for this workspace (via engagements)
+    // Fetch ALL campaigns for this workspace (via engagements) - only active statuses
     const engagementIds = engagements.map(e => e.id);
+    
+    // Build filter for active campaigns only (case-insensitive)
+    const activeStatuses = ['active', 'running', 'started', 'in_progress', 'live'];
     
     // Also fetch campaigns from unassigned placeholder
     const { data: allCampaigns, error: campError } = await supabase
@@ -118,11 +121,16 @@ serve(async (req) => {
       throw new Error(`Failed to fetch campaigns: ${campError.message}`);
     }
 
-    console.log(`Found ${allCampaigns?.length || 0} campaigns`);
+    // Filter to only active campaigns (case-insensitive)
+    const activeCampaigns = (allCampaigns || []).filter(c => 
+      c.status && activeStatuses.includes(c.status.toLowerCase())
+    );
 
-    if (!allCampaigns || allCampaigns.length === 0) {
+    console.log(`Found ${allCampaigns?.length || 0} total campaigns, ${activeCampaigns.length} active`);
+
+    if (activeCampaigns.length === 0) {
       return new Response(
-        JSON.stringify({ proposedMappings: [], message: "No campaigns found" }),
+        JSON.stringify({ proposedMappings: [], message: "No active campaigns found" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -151,11 +159,10 @@ serve(async (req) => {
     const BATCH_SIZE = 50;
     const proposedMappings: ProposedMapping[] = [];
     
-    // Limit total campaigns processed to avoid timeout, with offset for pagination
-    const CAMPAIGNS_PER_RUN = 200;
-    const campaignsToProcess = allCampaigns.slice(offset, offset + CAMPAIGNS_PER_RUN);
+    // Process all active campaigns (should be ~181, no need for pagination)
+    const campaignsToProcess = activeCampaigns;
     
-    console.log(`Processing campaigns ${offset} to ${offset + campaignsToProcess.length} (of ${allCampaigns.length} total)`);
+    console.log(`Processing ${campaignsToProcess.length} active campaigns`);
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -329,15 +336,12 @@ Return null for proposedEngagementId if no reasonable match exists.`;
     return new Response(
       JSON.stringify({
         proposedMappings,
-        totalCampaigns: allCampaigns.length,
+        totalCampaigns: allCampaigns?.length || 0,
+        activeCampaigns: activeCampaigns.length,
         totalEngagements: engagements.length,
         dryRun: dry_run,
         applied,
-        errors,
-        offset,
-        processedCount: campaignsToProcess.length,
-        hasMore,
-        nextOffset: hasMore ? offset + CAMPAIGNS_PER_RUN : null
+        errors
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
