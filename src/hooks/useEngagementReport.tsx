@@ -751,14 +751,21 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       ).length;
 
       // Fallback to campaign settings if no contacts
+      // Helper to safely parse string or number values from JSON settings
+      const parseNum = (val: any): number => {
+        if (typeof val === 'number') return val;
+        if (typeof val === 'string') return parseInt(val, 10) || 0;
+        return 0;
+      };
+      
       const campaignEnrollment = (campaigns || []).reduce((acc, c) => {
-        const settings = c.settings as Record<string, number> | null;
+        const settings = c.settings as Record<string, any> | null;
         return {
-          totalLeads: acc.totalLeads + (settings?.total_leads || 0),
-          notStarted: acc.notStarted + (settings?.not_started || 0),
-          inProgress: acc.inProgress + (settings?.in_progress || 0),
-          completed: acc.completed + (settings?.completed || 0),
-          blocked: acc.blocked + (settings?.blocked || 0),
+          totalLeads: acc.totalLeads + parseNum(settings?.total_leads),
+          notStarted: acc.notStarted + parseNum(settings?.not_started),
+          inProgress: acc.inProgress + parseNum(settings?.in_progress),
+          completed: acc.completed + parseNum(settings?.completed),
+          blocked: acc.blocked + parseNum(settings?.blocked),
         };
       }, { totalLeads: 0, notStarted: 0, inProgress: 0, completed: 0, blocked: 0 });
 
