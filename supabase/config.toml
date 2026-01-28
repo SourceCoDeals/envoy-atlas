@@ -113,3 +113,9 @@ verify_jwt = false
 
 [functions.export-table-data]
 verify_jwt = false
+
+[functions.sync-reset]
+verify_jwt = false
+
+[functions.process-retry-queue]
+verify_jwt = false
