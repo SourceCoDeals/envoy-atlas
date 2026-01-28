@@ -1,5 +1,12 @@
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface FunnelStage {
   stage: string;
@@ -12,6 +19,7 @@ interface ConversionFunnelProps {
 }
 
 export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const maxCount = Math.max(...data.map(d => d.count), 1);
 
   const getConversionRate = (index: number) => {
@@ -19,15 +27,23 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
     return ((data[index].count / data[index - 1].count) * 100).toFixed(1);
   };
 
-  // Colors for funnel stages - gradient from top to bottom
+  // Funnel colors - warm to cool gradient
   const stageColors = [
-    'from-blue-500 to-blue-600',
-    'from-cyan-500 to-cyan-600',
-    'from-teal-500 to-teal-600',
-    'from-emerald-500 to-emerald-600',
-    'from-green-500 to-green-600',
-    'from-green-600 to-green-700',
+    { bg: 'hsl(0 55% 62%)', hover: 'hsl(0 55% 55%)' },      // Coral/Red
+    { bg: 'hsl(43 77% 70%)', hover: 'hsl(43 77% 63%)' },    // Yellow
+    { bg: 'hsl(195 25% 45%)', hover: 'hsl(195 25% 38%)' },  // Teal/Slate
+    { bg: 'hsl(25 30% 35%)', hover: 'hsl(25 30% 28%)' },    // Brown
+    { bg: 'hsl(142 50% 40%)', hover: 'hsl(142 50% 33%)' },  // Green
+    { bg: 'hsl(220 50% 50%)', hover: 'hsl(220 50% 43%)' },  // Blue
   ];
+
+  // Calculate widths - top is 100%, each subsequent stage is proportionally smaller
+  const getWidth = (index: number) => {
+    const minWidth = 25;
+    const maxWidth = 100;
+    const step = (maxWidth - minWidth) / Math.max(data.length - 1, 1);
+    return maxWidth - (step * index);
+  };
 
   return (
     <Card className={className}>
@@ -35,56 +51,97 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
         <CardTitle className="text-base">Conversion Funnel</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-col items-center space-y-1">
-          {data.map((stage, index) => {
-            // Calculate width as percentage of max (minimum 20% for visibility)
-            const widthPercentage = Math.max((stage.count / maxCount) * 100, 20);
-            const convRate = getConversionRate(index);
-            
-            return (
-              <div key={stage.stage} className="w-full flex flex-col items-center">
-                {/* Funnel segment - trapezoid shape using clip-path */}
-                <div 
-                  className="relative group cursor-default"
-                  style={{ 
-                    width: `${widthPercentage}%`,
-                    minWidth: '120px',
-                  }}
-                >
-                  <div
-                    className={cn(
-                      'h-12 bg-gradient-to-r flex items-center justify-center transition-all duration-300',
-                      stageColors[index % stageColors.length],
-                      'hover:brightness-110'
-                    )}
-                    style={{
-                      clipPath: index === data.length - 1 
-                        ? 'polygon(5% 0%, 95% 0%, 90% 100%, 10% 100%)' // Bottom stage - more tapered
-                        : 'polygon(0% 0%, 100% 0%, 95% 100%, 5% 100%)', // Regular trapezoid
-                    }}
-                  >
-                    <div className="text-center text-white px-4">
-                      <div className="font-semibold text-sm truncate">{stage.stage}</div>
-                      <div className="text-xs opacity-90">{stage.count.toLocaleString()}</div>
-                    </div>
-                  </div>
+        <TooltipProvider>
+          <div className="flex gap-6">
+            {/* Funnel visualization */}
+            <div className="flex-1 flex flex-col items-center">
+              <svg 
+                viewBox="0 0 200 240" 
+                className="w-full max-w-[280px]"
+                preserveAspectRatio="xMidYMid meet"
+              >
+                {data.map((stage, index) => {
+                  const topWidth = getWidth(index);
+                  const bottomWidth = index < data.length - 1 ? getWidth(index + 1) : topWidth * 0.7;
+                  const segmentHeight = 200 / data.length;
+                  const y = index * segmentHeight + 10;
                   
-                  {/* Conversion rate badge between stages */}
-                  {index < data.length - 1 && convRate && (
-                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 z-10">
-                      <div className="bg-background border border-border rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">
-                        {convRate}%
-                      </div>
-                    </div>
-                  )}
-                </div>
+                  const topLeft = (200 - (topWidth * 2)) / 2;
+                  const topRight = topLeft + (topWidth * 2);
+                  const bottomLeft = (200 - (bottomWidth * 2)) / 2;
+                  const bottomRight = bottomLeft + (bottomWidth * 2);
+                  
+                  const color = stageColors[index % stageColors.length];
+                  const isHovered = hoveredIndex === index;
+                  
+                  return (
+                    <Tooltip key={stage.stage}>
+                      <TooltipTrigger asChild>
+                        <g
+                          onMouseEnter={() => setHoveredIndex(index)}
+                          onMouseLeave={() => setHoveredIndex(null)}
+                          className="cursor-pointer"
+                        >
+                          <path
+                            d={`M ${topLeft} ${y} 
+                                L ${topRight} ${y} 
+                                L ${bottomRight} ${y + segmentHeight - 2} 
+                                L ${bottomLeft} ${y + segmentHeight - 2} Z`}
+                            fill={isHovered ? color.hover : color.bg}
+                            className="transition-all duration-200"
+                          />
+                        </g>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[200px]">
+                        <div className="space-y-1">
+                          <p className="font-semibold">{stage.stage}</p>
+                          <p className="text-lg font-bold">{stage.count.toLocaleString()}</p>
+                          {getConversionRate(index) && (
+                            <p className="text-xs text-muted-foreground">
+                              {getConversionRate(index)}% of previous stage
+                            </p>
+                          )}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </svg>
+            </div>
+
+            {/* Labels on the right */}
+            <div className="flex flex-col justify-around py-2 min-w-[120px]">
+              {data.map((stage, index) => {
+                const convRate = getConversionRate(index);
+                const isHovered = hoveredIndex === index;
                 
-                {/* Spacer for conversion rate badge */}
-                {index < data.length - 1 && <div className="h-3" />}
-              </div>
-            );
-          })}
-        </div>
+                return (
+                  <div 
+                    key={stage.stage}
+                    className={cn(
+                      "flex flex-col transition-opacity duration-200",
+                      hoveredIndex !== null && !isHovered && "opacity-50"
+                    )}
+                    onMouseEnter={() => setHoveredIndex(index)}
+                    onMouseLeave={() => setHoveredIndex(null)}
+                  >
+                    <span className="text-sm font-medium text-foreground truncate">
+                      {stage.stage}
+                    </span>
+                    <span className="text-lg font-bold text-foreground">
+                      {stage.count.toLocaleString()}
+                    </span>
+                    {convRate && (
+                      <span className="text-xs text-muted-foreground">
+                        {convRate}%
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </TooltipProvider>
 
         {/* Overall conversion summary */}
         {data.length > 1 && data[0].count > 0 && (
