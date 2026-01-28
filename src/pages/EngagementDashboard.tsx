@@ -75,6 +75,7 @@ interface EngagementMetrics {
   conversations: number;
   meetingsSet: number;
   emailsSent: number;
+  totalReplies: number;
   positiveReplies: number;
 }
 
@@ -103,9 +104,6 @@ const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'secon
   closed: { label: 'Complete', variant: 'secondary' },
 };
 
-// Known sponsor names used to validate campaign attribution
-// Campaigns containing these sponsor names should NOT be attributed to engagements with different sponsors
-const KNOWN_SPONSORS = ['trivest', 'trinity', 'stadion', 'alpine', 'verde', 'arch city', 'gp partners', 'new heritage', 'kelso'];
 
 export default function EngagementDashboard() {
   const navigate = useNavigate();
@@ -214,8 +212,8 @@ export default function EngagementDashboard() {
     try {
       const engagementIds = engagementList.map(e => e.id);
       
-      // Fetch all data in parallel
-      const [callsRes, meetingsRes, campaignsRes, coldCallsRes] = await Promise.all([
+      // Fetch all data in parallel - including NocoDB tables for accurate email metrics
+      const [callsRes, meetingsRes, campaignsRes, coldCallsRes, smartleadRes, replyioRes] = await Promise.all([
         // Call activities
         supabase
           .from('call_activities')
@@ -226,27 +224,50 @@ export default function EngagementDashboard() {
           .from('meetings')
           .select('id, engagement_id')
           .in('engagement_id', engagementIds),
-        // Campaigns for email metrics
+        // Campaigns - need external_id for NocoDB join
         supabase
           .from('campaigns')
-          .select('engagement_id, total_sent, positive_replies, total_meetings')
+          .select('id, name, engagement_id, external_id, total_meetings')
           .in('engagement_id', engagementIds),
         // Cold calls for additional call/meeting data
         supabase
           .from('cold_calls')
           .select('engagement_id, is_meeting, is_connection')
           .in('engagement_id', engagementIds),
+        // NocoDB SmartLead campaigns (source of truth for email metrics)
+        supabase
+          .from('nocodb_smartlead_campaigns')
+          .select('campaign_id, total_emails_sent, total_replies, leads_interested, total_bounces'),
+        // NocoDB Reply.io campaigns (source of truth for email metrics)
+        supabase
+          .from('nocodb_replyio_campaigns')
+          .select('campaign_id, deliveries, bounces, replies'),
       ]);
 
       const allCalls = callsRes.data || [];
       const allMeetings = meetingsRes.data || [];
       const allCampaigns = campaignsRes.data || [];
       const allColdCalls = coldCallsRes.data || [];
+      const smartleadCampaigns = smartleadRes.data || [];
+      const replyioCampaigns = replyioRes.data || [];
 
-      // Build engagement name lookup for attribution validation
-      const engagementNameMap: Record<string, string> = {};
-      for (const eng of engagementList) {
-        engagementNameMap[eng.id] = (eng.name || '').toLowerCase();
+      // Build NocoDB lookup maps by campaign_id (matches campaigns.external_id)
+      const smartleadMap: Record<string, { sent: number; replies: number; positive: number }> = {};
+      for (const sl of smartleadCampaigns) {
+        smartleadMap[sl.campaign_id] = {
+          sent: sl.total_emails_sent || 0,
+          replies: sl.total_replies || 0,
+          positive: sl.leads_interested || 0,
+        };
+      }
+
+      const replyioMap: Record<string, { sent: number; replies: number }> = {};
+      for (const ri of replyioCampaigns) {
+        // Reply.io: sent = deliveries + bounces
+        replyioMap[ri.campaign_id] = {
+          sent: (ri.deliveries || 0) + (ri.bounces || 0),
+          replies: ri.replies || 0,
+        };
       }
 
       const metricsMap: Record<string, EngagementMetrics> = {};
@@ -259,6 +280,7 @@ export default function EngagementDashboard() {
           conversations: 0,
           meetingsSet: 0,
           emailsSent: 0,
+          totalReplies: 0,
           positiveReplies: 0,
         };
       }
@@ -288,29 +310,31 @@ export default function EngagementDashboard() {
         }
       }
 
-      // Aggregate campaign/email data with attribution validation
-      // Filter out campaigns that are clearly misattributed (different sponsor in campaign name vs engagement)
+      // Aggregate campaign/email data using NocoDB as source of truth
+      // Join via external_id -> NocoDB campaign_id
       for (const campaign of allCampaigns) {
         const m = metricsMap[campaign.engagement_id];
         if (!m) continue;
         
-        // Skip campaigns that appear misattributed
-        // A campaign is suspicious if it contains a known sponsor name that doesn't match the engagement
-        const engName = engagementNameMap[campaign.engagement_id] || '';
-        const campName = ((campaign as any).name || '').toLowerCase();
+        const externalId = campaign.external_id;
         
-        // Check if campaign contains a sponsor name that doesn't match the engagement
-        const hasMismatchedSponsor = KNOWN_SPONSORS.some(sponsor => 
-          campName.includes(sponsor) && !engName.includes(sponsor)
-        );
+        // Look up metrics in NocoDB tables
+        const slMetrics = externalId ? smartleadMap[externalId] : null;
+        const riMetrics = externalId ? replyioMap[externalId] : null;
         
-        if (hasMismatchedSponsor) {
-          // Skip this campaign - it's likely misattributed
-          continue;
+        if (slMetrics) {
+          // SmartLead campaign
+          m.emailsSent += slMetrics.sent;
+          m.totalReplies += slMetrics.replies;
+          m.positiveReplies += slMetrics.positive;
+        } else if (riMetrics) {
+          // Reply.io campaign
+          m.emailsSent += riMetrics.sent;
+          m.totalReplies += riMetrics.replies;
+          // Reply.io has no "positive" classification - stays 0
         }
         
-        m.emailsSent += campaign.total_sent || 0;
-        m.positiveReplies += campaign.positive_replies || 0;
+        // Meetings from campaigns table (still valid)
         m.meetingsSet += campaign.total_meetings || 0;
       }
 
@@ -604,8 +628,9 @@ export default function EngagementDashboard() {
       (acc, m) => ({
         meetings: acc.meetings + m.meetingsSet,
         positiveReplies: acc.positiveReplies + m.positiveReplies,
+        totalReplies: acc.totalReplies + m.totalReplies,
       }),
-      { meetings: 0, positiveReplies: 0 }
+      { meetings: 0, positiveReplies: 0, totalReplies: 0 }
     );
   }, [engagementMetrics]);
 
@@ -938,6 +963,7 @@ export default function EngagementDashboard() {
                       <TableHead>Start</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead className="text-right">Emails</TableHead>
+                      <TableHead className="text-right">Replies</TableHead>
                       <TableHead className="text-right">+Replies</TableHead>
                       <TableHead className="text-right">Calls</TableHead>
                       <TableHead className="text-right">Meetings</TableHead>
@@ -993,6 +1019,9 @@ export default function EngagementDashboard() {
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
                             {(engagementMetrics[engagement.id]?.emailsSent || 0).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {(engagementMetrics[engagement.id]?.totalReplies || 0).toLocaleString()}
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
                             {engagementMetrics[engagement.id]?.positiveReplies || 0}
