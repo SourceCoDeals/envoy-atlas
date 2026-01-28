@@ -92,6 +92,28 @@ export const calculateConnectRate = (calls: number | null | undefined, connects:
 export const calculateMeetingRate = (sent: number | null | undefined, meetings: number | null | undefined): number => 
   calculateRate(meetings, sent);
 
+/**
+ * Calculate Week-over-Week change percentage
+ * Capped at ±999% to prevent display issues with extreme values
+ * @param current - Current period value
+ * @param previous - Previous period value
+ * @returns Percentage change (e.g., 50 means +50%)
+ */
+export const calculateWoWChange = (current: number | null | undefined, previous: number | null | undefined): number => {
+  const curr = current ?? 0;
+  const prev = previous ?? 0;
+  
+  if (prev === 0) {
+    if (curr === 0) return 0;
+    return 999; // Cap at 999% when going from 0 to positive
+  }
+  
+  const change = ((curr - prev) / Math.abs(prev)) * 100;
+  
+  // Cap at ±999% to prevent display issues
+  return Math.max(-999, Math.min(999, Math.round(change)));
+};
+
 // ============================================================================
 // REPLY CLASSIFICATION
 // ============================================================================
