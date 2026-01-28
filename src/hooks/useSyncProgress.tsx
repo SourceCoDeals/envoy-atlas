@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
 
 export interface SyncProgressItem {
   id: string;
@@ -91,7 +92,7 @@ export function useSyncProgress() {
   
   const progressPercent = activeSync
     ? activeSync.total_campaigns > 0
-      ? Math.round((activeSync.processed_campaigns / activeSync.total_campaigns) * 100)
+      ? Math.round(calculateRate(activeSync.processed_campaigns, activeSync.total_campaigns))
       : 0
     : null;
   

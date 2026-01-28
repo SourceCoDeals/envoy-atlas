@@ -769,10 +769,10 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         inProgress: useContactsData ? contactsInProgress : campaignEnrollment.inProgress,
         completed: useContactsData ? contactsCompleted : campaignEnrollment.completed,
         blocked: useContactsData ? contactsBlocked : campaignEnrollment.blocked,
-        backlogRate: (useContactsData ? contactsCount : campaignEnrollment.totalLeads) > 0 
-          ? ((useContactsData ? contactsNotStarted : campaignEnrollment.notStarted) / 
-             (useContactsData ? contactsCount : campaignEnrollment.totalLeads)) * 100 
-          : 0,
+        backlogRate: calculateRate(
+          useContactsData ? contactsNotStarted : campaignEnrollment.notStarted,
+          useContactsData ? contactsCount : campaignEnrollment.totalLeads
+        ),
       };
 
       // Calculate weekly enrollment trends - use contacts.enrolled_at as primary source

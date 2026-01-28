@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { calculateRate } from '@/lib/metrics';
+import { calculateRate, calculateWoWChange } from '@/lib/metrics';
 import { logger } from '@/lib/logger';
 
 // Subject line analysis patterns
@@ -478,9 +478,7 @@ export function useCopyAnalytics(): CopyAnalyticsData {
           avg_reply_rate: avgReplyRate,
           avg_positive_rate: avgPositiveRate,
           significance: getConfidenceLevel(totalSent),
-          comparison_to_baseline: baselineReplyRate > 0 
-            ? ((avgReplyRate - baselineReplyRate) / baselineReplyRate) * 100
-            : 0,
+          comparison_to_baseline: calculateWoWChange(avgReplyRate, baselineReplyRate),
         };
       })
       .filter(p => p.sample_size > 0)
@@ -515,7 +513,8 @@ export function useCopyAnalytics(): CopyAnalyticsData {
       const persReplyRate = personalized.reduce((sum, s) => sum + s.reply_rate, 0) / personalized.length;
       const nonPersReplyRate = nonPersonalized.reduce((sum, s) => sum + s.reply_rate, 0) / nonPersonalized.length;
       if (persReplyRate > nonPersReplyRate * 1.1) {
-        recs.push(`Personalized subject lines are getting ${((persReplyRate / nonPersReplyRate - 1) * 100).toFixed(0)}% higher reply rates`);
+        const improvement = calculateWoWChange(persReplyRate, nonPersReplyRate);
+        recs.push(`Personalized subject lines are getting ${improvement.toFixed(0)}% higher reply rates`);
       }
     }
 

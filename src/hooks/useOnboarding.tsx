@@ -133,7 +133,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   };
 
   const completedCount = steps.filter((s) => s.completed).length;
-  const completionPercentage = Math.round((completedCount / steps.length) * 100);
+  // Using inline calculation for UI-specific progress (not a rate metric)
+  const completionPercentage = steps.length > 0 ? Math.round((completedCount / steps.length) * 100) : 0;
   const hasCompletedOnboarding = completionPercentage === 100;
 
   return (
