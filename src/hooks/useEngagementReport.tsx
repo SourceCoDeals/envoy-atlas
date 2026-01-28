@@ -279,6 +279,33 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         variantsData = variants || [];
       }
       
+      // Fetch NocoDB live metrics for linked campaigns - this is the source of truth
+      let nocodbSmartleadData: any[] = [];
+      let nocodbReplyioData: any[] = [];
+
+      if (externalCampaignIds.length > 0) {
+        const [smartleadRes, replyioRes] = await Promise.all([
+          supabase
+            .from('nocodb_smartlead_campaigns')
+            .select('campaign_id, total_emails_sent, total_replies, leads_interested, total_bounces')
+            .in('campaign_id', externalCampaignIds),
+          supabase
+            .from('nocodb_replyio_campaigns')
+            .select('campaign_id, deliveries, bounces, replies')
+            .in('campaign_id', externalCampaignIds),
+        ]);
+        nocodbSmartleadData = smartleadRes.data || [];
+        nocodbReplyioData = replyioRes.data || [];
+      }
+
+      // Build lookup maps by campaign_id (which matches external_id in campaigns table)
+      const nocodbSmartleadMap = new Map(
+        nocodbSmartleadData.map(n => [n.campaign_id, n])
+      );
+      const nocodbReplyioMap = new Map(
+        nocodbReplyioData.map(n => [n.campaign_id, n])
+      );
+      
       // Fetch NocoDB snapshots for linked campaigns via external_id
       let snapshotData: any[] = [];
       if (externalCampaignIds.length > 0) {
@@ -301,19 +328,46 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         platform: c.campaign_type 
       }));
 
+      // Build linkedCampaignsWithStats - PREFER NocoDB live data over stale campaigns table
       const linkedCampaignsWithStats: LinkedCampaignWithStats[] = (campaigns || []).map(c => {
-        const settings = c.settings as Record<string, number> | null;
+        const settings = c.settings as Record<string, any> | null;
+        const externalId = c.external_id;
+        
+        // Prefer NocoDB data (source of truth)
+        const smartlead = externalId ? nocodbSmartleadMap.get(externalId) : null;
+        const replyio = externalId ? nocodbReplyioMap.get(externalId) : null;
+        
+        let sent = c.total_sent || 0;
+        let replied = c.total_replied || 0;
+        let positive = c.positive_replies || 0;
+        
+        if (smartlead) {
+          sent = smartlead.total_emails_sent || 0;
+          replied = smartlead.total_replies || 0;
+          positive = smartlead.leads_interested || 0;
+        } else if (replyio) {
+          sent = (replyio.deliveries || 0) + (replyio.bounces || 0);
+          replied = replyio.replies || 0;
+          // Reply.io doesn't track positive separately
+        }
+        
+        const parseNum = (val: any): number => {
+          if (typeof val === 'number') return val;
+          if (typeof val === 'string') return parseInt(val, 10) || 0;
+          return 0;
+        };
+        
         return {
           id: c.id,
           name: c.name,
           platform: c.campaign_type,
           status: c.status,
-          enrolled: settings?.total_leads || c.total_sent || 0,
-          sent: c.total_sent || 0,
-          replied: c.total_replied || 0,
-          replyRate: c.reply_rate || 0,
-          positiveReplies: c.positive_replies || 0,
-          positiveRate: c.positive_rate || 0,
+          enrolled: parseNum(settings?.total_leads) || sent,
+          sent,
+          replied,
+          replyRate: calculateRate(replied, sent),
+          positiveReplies: positive,
+          positiveRate: calculateRate(positive, sent),
         };
       });
 
@@ -420,13 +474,42 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         positive: acc.positive + (m.positive_replies || 0),
       }), { sent: 0, delivered: 0, replied: 0, bounced: 0, positive: 0 });
 
-      // Calculate campaign totals as fallback (sum across all linked campaigns)
-      const campaignTotals = (campaigns || []).reduce((acc, c) => ({
-        sent: acc.sent + (c.total_sent || 0),
-        replied: acc.replied + (c.total_replied || 0),
-        positive: acc.positive + (c.positive_replies || 0),
-        bounced: acc.bounced + ((c as any).total_bounced || 0),
-      }), { sent: 0, replied: 0, positive: 0, bounced: 0 });
+      // Calculate campaign totals - PREFER NocoDB live data over stale campaigns table
+      const campaignTotals = (campaigns || []).reduce((acc, c) => {
+        const externalId = c.external_id;
+        
+        // Check for NocoDB data first (SmartLead)
+        const smartlead = externalId ? nocodbSmartleadMap.get(externalId) : null;
+        if (smartlead) {
+          return {
+            sent: acc.sent + (smartlead.total_emails_sent || 0),
+            replied: acc.replied + (smartlead.total_replies || 0),
+            positive: acc.positive + (smartlead.leads_interested || 0),
+            bounced: acc.bounced + (smartlead.total_bounces || 0),
+          };
+        }
+        
+        // Check for Reply.io data
+        const replyio = externalId ? nocodbReplyioMap.get(externalId) : null;
+        if (replyio) {
+          const delivered = replyio.deliveries || 0;
+          const bounced = replyio.bounces || 0;
+          return {
+            sent: acc.sent + delivered + bounced,
+            replied: acc.replied + (replyio.replies || 0),
+            positive: acc.positive, // Reply.io doesn't track positive
+            bounced: acc.bounced + bounced,
+          };
+        }
+        
+        // Fallback to campaigns table data
+        return {
+          sent: acc.sent + (c.total_sent || 0),
+          replied: acc.replied + (c.total_replied || 0),
+          positive: acc.positive + (c.positive_replies || 0),
+          bounced: acc.bounced + ((c as any).total_bounced || 0),
+        };
+      }, { sent: 0, replied: 0, positive: 0, bounced: 0 });
 
       // If we have *no* daily metrics in the selected range but campaign totals exist,
       // treat this as a campaign fallback and surface All-Time totals instead of 0s.
