@@ -1,168 +1,111 @@
 
-
-# Fix Email Performance Summary - Use Snapshot Deltas as Source of Truth
+# Include Paused Campaigns in Engagement Report Data
 
 ## Problem Identified
 
-The GP Partners engagement report is showing **incorrect totals** because:
+The Engagement Report currently excludes data from **Paused** (and **Completed**) campaigns in two ways:
 
-1. **Current behavior**: When a date range is selected, the code prioritizes `daily_metrics` (which is sparse/empty for GP Partners)
-2. **Data mismatch**: The `nocodb_campaign_daily_deltas` view has the correct data (33,682 sent, 162 replied, 43 positive, 53 bounced) but isn't being used for period calculations
-3. **Rate calculation issue**: Per-campaign rates use `sent` as denominator instead of `delivered` (misaligned with SmartLead's convention)
+1. **Snapshot Capture**: The `sync-nocodb-campaigns` Edge Function only captures daily snapshots for campaigns with `Status = "ACTIVE"` (line 234 and 256). Paused/Completed campaigns are excluded.
 
----
+2. **Final Totals Selection**: When snapshot deltas exist, the report prioritizes them even for "All time" view (line 572-576), potentially missing cumulative data.
 
-## Solution Overview
+### Data Verification
+The GP Partners engagement has:
+- **7 Active campaigns**: 33,682 sent, 162 replies (in NocoDB)
+- **2 Paused campaigns**: 0 sent, 0 replies (these happen to have no data)
+- **4 Drafted campaigns**: 0 sent (not yet started)
 
-| Step | Change | File |
-|------|--------|------|
-| 1 | Fetch snapshot deltas and compute `snapshotTotals` | `useEngagementReport.tsx` |
-| 2 | Prioritize snapshot totals over daily_metrics | `useEngagementReport.tsx` |
-| 3 | Fix per-campaign rates to use delivered denominator | `useEngagementReport.tsx` |
-| 4 | Add data source badge showing "Snapshots" | `EmailReportTab.tsx` |
+While the specific paused GP Partners campaigns have 0 data, the fix ensures future paused campaigns with data are properly captured.
 
 ---
 
-## Technical Implementation
+## Solution
 
-### 1. Fetch Snapshot Deltas (lines 309-323)
+### 1. Capture Snapshots for Paused and Completed Campaigns
 
-**Current**: Only fetches `nocodb_campaign_daily_snapshots` (cumulative totals)
+**File**: `supabase/functions/sync-nocodb-campaigns/index.ts`
 
-**Change**: Also fetch `nocodb_campaign_daily_deltas` (day-over-day changes)
-
+**Current behavior** (line 233-234 and 255-256):
 ```typescript
-// Add after existing snapshot query
-let deltasQuery = supabase
-  .from('nocodb_campaign_daily_deltas')
-  .select('campaign_id, snapshot_date, emails_sent_delta, emails_replied_delta, emails_bounced_delta, positive_delta')
-  .in('campaign_id', externalCampaignIds);
-
-if (startDateStr) deltasQuery = deltasQuery.gte('snapshot_date', startDateStr);
-if (endDateStr) deltasQuery = deltasQuery.lte('snapshot_date', endDateStr);
+// Only captures ACTIVE campaigns
+const activeSmartlead = smartleadRecords
+  .filter(r => r.Status?.toUpperCase() === "ACTIVE")
+  ...
+const activeReplyio = replyioRecords
+  .filter(r => r.Status === "Active")
 ```
 
-### 2. Compute Snapshot Totals (new code after line 475)
-
+**Change to include paused and completed**:
 ```typescript
-// Sum snapshot deltas for period totals
-const snapshotTotals = snapshotDeltasData.reduce((acc, d) => ({
-  sent: acc.sent + (d.emails_sent_delta || 0),
-  replied: acc.replied + (d.emails_replied_delta || 0),
-  bounced: acc.bounced + (d.emails_bounced_delta || 0),
-  positive: acc.positive + (d.positive_delta || 0),
-}), { sent: 0, replied: 0, bounced: 0, positive: 0 });
+// Capture snapshots for active, paused, and completed campaigns (with data)
+const SNAPSHOT_STATUSES = ['ACTIVE', 'PAUSED', 'COMPLETED'];
 
-const hasSnapshotDeltas = snapshotDeltasData.length > 0 && snapshotTotals.sent > 0;
+const includedSmartlead = smartleadRecords
+  .filter(r => SNAPSHOT_STATUSES.includes(r.Status?.toUpperCase() || '') && (r["Total Emails Sent"] || 0) > 0)
+  ...
+
+const includedReplyio = replyioRecords
+  .filter(r => ['Active', 'Paused', 'Finished'].includes(r.Status) && ((r["# of Deliveries"] || 0) + (r["# of Bounces"] || 0)) > 0)
 ```
 
-### 3. Update Final Totals Selection Logic (lines 534-536)
+This ensures campaigns with actual email data continue to have their snapshots captured even after being paused.
 
-**Current logic**:
+---
+
+### 2. Fix "All Time" Total Selection Logic
+
+**File**: `src/hooks/useEngagementReport.tsx`
+
+**Current logic** (lines 572-576):
 ```typescript
-const finalEmailTotals = startDateStr
-  ? (isCampaignFallbackInRange ? allTimeEmailTotals : rangeEmailTotals)
-  : allTimeEmailTotals;
-```
-
-**New logic** (prioritize snapshots):
-```typescript
-// Build snapshot-derived period totals
-const snapshotPeriodTotals = {
-  sent: snapshotTotals.sent,
-  replied: snapshotTotals.replied,
-  positive: snapshotTotals.positive,
-  bounced: snapshotTotals.bounced,
-  delivered: Math.max(0, snapshotTotals.sent - snapshotTotals.bounced),
-};
-
-// Priority: 1) Snapshot deltas, 2) Daily metrics, 3) Campaign totals
 const finalEmailTotals = hasSnapshotDeltas
-  ? snapshotPeriodTotals
+  ? snapshotPeriodTotals  // Always uses snapshots if available - WRONG for "All time"
   : startDateStr
-    ? (dailyTotals.sent > 0 ? rangeEmailTotals : allTimeEmailTotals)
+    ? (...)
     : allTimeEmailTotals;
-
-// Track which source was actually used
-const actualDataSource = hasSnapshotDeltas 
-  ? 'snapshots' 
-  : dailyTotals.sent > 0 
-    ? 'daily_metrics' 
-    : 'campaign_totals';
 ```
 
-### 4. Fix Per-Campaign Rate Denominators (lines 360-371)
-
-**Current**: Uses `sent` for rate calculations
+**Fixed logic**:
 ```typescript
-replyRate: calculateRate(replied, sent),
-positiveRate: calculateRate(positive, sent),
+// For "All time" (no date range), always use campaignTotals from NocoDB
+// For specific date ranges, prefer snapshot deltas if available
+const finalEmailTotals = startDateStr
+  ? (hasSnapshotDeltas 
+      ? snapshotPeriodTotals 
+      : (dailyTotals.sent > 0 ? rangeEmailTotals : allTimeEmailTotals))
+  : allTimeEmailTotals;  // "All time" always uses campaign totals
 ```
 
-**Change**: Use `delivered` (sent - bounced) to match SmartLead convention
-```typescript
-// Calculate delivered for denominator
-const delivered = Math.max(0, sent - bounced);
+This ensures:
+- **"All time"**: Uses NocoDB cumulative totals (`campaignTotals`)
+- **Date range with snapshots**: Uses snapshot deltas for period-specific metrics
+- **Date range without snapshots**: Falls back to daily_metrics or campaign totals
 
-return {
-  // ...
-  replyRate: calculateRate(replied, delivered > 0 ? delivered : sent),
-  positiveRate: calculateRate(positive, delivered > 0 ? delivered : sent),
-};
-```
+---
 
-### 5. Add Data Source Badge to Email Tab
+## Summary of Changes
 
-**File**: `src/components/engagementReport/EmailReportTab.tsx`
-
-Add to the Email Performance Summary card header:
-```tsx
-import { DataSourceBadge } from '@/components/ui/data-source-badge';
-
-// In the Card header (around line 479)
-<CardTitle className="text-lg flex items-center gap-2">
-  Email Performance Summary
-  {dataAvailability?.dataSource && (
-    <DataSourceBadge source={dataAvailability.dataSource} compact />
-  )}
-</CardTitle>
-```
-
-Update the interface to include the new dataSource field:
-```typescript
-interface DataAvailability {
-  // ... existing fields
-  dataSource?: 'snapshots' | 'daily_metrics' | 'campaign_totals' | 'estimated';
-  snapshotDateRange?: { min: string; max: string } | null;
-}
-```
+| File | Change |
+|------|--------|
+| `supabase/functions/sync-nocodb-campaigns/index.ts` | Expand snapshot capture to include PAUSED and COMPLETED campaigns with data (lines 233-252, 255-274) |
+| `src/hooks/useEngagementReport.tsx` | Fix final totals selection to use campaign totals for "All time" view (lines 572-576) |
 
 ---
 
 ## Expected Results
 
-| Metric | Before (Wrong) | After (Correct) |
-|--------|----------------|-----------------|
-| Emails Sent | ~0 or small number | 33,682 |
-| Delivered | ~0 | 33,629 |
-| Replied | 0 | 162 |
-| Positive Replies | 0 or low | 43 |
-| Reply Rate | 0% | ~0.48% (162/33,629) |
+| Scenario | Before | After |
+|----------|--------|-------|
+| "All time" view | May show snapshot deltas only (last 2 days: ~32k) | Shows full NocoDB totals (33,682 sent) |
+| Date range view | Uses snapshots if available | Same - uses snapshots for period |
+| Paused campaigns | No new snapshots captured | Daily snapshots continue until data stabilizes |
+| Completed campaigns | No snapshots captured | Snapshots captured (historical accuracy) |
 
 ---
 
-## Files to Modify
+## Technical Notes
 
-| File | Changes |
-|------|---------|
-| `src/hooks/useEngagementReport.tsx` | Add snapshot delta query, compute snapshotTotals, update selection logic, fix rate denominators, update dataAvailability |
-| `src/components/engagementReport/EmailReportTab.tsx` | Add DataSourceBadge import and display, update interface |
-
----
-
-## Edge Cases Handled
-
-1. **New campaigns (1 snapshot)**: Delta equals first observed total - works correctly
-2. **No snapshot data**: Falls back to daily_metrics, then campaign_totals (existing behavior)
-3. **Mixed sources**: prioritizes most accurate source (snapshots > daily_metrics > campaign_totals)
-
+1. The fix adds a minimum data threshold (`total_emails_sent > 0`) to avoid capturing empty campaigns
+2. For Reply.io, "Finished" is the equivalent of "Completed" status
+3. The snapshot capture runs daily via the sync-nocodb-campaigns function
+4. Existing historical data for paused campaigns is preserved in NocoDB tables and will be used for "All time" calculations
