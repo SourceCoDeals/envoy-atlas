@@ -90,6 +90,9 @@ const ALERT_THRESHOLDS = {
   lowPositiveRate: 0.5,
 };
 
+// Active statuses for filtering hero metrics
+const ACTIVE_CAMPAIGN_STATUSES = ['active', 'started', 'running'];
+
 // ===== Hook =====
 export function useOverviewDashboard(): OverviewDashboardData {
   const { currentWorkspace } = useWorkspace();
@@ -173,7 +176,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
         // Also used for alerts and top performers
         supabase
           .from('campaigns')
-          .select('id, name, total_sent, total_replied, positive_replies, total_meetings, reply_rate, positive_rate, updated_at')
+          .select('id, name, status, total_sent, total_replied, positive_replies, total_meetings, reply_rate, positive_rate, updated_at')
           .in('engagement_id', engagementIds)
           .not('status', 'eq', 'archived'),
         
@@ -289,7 +292,12 @@ export function useOverviewDashboard(): OverviewDashboardData {
 
       // ===== HERO METRICS: Use campaigns table (source of truth) =====
       // The campaigns table has complete aggregate data vs daily_metrics which has gaps
-      const campaignTotals = campaigns.reduce((acc, c) => ({
+      // Filter to only include ACTIVE campaigns to prevent inflated metrics from paused/completed campaigns
+      const activeCampaigns = campaigns.filter(c => 
+        ACTIVE_CAMPAIGN_STATUSES.includes(c.status?.toLowerCase() || '')
+      );
+      
+      const campaignTotals = activeCampaigns.reduce((acc, c) => ({
         sent: acc.sent + (c.total_sent || 0),
         replied: acc.replied + (c.total_replied || 0),
         positive: acc.positive + (c.positive_replies || 0),
