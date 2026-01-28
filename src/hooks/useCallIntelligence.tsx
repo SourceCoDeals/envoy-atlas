@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { toast } from 'sonner';
+import { calculateRate } from '@/lib/metrics';
 
 export interface CallWithScores {
   id: string;
@@ -101,7 +102,7 @@ export function useCallingMetrics(dateRange?: { start: Date; end: Date }) {
         totalConnected,
         totalVoicemails,
         totalTalkTimeSeconds,
-        connectRate: totalCalls > 0 ? (totalConnected / totalCalls) * 100 : 0,
+        connectRate: calculateRate(totalConnected, totalCalls),
         avgDuration: totalCalls > 0 ? totalTalkTimeSeconds / totalCalls : 0,
         avgAIScore: null, // AI scores stored separately if needed
         transcribedCalls,
@@ -442,7 +443,7 @@ export function useAggregateCallingMetrics() {
       // Calculate connect rates
       const repPerformance = Array.from(repMap.values()).map(rep => ({
         ...rep,
-        connectRate: rep.totalCalls > 0 ? (rep.callsConnected / rep.totalCalls) * 100 : 0,
+        connectRate: calculateRate(rep.callsConnected, rep.totalCalls),
       })).sort((a, b) => b.connectRate - a.connectRate);
 
       const totalCalls = repPerformance.reduce((sum, r) => sum + r.totalCalls, 0);
@@ -455,7 +456,7 @@ export function useAggregateCallingMetrics() {
         totalConnected,
         totalVoicemails,
         totalTalkTimeSeconds,
-        connectRate: totalCalls > 0 ? (totalConnected / totalCalls) * 100 : 0,
+        connectRate: calculateRate(totalConnected, totalCalls),
         repPerformance,
       };
     },

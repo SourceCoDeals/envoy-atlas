@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
 import {
   SeniorityLevel,
   DepartmentType,
@@ -199,7 +200,7 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
     return {
       totalLeads: contacts.length,
       enrichedLeads: enrichedCount,
-      enrichmentPercent: contacts.length > 0 ? (enrichedCount / contacts.length) * 100 : 0,
+      enrichmentPercent: calculateRate(enrichedCount, contacts.length),
       hasEnoughData: contacts.length >= 100 && (uniqueTitles > 1 || seniorityLevels.size > 1),
       uniqueTitles,
       uniqueIndustries,
@@ -242,9 +243,9 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
       if (hasMeeting) meetings++;
     });
 
-    const replyRate = contacted > 0 ? (replied / contacted) * 100 : 0;
-    const positiveRate = contacted > 0 ? (positiveReplies / contacted) * 100 : 0;
-    const vsAverage = avgReplyRate > 0 ? ((replyRate - avgReplyRate) / avgReplyRate) * 100 : 0;
+    const replyRate = calculateRate(replied, contacted);
+    const positiveRate = calculateRate(positiveReplies, contacted);
+    const vsAverage = calculateRate(replyRate - avgReplyRate, avgReplyRate);
 
     return {
       segment: segmentLabel,
@@ -287,8 +288,8 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
     return {
       totalContacted: contacted,
       totalReplied: replied,
-      avgReplyRate: contacted > 0 ? (replied / contacted) * 100 : 0,
-      avgPositiveRate: contacted > 0 ? (positive / contacted) * 100 : 0,
+      avgReplyRate: calculateRate(replied, contacted),
+      avgPositiveRate: calculateRate(positive, contacted),
     };
   }, [contacts, activitiesByContact]);
 

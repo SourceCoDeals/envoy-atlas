@@ -488,12 +488,12 @@ export function useOverviewDashboard(): OverviewDashboardData {
       };
     };
 
-    const last7ReplyRate = last7.sent > 0 ? (last7.replied / last7.sent) * 100 : 0;
-    const prev7ReplyRate = prev7.sent > 0 ? (prev7.replied / prev7.sent) * 100 : 0;
-    const last7PositiveRate = last7.sent > 0 ? (last7.positive / last7.sent) * 100 : 0;
-    const prev7PositiveRate = prev7.sent > 0 ? (prev7.positive / prev7.sent) * 100 : 0;
-    const last7MeetingRate = last7.sent > 0 ? (last7.meetings / last7.sent) * 100 : 0;
-    const prev7MeetingRate = prev7.sent > 0 ? (prev7.meetings / prev7.sent) * 100 : 0;
+    const last7ReplyRate = calculateRate(last7.replied, last7.sent);
+    const prev7ReplyRate = calculateRate(prev7.replied, prev7.sent);
+    const last7PositiveRate = calculateRate(last7.positive, last7.sent);
+    const prev7PositiveRate = calculateRate(prev7.positive, prev7.sent);
+    const last7MeetingRate = calculateRate(last7.meetings, last7.sent);
+    const prev7MeetingRate = calculateRate(prev7.meetings, prev7.sent);
 
     const sentChange = calcChange(last7.sent, prev7.sent);
     const replyRateChange = calcChange(last7ReplyRate, prev7ReplyRate);
@@ -510,21 +510,21 @@ export function useOverviewDashboard(): OverviewDashboardData {
       },
       {
         label: 'Reply Rate',
-        value: last30.sent > 0 ? (last30.replied / last30.sent) * 100 : 0,
+        value: calculateRate(last30.replied, last30.sent),
         format: 'percent',
         change: replyRateChange.change,
         trend: replyRateChange.trend,
       },
       {
         label: 'Positive Reply Rate',
-        value: last30.sent > 0 ? (last30.positive / last30.sent) * 100 : 0,
+        value: calculateRate(last30.positive, last30.sent),
         format: 'percent',
         change: positiveRateChange.change,
         trend: positiveRateChange.trend,
       },
       {
         label: 'Meeting Booked Rate',
-        value: last30.sent > 0 ? (last30.meetings / last30.sent) * 100 : 0,
+        value: calculateRate(last30.meetings, last30.sent),
         format: 'percent',
         change: meetingRateChange.change,
         trend: meetingRateChange.trend,

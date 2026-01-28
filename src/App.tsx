@@ -8,6 +8,7 @@ import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { OnboardingProvider } from "@/hooks/useOnboarding";
 import { OnboardingModal, HelpSidebar } from "@/components/onboarding";
 import { ChannelProvider } from "@/hooks/useChannel";
+import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
 import DealHub from "./pages/DealHub";
 import MonthlyReport from "./pages/MonthlyReport";
@@ -55,87 +56,89 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <AuthProvider>
-        <WorkspaceProvider>
-          <ChannelProvider>
-            <BrowserRouter>
-              <OnboardingProvider>
-                <OnboardingModal />
-                <HelpSidebar />
+  <ErrorBoundary section="Application">
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AuthProvider>
+          <WorkspaceProvider>
+            <ChannelProvider>
+              <BrowserRouter>
+                <OnboardingProvider>
+                  <OnboardingModal />
+                  <HelpSidebar />
 
-                <Toaster />
-                <Sonner />
+                  <Toaster />
+                  <Sonner />
 
-                <Routes>
-                  {/* Email routes */}
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/deal-hub" element={<DealHub />} />
-                  <Route path="/monthly-report" element={<MonthlyReport />} />
-                  <Route path="/auth" element={<Auth />} />
-                  <Route path="/connections" element={<Navigate to="/settings?tab=connections" replace />} />
-                  <Route path="/oauth/phoneburner/callback" element={<PhoneBurnerCallback />} />
-                  <Route path="/campaigns" element={<Campaigns />} />
-                  <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
-                  <Route path="/campaigns/:platform/:campaignId/summary" element={<CampaignSummary />} />
-                  <Route path="/inbox" element={<Inbox />} />
-                  <Route path="/inbox/:inboxId" element={<InboxDetail />} />
-                  <Route path="/deliverability" element={<Deliverability />} />
-                  <Route path="/audience" element={<Audience />} />
-                  <Route path="/audience-insights" element={<AudienceInsights />} />
-                  <Route path="/copy-insights" element={<CopyInsights />} />
-                  <Route path="/copy-library" element={<CopyLibrary />} />
-                  <Route path="/experiments" element={<Experiments />} />
-                  <Route path="/playbook" element={<Playbook />} />
-                  <Route path="/copywriting-studio" element={<CopywritingStudio />} />
-                  <Route path="/alerts" element={<Alerts />} />
-                  <Route path="/settings" element={<Settings />} />
+                  <Routes>
+                    {/* Email routes */}
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/deal-hub" element={<DealHub />} />
+                    <Route path="/monthly-report" element={<MonthlyReport />} />
+                    <Route path="/auth" element={<Auth />} />
+                    <Route path="/connections" element={<Navigate to="/settings?tab=connections" replace />} />
+                    <Route path="/oauth/phoneburner/callback" element={<PhoneBurnerCallback />} />
+                    <Route path="/campaigns" element={<Campaigns />} />
+                    <Route path="/campaigns/:campaignId" element={<CampaignDetail />} />
+                    <Route path="/campaigns/:platform/:campaignId/summary" element={<CampaignSummary />} />
+                    <Route path="/inbox" element={<Inbox />} />
+                    <Route path="/inbox/:inboxId" element={<InboxDetail />} />
+                    <Route path="/deliverability" element={<Deliverability />} />
+                    <Route path="/audience" element={<Audience />} />
+                    <Route path="/audience-insights" element={<AudienceInsights />} />
+                    <Route path="/copy-insights" element={<CopyInsights />} />
+                    <Route path="/copy-library" element={<CopyLibrary />} />
+                    <Route path="/experiments" element={<Experiments />} />
+                    <Route path="/playbook" element={<Playbook />} />
+                    <Route path="/copywriting-studio" element={<CopywritingStudio />} />
+                    <Route path="/alerts" element={<Alerts />} />
+                    <Route path="/settings" element={<Settings />} />
 
-                  {/* Engagements routes - Top-level channel */}
-                  <Route path="/engagements" element={<EngagementDashboard />} />
-                  <Route path="/engagements/performance" element={<EngagementDashboard />} />
-                  <Route path="/engagements/:engagementId/report" element={<EngagementReport />} />
+                    {/* Engagements routes - Top-level channel */}
+                    <Route path="/engagements" element={<EngagementDashboard />} />
+                    <Route path="/engagements/performance" element={<EngagementDashboard />} />
+                    <Route path="/engagements/:engagementId/report" element={<EngagementReport />} />
 
-                  {/* Calling routes - Consolidated structure */}
-                  <Route path="/calling" element={<CallerDashboard />} />
-                  <Route path="/calling/top-calls" element={<TopCallsWeek />} />
-                  <Route path="/calling/insights" element={<DataInsights />} />
-                  <Route path="/calling/call-insights" element={<CallInsights />} />
-                  <Route path="/calling/library" element={<CallLibrary />} />
-                  
-                  {/* Redirects for removed pages */}
-                  <Route path="/calling/deals" element={<Navigate to="/calling" replace />} />
-                  <Route path="/calling/analytics" element={<Navigate to="/calling/insights" replace />} />
-                  <Route path="/calling/timing" element={<Navigate to="/calling/insights" replace />} />
-                  <Route path="/calling/chatbot" element={<Navigate to="/calling" replace />} />
-                  <Route path="/calling/engagements" element={<Navigate to="/engagements" replace />} />
-                  
-                  {/* Legacy calling routes */}
-                  <Route path="/calling/search" element={<CallSearch />} />
-                  <Route path="/calling/best-worst" element={<BestWorstCalls />} />
-                  <Route path="/calling/sessions" element={<CallSessions />} />
-                  <Route path="/calling/reps" element={<RepInsights />} />
-                  <Route path="/calling/patterns" element={<PatternAnalysis />} />
-                  <Route path="/calling/training" element={<TrainingQueue />} />
-                  <Route path="/calling/onboarding" element={<OnboardingProgress />} />
-                  <Route path="/calling/team" element={<Team />} />
+                    {/* Calling routes - Consolidated structure */}
+                    <Route path="/calling" element={<CallerDashboard />} />
+                    <Route path="/calling/top-calls" element={<TopCallsWeek />} />
+                    <Route path="/calling/insights" element={<DataInsights />} />
+                    <Route path="/calling/call-insights" element={<CallInsights />} />
+                    <Route path="/calling/library" element={<CallLibrary />} />
+                    
+                    {/* Redirects for removed pages */}
+                    <Route path="/calling/deals" element={<Navigate to="/calling" replace />} />
+                    <Route path="/calling/analytics" element={<Navigate to="/calling/insights" replace />} />
+                    <Route path="/calling/timing" element={<Navigate to="/calling/insights" replace />} />
+                    <Route path="/calling/chatbot" element={<Navigate to="/calling" replace />} />
+                    <Route path="/calling/engagements" element={<Navigate to="/engagements" replace />} />
+                    
+                    {/* Legacy calling routes */}
+                    <Route path="/calling/search" element={<CallSearch />} />
+                    <Route path="/calling/best-worst" element={<BestWorstCalls />} />
+                    <Route path="/calling/sessions" element={<CallSessions />} />
+                    <Route path="/calling/reps" element={<RepInsights />} />
+                    <Route path="/calling/patterns" element={<PatternAnalysis />} />
+                    <Route path="/calling/training" element={<TrainingQueue />} />
+                    <Route path="/calling/onboarding" element={<OnboardingProgress />} />
+                    <Route path="/calling/team" element={<Team />} />
 
-                  {/* Shared routes */}
-                  <Route path="/contacts" element={<Contacts />} />
-                  <Route path="/contacts/:contactId" element={<ContactDetail />} />
-                  <Route path="/contacts/search" element={<ContactsSearch />} />
+                    {/* Shared routes */}
+                    <Route path="/contacts" element={<Contacts />} />
+                    <Route path="/contacts/:contactId" element={<ContactDetail />} />
+                    <Route path="/contacts/search" element={<ContactsSearch />} />
 
-                  {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </OnboardingProvider>
-            </BrowserRouter>
-          </ChannelProvider>
-        </WorkspaceProvider>
-      </AuthProvider>
-    </TooltipProvider>
-  </QueryClientProvider>
+                    {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </OnboardingProvider>
+              </BrowserRouter>
+            </ChannelProvider>
+          </WorkspaceProvider>
+        </AuthProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;

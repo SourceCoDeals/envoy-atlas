@@ -520,9 +520,9 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       // Build funnel
       const funnel: FunnelStage[] = [
         { name: 'Contacted', count: keyMetrics.companiesContacted, percentage: 100 },
-        { name: 'Engaged', count: finalEmailTotals.replied + connections, percentage: keyMetrics.companiesContacted > 0 ? Math.round(((finalEmailTotals.replied + connections) / keyMetrics.companiesContacted) * 100) : 0 },
-        { name: 'Positive Response', count: keyMetrics.positiveResponses, percentage: keyMetrics.companiesContacted > 0 ? Math.round((keyMetrics.positiveResponses / keyMetrics.companiesContacted) * 100) : 0 },
-        { name: 'Meeting', count: meetingsBooked, percentage: keyMetrics.companiesContacted > 0 ? Math.round((meetingsBooked / keyMetrics.companiesContacted) * 100) : 0 },
+        { name: 'Engaged', count: finalEmailTotals.replied + connections, percentage: Math.round(calculateRate(finalEmailTotals.replied + connections, keyMetrics.companiesContacted)) },
+        { name: 'Positive Response', count: keyMetrics.positiveResponses, percentage: Math.round(calculateRate(keyMetrics.positiveResponses, keyMetrics.companiesContacted)) },
+        { name: 'Meeting', count: meetingsBooked, percentage: Math.round(calculateRate(meetingsBooked, keyMetrics.companiesContacted)) },
         { name: 'Opportunity', count: 0, percentage: 0 },
       ];
 
@@ -542,9 +542,9 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           attempts: totalCalls,
           engagementRate: callingMetrics.connectRate,
           responseRate: callingMetrics.conversationRate,
-          positiveRate: totalCalls > 0 ? (conversations / totalCalls) * 100 : 0,
+          positiveRate: calculateRate(conversations, totalCalls),
           meetings: callMeetings,
-          meetingsPerHundred: totalCalls > 0 ? (callMeetings / totalCalls) * 100 : 0,
+          meetingsPerHundred: calculateRate(callMeetings, totalCalls),
         },
       ];
 
@@ -625,14 +625,14 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         .map(([category, count]) => ({
           category,
           count,
-          percentage: totalCalls > 0 ? (count / totalCalls) * 100 : 0,
+          percentage: calculateRate(count, totalCalls),
         }))
         .sort((a, b) => b.count - a.count);
 
       // Build call outcomes
       const callOutcomes: CallOutcome[] = [
-        { outcome: 'Meeting Booked', count: callMeetings, percentage: totalCalls > 0 ? (callMeetings / totalCalls) * 100 : 0 },
-        { outcome: 'Interested', count: conversations - callMeetings, percentage: totalCalls > 0 ? ((conversations - callMeetings) / totalCalls) * 100 : 0 },
+        { outcome: 'Meeting Booked', count: callMeetings, percentage: calculateRate(callMeetings, totalCalls) },
+        { outcome: 'Interested', count: conversations - callMeetings, percentage: calculateRate(conversations - callMeetings, totalCalls) },
         { outcome: 'Not Interested', count: 0, percentage: 0 },
         { outcome: 'Call Back', count: calls.filter(c => c.callback_scheduled).length, percentage: 0 },
       ];

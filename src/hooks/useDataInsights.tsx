@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
 import { COLD_CALLING_BENCHMARKS } from '@/lib/coldCallingBenchmarks';
 import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
+import { calculateRate } from '@/lib/metrics';
 
 interface Benchmark {
   metric_name: string;
@@ -215,7 +216,7 @@ export function useDataInsights() {
       });
 
       // Engagement Metrics
-      const connectRate = totalDials > 0 ? (totalConnects / totalDials) * 100 : 0;
+      const connectRate = calculateRate(totalConnects, totalDials);
       const callsWithDuration = calls.filter(c => (c.talk_duration || 0) > 0);
       const avgDuration = callsWithDuration.length 
         ? callsWithDuration.reduce((sum, c) => sum + (c.talk_duration || 0), 0) / callsWithDuration.length 
@@ -237,13 +238,13 @@ export function useDataInsights() {
       const connectTrend = Array.from(dateMap.entries())
         .map(([date, data]) => ({ 
           date, 
-          rate: data.calls > 0 ? Math.round((data.connects / data.calls) * 100) : 0 
+          rate: Math.round(calculateRate(data.connects, data.calls)) 
         }))
         .sort((a, b) => a.date.localeCompare(b.date))
         .slice(-14);
 
       const meaningfulConversations = calls.filter(c => (c.talk_duration || 0) >= 180).length;
-      const meaningfulRate = totalConnects > 0 ? (meaningfulConversations / totalConnects) * 100 : 0;
+      const meaningfulRate = calculateRate(meaningfulConversations, totalConnects);
 
       setEngagementMetrics({
         connectRate: Math.round(connectRate * 10) / 10, 
@@ -273,9 +274,9 @@ export function useDataInsights() {
 
       setOutcomeMetrics({ 
         meetingsBooked: meetingsOutcome, 
-        conversationToMeetingRate: totalConnects > 0 ? Math.round((meetingsOutcome / totalConnects) * 100) : 0, 
-        leadQualityConversionRate: meaningfulConversations > 0 ? Math.round((meetingsOutcome / meaningfulConversations) * 100) : 0, 
-        conversionToSale: meetingsOutcome > 0 ? Math.round((closedDeals / meetingsOutcome) * 100) : 0, 
+        conversationToMeetingRate: Math.round(calculateRate(meetingsOutcome, totalConnects)), 
+        leadQualityConversionRate: Math.round(calculateRate(meetingsOutcome, meaningfulConversations)), 
+        conversionToSale: Math.round(calculateRate(closedDeals, meetingsOutcome)),
         followUpSuccessRate: 0,
         funnel, 
         meetingTrend: []
