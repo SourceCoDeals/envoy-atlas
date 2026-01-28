@@ -190,13 +190,24 @@ ${JSON.stringify(campaignNames, null, 2)}
 
 ## Pattern Recognition Rules
 Campaign names typically follow this structure:
-1. First segment = Sponsor name (e.g., "Baum", "Alpine", "GP Partners", "Trivest", "Trinity", "Stadion", "Verde", "Arch City", "HTR")
-2. Second segment = Portfolio company or service type (e.g., "Property Management", "Windows & Doors", "Collision", "HVAC")
-3. Remaining segments = Rep initials (SD, JT, etc.), tier indicators, variations
+1. First segment = Sponsor name (e.g., "Baum", "Alpine", "GP Partners", "Trivest", "Trinity", "Stadion", "Verde", "Arch City", "HTR", "Harbor Street", "New Heritage", "Renovus", "Shoreline", "LLCP", "Boyne")
+2. Second segment = Portfolio company or service type (e.g., "Property Management", "Windows & Doors", "Collision", "HVAC", "Insurance", "Medical")
+3. Remaining segments = Rep initials (SD, JT, BM, JB, CJ, TM, etc.), tier indicators (T1, T2, T3), variations
+
+## Important Matching Notes
+- "Alpine" campaigns → match to "Alpine" or "Vertex" or "ORION" engagements
+- "Arch City" campaigns → look for Arch City engagement (create if needed)
+- "New Heritage" campaigns → match to "New Heritage - HRIS" or similar
+- "Renovus" campaigns → match to "Renovus Capital"
+- "Shoreline" campaigns → match to "Shoreline"
+- "Boyne" campaigns → match to "Boyne"
+- "Harbor Street" or "HSC" campaigns → match to "Harbor Street"
+- Campaigns with "O2" in the name should STAY in O2 Investment
+- Campaigns mentioning specific sponsor names should be matched to that sponsor
 
 ## Your Task
 For EACH campaign, determine the best matching engagement based on:
-- Sponsor name match (strongest signal)
+- Sponsor name match (strongest signal - if campaign contains sponsor name, match it)
 - Portfolio company name match
 - Service type/industry keywords
 
