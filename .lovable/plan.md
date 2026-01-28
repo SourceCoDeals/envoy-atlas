@@ -1,224 +1,135 @@
 
-# CTO-Level Fix Plan: Campaign Sorting, Email Count Discrepancy & Engagement Metrics
+# Fix Plan: Campaign Linking Bug & AI-Powered Engagement Remapping
 
-## Executive Summary
+## Overview
 
-After a thorough investigation of the codebase and database, I've identified the root causes of all three issues:
-
-| Issue | Root Cause | Impact | Fix Complexity |
-|-------|-----------|--------|----------------|
-| Campaign sorting | Missing status prioritization in `EnhancedCampaignTable` | UX - active campaigns buried | Low |
-| 540K email count | Aggregating ALL campaigns (including those incorrectly attributed) | Inflated hero metrics | Medium |
-| O2 Auto Repair data | 450 campaigns incorrectly linked (only 13 are actually O2 Auto) | Cascading data corruption | Data + Code |
+This plan addresses two critical issues:
+1. **Campaign linking dropdown causes page reload** - RLS policy conflict when updating `engagement_id`
+2. **All campaigns incorrectly attributed to O2 Investment Auto Repair** - Need AI-powered remapping
 
 ---
 
-## Issue 1: Campaign Dashboard Sorting
-
-### Current State
-The `EnhancedCampaignTable.tsx` (lines 173-267) has a generic sort that does NOT prioritize active campaigns. The older `CampaignTable.tsx` correctly prioritizes `['active', 'started', 'running']` statuses, but this logic was not carried over to the enhanced table.
-
-### Fix
-Add a two-tier sort that ALWAYS places active campaigns first, regardless of secondary sort field:
-
-```text
-┌─────────────────────────────────────────────┐
-│  SORT PRIORITY                              │
-├─────────────────────────────────────────────┤
-│  1. Active Status (active, started, running)│
-│  2. Secondary Sort Field (user-selected)    │
-└─────────────────────────────────────────────┘
-```
-
-**File:** `src/components/campaigns/EnhancedCampaignTable.tsx`
-
-**Changes:**
-- Add `ACTIVE_STATUSES` constant at top of component
-- Modify the `filteredAndSortedCampaigns` useMemo to apply two-tier sorting
-- Active campaigns bubble to top, then sort by selected field within each tier
-
----
-
-## Issue 2: Email Count Discrepancy (540K → ~170K Actual)
-
-### Current State
-The Overview Dashboard (`useOverviewDashboard.tsx` lines 290-297) aggregates ALL campaigns linked to the client's engagements:
-
-```typescript
-const campaignTotals = campaigns.reduce((acc, c) => ({
-  sent: acc.sent + (c.total_sent || 0), // No status filter!
-  ...
-}), {...});
-```
-
-**Database Reality:**
-- `campaigns` table total: **739,005** emails
-- Active engagements campaigns: **738,512** emails
-- BUT: **715,271** are from incorrectly attributed campaigns (O2 Investment Auto Repair)
-
-### Fix
-Filter aggregation to only include campaigns with `status IN ('active', 'started', 'running')`:
-
-**File:** `src/hooks/useOverviewDashboard.tsx`
-
-**Changes:**
-- Add status filter when aggregating `campaignTotals`
-- Only count emails from campaigns that are currently active
-- Add data quality indicator showing paused/completed campaign totals separately
-
----
-
-## Issue 3: O2 Investment Auto Repair Data Corruption
-
-### Database Forensics
-```text
-┌──────────────────────────────────────────────────────────────┐
-│  O2 Investment Auto Repair (f8ad6966-49ed-4394-8cec-...)    │
-├──────────────────────────────────────────────────────────────┤
-│  Total campaigns linked: 450                                 │
-│  Correctly attributed (O2 Auto): 13 campaigns (68K emails)  │
-│  WRONG - Trivest campaigns: 47 (121K emails)                │
-│  WRONG - Stadion campaigns: 16 (75K emails)                 │
-│  WRONG - Alpine campaigns: 20 (47K emails)                  │
-│  WRONG - Trinity campaigns: 18 (44K emails)                 │
-│  WRONG - GP Partners campaigns: 15 (35K emails)             │
-│  WRONG - Other misattributed: 316+ campaigns                │
-└──────────────────────────────────────────────────────────────┘
-```
+## Phase 1: Fix Campaign Linking Dropdown Bug
 
 ### Root Cause
-The `auto-pair-engagements` function has been incorrectly linking campaigns from OTHER clients/sponsors to "O2 Investment Auto Repair" as a catch-all bucket.
+The `useCampaignLinking` hook passes `null` when "Unlinked" is selected, but:
+- The RLS policy checks `engagement_id` relationship for permissions
+- Setting to `null` breaks the relationship check
+- The database update fails silently, causing a page state mismatch
 
-### Fix Strategy (Two-Part)
+### Solution
+Update `useCampaignLinking.tsx` to use the "Unassigned" placeholder UUID instead of `null`:
 
-**Part A: Code Fix** - Improve `EngagementDashboard.tsx` metrics aggregation
-- Add validation in `fetchEngagementMetrics` to filter out obviously misattributed campaigns
-- Add engagement name matching heuristics (e.g., "Trivest" campaigns shouldn't be in "O2 Investment")
+```text
+File: src/hooks/useCampaignLinking.tsx
 
-**Part B: Data Remediation** - SQL cleanup (requires manual execution)
-- Provide migration script to move misattributed campaigns to proper engagements or "Unassigned"
-- This is a data governance issue that requires human review
+Changes:
+- Line 110: Change null handling to use sentinel UUID
+- When "unlinked" selected, set engagement_id to '00000000-0000-0000-0000-000000000000'
+- This maintains RLS relationship while marking as unassigned
+```
 
-**Files to modify:**
-1. `src/pages/EngagementDashboard.tsx` - Add campaign filtering logic
-2. Create data audit SQL for the user to review and execute
+### Also Fix EnhancedCampaignTable.tsx
+- Line 574: Update `handleCampaignEngagementAssign` to pass the sentinel UUID instead of `null`
 
 ---
 
-## Technical Implementation Plan
+## Phase 2: Create AI-Powered Campaign Remapping Function
 
-### Phase 1: Campaign Sorting Fix (EnhancedCampaignTable.tsx)
+### New Edge Function: `ai-remap-campaigns`
 
-```typescript
-// Add constant at top
-const ACTIVE_STATUSES = ['active', 'started', 'running'];
+Create a new edge function that uses **Lovable AI** (google/gemini-2.5-flash) to intelligently match campaigns to engagements.
 
-// In filteredAndSortedCampaigns useMemo, after filtering:
-result.sort((a, b) => {
-  // TIER 1: Active status priority
-  const aIsActive = ACTIVE_STATUSES.includes(a.status?.toLowerCase() || '');
-  const bIsActive = ACTIVE_STATUSES.includes(b.status?.toLowerCase() || '');
-  
-  if (aIsActive && !bIsActive) return -1;
-  if (!aIsActive && bIsActive) return 1;
-  
-  // TIER 2: User-selected sort field (existing logic)
-  // ... existing switch statement ...
-});
+```text
+File: supabase/functions/ai-remap-campaigns/index.ts
+
+Logic:
+1. Fetch all campaigns currently linked to O2 Investment Auto Repair
+2. Fetch all available engagements with their sponsor/portfolio data
+3. For each campaign, use AI to:
+   - Parse the campaign name structure
+   - Identify sponsor keywords (Baum, Alpine, GP Partners, etc.)
+   - Identify portfolio/client keywords
+   - Match to the most appropriate engagement
+4. Return proposed mappings for user review
+5. On confirmation, execute batch update
 ```
 
-### Phase 2: Overview Dashboard Filter (useOverviewDashboard.tsx)
+### AI Prompt Design
+```text
+Given campaign name: "Baum - Property Management - SD - All Tiers"
+Available engagements: [list with sponsor/portfolio data]
 
-```typescript
-// Filter to only active campaigns for hero metrics
-const activeCampaigns = campaigns.filter(c => 
-  ['active', 'started', 'running'].includes(c.status?.toLowerCase() || '')
-);
+Task: Identify which engagement this campaign belongs to based on:
+1. First segment usually = Sponsor name
+2. Second segment usually = Portfolio company or service type
+3. Remaining segments = Rep initials, tiers, variations
 
-const campaignTotals = activeCampaigns.reduce((acc, c) => ({
-  sent: acc.sent + (c.total_sent || 0),
-  replied: acc.replied + (c.total_replied || 0),
-  positive: acc.positive + (c.positive_replies || 0),
-  meetings: acc.meetings + (c.total_meetings || 0),
-}), { sent: 0, replied: 0, positive: 0, meetings: 0 });
-```
-
-### Phase 3: Engagement Dashboard Validation (EngagementDashboard.tsx)
-
-Add a validation heuristic to flag suspicious campaign attributions:
-
-```typescript
-// In fetchEngagementMetrics, before aggregating:
-// Filter out campaigns that are clearly misattributed
-const validCampaigns = allCampaigns.filter(campaign => {
-  const engName = metricsMap[campaign.engagement_id]?.name?.toLowerCase() || '';
-  const campName = campaign.name?.toLowerCase() || '';
-  
-  // Skip if campaign name contains a DIFFERENT sponsor/client name
-  const knownSponsors = ['trivest', 'trinity', 'stadion', 'alpine', 'verde', 'arch city'];
-  const hasOtherSponsor = knownSponsors.some(sponsor => 
-    campName.includes(sponsor) && !engName.includes(sponsor)
-  );
-  
-  return !hasOtherSponsor;
-});
-```
-
-### Phase 4: Data Audit SQL (For Manual Review)
-
-```sql
--- Identify misattributed campaigns
-SELECT 
-  c.id,
-  c.name as campaign_name,
-  e.name as current_engagement,
-  CASE 
-    WHEN c.name ILIKE '%Trivest%' THEN 'Trivest'
-    WHEN c.name ILIKE '%Trinity%' THEN 'Trinity'
-    WHEN c.name ILIKE '%Stadion%' THEN 'Stadion'
-    WHEN c.name ILIKE '%Alpine%' THEN 'Alpine'
-    WHEN c.name ILIKE '%GP Partners%' THEN 'GP Partners'
-    ELSE 'Review Manually'
-  END as suggested_engagement
-FROM campaigns c
-JOIN engagements e ON e.id = c.engagement_id
-WHERE e.name = 'O2 Investment Auto Repair'
-  AND (
-    c.name NOT ILIKE '%O2%Auto%'
-    AND c.name NOT ILIKE '%O2 Investment%'
-  )
-ORDER BY c.total_sent DESC;
+Return: { engagementId, confidence, reasoning }
 ```
 
 ---
 
-## Files to Modify
+## Phase 3: Add Remapping UI Component
 
-| File | Changes |
-|------|---------|
-| `src/components/campaigns/EnhancedCampaignTable.tsx` | Add active-first sorting logic |
-| `src/hooks/useOverviewDashboard.tsx` | Filter hero metrics to active campaigns only |
-| `src/pages/EngagementDashboard.tsx` | Add campaign validation heuristics for metrics |
+### New Component: `CampaignRemapDialog.tsx`
+
+A modal that:
+1. Calls the AI remapping function
+2. Shows proposed mappings in a reviewable table
+3. Allows user to approve/reject individual mappings
+4. Executes approved mappings in batch
+
+```text
+File: src/components/campaigns/CampaignRemapDialog.tsx
+
+Features:
+- Progress indicator during AI analysis
+- Table showing: Campaign Name | Current | Proposed | Confidence | Approve checkbox
+- "Apply Selected" button to execute approved mappings
+- Color coding: Green (high confidence), Yellow (medium), Red (low/review needed)
+```
+
+---
+
+## Phase 4: Update config.toml
+
+Add the new edge function:
+```text
+[functions.ai-remap-campaigns]
+verify_jwt = false
+```
+
+---
+
+## Files to Create/Modify
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `src/hooks/useCampaignLinking.tsx` | Modify | Fix null handling, use sentinel UUID |
+| `src/components/campaigns/EnhancedCampaignTable.tsx` | Modify | Pass sentinel UUID for unlink |
+| `supabase/functions/ai-remap-campaigns/index.ts` | Create | AI-powered campaign matching |
+| `src/components/campaigns/CampaignRemapDialog.tsx` | Create | UI for reviewing/approving mappings |
+| `src/pages/Campaigns.tsx` | Modify | Add button to open remap dialog |
+| `supabase/config.toml` | Modify | Register new edge function |
 
 ---
 
 ## Expected Outcomes
 
-After implementation:
-
-1. **Campaign Dashboard**: Active campaigns (`status: active/started/running`) will ALWAYS appear at the top of the table, regardless of other sort criteria
-
-2. **Overview Dashboard**: Hero metrics will show accurate email counts (~170K actual active vs 540K inflated), with proper attribution
-
-3. **Engagement Tab**: O2 Investment Auto Repair will show only its legitimate 13 campaigns (~68K emails) with actual reply and call data, not the 450 incorrectly linked campaigns
+1. **Linking Fix**: Dropdown will work without page reload - campaigns can be linked/unlinked smoothly
+2. **AI Remapping**: One-click solution to fix all 400+ misattributed campaigns
+3. **Accuracy**: AI will correctly identify patterns like:
+   - `"Baum - Property Management"` → Baum Capital Property Mgmt
+   - `"Alpine - Windows & Doors"` → Alpine  
+   - `"GP Partners - Collision"` → GP Partners
+   - `"HTR Capital - Oilex"` → Oilex
 
 ---
 
-## Risk Assessment
+## Technical Notes
 
-| Risk | Mitigation |
-|------|------------|
-| Breaking existing sort preferences | Active-first is additive, secondary sort preserved |
-| Hiding legitimate paused campaigns | Add filter option for "Include paused" |
-| Data cleanup requires manual review | Provide SQL audit script, don't auto-delete |
-
+- Uses **Lovable AI** (google/gemini-2.5-flash) - no additional API key required
+- Batch processing to avoid rate limits
+- Dry-run mode available for testing before applying changes
+- All changes logged for audit trail
