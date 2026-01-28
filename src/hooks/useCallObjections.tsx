@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { calculateRate } from '@/lib/metrics';
 
 export interface CallObjection {
   id: string;
@@ -67,9 +68,7 @@ export function useCallObjections(engagementId?: string, dateRange?: { start: Da
       const objections = (data || []) as CallObjection[];
       const totalObjections = objections.length;
       const totalResolved = objections.filter(o => o.was_resolved).length;
-      const overallResolutionRate = totalObjections > 0 
-        ? (totalResolved / totalObjections) * 100 
-        : 0;
+      const overallResolutionRate = calculateRate(totalResolved, totalObjections);
 
       // Group by type
       const byTypeMap = new Map<string, { count: number; resolved: number }>();
@@ -88,8 +87,8 @@ export function useCallObjections(engagementId?: string, dateRange?: { start: Da
           type,
           count: stats.count,
           resolved: stats.resolved,
-          resolutionRate: stats.count > 0 ? (stats.resolved / stats.count) * 100 : 0,
-          percentage: totalObjections > 0 ? (stats.count / totalObjections) * 100 : 0,
+          resolutionRate: calculateRate(stats.resolved, stats.count),
+          percentage: calculateRate(stats.count, totalObjections),
         }))
         .sort((a, b) => b.count - a.count);
 

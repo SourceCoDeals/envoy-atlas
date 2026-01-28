@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 export type DataHealthStatus = 'healthy' | 'degraded' | 'broken' | 'empty';
 
@@ -229,13 +231,13 @@ export function useDataHealth() {
         status: healthyCount >= 5 ? 'healthy' : healthyCount >= 2 ? 'degraded' : totalWithData > 0 ? 'broken' : 'empty',
         healthyCount,
         totalCount: allSources.length,
-        percentage: Math.round((healthyCount / allSources.length) * 100),
+        percentage: Math.round(calculateRate(healthyCount, allSources.length)),
       };
 
       setHealth(healthData);
       setError(null);
     } catch (err) {
-      console.error('Error checking data health:', err);
+      logger.error('Error checking data health', err);
       setError(err instanceof Error ? err.message : 'Failed to check data health');
     } finally {
       setLoading(false);

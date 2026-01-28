@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 export interface DomainHealth {
   domain: string;
@@ -150,7 +152,7 @@ export function useDeliverabilityData() {
         .map(c => ({
           id: c.id,
           name: c.name,
-          bounceRate: ((c.total_bounced || 0) / (c.total_sent || 1)) * 100,
+          bounceRate: calculateRate(c.total_bounced || 0, c.total_sent || 1),
           bounces: c.total_bounced || 0,
           sent: c.total_sent || 0,
           platform: c.campaign_type,
@@ -160,7 +162,7 @@ export function useDeliverabilityData() {
       // Calculate aggregate stats from campaigns
       const totalSent = bounceData.reduce((sum, c) => sum + c.sent, 0);
       const totalBounced = bounceData.reduce((sum, c) => sum + c.bounces, 0);
-      const avgBounceRate = totalSent > 0 ? (totalBounced / totalSent) * 100 : 0;
+      const avgBounceRate = calculateRate(totalBounced, totalSent);
 
       // Build mailboxes list from email_accounts
       const mailboxesList: MailboxHealth[] = emailAccounts.map((a: any) => {
@@ -238,7 +240,7 @@ export function useDeliverabilityData() {
 
       // Calculate total replied for reply rate
       const totalReplied = (campaignsData || []).reduce((sum, c) => sum + (c.total_replied || 0), 0);
-      const avgReplyRate = totalSent > 0 ? (totalReplied / totalSent) * 100 : 0;
+      const avgReplyRate = calculateRate(totalReplied, totalSent);
 
       // Calculate health scores
       const allHealthScores = emailAccounts
@@ -270,7 +272,7 @@ export function useDeliverabilityData() {
       setCampaignBounces(bounceData);
       
     } catch (err) {
-      console.error('Error fetching deliverability data:', err);
+      logger.error('Error fetching deliverability data', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
     } finally {
       setLoading(false);

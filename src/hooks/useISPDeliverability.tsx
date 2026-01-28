@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 interface ISPData {
   isp_name: string;
@@ -88,10 +90,10 @@ export function useISPDeliverability(engagementId?: string, dateRange?: { from: 
       // Calculate rates
       const result = Object.values(aggregated).map(isp => ({
         ...isp,
-        delivery_rate: isp.sent_count > 0 ? (isp.delivered_count / isp.sent_count) * 100 : 0,
-        open_rate: isp.delivered_count > 0 ? (isp.opened_count / isp.delivered_count) * 100 : 0,
-        reply_rate: isp.delivered_count > 0 ? (isp.replied_count / isp.delivered_count) * 100 : 0,
-        bounce_rate: isp.sent_count > 0 ? (isp.bounced_count / isp.sent_count) * 100 : 0,
+        delivery_rate: calculateRate(isp.delivered_count, isp.sent_count),
+        open_rate: calculateRate(isp.opened_count, isp.delivered_count),
+        reply_rate: calculateRate(isp.replied_count, isp.delivered_count),
+        bounce_rate: calculateRate(isp.bounced_count, isp.sent_count),
       }));
 
       // Sort by volume
@@ -99,7 +101,7 @@ export function useISPDeliverability(engagementId?: string, dateRange?: { from: 
 
       setData(result);
     } catch (err) {
-      console.error('Error fetching ISP deliverability:', err);
+      logger.error('Error fetching ISP deliverability', err);
     } finally {
       setLoading(false);
     }

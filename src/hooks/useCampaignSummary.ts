@@ -252,7 +252,7 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
         dkim_valid: data.dkim_valid,
         dmarc_valid: data.dmarc_valid,
         inbox_count: data.inbox_count,
-        bounce_rate: data.total_sent > 0 ? (data.total_bounces / data.total_sent) * 100 : 0,
+        bounce_rate: calculateRate(data.total_bounces, data.total_sent),
       }));
 
       const infrastructure = {
@@ -276,7 +276,7 @@ export function useCampaignSummary(campaignId: string | undefined, platform?: st
       });
 
       const bounceByDomain = Object.entries(domainCounts)
-        .map(([domain, count]) => ({ domain, count, rate: total_sent > 0 ? (count / total_sent) * 100 : 0 }))
+        .map(([domain, count]) => ({ domain, count, rate: calculateRate(count, total_sent) }))
         .sort((a, b) => b.count - a.count)
         .slice(0, 10);
 

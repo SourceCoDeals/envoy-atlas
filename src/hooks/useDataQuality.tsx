@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 export interface DataQualityMetrics {
   // Contact completeness
@@ -93,9 +95,10 @@ export function useDataQuality() {
       const contactsWithPhone = allContacts.filter(c => c.phone).length;
       
       // Calculate contact completeness (average of key fields)
-      const contactCompleteness = totalContacts > 0 
-        ? ((contactsWithTitles + contactsWithCompanies + contactsWithEmail) / (totalContacts * 3)) * 100 
-        : 0;
+      const contactCompleteness = calculateRate(
+        contactsWithTitles + contactsWithCompanies + contactsWithEmail, 
+        totalContacts * 3
+      );
       
       // Fetch email activities for classification rate
       const { data: activities } = await supabase
@@ -110,7 +113,7 @@ export function useDataQuality() {
         a.reply_category && a.reply_category !== 'unknown'
       ).length;
       const classificationRate = totalReplies > 0 
-        ? (repliesClassified / totalReplies) * 100 
+        ? calculateRate(repliesClassified, totalReplies)
         : 100; // 100% if no replies to classify
       
       // Fetch data sources for sync freshness
@@ -161,7 +164,7 @@ export function useDataQuality() {
       // Calculate sync freshness score
       const healthySources = statuses.filter(s => s.status === 'healthy').length;
       const totalSources = statuses.length;
-      const syncFreshness = totalSources > 0 ? (healthySources / totalSources) * 100 : 100;
+      const syncFreshness = totalSources > 0 ? calculateRate(healthySources, totalSources) : 100;
       
       // Build alerts
       const alerts: DataAlert[] = [];

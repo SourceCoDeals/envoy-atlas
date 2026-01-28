@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { calculateRate } from '@/lib/metrics';
 
 export interface Rep {
   id: string;
@@ -126,8 +127,8 @@ export function useRepsWithMetrics(engagementId?: string, dateRange?: { start: D
           totalCalls: metrics.totalCalls,
           connections: metrics.connections,
           meetings: metrics.meetings,
-          connectRate: metrics.totalCalls > 0 ? (metrics.connections / metrics.totalCalls) * 100 : 0,
-          meetingRate: metrics.totalCalls > 0 ? (metrics.meetings / metrics.totalCalls) * 100 : 0,
+          connectRate: calculateRate(metrics.connections, metrics.totalCalls),
+          meetingRate: calculateRate(metrics.meetings, metrics.totalCalls),
           avgCallDuration: metrics.connections > 0 ? metrics.totalTalkTime / metrics.connections : 0,
         };
       }).sort((a, b) => b.connectRate - a.connectRate);

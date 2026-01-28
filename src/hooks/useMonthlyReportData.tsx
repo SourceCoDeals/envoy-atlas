@@ -202,7 +202,7 @@ export function useMonthlyReportData(selectedMonth: Date = new Date()): MonthlyR
           dailyMap.set(row.date, existing);
         });
         const trends = Array.from(dailyMap.values())
-          .map(d => ({ ...d, replyRate: d.sent > 0 ? (d.replied / d.sent) * 100 : 0 }))
+          .map(d => ({ ...d, replyRate: calculateRate(d.replied, d.sent) }))
           .sort((a, b) => a.date.localeCompare(b.date));
         setDailyTrends(trends);
 

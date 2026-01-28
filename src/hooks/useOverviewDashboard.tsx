@@ -412,8 +412,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
           ...w,
           // Using sent as denominator here since we don't have weekly delivered totals
           // For campaign-level metrics, we use delivered (see useCampaigns)
-          replyRate: w.emailsSent > 0 ? (w.replies / w.emailsSent) * 100 : 0,
-          positiveRate: w.emailsSent > 0 ? (w.positiveReplies / w.emailsSent) * 100 : 0,
+          replyRate: calculateRate(w.replies, w.emailsSent),
+          positiveRate: calculateRate(w.positiveReplies, w.emailsSent),
         }));
 
       // Calculate data completeness (daily_metrics positive vs campaigns positive)
@@ -537,8 +537,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
     const alerts: AlertCampaign[] = [];
 
     rawMetrics.campaigns.forEach(c => {
-      const replyRate = c.sent7d > 0 ? (c.replied7d / c.sent7d) * 100 : 0;
-      const positiveRate = c.sent30d > 0 ? (c.positive30d / c.sent30d) * 100 : 0;
+      const replyRate = calculateRate(c.replied7d, c.sent7d);
+      const positiveRate = calculateRate(c.positive30d, c.sent30d);
 
       // Low reply rate (< 1.5% with min 100 emails)
       if (replyRate < ALERT_THRESHOLDS.lowReplyRate && c.sent7d >= ALERT_THRESHOLDS.minEmailsForLowReply) {
@@ -598,8 +598,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
         id: c.id,
         name: c.name,
         sent: c.sent30d,
-        replyRate: c.sent30d > 0 ? (c.replied30d / c.sent30d) * 100 : 0,
-        positiveRate: c.sent30d > 0 ? (c.positive30d / c.sent30d) * 100 : 0,
+        replyRate: calculateRate(c.replied30d, c.sent30d),
+        positiveRate: calculateRate(c.positive30d, c.sent30d),
         meetingsBooked: c.meetings30d,
       }))
       .sort((a, b) => b.positiveRate - a.positiveRate)
