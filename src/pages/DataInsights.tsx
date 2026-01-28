@@ -134,10 +134,11 @@ export default function DataInsights() {
         dateMap.set(date, existing);
       }
       
-      // Parse time from called_date_time for hourly distribution
-      if (call.called_date_time) {
+      // Parse time from nocodb_created_at for hourly distribution (more accurate timing)
+      const timestamp = (call as any).nocodb_created_at || call.called_date_time;
+      if (timestamp) {
         try {
-          const dt = new Date(call.called_date_time);
+          const dt = new Date(timestamp);
           const hour = toEasternHour(dt);
           if (isBusinessHour(hour)) {
             const hourExisting = hourlyMap.get(hour) || { calls: 0, connects: 0 };
