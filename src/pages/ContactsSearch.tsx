@@ -106,17 +106,12 @@ function validateEmail(email: string): { valid: boolean; error?: string } {
 }
 
 function MessageThread({ messages, platform }: { messages: MessageHistoryItem[]; platform: 'smartlead' | 'replyio' }) {
-  // Debug: Log received messages
-  console.log('MessageThread received messages:', messages?.length, messages);
-  
   // Sort by time
   const sortedMessages = [...(messages || [])].sort((a, b) => {
     const timeA = new Date(a.time || a.date || 0).getTime();
     const timeB = new Date(b.time || b.date || 0).getTime();
     return timeA - timeB;
   });
-
-  console.log('MessageThread sorted messages:', sortedMessages?.length);
 
   if (sortedMessages.length === 0) {
     return (
@@ -137,8 +132,6 @@ function MessageThread({ messages, platform }: { messages: MessageHistoryItem[];
         const messageTime = msg.time || msg.date;
         const subject = msg.email_subject || msg.subject;
         const body = msg.email_body || msg.body || '';
-        
-        console.log(`Rendering message ${idx}: id=${msg.id}, type=${msgType}, isReply=${isReply}, hasBody=${!!body}`);
         
         return (
           <div 
