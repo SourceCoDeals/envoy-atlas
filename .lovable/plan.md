@@ -1,109 +1,168 @@
 
-Goal
-- Make the "Email Performance Summary" for the GP Partners engagement match what you see in SmartLead by ensuring the Engagement Report uses the correct underlying data source and the correct time-window.
 
-What's happening (root cause)
-- The Engagement Report currently computes the Email Performance Summary primarily from `daily_metrics` when a date range is selected (e.g., "Last 30 days").
-- For GP Partners, there are a few `daily_metrics` rows (often estimated/backfilled), so the report treats them as "real" and uses those small totals.
-- At the same time, the report is already fetching NocoDB snapshot data (`nocodb_campaign_daily_snapshots`) and even marks `dataAvailability.dataSource` as `snapshots`, but it does not actually use snapshots to calculate the summary totals.
-- Result: the UI shows snapshot-backed labeling, but the numbers are coming from `daily_metrics`, so the totals are not aligned with SmartLead.
+# Fix Email Performance Summary - Use Snapshot Deltas as Source of Truth
 
-High-level fix
-- When snapshot data exists for the linked campaigns, compute period totals from snapshot deltas (day-over-day changes) and use that for:
-  - Emails Sent
-  - Delivered (derived)
-  - Replied
-  - Positive Replies
-  - Bounced
-- Only fall back to `daily_metrics` when snapshot data is missing.
+## Problem Identified
 
-Implementation plan (code changes)
+The GP Partners engagement report is showing **incorrect totals** because:
 
-1) Update `useEngagementReport` to compute email totals from snapshot deltas
-File: `src/hooks/useEngagementReport.tsx`
+1. **Current behavior**: When a date range is selected, the code prioritizes `daily_metrics` (which is sparse/empty for GP Partners)
+2. **Data mismatch**: The `nocodb_campaign_daily_deltas` view has the correct data (33,682 sent, 162 replied, 43 positive, 53 bounced) but isn't being used for period calculations
+3. **Rate calculation issue**: Per-campaign rates use `sent` as denominator instead of `delivered` (misaligned with SmartLead's convention)
 
-A. Fetch snapshot deltas (filtered) in addition to snapshots
-- Add a query to the view `nocodb_campaign_daily_deltas` filtered by:
-  - `campaign_id in externalCampaignIds`
-  - `snapshot_date >= startDateStr` when a start date exists
-  - `snapshot_date <= endDateStr` when an end date exists
-- This view already has:
-  - `emails_sent_delta`
-  - `emails_replied_delta`
-  - `emails_bounced_delta`
-  - `positive_delta`
+---
 
-B. Build `snapshotTotals` from the deltas
-- Reduce deltas into:
-  - `sent = sum(emails_sent_delta)`
-  - `replied = sum(emails_replied_delta)`
-  - `bounced = sum(emails_bounced_delta)`
-  - `positive = sum(positive_delta)`
-  - `delivered = max(0, sent - bounced)`
+## Solution Overview
 
-C. Change the "final totals selection" logic to prefer snapshots when available
-- Current behavior:
-  - If date range is selected and `dailyTotals.sent > 0`, it uses `daily_metrics` totals even if snapshots exist.
-- New behavior:
-  - If snapshot deltas exist for the engagement's linked campaigns in the selected date range:
-    - Use `snapshotTotals` for the Email Performance Summary and key metrics calculations (touchpoints, response rate, etc.).
-  - Else, if no snapshot deltas:
-    - Use `daily_metrics` totals if present
-    - Else fall back to all-time campaign totals (current logic)
+| Step | Change | File |
+|------|--------|------|
+| 1 | Fetch snapshot deltas and compute `snapshotTotals` | `useEngagementReport.tsx` |
+| 2 | Prioritize snapshot totals over daily_metrics | `useEngagementReport.tsx` |
+| 3 | Fix per-campaign rates to use delivered denominator | `useEngagementReport.tsx` |
+| 4 | Add data source badge showing "Snapshots" | `EmailReportTab.tsx` |
 
-D. Make `dataAvailability` consistent with the actual source used
-- Update `dataAvailability.dataSource` to reflect what we truly used:
-  - `snapshots` if snapshot deltas were used
-  - `daily_metrics` if daily totals were used
-  - `campaign_totals` / `estimated` only if those were used
-- Update `emailCampaignFallback` so it no longer checks only `(campaigns.total_sent > 0)` (which can be stale/zero for SmartLead-synced rows). Instead:
-  - Use `campaignTotals.sent > 0` or `snapshotTotals.sent > 0` to decide if fallback should be offered.
+---
 
-2) Fix per-campaign rate math to match the "delivered-denominator" convention
-File: `src/hooks/useEngagementReport.tsx`
+## Technical Implementation
 
-- In `linkedCampaignsWithStats`, rates are currently computed using `sent` as the denominator:
-  - `replyRate: calculateRate(replied, sent)`
-  - `positiveRate: calculateRate(positive, sent)`
-- Update to match the rest of the app's rule ("delivered is the denominator for engagement rates"):
-  - For SmartLead:
-    - delivered = sent - total_bounces
-    - replyRate = replied / delivered
-    - positiveRate = positive / delivered
-  - For Reply.io:
-    - delivered = deliveries
-    - replyRate = replies / delivered
-    - (positive remains untracked)
+### 1. Fetch Snapshot Deltas (lines 309-323)
 
-This makes the per-campaign list and the summary consistent and closer to SmartLead's view.
+**Current**: Only fetches `nocodb_campaign_daily_snapshots` (cumulative totals)
 
-3) (Optional but recommended) Add a small "Data Source" badge to the Email tab summary
-File: `src/components/engagementReport/EmailReportTab.tsx`
+**Change**: Also fetch `nocodb_campaign_daily_deltas` (day-over-day changes)
 
-- Add a compact badge near "Email Performance Summary" that shows something like:
-  - "Source: Snapshots" (and ideally "as of {latest snapshot date}")
-- This reduces confusion and makes it obvious why a number might differ (e.g., if SmartLead has updated in the last few hours and the latest snapshot is from yesterday).
+```typescript
+// Add after existing snapshot query
+let deltasQuery = supabase
+  .from('nocodb_campaign_daily_deltas')
+  .select('campaign_id, snapshot_date, emails_sent_delta, emails_replied_delta, emails_bounced_delta, positive_delta')
+  .in('campaign_id', externalCampaignIds);
 
-Edge cases to handle
-- Engagements with very new campaigns (only 1 snapshot):
-  - Delta logic should still work (first delta typically equals the first observed total).
-- Engagements with snapshot data but sparse `daily_metrics` (estimated rows):
-  - We will now prefer snapshots, preventing estimated `daily_metrics` from overriding accurate snapshot-derived totals.
-- Engagements with no snapshot data:
-  - Behavior remains as-is (use daily_metrics if available, else campaign totals).
+if (startDateStr) deltasQuery = deltasQuery.gte('snapshot_date', startDateStr);
+if (endDateStr) deltasQuery = deltasQuery.lte('snapshot_date', endDateStr);
+```
 
-How we'll verify (quick acceptance tests)
-1) Open /engagements/432cd24b-a1f4-4f64-a0eb-82e2ac5f1e26/report
-2) On "Last 30 days":
-   - Email Performance Summary should reflect the snapshot-based deltas in that date window (not the small estimated daily_metrics totals).
-3) Switch to "All time":
-   - Totals should align closely with SmartLead totals for the same campaigns (accounting for last snapshot timestamp).
-4) Confirm per-campaign list rates look reasonable and use delivered denominators (reply/positive rates shouldn't be artificially low/high due to bounces).
+### 2. Compute Snapshot Totals (new code after line 475)
 
-Files expected to change
-- `src/hooks/useEngagementReport.tsx` (primary fix: snapshot-delta totals selection + per-campaign rate denominator fixes + dataAvailability consistency)
-- `src/components/engagementReport/EmailReportTab.tsx` (optional: show data source badge/last snapshot date)
+```typescript
+// Sum snapshot deltas for period totals
+const snapshotTotals = snapshotDeltasData.reduce((acc, d) => ({
+  sent: acc.sent + (d.emails_sent_delta || 0),
+  replied: acc.replied + (d.emails_replied_delta || 0),
+  bounced: acc.bounced + (d.emails_bounced_delta || 0),
+  positive: acc.positive + (d.positive_delta || 0),
+}), { sent: 0, replied: 0, bounced: 0, positive: 0 });
 
-Non-goals (for this iteration)
-- Perfect real-time parity with SmartLead minute-by-minute (snapshots are periodic).
-- Rebuilding estimated daily_metrics logic; we'll simply ensure it doesn't override snapshot truth when snapshots exist.
+const hasSnapshotDeltas = snapshotDeltasData.length > 0 && snapshotTotals.sent > 0;
+```
+
+### 3. Update Final Totals Selection Logic (lines 534-536)
+
+**Current logic**:
+```typescript
+const finalEmailTotals = startDateStr
+  ? (isCampaignFallbackInRange ? allTimeEmailTotals : rangeEmailTotals)
+  : allTimeEmailTotals;
+```
+
+**New logic** (prioritize snapshots):
+```typescript
+// Build snapshot-derived period totals
+const snapshotPeriodTotals = {
+  sent: snapshotTotals.sent,
+  replied: snapshotTotals.replied,
+  positive: snapshotTotals.positive,
+  bounced: snapshotTotals.bounced,
+  delivered: Math.max(0, snapshotTotals.sent - snapshotTotals.bounced),
+};
+
+// Priority: 1) Snapshot deltas, 2) Daily metrics, 3) Campaign totals
+const finalEmailTotals = hasSnapshotDeltas
+  ? snapshotPeriodTotals
+  : startDateStr
+    ? (dailyTotals.sent > 0 ? rangeEmailTotals : allTimeEmailTotals)
+    : allTimeEmailTotals;
+
+// Track which source was actually used
+const actualDataSource = hasSnapshotDeltas 
+  ? 'snapshots' 
+  : dailyTotals.sent > 0 
+    ? 'daily_metrics' 
+    : 'campaign_totals';
+```
+
+### 4. Fix Per-Campaign Rate Denominators (lines 360-371)
+
+**Current**: Uses `sent` for rate calculations
+```typescript
+replyRate: calculateRate(replied, sent),
+positiveRate: calculateRate(positive, sent),
+```
+
+**Change**: Use `delivered` (sent - bounced) to match SmartLead convention
+```typescript
+// Calculate delivered for denominator
+const delivered = Math.max(0, sent - bounced);
+
+return {
+  // ...
+  replyRate: calculateRate(replied, delivered > 0 ? delivered : sent),
+  positiveRate: calculateRate(positive, delivered > 0 ? delivered : sent),
+};
+```
+
+### 5. Add Data Source Badge to Email Tab
+
+**File**: `src/components/engagementReport/EmailReportTab.tsx`
+
+Add to the Email Performance Summary card header:
+```tsx
+import { DataSourceBadge } from '@/components/ui/data-source-badge';
+
+// In the Card header (around line 479)
+<CardTitle className="text-lg flex items-center gap-2">
+  Email Performance Summary
+  {dataAvailability?.dataSource && (
+    <DataSourceBadge source={dataAvailability.dataSource} compact />
+  )}
+</CardTitle>
+```
+
+Update the interface to include the new dataSource field:
+```typescript
+interface DataAvailability {
+  // ... existing fields
+  dataSource?: 'snapshots' | 'daily_metrics' | 'campaign_totals' | 'estimated';
+  snapshotDateRange?: { min: string; max: string } | null;
+}
+```
+
+---
+
+## Expected Results
+
+| Metric | Before (Wrong) | After (Correct) |
+|--------|----------------|-----------------|
+| Emails Sent | ~0 or small number | 33,682 |
+| Delivered | ~0 | 33,629 |
+| Replied | 0 | 162 |
+| Positive Replies | 0 or low | 43 |
+| Reply Rate | 0% | ~0.48% (162/33,629) |
+
+---
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/hooks/useEngagementReport.tsx` | Add snapshot delta query, compute snapshotTotals, update selection logic, fix rate denominators, update dataAvailability |
+| `src/components/engagementReport/EmailReportTab.tsx` | Add DataSourceBadge import and display, update interface |
+
+---
+
+## Edge Cases Handled
+
+1. **New campaigns (1 snapshot)**: Delta equals first observed total - works correctly
+2. **No snapshot data**: Falls back to daily_metrics, then campaign_totals (existing behavior)
+3. **Mixed sources**: prioritizes most accurate source (snapshots > daily_metrics > campaign_totals)
+
