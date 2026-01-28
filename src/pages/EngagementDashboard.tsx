@@ -33,6 +33,7 @@ import {
   ThumbsUp, Calendar, Layers, LayoutGrid,
   ArrowUp, ArrowDown, Minus
 } from 'lucide-react';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import {
@@ -962,11 +963,21 @@ export default function EngagementDashboard() {
                       <TableHead>Client</TableHead>
                       <TableHead>Start</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Emails</TableHead>
-                      <TableHead className="text-right">Replies</TableHead>
-                      <TableHead className="text-right">+Replies</TableHead>
-                      <TableHead className="text-right">Calls</TableHead>
-                      <TableHead className="text-right">Meetings</TableHead>
+                      <TableHead className="text-right">
+                        <MetricTooltip metricKey="engagement_emails">Emails</MetricTooltip>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <MetricTooltip metricKey="engagement_replies">Replies</MetricTooltip>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <MetricTooltip metricKey="engagement_positive_replies">+Replies</MetricTooltip>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <MetricTooltip metricKey="engagement_calls">Calls</MetricTooltip>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <MetricTooltip metricKey="engagement_meetings">Meetings</MetricTooltip>
+                      </TableHead>
                       <TableHead>Deal Lead</TableHead>
                       <TableHead>Associate</TableHead>
                       <TableHead>Analyst</TableHead>

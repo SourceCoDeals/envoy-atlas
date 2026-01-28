@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Users, Search, Download, Star, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { CallingMetricsConfig } from '@/lib/callingConfig';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 
 interface CallerStats {
   rep: string;
@@ -176,14 +177,30 @@ export function CallerPerformanceTable({ repPerformance, config, onCallerClick }
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead className="text-right">Calls</TableHead>
-                <TableHead className="text-right">Connects</TableHead>
-                <TableHead className="text-right">Connect Rate</TableHead>
-                <TableHead className="text-right">Meetings</TableHead>
-                <TableHead className="text-right">Meeting Rate</TableHead>
-                <TableHead className="text-right">Positive %</TableHead>
-                <TableHead className="text-right">Avg Score</TableHead>
-                <TableHead className="text-center">Status</TableHead>
+                <TableHead className="text-right">
+                  <MetricTooltip metricKey="caller_calls">Calls</MetricTooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <MetricTooltip metricKey="caller_connects">Connects</MetricTooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <MetricTooltip metricKey="caller_connect_rate">Connect Rate</MetricTooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <MetricTooltip metricKey="caller_meetings">Meetings</MetricTooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <MetricTooltip metricKey="caller_meeting_rate">Meeting Rate</MetricTooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <MetricTooltip metricKey="caller_positive_pct">Positive %</MetricTooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <MetricTooltip metricKey="avg_score">Avg Score</MetricTooltip>
+                </TableHead>
+                <TableHead className="text-center">
+                  <MetricTooltip metricKey="caller_status">Status</MetricTooltip>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

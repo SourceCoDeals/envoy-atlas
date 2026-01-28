@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 
 /**
  * Simplified 4-category disposition grouping
@@ -182,10 +183,10 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
   }
 
   const categoryConfig = [
-    { key: 'positive', ...SIMPLIFIED_CATEGORIES.positive, data: breakdown.positive },
-    { key: 'contact_made', ...SIMPLIFIED_CATEGORIES.contact_made, data: breakdown.contact_made },
-    { key: 'no_contact', ...SIMPLIFIED_CATEGORIES.no_contact, data: breakdown.no_contact },
-    { key: 'data_issues', ...SIMPLIFIED_CATEGORIES.data_issues, data: breakdown.data_issues },
+    { key: 'positive', metricKey: 'positive_outcomes', ...SIMPLIFIED_CATEGORIES.positive, data: breakdown.positive },
+    { key: 'contact_made', metricKey: 'contact_made', ...SIMPLIFIED_CATEGORIES.contact_made, data: breakdown.contact_made },
+    { key: 'no_contact', metricKey: 'no_contact', ...SIMPLIFIED_CATEGORIES.no_contact, data: breakdown.no_contact },
+    { key: 'data_issues', metricKey: 'data_issues', ...SIMPLIFIED_CATEGORIES.data_issues, data: breakdown.data_issues },
   ];
 
   return (
@@ -232,16 +233,18 @@ export function DispositionPieChart({ calls }: DispositionPieChartProps) {
 
           {/* Category Breakdown */}
           <div className="space-y-3">
-            {categoryConfig.map(({ key, label, color, data }) => (
+            {categoryConfig.map(({ key, metricKey, label, color, data }) => (
               <div key={key} className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div 
-                      className="w-3 h-3 rounded-full" 
-                      style={{ backgroundColor: color }}
-                    />
-                    <span className="text-sm font-medium">{label}</span>
-                  </div>
+                  <MetricTooltip metricKey={metricKey}>
+                    <div className="flex items-center gap-2 cursor-help">
+                      <div 
+                        className="w-3 h-3 rounded-full" 
+                        style={{ backgroundColor: color }}
+                      />
+                      <span className="text-sm font-medium">{label}</span>
+                    </div>
+                  </MetricTooltip>
                   <Badge 
                     variant="outline" 
                     className="text-xs"
