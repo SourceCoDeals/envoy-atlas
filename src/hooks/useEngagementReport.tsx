@@ -308,7 +308,9 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
       
       // Fetch NocoDB snapshots for linked campaigns via external_id
       let snapshotData: any[] = [];
+      let snapshotDeltasData: any[] = [];
       if (externalCampaignIds.length > 0) {
+        // Fetch cumulative snapshots
         let snapshotQuery = supabase
           .from('nocodb_campaign_daily_snapshots')
           .select('*')
@@ -318,8 +320,18 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         if (startDateStr) snapshotQuery = snapshotQuery.gte('snapshot_date', startDateStr);
         if (endDateStr) snapshotQuery = snapshotQuery.lte('snapshot_date', endDateStr);
         
-        const { data: snapshots } = await snapshotQuery;
-        snapshotData = snapshots || [];
+        // Fetch day-over-day deltas (the actual changes per day)
+        let deltasQuery = supabase
+          .from('nocodb_campaign_daily_deltas')
+          .select('campaign_id, snapshot_date, emails_sent_delta, emails_replied_delta, emails_bounced_delta, positive_delta')
+          .in('campaign_id', externalCampaignIds);
+        
+        if (startDateStr) deltasQuery = deltasQuery.gte('snapshot_date', startDateStr);
+        if (endDateStr) deltasQuery = deltasQuery.lte('snapshot_date', endDateStr);
+        
+        const [snapshotsRes, deltasRes] = await Promise.all([snapshotQuery, deltasQuery]);
+        snapshotData = snapshotsRes.data || [];
+        snapshotDeltasData = deltasRes.data || [];
       }
 
       const linkedCampaigns = (campaigns || []).map(c => ({ 
@@ -357,6 +369,11 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           return 0;
         };
         
+        // Use delivered (sent - bounced) as denominator to match SmartLead convention
+        const bounced = smartlead?.total_bounces || replyio?.bounces || 0;
+        const delivered = Math.max(0, sent - bounced);
+        const rateBase = delivered > 0 ? delivered : sent;
+        
         return {
           id: c.id,
           name: c.name,
@@ -365,9 +382,9 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           enrolled: parseNum(settings?.total_leads) || sent,
           sent,
           replied,
-          replyRate: calculateRate(replied, sent),
+          replyRate: calculateRate(replied, rateBase),
           positiveReplies: positive,
-          positiveRate: calculateRate(positive, sent),
+          positiveRate: calculateRate(positive, rateBase),
         };
       });
 
@@ -511,6 +528,17 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         };
       }, { sent: 0, replied: 0, positive: 0, bounced: 0 });
 
+      // Compute snapshot totals from deltas (day-over-day changes)
+      // This is the most accurate source for period-specific totals
+      const snapshotTotals = snapshotDeltasData.reduce((acc, d) => ({
+        sent: acc.sent + (d.emails_sent_delta || 0),
+        replied: acc.replied + (d.emails_replied_delta || 0),
+        bounced: acc.bounced + (d.emails_bounced_delta || 0),
+        positive: acc.positive + (d.positive_delta || 0),
+      }), { sent: 0, replied: 0, bounced: 0, positive: 0 });
+
+      const hasSnapshotDeltas = snapshotDeltasData.length > 0 && snapshotTotals.sent > 0;
+
       // If we have *no* daily metrics in the selected range but campaign totals exist,
       // treat this as a campaign fallback and surface All-Time totals instead of 0s.
       const isCampaignFallbackInRange = Boolean(startDateStr && dailyTotals.sent === 0 && campaignTotals.sent > 0);
@@ -531,9 +559,28 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         delivered: Math.max(0, dailyTotals.delivered || (dailyTotals.sent - dailyTotals.bounced)),
       };
 
-      const finalEmailTotals = startDateStr
-        ? (isCampaignFallbackInRange ? allTimeEmailTotals : rangeEmailTotals)
-        : allTimeEmailTotals;
+      // Build snapshot-derived period totals
+      const snapshotPeriodTotals = {
+        sent: snapshotTotals.sent,
+        replied: snapshotTotals.replied,
+        positive: snapshotTotals.positive,
+        bounced: snapshotTotals.bounced,
+        delivered: Math.max(0, snapshotTotals.sent - snapshotTotals.bounced),
+      };
+
+      // Priority: 1) Snapshot deltas, 2) Daily metrics, 3) Campaign totals
+      const finalEmailTotals = hasSnapshotDeltas
+        ? snapshotPeriodTotals
+        : startDateStr
+          ? (isCampaignFallbackInRange ? allTimeEmailTotals : rangeEmailTotals)
+          : allTimeEmailTotals;
+
+      // Track which source was actually used for transparency
+      const actualDataSource = hasSnapshotDeltas 
+        ? 'snapshots' as const
+        : dailyTotals.sent > 0 
+          ? 'daily_metrics' as const
+          : 'campaign_totals' as const;
 
       const delivered = finalEmailTotals.delivered;
 
@@ -979,13 +1026,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
                 max: snapshotData[snapshotData.length - 1]?.snapshot_date || '',
               }
             : null,
-          dataSource: snapshotData.length > 0 
-            ? 'snapshots' 
-            : isEstimated 
-              ? 'estimated' 
-              : dailyMetrics.length > 0 
-                ? 'daily_metrics' 
-                : 'campaign_totals',
+          dataSource: actualDataSource,
         },
       });
 

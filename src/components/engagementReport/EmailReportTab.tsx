@@ -17,6 +17,7 @@ import { DataAvailabilityWarning } from './DataAvailabilityWarning';
 import { DataErrorFlag } from '@/components/ui/data-error-flag';
 import { SentimentAnalysisNotAvailable } from '@/components/ui/data-status-banner';
 import { WeeklyPerformanceBreakdown } from './WeeklyPerformanceBreakdown';
+import { DataSourceBadge, DataSourceType } from '@/components/ui/data-source-badge';
 
 interface DataAvailability {
   emailDailyMetrics: boolean;
@@ -25,6 +26,8 @@ interface DataAvailability {
   infrastructureData: boolean;
   syncInProgress: boolean;
   isEstimated?: boolean;
+  dataSource?: 'snapshots' | 'daily_metrics' | 'campaign_totals' | 'estimated';
+  snapshotDateRange?: { min: string; max: string } | null;
 }
 
 interface EmailReportTabProps {
@@ -479,6 +482,9 @@ export function EmailReportTab({ data, onGenerateWeeklyBreakdown, isGeneratingBr
           <CardTitle className="text-lg flex items-center gap-2">
             <Mail className="h-5 w-5 text-primary" />
             Email Performance Summary
+            {dataAvailability?.dataSource && (
+              <DataSourceBadge source={dataAvailability.dataSource as DataSourceType} compact />
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
