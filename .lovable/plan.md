@@ -1,181 +1,173 @@
 
-# Fix "Failed to Link Campaigns" - Duplicate Campaign Constraint Violation
+# Fix Email Metrics Data Source - Use NocoDB Instead of Stale campaigns Table
 
 ## Problem Identified
 
-When trying to link campaigns to the "GP Partners" engagement, you're getting a "Failed to link campaigns" error. The root cause is a **duplicate key constraint violation**.
+The Engagement Report is showing **incorrect email metrics** because it reads from the `campaigns` table, which has **stale or missing data** for many GP Partners campaigns.
 
-### Technical Details
+### Data Comparison
 
-The database has a unique constraint: `campaigns_engagement_datasource_external_unique` on `(engagement_id, data_source_id, external_id)`.
+| Campaign | NocoDB (Correct) | campaigns table (Shown) |
+|----------|------------------|-------------------------|
+| GP Partners - Ria A/B Test | 21,204 sent, 73 replied | 0 sent, 0 replied |
+| GP Partners - Collision 1 | 7,285 sent, 51 replied | 0 sent, 0 replied |
+| GP Partners - Restoration | 3,028 sent, 17 replied | 0 sent, 0 replied |
+| GP Partners - Garage Doors | 1,519 sent, 13 replied | 0 sent, 0 replied |
+| **Totals** | **~33,000 sent, ~160 replied** | **~1,917 sent, 0 replied** |
 
-The issue is that **duplicate campaign records exist** in the database - the same SmartLead campaigns (identified by external_id) appear in multiple engagements:
+### Root Cause
 
-| Campaign Name | External ID | Current Engagements |
-|---------------|-------------|---------------------|
-| GP Partners - Ria A/B Test | 2657896 | GP Partners + Sales Outreach |
-| GP Partners - Collision 1 | 2744621 | GP Partners + Sales Outreach |
-| GP Partners - Garage Doors | 2806965 | GP Partners + Sales Outreach |
-| GP Partners - Restoration | 2806969 | GP Partners + Sales Outreach |
-| GP Partners - CPA/Accounting (SmartProspect) | 2865454 | GP Partners + Sales Outreach |
-| GP Partners - Electrical (SmartProspect) | 2874939 | GP Partners + Sales Outreach |
-| GP Partners - Tires and Automotive (SmartProspect) | 2874989 | GP Partners + Sales Outreach |
-
-When trying to link a campaign from "Sales Outreach" to "GP Partners", the constraint fails because a copy already exists there.
+The `useEngagementReport` hook (lines 424-429) calculates email metrics by summing `total_sent`, `total_replied`, etc. from the `campaigns` table. However:
+1. The `campaigns` table is not being updated with NocoDB data for many campaigns
+2. Only `positive_replies` appears to sync correctly (via a different process)
+3. The live data in `nocodb_smartlead_campaigns` is accurate but not being used
 
 ---
 
 ## Solution
 
-### Two-Part Fix
+Modify `useEngagementReport.tsx` to fetch and merge NocoDB data for accurate email metrics:
 
-**Part 1: Improve the linking function to handle conflicts gracefully**
-
-Modify `useCampaignLinking.tsx` to:
-1. Before bulk updating, check which campaigns would conflict
-2. For conflicting campaigns (same external_id already exists in target engagement):
-   - Delete the duplicate from the source (it's redundant anyway)
-   - OR Skip it and report which ones were skipped
-3. Provide detailed error messages showing which campaigns succeeded/failed
-
-**Part 2: One-time data cleanup**
-
-Delete the duplicate campaign records in "Sales Outreach" that are redundant copies of GP Partners campaigns. These exist in both engagements and should only exist in one.
+1. After fetching campaigns (which gives us `external_id` values)
+2. Fetch matching rows from `nocodb_smartlead_campaigns` and `nocodb_replyio_campaigns`
+3. Build a lookup map by `external_id`
+4. When calculating campaign totals, prefer NocoDB values over stale `campaigns` values
 
 ---
 
-## Implementation Details
+## Technical Changes
 
-### File: `src/hooks/useCampaignLinking.tsx`
+### File: `src/hooks/useEngagementReport.tsx`
 
-**Changes to `linkCampaignsToEngagement` function (lines 73-97):**
-
-```text
-Before:
-- Simple bulk update with `.in('id', campaignIds)`
-- Single error handling that fails entire batch
-
-After:
-1. Fetch campaign details (external_id, data_source_id) for all selected campaigns
-2. Check for existing campaigns in target engagement with same external_id/data_source_id
-3. For each campaign:
-   - If no conflict: add to "safe to link" list
-   - If conflict exists: add to "conflict" list
-4. Delete duplicate records (those in conflict list) since they're redundant
-5. Link the remaining campaigns individually using a loop
-6. Report: "Linked X campaigns, deleted Y duplicates"
-```
-
-### File: `src/components/engagements/LinkCampaignsDialog.tsx`
-
-**Minor enhancement:**
-- Update the `onLink` callback signature to return detailed results
-- Show a more informative success/error message
-
----
-
-## Code Changes
-
-### `src/hooks/useCampaignLinking.tsx` - Enhanced `linkCampaignsToEngagement`:
+**After line 271 (after fetching campaigns):** Add NocoDB data fetch
 
 ```typescript
-const linkCampaignsToEngagement = useCallback(async (
-  campaignIds: string[],
-  engagementId: string
-): Promise<{ success: boolean; linked: number; duplicatesRemoved?: number }> => {
-  if (campaignIds.length === 0) {
-    return { success: false, linked: 0 };
+// Fetch NocoDB live metrics for linked campaigns
+const externalCampaignIds = (campaigns || []).map(c => c.external_id).filter(Boolean) as string[];
+
+let nocodbSmartleadData: any[] = [];
+let nocodbReplyioData: any[] = [];
+
+if (externalCampaignIds.length > 0) {
+  const [smartleadRes, replyioRes] = await Promise.all([
+    supabase
+      .from('nocodb_smartlead_campaigns')
+      .select('campaign_id, total_emails_sent, total_replies, leads_interested, total_bounces')
+      .in('campaign_id', externalCampaignIds),
+    supabase
+      .from('nocodb_replyio_campaigns')
+      .select('campaign_id, deliveries, bounces, replies')
+      .in('campaign_id', externalCampaignIds),
+  ]);
+  nocodbSmartleadData = smartleadRes.data || [];
+  nocodbReplyioData = replyioRes.data || [];
+}
+
+// Build lookup maps
+const nocodbSmartleadMap = new Map(
+  nocodbSmartleadData.map(n => [n.campaign_id, n])
+);
+const nocodbReplyioMap = new Map(
+  nocodbReplyioData.map(n => [n.campaign_id, n])
+);
+```
+
+**Replace lines 424-429 (campaign totals calculation):** Use NocoDB data preferentially
+
+```typescript
+// Calculate campaign totals - PREFER NocoDB live data over stale campaigns table
+const campaignTotals = (campaigns || []).reduce((acc, c) => {
+  const externalId = c.external_id;
+  
+  // Check for NocoDB data first (SmartLead)
+  const smartlead = externalId ? nocodbSmartleadMap.get(externalId) : null;
+  if (smartlead) {
+    return {
+      sent: acc.sent + (smartlead.total_emails_sent || 0),
+      replied: acc.replied + (smartlead.total_replies || 0),
+      positive: acc.positive + (smartlead.leads_interested || 0),
+      bounced: acc.bounced + (smartlead.total_bounces || 0),
+    };
   }
-
-  try {
-    // Step 1: Get details of campaigns being linked
-    const { data: sourceCampaigns } = await supabase
-      .from('campaigns')
-      .select('id, external_id, data_source_id')
-      .in('id', campaignIds);
-
-    if (!sourceCampaigns || sourceCampaigns.length === 0) {
-      throw new Error('No campaigns found');
-    }
-
-    // Step 2: Check for duplicates in target engagement
-    const externalIds = sourceCampaigns
-      .filter(c => c.external_id && c.data_source_id)
-      .map(c => c.external_id);
-
-    const { data: existingCampaigns } = await supabase
-      .from('campaigns')
-      .select('id, external_id, data_source_id')
-      .eq('engagement_id', engagementId)
-      .in('external_id', externalIds);
-
-    // Build lookup of existing external_id + data_source_id in target
-    const existingSet = new Set(
-      (existingCampaigns || []).map(c => `${c.external_id}:${c.data_source_id}`)
-    );
-
-    // Step 3: Split campaigns into safe-to-link and duplicates
-    const safeToLink: string[] = [];
-    const duplicatesToDelete: string[] = [];
-
-    for (const campaign of sourceCampaigns) {
-      const key = `${campaign.external_id}:${campaign.data_source_id}`;
-      if (existingSet.has(key)) {
-        // This campaign already exists in target - delete the source duplicate
-        duplicatesToDelete.push(campaign.id);
-      } else {
-        safeToLink.push(campaign.id);
-      }
-    }
-
-    // Step 4: Delete duplicates
-    if (duplicatesToDelete.length > 0) {
-      await supabase
-        .from('campaigns')
-        .delete()
-        .in('id', duplicatesToDelete);
-    }
-
-    // Step 5: Link safe campaigns
-    if (safeToLink.length > 0) {
-      const { error } = await supabase
-        .from('campaigns')
-        .update({ engagement_id: engagementId })
-        .in('id', safeToLink);
-
-      if (error) throw error;
-    }
-
-    const linked = safeToLink.length;
-    const removed = duplicatesToDelete.length;
-    
-    if (removed > 0 && linked > 0) {
-      toast.success(`Linked ${linked} campaign(s), removed ${removed} duplicate(s)`);
-    } else if (removed > 0) {
-      toast.success(`Removed ${removed} duplicate campaign(s)`);
-    } else if (linked > 0) {
-      toast.success(`Linked ${linked} campaign${linked !== 1 ? 's' : ''}`);
-    }
-
-    return { success: true, linked, duplicatesRemoved: removed };
-  } catch (err) {
-    console.error('Error linking campaigns:', err);
-    toast.error('Failed to link campaigns');
-    return { success: false, linked: 0 };
+  
+  // Check for Reply.io data
+  const replyio = externalId ? nocodbReplyioMap.get(externalId) : null;
+  if (replyio) {
+    const delivered = replyio.deliveries || 0;
+    const bounced = replyio.bounces || 0;
+    return {
+      sent: acc.sent + delivered + bounced,
+      replied: acc.replied + (replyio.replies || 0),
+      positive: acc.positive, // Reply.io doesn't track positive
+      bounced: acc.bounced + bounced,
+    };
   }
-}, []);
+  
+  // Fallback to campaigns table data
+  return {
+    sent: acc.sent + (c.total_sent || 0),
+    replied: acc.replied + (c.total_replied || 0),
+    positive: acc.positive + (c.positive_replies || 0),
+    bounced: acc.bounced + (c.total_bounced || 0),
+  };
+}, { sent: 0, replied: 0, positive: 0, bounced: 0 });
+```
+
+**Update linkedCampaignsWithStats (lines 304-318):** Also use NocoDB for the campaigns table
+
+```typescript
+const linkedCampaignsWithStats: LinkedCampaignWithStats[] = (campaigns || []).map(c => {
+  const settings = c.settings as Record<string, any> | null;
+  const externalId = c.external_id;
+  
+  // Prefer NocoDB data
+  const smartlead = externalId ? nocodbSmartleadMap.get(externalId) : null;
+  const replyio = externalId ? nocodbReplyioMap.get(externalId) : null;
+  
+  let sent = c.total_sent || 0;
+  let replied = c.total_replied || 0;
+  let positive = c.positive_replies || 0;
+  
+  if (smartlead) {
+    sent = smartlead.total_emails_sent || 0;
+    replied = smartlead.total_replies || 0;
+    positive = smartlead.leads_interested || 0;
+  } else if (replyio) {
+    sent = (replyio.deliveries || 0) + (replyio.bounces || 0);
+    replied = replyio.replies || 0;
+  }
+  
+  const parseNum = (val: any): number => {
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string') return parseInt(val, 10) || 0;
+    return 0;
+  };
+  
+  return {
+    id: c.id,
+    name: c.name,
+    platform: c.campaign_type,
+    status: c.status,
+    enrolled: parseNum(settings?.total_leads) || sent,
+    sent,
+    replied,
+    replyRate: calculateRate(replied, sent),
+    positiveReplies: positive,
+    positiveRate: calculateRate(positive, sent),
+  };
+});
 ```
 
 ---
 
-## Testing
+## Expected Results After Fix
 
-After implementation:
-1. Go to GP Partners engagement report
-2. Click "Link Campaigns"
-3. Select campaigns that were previously failing
-4. Verify they link successfully (duplicates get cleaned up automatically)
-5. Check that the engagement report shows correct campaign data
+| Metric | Before (Wrong) | After (Correct) |
+|--------|----------------|-----------------|
+| Emails Sent | ~1,917 | ~33,682 |
+| Delivered | ~1,808 | ~33,631 |
+| Replied | 0 | 162 |
+| Positive Replies | 43 | 43 |
 
 ---
 
@@ -183,4 +175,6 @@ After implementation:
 
 | File | Change |
 |------|--------|
-| `src/hooks/useCampaignLinking.tsx` | Rewrite `linkCampaignsToEngagement` to detect and handle duplicate campaigns by deleting redundant copies before linking |
+| `src/hooks/useEngagementReport.tsx` | Fetch NocoDB data and use it preferentially over stale `campaigns` table for email metrics (affects lines 271-280, 304-318, 424-429) |
+
+This ensures the Engagement Report shows live, accurate data from NocoDB (the source of truth synced from SmartLead) rather than potentially stale data in the campaigns table.
