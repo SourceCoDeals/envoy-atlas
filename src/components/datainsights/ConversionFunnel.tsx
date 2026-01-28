@@ -7,6 +7,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Info } from 'lucide-react';
 
 interface FunnelStage {
   stage: string;
@@ -17,6 +18,109 @@ interface ConversionFunnelProps {
   data: FunnelStage[];
   className?: string;
 }
+
+// Define calculation details and dispositions for each funnel stage
+const FUNNEL_STAGE_INFO: Record<string, { 
+  calculation: string; 
+  dispositions?: string[];
+  description: string;
+}> = {
+  'Total Dials': {
+    calculation: 'Count of all call attempts',
+    description: 'Every outbound call made by the team',
+    dispositions: ['All dispositions included'],
+  },
+  'Dials': {
+    calculation: 'Count of all call attempts',
+    description: 'Every outbound call made by the team',
+    dispositions: ['All dispositions included'],
+  },
+  'Connections': {
+    calculation: 'Calls where talk_duration > 30 seconds',
+    description: 'Calls that reached a live person',
+    dispositions: [
+      'Meeting Booked',
+      'Callback Requested', 
+      'Send Email',
+      'Not Interested',
+      'Not Qualified',
+      'Referral',
+    ],
+  },
+  'Quality Conversations': {
+    calculation: 'Calls where talk_duration > 60 seconds',
+    description: 'Meaningful conversations with decision makers',
+    dispositions: [
+      'Meeting Booked',
+      'Callback Requested',
+      'Send Email (>60s)',
+      'Not Interested (engaged)',
+    ],
+  },
+  'Completed': {
+    calculation: 'Calls marked as completed conversations',
+    description: 'Full conversations that reached a conclusion',
+    dispositions: [
+      'Meeting Booked',
+      'Callback Requested',
+      'Send Email',
+      'Not Interested',
+      'Not Qualified',
+    ],
+  },
+  'Meetings': {
+    calculation: 'conversation_outcome contains "meeting" or "scheduled"',
+    description: 'Calls resulting in a scheduled meeting',
+    dispositions: ['Meeting Booked', 'Meeting Scheduled'],
+  },
+  'Meetings Booked': {
+    calculation: 'conversation_outcome contains "meeting" or "scheduled"',
+    description: 'Calls resulting in a scheduled meeting',
+    dispositions: ['Meeting Booked', 'Meeting Scheduled'],
+  },
+  'Owners Willing to Sell': {
+    calculation: 'seller_interest_score >= 7 (Yes)',
+    description: 'Contacts who expressed interest in selling',
+    dispositions: ['Seller Interest = Yes'],
+  },
+  'Activated': {
+    calculation: 'seller_interest_score >= 7 (Yes)',
+    description: 'Contacts willing to engage further',
+    dispositions: ['Seller Interest = Yes'],
+  },
+  'Interested': {
+    calculation: 'is_interested = true OR seller_interest >= 7',
+    description: 'Contacts showing genuine interest',
+    dispositions: ['Meeting Booked', 'Callback', 'High Interest Score'],
+  },
+  'Closed Deals': {
+    calculation: 'Opportunities marked as won',
+    description: 'Successfully closed sales',
+    dispositions: ['Deal Closed', 'Won'],
+  },
+};
+
+// Fallback for unknown stages
+const getStageInfo = (stageName: string) => {
+  // Try exact match first
+  if (FUNNEL_STAGE_INFO[stageName]) {
+    return FUNNEL_STAGE_INFO[stageName];
+  }
+  
+  // Try partial match
+  const lowerStage = stageName.toLowerCase();
+  for (const [key, value] of Object.entries(FUNNEL_STAGE_INFO)) {
+    if (lowerStage.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerStage)) {
+      return value;
+    }
+  }
+  
+  return {
+    calculation: 'Count of matching records',
+    description: stageName,
+    dispositions: undefined,
+  };
+};
 
 export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -51,7 +155,7 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
         <CardTitle className="text-base">Conversion Funnel</CardTitle>
       </CardHeader>
       <CardContent>
-        <TooltipProvider>
+        <TooltipProvider delayDuration={0}>
           <div className="flex gap-6">
             {/* Funnel visualization */}
             <div className="flex-1 flex flex-col items-center">
@@ -73,6 +177,7 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
                   
                   const color = stageColors[index % stageColors.length];
                   const isHovered = hoveredIndex === index;
+                  const stageInfo = getStageInfo(stage.stage);
                   
                   return (
                     <Tooltip key={stage.stage}>
@@ -92,14 +197,50 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
                           />
                         </g>
                       </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-[200px]">
-                        <div className="space-y-1">
-                          <p className="font-semibold">{stage.stage}</p>
-                          <p className="text-lg font-bold">{stage.count.toLocaleString()}</p>
-                          {getConversionRate(index) && (
-                            <p className="text-xs text-muted-foreground">
-                              {getConversionRate(index)}% of previous stage
-                            </p>
+                      <TooltipContent 
+                        side="right" 
+                        className="max-w-[280px] p-0"
+                        sideOffset={10}
+                      >
+                        <div className="p-3 space-y-3">
+                          {/* Header */}
+                          <div className="border-b pb-2">
+                            <p className="font-semibold text-base">{stage.stage}</p>
+                            <p className="text-2xl font-bold text-primary">{stage.count.toLocaleString()}</p>
+                            {getConversionRate(index) && (
+                              <p className="text-xs text-muted-foreground">
+                                {getConversionRate(index)}% of previous stage
+                              </p>
+                            )}
+                          </div>
+                          
+                          {/* Calculation */}
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                              <Info className="h-3 w-3" />
+                              <span>How it's calculated</span>
+                            </div>
+                            <p className="text-sm">{stageInfo.calculation}</p>
+                            <p className="text-xs text-muted-foreground">{stageInfo.description}</p>
+                          </div>
+                          
+                          {/* Dispositions */}
+                          {stageInfo.dispositions && stageInfo.dispositions.length > 0 && (
+                            <div className="space-y-1.5">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Included Dispositions
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {stageInfo.dispositions.map((disp) => (
+                                  <span 
+                                    key={disp}
+                                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground"
+                                  >
+                                    {disp}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </TooltipContent>
@@ -119,7 +260,7 @@ export function ConversionFunnel({ data, className }: ConversionFunnelProps) {
                   <div 
                     key={stage.stage}
                     className={cn(
-                      "flex flex-col transition-opacity duration-200",
+                      "flex flex-col transition-opacity duration-200 cursor-pointer",
                       hoveredIndex !== null && !isHovered && "opacity-50"
                     )}
                     onMouseEnter={() => setHoveredIndex(index)}
