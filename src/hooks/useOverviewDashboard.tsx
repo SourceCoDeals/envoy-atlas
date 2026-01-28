@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { calculateRate } from '@/lib/metrics';
+import { calculateRate, calculateWoWChange } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 import { startOfWeek, endOfWeek, subWeeks, subDays, format, parseISO, isWithinInterval } from 'date-fns';
 
 // ===== Types =====
@@ -455,7 +456,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       });
 
     } catch (err) {
-      console.error('Error fetching overview dashboard data:', err);
+      logger.error('Error fetching overview dashboard data', err);
     } finally {
       setLoading(false);
     }
@@ -469,21 +470,17 @@ export function useOverviewDashboard(): OverviewDashboardData {
   const heroMetrics = useMemo((): HeroMetric[] => {
     const { last30, last7, prev7 } = rawMetrics;
     
-    // Helper to calculate WoW change with safeguards:
-    // - Cap at 999% to prevent layout-breaking numbers
-    // - Show "neutral" trend when previous period has no data
+    // Helper to calculate WoW change with safeguards using centralized calculateWoWChange
     const calcChange = (current: number, previous: number): { change: number; trend: 'up' | 'down' | 'neutral' } => {
       // If no previous data, show neutral (not a valid comparison)
       if (previous === 0) {
         return { change: 0, trend: 'neutral' };
       }
       
-      const pctChange = ((current - previous) / previous) * 100;
-      // Cap at 999% to prevent extreme numbers from breaking layout
-      const cappedChange = Math.min(Math.abs(pctChange), 999);
+      const pctChange = calculateWoWChange(current, previous);
       
       return {
-        change: cappedChange,
+        change: Math.abs(pctChange),
         trend: pctChange > 1 ? 'up' : pctChange < -1 ? 'down' : 'neutral',
       };
     };

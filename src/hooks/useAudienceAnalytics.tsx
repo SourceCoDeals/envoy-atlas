@@ -195,7 +195,7 @@ export function useAudienceAnalytics(): AudienceAnalyticsData {
     const issues: string[] = [];
     if (uniqueTitles === 0) issues.push('No job title data available');
     if (uniqueIndustries === 0) issues.push('No industry data available');
-    if (enrichedCount < contacts.length * 0.5) issues.push(`Only ${Math.round(enrichedCount / contacts.length * 100)}% of contacts are enriched`);
+    if (enrichedCount < contacts.length * 0.5) issues.push(`Only ${Math.round(calculateRate(enrichedCount, contacts.length))}% of contacts are enriched`);
     if (contacts.length < 100) issues.push('Limited sample size - need more contacts for reliable insights');
     
     return {

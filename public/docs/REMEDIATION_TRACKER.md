@@ -142,9 +142,11 @@
    - Create foreign key relationship
    - Migrate historical data
 
-2. **Console Statement Cleanup**
-   - 35 remaining console.log statements
-   - Replace with `logger` utility
+### Additional Fixes (January 28, 2026 Update)
+- `src/hooks/useCopyAnalytics.tsx` - calculateWoWChange for comparison_to_baseline
+- `src/hooks/useDataQuality.tsx` - calculateRate for consistencyScore
+- `src/hooks/useSyncProgress.tsx` - calculateRate for progressPercent
+- `src/hooks/useOnboarding.tsx` - Added zero-division guard
 
 ---
 

@@ -219,8 +219,8 @@ export function useDataQuality() {
         
         if (campaignsWithReplies.length > 0) {
           // If we have replies but no positive classifications, something might be wrong
-          const positiveCoverage = campaignsWithPositive.length / campaignsWithReplies.length;
-          consistencyScore = positiveCoverage * 100;
+          // Use calculateRate for consistency with rest of codebase
+          consistencyScore = calculateRate(campaignsWithPositive.length, campaignsWithReplies.length);
           
           if (consistencyScore < 50) {
             alerts.push({
