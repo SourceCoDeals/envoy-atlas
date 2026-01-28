@@ -10,11 +10,12 @@ import { CampaignPortfolioOverview } from '@/components/campaigns/CampaignPortfo
 import { EnhancedCampaignTable } from '@/components/campaigns/EnhancedCampaignTable';
 import { AutoLinkPreviewModal } from '@/components/campaigns/AutoLinkPreviewModal';
 import { UnassignedCampaignsAlert } from '@/components/campaigns/UnassignedCampaignsAlert';
+import { CampaignRemapDialog } from '@/components/campaigns/CampaignRemapDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { DataHealthIndicator } from '@/components/ui/data-health-indicator';
-import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download, Link2, AlertTriangle, XCircle } from 'lucide-react';
+import { Loader2, Mail, RefreshCw, ArrowRight, Plus, GitCompare, Download, Link2, AlertTriangle, XCircle, Brain } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Engagement {
@@ -33,6 +34,7 @@ export default function Campaigns() {
   const [engagements, setEngagements] = useState<Engagement[]>([]);
   const [autoLinkOpen, setAutoLinkOpen] = useState(false);
   const [autoLinking, setAutoLinking] = useState(false);
+  const [remapDialogOpen, setRemapDialogOpen] = useState(false);
 
   // Fetch engagements
   useEffect(() => {
@@ -210,6 +212,15 @@ export default function Campaigns() {
                 <Link2 className="h-4 w-4 mr-2" />
                 Auto-Link Campaigns
               </Button>
+              <Button 
+                variant="default" 
+                size="sm" 
+                onClick={() => setRemapDialogOpen(true)}
+                disabled={loading || engagements.length === 0}
+              >
+                <Brain className="h-4 w-4 mr-2" />
+                AI Remap Campaigns
+              </Button>
               <Button variant="outline" size="sm" disabled>
                 <Plus className="h-4 w-4 mr-2" />
                 New Campaign
@@ -264,6 +275,13 @@ export default function Campaigns() {
                   setAutoLinking(false);
                 }
               }}
+            />
+
+            {/* AI Remap Dialog */}
+            <CampaignRemapDialog
+              open={remapDialogOpen}
+              onOpenChange={setRemapDialogOpen}
+              onComplete={refetch}
             />
           </div>
         )}

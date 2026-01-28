@@ -103,8 +103,12 @@ export function EnhancedCampaignTable({
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
 
+  // Sentinel UUID for unassigned campaigns - consistent with useCampaignLinking hook
+  const UNASSIGNED_ENGAGEMENT_ID = '00000000-0000-0000-0000-000000000000';
+
   // Handle engagement assignment change for a campaign row
   const handleCampaignEngagementAssign = useCallback(async (campaignId: string, newEngagementId: string) => {
+    // Use sentinel UUID for unlinked state to maintain RLS relationships
     const success = await updateCampaignEngagement(
       campaignId, 
       newEngagementId === 'unlinked' ? null : newEngagementId
