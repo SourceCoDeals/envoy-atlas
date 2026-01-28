@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
 import { useCallingConfig } from './useCallingConfig';
+import { calculateRate } from '@/lib/metrics';
 import {
   isTopCall,
   isWorstCall,
@@ -421,9 +422,9 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         c.is_connection && c.seller_interest_score !== null
       ).length;
 
-      const connectRate = totalCalls > 0 ? (connections / totalCalls) * 100 : 0;
-      const meetingRate = totalCalls > 0 ? (meetings / totalCalls) * 100 : 0;
-      const voicemailRate = totalCalls > 0 ? (voicemails / totalCalls) * 100 : 0;
+      const connectRate = calculateRate(connections, totalCalls);
+      const meetingRate = calculateRate(meetings, totalCalls);
+      const voicemailRate = calculateRate(voicemails, totalCalls);
 
       // By rep (analyst)
       const repMap = new Map<string, ColdCall[]>();
@@ -485,7 +486,7 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
             calls: dayCalls.length,
             connections: dayConnections,
             meetings: dayMeetings,
-            connectRate: dayCalls.length > 0 ? (dayConnections / dayCalls.length) * 100 : 0,
+            connectRate: calculateRate(dayConnections, dayCalls.length),
             avgScore: avg(dayCalls.map(c => c.composite_score)),
           };
         })
@@ -526,7 +527,7 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
           hourLabel: `${hour}:00`,
           calls: data.calls,
           connections: data.connections,
-          connectRate: data.calls > 0 ? (data.connections / data.calls) * 100 : 0,
+          connectRate: calculateRate(data.connections, data.calls),
         };
       });
 
@@ -538,7 +539,7 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         avgScores,
         interestBreakdown,
         positiveInterestCount,
-        positiveInterestRate: totalCalls > 0 ? (positiveInterestCount / totalCalls) * 100 : 0,
+        positiveInterestRate: calculateRate(positiveInterestCount, totalCalls),
         topCalls,
         worstCalls,
         hotLeads,

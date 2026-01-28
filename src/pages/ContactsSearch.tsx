@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DOMPurify from 'dompurify';
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -169,7 +170,13 @@ function MessageThread({ messages, platform }: { messages: MessageHistoryItem[];
             {body ? (
               <div 
                 className="text-sm text-muted-foreground prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{ __html: body }}
+                dangerouslySetInnerHTML={{ 
+                  __html: DOMPurify.sanitize(body || '', {
+                    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'b', 'i', 'a', 'ul', 'ol', 'li', 'span', 'div'],
+                    ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
+                    ADD_ATTR: ['target'],
+                  })
+                }}
               />
             ) : (
               <p className="text-sm text-muted-foreground italic">
