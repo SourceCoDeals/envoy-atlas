@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
-
+import { logger } from '@/lib/logger';
 export type DateRangeOption = 'today' | 'last_week' | 'last_2_weeks' | 'last_month' | 'all_time';
 
 export const DATE_RANGE_OPTIONS: { value: DateRangeOption; label: string }[] = [
@@ -117,7 +117,7 @@ export function useExternalCalls(options: UseExternalCallsOptions = {}) {
 
       setAllCalls(allData);
     } catch (err) {
-      console.error('Error fetching calls:', err);
+      logger.error('Error fetching calls', err);
       setError(err instanceof Error ? err.message : 'Failed to load calls');
     } finally {
       setLoading(false);

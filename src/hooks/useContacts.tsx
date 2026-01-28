@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
-
+import { logger } from '@/lib/logger';
 export type ContactStatus = 'new' | 'contacted' | 'interested' | 'meeting_set' | 'disqualified' | 'do_not_contact';
 
 export interface Contact {
@@ -280,7 +280,7 @@ export function useContactDetail(contactId: string | null) {
 
       setNotes((notesData || []) as ContactNote[]);
     } catch (err) {
-      console.error('Error fetching contact:', err);
+      logger.error('Error fetching contact', err);
     } finally {
       setLoading(false);
     }
@@ -392,7 +392,7 @@ export function useContactTimeline(contactId: string | null) {
 
         setTimeline(combined);
       } catch (err) {
-        console.error('Error fetching timeline:', err);
+        logger.error('Error fetching timeline', err);
       } finally {
         setLoading(false);
       }

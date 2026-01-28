@@ -4,6 +4,7 @@ import { useWorkspace } from './useWorkspace';
 import { COLD_CALLING_BENCHMARKS } from '@/lib/coldCallingBenchmarks';
 import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
 import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 interface Benchmark {
   metric_name: string;
@@ -329,7 +330,7 @@ export function useDataInsights() {
       });
 
     } catch (error) {
-      console.error('Error fetching data insights:', error);
+      logger.error('Error fetching data insights', error);
     } finally {
       setLoading(false);
     }

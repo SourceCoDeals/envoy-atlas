@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
-
+import { logger } from '@/lib/logger';
 export interface Deal {
   id: string;
   engagement_id: string | null;
@@ -122,7 +122,7 @@ export function useDeals() {
         totalClients: clientsData.length,
       });
     } catch (err) {
-      console.error('Error fetching deals:', err);
+      logger.error('Error fetching deals', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch deals');
     } finally {
       setLoading(false);
