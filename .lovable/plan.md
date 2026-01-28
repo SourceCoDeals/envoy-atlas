@@ -1,221 +1,224 @@
 
-# Envoy Atlas Remediation Plan - Implementation Roadmap
+# CTO-Level Fix Plan: Campaign Sorting, Email Count Discrepancy & Engagement Metrics
 
-Based on the CTO audit report and detailed remediation prompt, this plan organizes work into three phases by priority.
+## Executive Summary
 
----
+After a thorough investigation of the codebase and database, I've identified the root causes of all three issues:
 
-## Current State Assessment
-
-### Already Completed
-| Item | Status | Location |
-|------|--------|----------|
-| Reply Rate Standardization | Done | `src/lib/metrics.ts` - `calculateReplyRateFromDelivered()` |
-| Data Source Badges | Done | `src/components/ui/data-source-badge.tsx` |
-| WoW Cap at 999% | Done | `src/lib/metrics.ts` - `calculateWoWChange()` |
-| Positive Replies Sync | Done | Edge function sync |
-| Disposition Simplification | Done | `DispositionPieChart.tsx` |
-| **Testing Framework** | ✅ Done | `vitest.config.ts`, `src/test/setup.ts` |
-| **MSW Handlers** | ✅ Done | `src/test/mocks/handlers.ts` |
-| **Unit Tests: Metrics** | ✅ Done | `src/lib/__tests__/metrics.test.ts` (56 tests) |
-| **Unit Tests: Call Scoring** | ✅ Done | `src/lib/__tests__/callScoring.test.ts` (28 tests) |
-| **Error Boundary Component** | ✅ Done | `src/components/error/ErrorBoundary.tsx` |
-| **Logger Utility** | ✅ Done | `src/lib/logger.ts` |
-| **Campaign Table Components** | ✅ Done | `src/components/campaigns/table/` (Header, Sort hook) |
-| Item | Priority | Effort |
-|------|----------|--------|
-| Webhook Retry Queue | High | 4 hours |
-| call_analysis Table | Medium | 3 hours |
-| Performance Indexes | Medium | 1 hour |
-| Sync Status Hook | High | 2 hours |
+| Issue | Root Cause | Impact | Fix Complexity |
+|-------|-----------|--------|----------------|
+| Campaign sorting | Missing status prioritization in `EnhancedCampaignTable` | UX - active campaigns buried | Low |
+| 540K email count | Aggregating ALL campaigns (including those incorrectly attributed) | Inflated hero metrics | Medium |
+| O2 Auto Repair data | 450 campaigns incorrectly linked (only 13 are actually O2 Auto) | Cascading data corruption | Data + Code |
 
 ---
 
-## Phase 1: Critical Fixes (Week 1-2)
+## Issue 1: Campaign Dashboard Sorting
 
-### 1.1 Add Testing Framework
+### Current State
+The `EnhancedCampaignTable.tsx` (lines 173-267) has a generic sort that does NOT prioritize active campaigns. The older `CampaignTable.tsx` correctly prioritizes `['active', 'started', 'running']` statuses, but this logic was not carried over to the enhanced table.
 
-**Files to Create:**
-- `vitest.config.ts` - Vitest configuration with jsdom environment
-- `src/test/setup.ts` - Global test setup with Supabase mocks
-- `src/test/mocks/handlers.ts` - MSW handlers for API mocking
-
-**Package.json Updates:**
-Add devDependencies:
-- `@testing-library/react: ^14.1.0`
-- `@testing-library/jest-dom: ^6.1.0`  
-- `@testing-library/user-event: ^14.5.0`
-- `vitest: ^1.2.0`
-- `@vitest/coverage-v8: ^1.2.0`
-- `jsdom: ^23.0.0`
-- `msw: ^2.0.0`
-
-Add scripts:
-- `"test": "vitest"`
-- `"test:coverage": "vitest --coverage"`
-- `"test:ui": "vitest --ui"`
-
-### 1.2 Initial Test Suite
-
-**Files to Create:**
-- `src/lib/__tests__/metrics.test.ts` - Unit tests for metrics calculations
-- `src/lib/__tests__/callScoring.test.ts` - Call scoring logic tests
-- `src/hooks/__tests__/useOverviewDashboard.test.tsx` - Dashboard hook tests
-
-Test coverage targets:
-- `calculateRate()` - zero division, normal cases
-- `calculateReplyRateFromDelivered()` - standard formula
-- `calculateWoWChange()` - cap at 999%, trend detection
-- `calculateEnhancedScore()` - scoring breakdown validation
-
-### 1.3 Error Boundary Component
-
-**File to Create:** `src/components/error/ErrorBoundary.tsx`
-
-Features:
-- Catches React render errors
-- Displays friendly error card with retry button
-- Logs errors to console (later: external service)
-- Optional custom fallback UI
-
-**Wrap Major Sections:**
-- Dashboard pages
-- Data tables
-- Chart components
-
----
-
-## Phase 2: High Priority Fixes (Week 3-4)
-
-### 2.1 Logger Utility
-
-**File to Create:** `src/lib/logger.ts`
+### Fix
+Add a two-tier sort that ALWAYS places active campaigns first, regardless of secondary sort field:
 
 ```text
-logger.debug() - Dev only
-logger.info()  - Dev only  
-logger.warn()  - Always
-logger.error() - Always + future external tracking
+┌─────────────────────────────────────────────┐
+│  SORT PRIORITY                              │
+├─────────────────────────────────────────────┤
+│  1. Active Status (active, started, running)│
+│  2. Secondary Sort Field (user-selected)    │
+└─────────────────────────────────────────────┘
 ```
 
-Systematically replace 109 console statements with appropriate logger calls.
+**File:** `src/components/campaigns/EnhancedCampaignTable.tsx`
 
-### 2.2 Webhook Retry Queue
-
-**Database Migration:**
-Create `webhook_retry_queue` table with:
-- `id`, `webhook_type`, `payload` (JSONB)
-- `attempt_count`, `max_attempts` (default 5)
-- `status` ('pending', 'processing', 'completed', 'failed')
-- `idempotency_key` (UNIQUE)
-- `next_attempt_at`, `last_attempt_at`
-
-**Edge Function Updates:**
-- Add idempotency key generation
-- Wrap processing in try-catch
-- Queue failed webhooks for retry
-- Mark successful webhooks as completed
-
-### 2.3 Sync Status Hook
-
-**File to Create:** `src/hooks/useSyncStatus.tsx`
-
-Features:
-- Subscribe to `sync_status` table changes via realtime
-- Show toast notifications on sync failures
-- Provide `triggerSync(platform)` function
-- Track last sync time per platform
+**Changes:**
+- Add `ACTIVE_STATUSES` constant at top of component
+- Modify the `filteredAndSortedCampaigns` useMemo to apply two-tier sorting
+- Active campaigns bubble to top, then sort by selected field within each tier
 
 ---
 
-## Phase 3: Medium Priority (Month 2)
+## Issue 2: Email Count Discrepancy (540K → ~170K Actual)
 
-### 3.1 Normalize cold_calls Schema
+### Current State
+The Overview Dashboard (`useOverviewDashboard.tsx` lines 290-297) aggregates ALL campaigns linked to the client's engagements:
 
-**Database Migration:**
-Create `call_analysis` table to extract 25+ AI scoring columns:
-- Composite and individual scores
-- Reasoning fields
-- Analyzer metadata
+```typescript
+const campaignTotals = campaigns.reduce((acc, c) => ({
+  sent: acc.sent + (c.total_sent || 0), // No status filter!
+  ...
+}), {...});
+```
 
-This reduces `cold_calls` from 66 columns to ~40 core columns.
+**Database Reality:**
+- `campaigns` table total: **739,005** emails
+- Active engagements campaigns: **738,512** emails
+- BUT: **715,271** are from incorrectly attributed campaigns (O2 Investment Auto Repair)
 
-### 3.2 Performance Indexes
+### Fix
+Filter aggregation to only include campaigns with `status IN ('active', 'started', 'running')`:
 
-**Indexes to Create:**
-- `idx_campaigns_engagement_status` - Campaign queries
-- `idx_daily_metrics_date_engagement` - Time-series queries
-- `idx_cold_calls_date` - Date range filtering
-- `idx_cold_calls_analyst` - Rep performance queries
-- `idx_campaigns_active` - Partial index for active only
+**File:** `src/hooks/useOverviewDashboard.tsx`
 
-### 3.3 Component Refactoring
-
-Split `EnhancedCampaignTable.tsx` (724 lines) into:
-- `CampaignTableHeader.tsx`
-- `CampaignTableRow.tsx`
-- `useCampaignTableSort.ts`
-- `CampaignBulkActions.tsx`
+**Changes:**
+- Add status filter when aggregating `campaignTotals`
+- Only count emails from campaigns that are currently active
+- Add data quality indicator showing paused/completed campaign totals separately
 
 ---
 
-## Implementation Summary
+## Issue 3: O2 Investment Auto Repair Data Corruption
 
-### File Creations (9 files)
-| File | Purpose |
+### Database Forensics
+```text
+┌──────────────────────────────────────────────────────────────┐
+│  O2 Investment Auto Repair (f8ad6966-49ed-4394-8cec-...)    │
+├──────────────────────────────────────────────────────────────┤
+│  Total campaigns linked: 450                                 │
+│  Correctly attributed (O2 Auto): 13 campaigns (68K emails)  │
+│  WRONG - Trivest campaigns: 47 (121K emails)                │
+│  WRONG - Stadion campaigns: 16 (75K emails)                 │
+│  WRONG - Alpine campaigns: 20 (47K emails)                  │
+│  WRONG - Trinity campaigns: 18 (44K emails)                 │
+│  WRONG - GP Partners campaigns: 15 (35K emails)             │
+│  WRONG - Other misattributed: 316+ campaigns                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Root Cause
+The `auto-pair-engagements` function has been incorrectly linking campaigns from OTHER clients/sponsors to "O2 Investment Auto Repair" as a catch-all bucket.
+
+### Fix Strategy (Two-Part)
+
+**Part A: Code Fix** - Improve `EngagementDashboard.tsx` metrics aggregation
+- Add validation in `fetchEngagementMetrics` to filter out obviously misattributed campaigns
+- Add engagement name matching heuristics (e.g., "Trivest" campaigns shouldn't be in "O2 Investment")
+
+**Part B: Data Remediation** - SQL cleanup (requires manual execution)
+- Provide migration script to move misattributed campaigns to proper engagements or "Unassigned"
+- This is a data governance issue that requires human review
+
+**Files to modify:**
+1. `src/pages/EngagementDashboard.tsx` - Add campaign filtering logic
+2. Create data audit SQL for the user to review and execute
+
+---
+
+## Technical Implementation Plan
+
+### Phase 1: Campaign Sorting Fix (EnhancedCampaignTable.tsx)
+
+```typescript
+// Add constant at top
+const ACTIVE_STATUSES = ['active', 'started', 'running'];
+
+// In filteredAndSortedCampaigns useMemo, after filtering:
+result.sort((a, b) => {
+  // TIER 1: Active status priority
+  const aIsActive = ACTIVE_STATUSES.includes(a.status?.toLowerCase() || '');
+  const bIsActive = ACTIVE_STATUSES.includes(b.status?.toLowerCase() || '');
+  
+  if (aIsActive && !bIsActive) return -1;
+  if (!aIsActive && bIsActive) return 1;
+  
+  // TIER 2: User-selected sort field (existing logic)
+  // ... existing switch statement ...
+});
+```
+
+### Phase 2: Overview Dashboard Filter (useOverviewDashboard.tsx)
+
+```typescript
+// Filter to only active campaigns for hero metrics
+const activeCampaigns = campaigns.filter(c => 
+  ['active', 'started', 'running'].includes(c.status?.toLowerCase() || '')
+);
+
+const campaignTotals = activeCampaigns.reduce((acc, c) => ({
+  sent: acc.sent + (c.total_sent || 0),
+  replied: acc.replied + (c.total_replied || 0),
+  positive: acc.positive + (c.positive_replies || 0),
+  meetings: acc.meetings + (c.total_meetings || 0),
+}), { sent: 0, replied: 0, positive: 0, meetings: 0 });
+```
+
+### Phase 3: Engagement Dashboard Validation (EngagementDashboard.tsx)
+
+Add a validation heuristic to flag suspicious campaign attributions:
+
+```typescript
+// In fetchEngagementMetrics, before aggregating:
+// Filter out campaigns that are clearly misattributed
+const validCampaigns = allCampaigns.filter(campaign => {
+  const engName = metricsMap[campaign.engagement_id]?.name?.toLowerCase() || '';
+  const campName = campaign.name?.toLowerCase() || '';
+  
+  // Skip if campaign name contains a DIFFERENT sponsor/client name
+  const knownSponsors = ['trivest', 'trinity', 'stadion', 'alpine', 'verde', 'arch city'];
+  const hasOtherSponsor = knownSponsors.some(sponsor => 
+    campName.includes(sponsor) && !engName.includes(sponsor)
+  );
+  
+  return !hasOtherSponsor;
+});
+```
+
+### Phase 4: Data Audit SQL (For Manual Review)
+
+```sql
+-- Identify misattributed campaigns
+SELECT 
+  c.id,
+  c.name as campaign_name,
+  e.name as current_engagement,
+  CASE 
+    WHEN c.name ILIKE '%Trivest%' THEN 'Trivest'
+    WHEN c.name ILIKE '%Trinity%' THEN 'Trinity'
+    WHEN c.name ILIKE '%Stadion%' THEN 'Stadion'
+    WHEN c.name ILIKE '%Alpine%' THEN 'Alpine'
+    WHEN c.name ILIKE '%GP Partners%' THEN 'GP Partners'
+    ELSE 'Review Manually'
+  END as suggested_engagement
+FROM campaigns c
+JOIN engagements e ON e.id = c.engagement_id
+WHERE e.name = 'O2 Investment Auto Repair'
+  AND (
+    c.name NOT ILIKE '%O2%Auto%'
+    AND c.name NOT ILIKE '%O2 Investment%'
+  )
+ORDER BY c.total_sent DESC;
+```
+
+---
+
+## Files to Modify
+
+| File | Changes |
 |------|---------|
-| `vitest.config.ts` | Test framework config |
-| `src/test/setup.ts` | Test environment setup |
-| `src/test/mocks/handlers.ts` | MSW API mocks |
-| `src/lib/__tests__/metrics.test.ts` | Metrics unit tests |
-| `src/lib/__tests__/callScoring.test.ts` | Scoring tests |
-| `src/hooks/__tests__/useOverviewDashboard.test.tsx` | Hook tests |
-| `src/components/error/ErrorBoundary.tsx` | Error boundary |
-| `src/lib/logger.ts` | Production logger |
-| `src/hooks/useSyncStatus.tsx` | Realtime sync status |
-
-### Database Migrations (3 migrations)
-| Migration | Tables/Indexes |
-|-----------|----------------|
-| Webhook Retry Queue | `webhook_retry_queue` table + indexes |
-| Call Analysis Normalization | `call_analysis` table |
-| Performance Optimization | 5-6 new indexes |
-
-### Package.json Updates
-- 7 new devDependencies for testing
-- 3 new npm scripts
+| `src/components/campaigns/EnhancedCampaignTable.tsx` | Add active-first sorting logic |
+| `src/hooks/useOverviewDashboard.tsx` | Filter hero metrics to active campaigns only |
+| `src/pages/EngagementDashboard.tsx` | Add campaign validation heuristics for metrics |
 
 ---
 
-## Validation Checklist
+## Expected Outcomes
 
-### Phase 1 Completion
-- `npm test` runs successfully
-- Test coverage > 30% for `src/lib/*.ts`
-- Error boundaries wrap all dashboard pages
-- No TypeScript errors in new files
+After implementation:
 
-### Phase 2 Completion
-- Sync failures show toast notifications
-- Failed webhooks queued for retry
-- Console statements replaced with logger
-- Idempotency prevents duplicate processing
+1. **Campaign Dashboard**: Active campaigns (`status: active/started/running`) will ALWAYS appear at the top of the table, regardless of other sort criteria
 
-### Phase 3 Completion  
-- `call_analysis` table populated from existing data
-- Dashboard queries under 500ms
-- `EnhancedCampaignTable` split into 4+ files
+2. **Overview Dashboard**: Hero metrics will show accurate email counts (~170K actual active vs 540K inflated), with proper attribution
+
+3. **Engagement Tab**: O2 Investment Auto Repair will show only its legitimate 13 campaigns (~68K emails) with actual reply and call data, not the 450 incorrectly linked campaigns
 
 ---
 
-## Estimated Effort
+## Risk Assessment
 
-| Phase | Duration | Person-Hours |
-|-------|----------|--------------|
-| Phase 1 | Week 1-2 | 12-16 hours |
-| Phase 2 | Week 3-4 | 10-14 hours |
-| Phase 3 | Month 2 | 8-10 hours |
-| **Total** | **6 weeks** | **30-40 hours** |
-
-This matches the CTO audit's estimate of 30-40 person-weeks for full remediation.
+| Risk | Mitigation |
+|------|------------|
+| Breaking existing sort preferences | Active-first is additive, secondary sort preserved |
+| Hiding legitimate paused campaigns | Add filter option for "Include paused" |
+| Data cleanup requires manual review | Provide SQL audit script, don't auto-delete |
 
