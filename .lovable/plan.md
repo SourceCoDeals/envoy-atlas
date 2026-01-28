@@ -1,180 +1,109 @@
 
-# Fix Email Metrics Data Source - Use NocoDB Instead of Stale campaigns Table
+Goal
+- Make the “Email Performance Summary” for the GP Partners engagement match what you see in SmartLead by ensuring the Engagement Report uses the correct underlying data source and the correct time-window.
 
-## Problem Identified
+What’s happening (root cause)
+- The Engagement Report currently computes the Email Performance Summary primarily from `daily_metrics` when a date range is selected (e.g., “Last 30 days”).
+- For GP Partners, there are a few `daily_metrics` rows (often estimated/backfilled), so the report treats them as “real” and uses those small totals.
+- At the same time, the report is already fetching NocoDB snapshot data (`nocodb_campaign_daily_snapshots`) and even marks `dataAvailability.dataSource` as `snapshots`, but it does not actually use snapshots to calculate the summary totals.
+- Result: the UI shows snapshot-backed labeling, but the numbers are coming from `daily_metrics`, so the totals are not aligned with SmartLead.
 
-The Engagement Report is showing **incorrect email metrics** because it reads from the `campaigns` table, which has **stale or missing data** for many GP Partners campaigns.
+High-level fix
+- When snapshot data exists for the linked campaigns, compute period totals from snapshot deltas (day-over-day changes) and use that for:
+  - Emails Sent
+  - Delivered (derived)
+  - Replied
+  - Positive Replies
+  - Bounced
+- Only fall back to `daily_metrics` when snapshot data is missing.
 
-### Data Comparison
+Implementation plan (code changes)
 
-| Campaign | NocoDB (Correct) | campaigns table (Shown) |
-|----------|------------------|-------------------------|
-| GP Partners - Ria A/B Test | 21,204 sent, 73 replied | 0 sent, 0 replied |
-| GP Partners - Collision 1 | 7,285 sent, 51 replied | 0 sent, 0 replied |
-| GP Partners - Restoration | 3,028 sent, 17 replied | 0 sent, 0 replied |
-| GP Partners - Garage Doors | 1,519 sent, 13 replied | 0 sent, 0 replied |
-| **Totals** | **~33,000 sent, ~160 replied** | **~1,917 sent, 0 replied** |
+1) Update `useEngagementReport` to compute email totals from snapshot deltas
+File: `src/hooks/useEngagementReport.tsx`
 
-### Root Cause
+A. Fetch snapshot deltas (filtered) in addition to snapshots
+- Add a query to the view `nocodb_campaign_daily_deltas` filtered by:
+  - `campaign_id in externalCampaignIds`
+  - `snapshot_date >= startDateStr` when a start date exists
+  - `snapshot_date <= endDateStr` when an end date exists
+- This view already has:
+  - `emails_sent_delta`
+  - `emails_replied_delta`
+  - `emails_bounced_delta`
+  - `positive_delta`
 
-The `useEngagementReport` hook (lines 424-429) calculates email metrics by summing `total_sent`, `total_replied`, etc. from the `campaigns` table. However:
-1. The `campaigns` table is not being updated with NocoDB data for many campaigns
-2. Only `positive_replies` appears to sync correctly (via a different process)
-3. The live data in `nocodb_smartlead_campaigns` is accurate but not being used
+B. Build `snapshotTotals` from the deltas
+- Reduce deltas into:
+  - `sent = sum(emails_sent_delta)`
+  - `replied = sum(emails_replied_delta)`
+  - `bounced = sum(emails_bounced_delta)`
+  - `positive = sum(positive_delta)`
+  - `delivered = max(0, sent - bounced)`
 
----
+C. Change the “final totals selection” logic to prefer snapshots when available
+- Current behavior:
+  - If date range is selected and `dailyTotals.sent > 0`, it uses `daily_metrics` totals even if snapshots exist.
+- New behavior:
+  - If snapshot deltas exist for the engagement’s linked campaigns in the selected date range:
+    - Use `snapshotTotals` for the Email Performance Summary and key metrics calculations (touchpoints, response rate, etc.).
+  - Else, if no snapshot deltas:
+    - Use `daily_metrics` totals if present
+    - Else fall back to all-time campaign totals (current logic)
 
-## Solution
+D. Make `dataAvailability` consistent with the actual source used
+- Update `dataAvailability.dataSource` to reflect what we truly used:
+  - `snapshots` if snapshot deltas were used
+  - `daily_metrics` if daily totals were used
+  - `campaign_totals` / `estimated` only if those were used
+- Update `emailCampaignFallback` so it no longer checks only `(campaigns.total_sent > 0)` (which can be stale/zero for SmartLead-synced rows). Instead:
+  - Use `campaignTotals.sent > 0` or `snapshotTotals.sent > 0` to decide if fallback should be offered.
 
-Modify `useEngagementReport.tsx` to fetch and merge NocoDB data for accurate email metrics:
+2) Fix per-campaign rate math to match the “delivered-denominator” convention
+File: `src/hooks/useEngagementReport.tsx`
 
-1. After fetching campaigns (which gives us `external_id` values)
-2. Fetch matching rows from `nocodb_smartlead_campaigns` and `nocodb_replyio_campaigns`
-3. Build a lookup map by `external_id`
-4. When calculating campaign totals, prefer NocoDB values over stale `campaigns` values
+- In `linkedCampaignsWithStats`, rates are currently computed using `sent` as the denominator:
+  - `replyRate: calculateRate(replied, sent)`
+  - `positiveRate: calculateRate(positive, sent)`
+- Update to match the rest of the app’s rule (“delivered is the denominator for engagement rates”):
+  - For SmartLead:
+    - delivered = sent - total_bounces
+    - replyRate = replied / delivered
+    - positiveRate = positive / delivered
+  - For Reply.io:
+    - delivered = deliveries
+    - replyRate = replies / delivered
+    - (positive remains untracked)
 
----
+This makes the per-campaign list and the summary consistent and closer to SmartLead’s view.
 
-## Technical Changes
+3) (Optional but recommended) Add a small “Data Source” badge to the Email tab summary
+File: `src/components/engagementReport/EmailReportTab.tsx`
 
-### File: `src/hooks/useEngagementReport.tsx`
+- Add a compact badge near “Email Performance Summary” that shows something like:
+  - “Source: Snapshots” (and ideally “as of {latest snapshot date}”)
+- This reduces confusion and makes it obvious why a number might differ (e.g., if SmartLead has updated in the last few hours and the latest snapshot is from yesterday).
 
-**After line 271 (after fetching campaigns):** Add NocoDB data fetch
+Edge cases to handle
+- Engagements with very new campaigns (only 1 snapshot):
+  - Delta logic should still work (first delta typically equals the first observed total).
+- Engagements with snapshot data but sparse `daily_metrics` (estimated rows):
+  - We will now prefer snapshots, preventing estimated `daily_metrics` from overriding accurate snapshot-derived totals.
+- Engagements with no snapshot data:
+  - Behavior remains as-is (use daily_metrics if available, else campaign totals).
 
-```typescript
-// Fetch NocoDB live metrics for linked campaigns
-const externalCampaignIds = (campaigns || []).map(c => c.external_id).filter(Boolean) as string[];
+How we’ll verify (quick acceptance tests)
+1) Open /engagements/432cd24b-a1f4-4f64-a0eb-82e2ac5f1e26/report
+2) On “Last 30 days”:
+   - Email Performance Summary should reflect the snapshot-based deltas in that date window (not the small estimated daily_metrics totals).
+3) Switch to “All time”:
+   - Totals should align closely with SmartLead totals for the same campaigns (accounting for last snapshot timestamp).
+4) Confirm per-campaign list rates look reasonable and use delivered denominators (reply/positive rates shouldn’t be artificially low/high due to bounces).
 
-let nocodbSmartleadData: any[] = [];
-let nocodbReplyioData: any[] = [];
+Files expected to change
+- `src/hooks/useEngagementReport.tsx` (primary fix: snapshot-delta totals selection + per-campaign rate denominator fixes + dataAvailability consistency)
+- `src/components/engagementReport/EmailReportTab.tsx` (optional: show data source badge/last snapshot date)
 
-if (externalCampaignIds.length > 0) {
-  const [smartleadRes, replyioRes] = await Promise.all([
-    supabase
-      .from('nocodb_smartlead_campaigns')
-      .select('campaign_id, total_emails_sent, total_replies, leads_interested, total_bounces')
-      .in('campaign_id', externalCampaignIds),
-    supabase
-      .from('nocodb_replyio_campaigns')
-      .select('campaign_id, deliveries, bounces, replies')
-      .in('campaign_id', externalCampaignIds),
-  ]);
-  nocodbSmartleadData = smartleadRes.data || [];
-  nocodbReplyioData = replyioRes.data || [];
-}
-
-// Build lookup maps
-const nocodbSmartleadMap = new Map(
-  nocodbSmartleadData.map(n => [n.campaign_id, n])
-);
-const nocodbReplyioMap = new Map(
-  nocodbReplyioData.map(n => [n.campaign_id, n])
-);
-```
-
-**Replace lines 424-429 (campaign totals calculation):** Use NocoDB data preferentially
-
-```typescript
-// Calculate campaign totals - PREFER NocoDB live data over stale campaigns table
-const campaignTotals = (campaigns || []).reduce((acc, c) => {
-  const externalId = c.external_id;
-  
-  // Check for NocoDB data first (SmartLead)
-  const smartlead = externalId ? nocodbSmartleadMap.get(externalId) : null;
-  if (smartlead) {
-    return {
-      sent: acc.sent + (smartlead.total_emails_sent || 0),
-      replied: acc.replied + (smartlead.total_replies || 0),
-      positive: acc.positive + (smartlead.leads_interested || 0),
-      bounced: acc.bounced + (smartlead.total_bounces || 0),
-    };
-  }
-  
-  // Check for Reply.io data
-  const replyio = externalId ? nocodbReplyioMap.get(externalId) : null;
-  if (replyio) {
-    const delivered = replyio.deliveries || 0;
-    const bounced = replyio.bounces || 0;
-    return {
-      sent: acc.sent + delivered + bounced,
-      replied: acc.replied + (replyio.replies || 0),
-      positive: acc.positive, // Reply.io doesn't track positive
-      bounced: acc.bounced + bounced,
-    };
-  }
-  
-  // Fallback to campaigns table data
-  return {
-    sent: acc.sent + (c.total_sent || 0),
-    replied: acc.replied + (c.total_replied || 0),
-    positive: acc.positive + (c.positive_replies || 0),
-    bounced: acc.bounced + (c.total_bounced || 0),
-  };
-}, { sent: 0, replied: 0, positive: 0, bounced: 0 });
-```
-
-**Update linkedCampaignsWithStats (lines 304-318):** Also use NocoDB for the campaigns table
-
-```typescript
-const linkedCampaignsWithStats: LinkedCampaignWithStats[] = (campaigns || []).map(c => {
-  const settings = c.settings as Record<string, any> | null;
-  const externalId = c.external_id;
-  
-  // Prefer NocoDB data
-  const smartlead = externalId ? nocodbSmartleadMap.get(externalId) : null;
-  const replyio = externalId ? nocodbReplyioMap.get(externalId) : null;
-  
-  let sent = c.total_sent || 0;
-  let replied = c.total_replied || 0;
-  let positive = c.positive_replies || 0;
-  
-  if (smartlead) {
-    sent = smartlead.total_emails_sent || 0;
-    replied = smartlead.total_replies || 0;
-    positive = smartlead.leads_interested || 0;
-  } else if (replyio) {
-    sent = (replyio.deliveries || 0) + (replyio.bounces || 0);
-    replied = replyio.replies || 0;
-  }
-  
-  const parseNum = (val: any): number => {
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') return parseInt(val, 10) || 0;
-    return 0;
-  };
-  
-  return {
-    id: c.id,
-    name: c.name,
-    platform: c.campaign_type,
-    status: c.status,
-    enrolled: parseNum(settings?.total_leads) || sent,
-    sent,
-    replied,
-    replyRate: calculateRate(replied, sent),
-    positiveReplies: positive,
-    positiveRate: calculateRate(positive, sent),
-  };
-});
-```
-
----
-
-## Expected Results After Fix
-
-| Metric | Before (Wrong) | After (Correct) |
-|--------|----------------|-----------------|
-| Emails Sent | ~1,917 | ~33,682 |
-| Delivered | ~1,808 | ~33,631 |
-| Replied | 0 | 162 |
-| Positive Replies | 43 | 43 |
-
----
-
-## Summary of Changes
-
-| File | Change |
-|------|--------|
-| `src/hooks/useEngagementReport.tsx` | Fetch NocoDB data and use it preferentially over stale `campaigns` table for email metrics (affects lines 271-280, 304-318, 424-429) |
-
-This ensures the Engagement Report shows live, accurate data from NocoDB (the source of truth synced from SmartLead) rather than potentially stale data in the campaigns table.
+Non-goals (for this iteration)
+- Perfect real-time parity with SmartLead minute-by-minute (snapshots are periodic).
+- Rebuilding estimated daily_metrics logic; we’ll simply ensure it doesn’t override snapshot truth when snapshots exist.
