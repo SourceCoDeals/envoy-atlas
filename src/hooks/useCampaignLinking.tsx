@@ -69,26 +69,91 @@ export function useCampaignLinking() {
 
   /**
    * Links multiple campaigns to an engagement
+   * Handles duplicate campaigns by detecting conflicts and deleting redundant copies
    */
   const linkCampaignsToEngagement = useCallback(async (
     campaignIds: string[],
     engagementId: string
-  ): Promise<{ success: boolean; linked: number }> => {
+  ): Promise<{ success: boolean; linked: number; duplicatesRemoved?: number }> => {
     if (campaignIds.length === 0) {
       return { success: false, linked: 0 };
     }
 
     try {
-      const { error, count } = await supabase
+      // Step 1: Get details of campaigns being linked
+      const { data: sourceCampaigns } = await supabase
         .from('campaigns')
-        .update({ engagement_id: engagementId })
+        .select('id, external_id, data_source_id')
         .in('id', campaignIds);
 
-      if (error) throw error;
+      if (!sourceCampaigns || sourceCampaigns.length === 0) {
+        throw new Error('No campaigns found');
+      }
+
+      // Step 2: Check for duplicates in target engagement
+      const externalIds = sourceCampaigns
+        .filter(c => c.external_id && c.data_source_id)
+        .map(c => c.external_id);
+
+      let existingSet = new Set<string>();
       
-      const linked = count || campaignIds.length;
-      toast.success(`Linked ${linked} campaign${linked !== 1 ? 's' : ''}`);
-      return { success: true, linked };
+      if (externalIds.length > 0) {
+        const { data: existingCampaigns } = await supabase
+          .from('campaigns')
+          .select('id, external_id, data_source_id')
+          .eq('engagement_id', engagementId)
+          .in('external_id', externalIds);
+
+        // Build lookup of existing external_id + data_source_id in target
+        existingSet = new Set(
+          (existingCampaigns || []).map(c => `${c.external_id}:${c.data_source_id}`)
+        );
+      }
+
+      // Step 3: Split campaigns into safe-to-link and duplicates
+      const safeToLink: string[] = [];
+      const duplicatesToDelete: string[] = [];
+
+      for (const campaign of sourceCampaigns) {
+        const key = `${campaign.external_id}:${campaign.data_source_id}`;
+        if (campaign.external_id && campaign.data_source_id && existingSet.has(key)) {
+          // This campaign already exists in target - delete the source duplicate
+          duplicatesToDelete.push(campaign.id);
+        } else {
+          safeToLink.push(campaign.id);
+        }
+      }
+
+      // Step 4: Delete duplicates
+      if (duplicatesToDelete.length > 0) {
+        await supabase
+          .from('campaigns')
+          .delete()
+          .in('id', duplicatesToDelete);
+      }
+
+      // Step 5: Link safe campaigns
+      if (safeToLink.length > 0) {
+        const { error } = await supabase
+          .from('campaigns')
+          .update({ engagement_id: engagementId })
+          .in('id', safeToLink);
+
+        if (error) throw error;
+      }
+
+      const linked = safeToLink.length;
+      const removed = duplicatesToDelete.length;
+      
+      if (removed > 0 && linked > 0) {
+        toast.success(`Linked ${linked} campaign(s), removed ${removed} duplicate(s)`);
+      } else if (removed > 0) {
+        toast.success(`Removed ${removed} duplicate campaign(s)`);
+      } else if (linked > 0) {
+        toast.success(`Linked ${linked} campaign${linked !== 1 ? 's' : ''}`);
+      }
+
+      return { success: true, linked, duplicatesRemoved: removed };
     } catch (err) {
       console.error('Error linking campaigns:', err);
       toast.error('Failed to link campaigns');
