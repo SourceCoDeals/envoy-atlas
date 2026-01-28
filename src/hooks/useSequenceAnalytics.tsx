@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 export interface SequenceStepData {
   step_number: number;
@@ -93,8 +95,8 @@ export function useSequenceAnalytics(): SequenceAnalytics {
             opens: data.opens,
             replies: data.replies,
             positive_replies: data.positive,
-            reply_rate: data.sent > 0 ? (data.replies / data.sent) * 100 : 0,
-            open_rate: data.sent > 0 ? (data.opens / data.sent) * 100 : 0,
+            reply_rate: calculateRate(data.replies, data.sent),
+            open_rate: calculateRate(data.opens, data.sent),
           }))
           .sort((a, b) => a.step_number - b.step_number);
 
@@ -130,8 +132,8 @@ export function useSequenceAnalytics(): SequenceAnalytics {
               opens: data.opens,
               replies: data.replies,
               positive_replies: data.positive,
-              reply_rate: data.sent > 0 ? (data.replies / data.sent) * 100 : 0,
-              open_rate: data.sent > 0 ? (data.opens / data.sent) * 100 : 0,
+              reply_rate: calculateRate(data.replies, data.sent),
+              open_rate: calculateRate(data.opens, data.sent),
             }))
             .sort((a, b) => a.step_number - b.step_number);
 
@@ -141,7 +143,7 @@ export function useSequenceAnalytics(): SequenceAnalytics {
         }
       }
     } catch (err) {
-      console.error('Error fetching sequence data:', err);
+      logger.error('Error fetching sequence data', err);
       setError(err instanceof Error ? err.message : 'Failed to load sequence data');
     } finally {
       setLoading(false);
@@ -153,7 +155,7 @@ export function useSequenceAnalytics(): SequenceAnalytics {
   const totalSent = sequenceData.reduce((sum, s) => sum + s.sent, 0);
   const totalReplies = sequenceData.reduce((sum, s) => sum + s.replies, 0);
   const step1Replies = sequenceData.find(s => s.step_number === 1)?.replies || 0;
-  const step1ReplyShare = totalReplies > 0 ? (step1Replies / totalReplies) * 100 : 0;
+  const step1ReplyShare = calculateRate(step1Replies, totalReplies);
 
   // Calculate optimal length (step with best marginal return)
   let optimalLength: number | null = null;

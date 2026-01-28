@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 interface EnrollmentData {
   not_started: number;
@@ -159,14 +161,14 @@ export function useEnrollmentData() {
         setClickData({
           total_clicks: totalClicks,
           unique_clicks: uniqueClicks,
-          click_to_reply_rate: uniqueClicks > 0 ? (repliesAfterClick / uniqueClicks) * 100 : 0,
+          click_to_reply_rate: calculateRate(repliesAfterClick, uniqueClicks),
           top_links: [], // Would require link_clicks JSON parsing
           clicks_by_hour: hourBuckets.map((clicks, hour) => ({ hour, clicks })),
         });
       }
 
     } catch (err) {
-      console.error('Error fetching enrollment data:', err);
+      logger.error('Error fetching enrollment data', err);
     } finally {
       setLoading(false);
     }

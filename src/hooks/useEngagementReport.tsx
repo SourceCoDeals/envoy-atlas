@@ -728,7 +728,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         activeMailboxes,
         totalDailyCapacity,
         currentDailySending,
-        utilizationRate: totalDailyCapacity > 0 ? (currentDailySending / totalDailyCapacity) * 100 : 0,
+        utilizationRate: calculateRate(currentDailySending, totalDailyCapacity),
         warmupCount,
         domainsWithFullAuth: domainBreakdown.filter(d => d.spfValid && d.dkimValid && d.dmarcValid).length,
         avgHealthScore: allHealthScores.length > 0 
@@ -863,7 +863,7 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
           step: v.step_number || 1,
           stepName: `Step ${v.step_number || 1}`,
           sent: v.total_sent || 0,
-          replyRate: v.reply_rate || ((v.total_sent || 0) > 0 ? ((v.total_replied || 0) / (v.total_sent || 0)) * 100 : 0),
+          replyRate: v.reply_rate || calculateRate(v.total_replied || 0, v.total_sent || 0),
           positiveReplies: v.positive_replies || 0,
         })).sort((a: any, b: any) => a.step - b.step),
         callDispositions,

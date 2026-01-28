@@ -4,6 +4,7 @@ import { useWorkspace } from './useWorkspace';
 import { useCallingConfig } from './useCallingConfig';
 import { getScoreStatus, formatScore } from '@/lib/callingConfig';
 import { startOfWeek, subWeeks, parseISO } from 'date-fns';
+import { calculateRate } from '@/lib/metrics';
 
 export interface ExternalCallIntel {
   id: string;
@@ -293,9 +294,7 @@ export function useExternalCallIntel() {
       // Objection intelligence
       const totalObjectionsFaced = intelRecords.reduce((sum, r) => sum + (r.number_of_objections || 0), 0);
       const totalObjectionsResolved = intelRecords.reduce((sum, r) => sum + (r.objections_resolved_count || 0), 0);
-      const overallResolutionRate = totalObjectionsFaced > 0 
-        ? (totalObjectionsResolved / totalObjectionsFaced) * 100 
-        : 0;
+      const overallResolutionRate = calculateRate(totalObjectionsResolved, totalObjectionsFaced);
       const avgObjectionsPerCall = intelRecords.length > 0 
         ? totalObjectionsFaced / intelRecords.length 
         : 0;
@@ -314,7 +313,7 @@ export function useExternalCallIntel() {
         rep,
         objectionsFaced: stats.faced,
         resolved: stats.resolved,
-        resolutionRate: stats.faced > 0 ? (stats.resolved / stats.faced) * 100 : 0,
+        resolutionRate: calculateRate(stats.resolved, stats.faced),
       }));
 
       // Interest breakdown
@@ -537,9 +536,7 @@ async function buildFromCallActivities(engagementIds: string[]): Promise<CallIns
   // Objection stats
   const totalObjectionsFaced = intelRecords.reduce((sum, r) => sum + (r.number_of_objections || 0), 0);
   const totalObjectionsResolved = intelRecords.reduce((sum, r) => sum + (r.objections_resolved_count || 0), 0);
-  const overallResolutionRate = totalObjectionsFaced > 0 
-    ? (totalObjectionsResolved / totalObjectionsFaced) * 100 
-    : 0;
+  const overallResolutionRate = calculateRate(totalObjectionsResolved, totalObjectionsFaced);
 
   // Interest breakdown
   const interestBreakdown: InterestBreakdown = {

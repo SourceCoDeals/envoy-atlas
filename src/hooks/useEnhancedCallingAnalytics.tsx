@@ -12,6 +12,7 @@ import {
 } from '@/lib/callingConfig';
 import { startOfDay, subDays, format } from 'date-fns';
 import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
+import { calculateRate } from '@/lib/metrics';
 
 export type DateRange = '7d' | '14d' | '30d' | '90d' | 'all';
 
@@ -322,16 +323,12 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
 
       // Question coverage
       const avgQuestionsCovered = avgNumber(allCalls.map(c => c.questions_covered));
-      const questionCoverageRate = config.questionCoverageTotal > 0 
-        ? (avgQuestionsCovered / config.questionCoverageTotal) * 100 
-        : 0;
+      const questionCoverageRate = calculateRate(avgQuestionsCovered, config.questionCoverageTotal);
 
       // Objection stats
       const totalObjections = allCalls.reduce((sum, c) => sum + (c.number_of_objections || 0), 0);
       const totalResolved = allCalls.reduce((sum, c) => sum + (c.objections_resolved || 0), 0);
-      const objectionResolutionRate = totalObjections > 0 
-        ? (totalResolved / totalObjections) * 100 
-        : 0;
+      const objectionResolutionRate = calculateRate(totalResolved, totalObjections);
 
       // Connection/meeting metrics using pre-computed flags
       const connections = allCalls.filter(c => c.is_connection).length;
@@ -341,9 +338,9 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
       ).length;
       const meetings = allCalls.filter(c => c.is_meeting).length;
 
-      const connectRate = totalCalls > 0 ? (connections / totalCalls) * 100 : 0;
-      const conversationRate = totalCalls > 0 ? (conversations / totalCalls) * 100 : 0;
-      const meetingRate = totalCalls > 0 ? (meetings / totalCalls) * 100 : 0;
+      const connectRate = calculateRate(connections, totalCalls);
+      const conversationRate = calculateRate(conversations, totalCalls);
+      const meetingRate = calculateRate(meetings, totalCalls);
 
       // By rep (analyst)
       const repMap = new Map<string, ColdCall[]>();
@@ -402,7 +399,7 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
             calls: dayCalls.length,
             connections: dayConnections,
             meetings: dayMeetings,
-            connectRate: dayCalls.length > 0 ? (dayConnections / dayCalls.length) * 100 : 0,
+            connectRate: calculateRate(dayConnections, dayCalls.length),
             avgScore: avg(dayCalls.map(c => c.composite_score)),
           };
         })
@@ -438,7 +435,7 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
           hourLabel: `${hour}:00`,
           calls: data.calls,
           connections: data.connections,
-          connectRate: data.calls > 0 ? (data.connections / data.calls) * 100 : 0,
+          connectRate: calculateRate(data.connections, data.calls),
         };
       });
 
@@ -450,7 +447,7 @@ export function useEnhancedCallingAnalytics(dateRange: DateRange = '30d') {
         avgScores,
         interestBreakdown,
         positiveInterestCount,
-        positiveInterestRate: totalCalls > 0 ? (positiveInterestCount / totalCalls) * 100 : 0,
+        positiveInterestRate: calculateRate(positiveInterestCount, totalCalls),
         topCalls,
         worstCalls,
         hotLeads,

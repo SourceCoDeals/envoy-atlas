@@ -3,6 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from './useWorkspace';
 import { format, subDays, startOfDay } from 'date-fns';
 import { toEasternHour, BUSINESS_HOURS_ARRAY, isBusinessHour } from '@/lib/timezone';
+import { calculateRate } from '@/lib/metrics';
+import { logger } from '@/lib/logger';
 
 interface FunnelStage {
   stage: string;
@@ -156,7 +158,7 @@ export function useCallAnalytics() {
             name: data.displayName,
             totalCalls: data.calls,
             connects: data.connects,
-            connectRate: data.calls > 0 ? (data.connects / data.calls) * 100 : 0,
+            connectRate: calculateRate(data.connects, data.calls),
             avgScore: data.calls > 0 ? data.totalScore / data.calls : 0,
           }))
           .sort((a, b) => b.totalCalls - a.totalCalls)
@@ -190,7 +192,7 @@ export function useCallAnalytics() {
           .sort((a, b) => a.date.localeCompare(b.date));
 
         const totalConnects = connections;
-        const avgConnectRate = totalDials > 0 ? (totalConnects / totalDials) * 100 : 0;
+        const avgConnectRate = calculateRate(totalConnects, totalDials);
 
         setData({
           funnel,
@@ -202,7 +204,7 @@ export function useCallAnalytics() {
           avgConnectRate,
         });
       } catch (err) {
-        console.error('Error fetching call analytics:', err);
+        logger.error('Error fetching call analytics', err);
         setError(err instanceof Error ? err.message : 'Failed to load analytics');
       } finally {
         setIsLoading(false);
