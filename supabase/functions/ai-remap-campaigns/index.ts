@@ -40,7 +40,7 @@ serve(async (req) => {
   }
 
   try {
-    const { workspace_id, dry_run = true, apply_mappings } = await req.json();
+    const { workspace_id, dry_run = true, apply_mappings, auto_apply = false, offset = 0 } = await req.json();
 
     if (!workspace_id) {
       return new Response(
@@ -148,16 +148,24 @@ serve(async (req) => {
     }));
 
     // Process campaigns in batches to avoid rate limits
-    const BATCH_SIZE = 20;
+    const BATCH_SIZE = 50;
     const proposedMappings: ProposedMapping[] = [];
+    
+    // Limit total campaigns processed to avoid timeout, with offset for pagination
+    const CAMPAIGNS_PER_RUN = 200;
+    const campaignsToProcess = allCampaigns.slice(offset, offset + CAMPAIGNS_PER_RUN);
+    
+    console.log(`Processing campaigns ${offset} to ${offset + campaignsToProcess.length} (of ${allCampaigns.length} total)`);
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    for (let i = 0; i < allCampaigns.length; i += BATCH_SIZE) {
-      const batch = allCampaigns.slice(i, i + BATCH_SIZE);
+    console.log(`Processing ${campaignsToProcess.length} campaigns in batches of ${BATCH_SIZE}`);
+    
+    for (let i = 0; i < campaignsToProcess.length; i += BATCH_SIZE) {
+      const batch = campaignsToProcess.slice(i, i + BATCH_SIZE);
       
       const campaignNames = batch.map(c => ({
         id: c.id,
@@ -277,8 +285,9 @@ Return null for proposedEngagementId if no reasonable match exists.`;
       }
 
       // Small delay between batches
-      if (i + BATCH_SIZE < allCampaigns.length) {
-        await new Promise(r => setTimeout(r, 500));
+      if (i + BATCH_SIZE < campaignsToProcess.length) {
+        console.log(`Batch ${Math.floor(i/BATCH_SIZE) + 1} complete. ${proposedMappings.length} mappings so far.`);
+        await new Promise(r => setTimeout(r, 300));
       }
     }
 
@@ -292,12 +301,43 @@ Return null for proposedEngagementId if no reasonable match exists.`;
 
     console.log(`Generated ${proposedMappings.length} proposed remappings`);
 
+    // Auto-apply high confidence mappings if requested
+    let applied = 0;
+    let errors = 0;
+    if (auto_apply) {
+      const highConfidenceMappings = proposedMappings.filter(m => m.confidence === 'high');
+      console.log(`Auto-applying ${highConfidenceMappings.length} high-confidence mappings...`);
+      
+      for (const mapping of highConfidenceMappings) {
+        const { error } = await supabase
+          .from('campaigns')
+          .update({ engagement_id: mapping.proposedEngagementId })
+          .eq('id', mapping.campaignId);
+        
+        if (error) {
+          console.error(`Failed to update campaign ${mapping.campaignId}:`, error);
+          errors++;
+        } else {
+          applied++;
+        }
+      }
+      console.log(`Applied ${applied} mappings, ${errors} errors`);
+    }
+
+    const hasMore = offset + campaignsToProcess.length < allCampaigns.length;
+
     return new Response(
       JSON.stringify({
         proposedMappings,
         totalCampaigns: allCampaigns.length,
         totalEngagements: engagements.length,
-        dryRun: dry_run
+        dryRun: dry_run,
+        applied,
+        errors,
+        offset,
+        processedCount: campaignsToProcess.length,
+        hasMore,
+        nextOffset: hasMore ? offset + CAMPAIGNS_PER_RUN : null
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
