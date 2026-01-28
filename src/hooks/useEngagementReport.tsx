@@ -568,12 +568,13 @@ export function useEngagementReport(engagementId: string, dateRange?: DateRange)
         delivered: Math.max(0, snapshotTotals.sent - snapshotTotals.bounced),
       };
 
-      // Priority: 1) Snapshot deltas, 2) Daily metrics, 3) Campaign totals
-      const finalEmailTotals = hasSnapshotDeltas
-        ? snapshotPeriodTotals
-        : startDateStr
-          ? (isCampaignFallbackInRange ? allTimeEmailTotals : rangeEmailTotals)
-          : allTimeEmailTotals;
+      // For "All time" (no date range), always use campaignTotals from NocoDB
+      // For specific date ranges, prefer snapshot deltas if available
+      const finalEmailTotals = startDateStr
+        ? (hasSnapshotDeltas 
+            ? snapshotPeriodTotals 
+            : (dailyTotals.sent > 0 ? rangeEmailTotals : allTimeEmailTotals))
+        : allTimeEmailTotals;  // "All time" always uses campaign totals
 
       // Track which source was actually used for transparency
       const actualDataSource = hasSnapshotDeltas 

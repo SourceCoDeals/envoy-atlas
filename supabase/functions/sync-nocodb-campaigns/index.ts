@@ -229,9 +229,15 @@ async function captureSnapshots(
   const today = new Date().toISOString().split("T")[0];
   const result = { smartlead: 0, replyio: 0, errors: 0 };
   
-  // Filter to active SmartLead campaigns and map to snapshot format
-  const activeSmartlead = smartleadRecords
-    .filter(r => r.Status?.toUpperCase() === "ACTIVE")
+  // Capture snapshots for active, paused, and completed campaigns (with data)
+  // This ensures historical data is preserved even after campaigns are paused
+  const SMARTLEAD_SNAPSHOT_STATUSES = ['ACTIVE', 'PAUSED', 'COMPLETED'];
+  
+  const includedSmartlead = smartleadRecords
+    .filter(r => 
+      SMARTLEAD_SNAPSHOT_STATUSES.includes(r.Status?.toUpperCase() || '') && 
+      (r["Total Emails Sent"] || 0) > 0
+    )
     .map(r => ({
       snapshot_date: today,
       platform: "smartlead" as const,
@@ -251,9 +257,15 @@ async function captureSnapshots(
       ooos: 0,
     }));
   
-  // Filter to active Reply.io campaigns and map to snapshot format
-  const activeReplyio = replyioRecords
-    .filter(r => r.Status === "Active")
+  // Capture snapshots for active, paused, and finished Reply.io campaigns (with data)
+  // "Finished" is Reply.io's equivalent of "Completed"
+  const REPLYIO_SNAPSHOT_STATUSES = ['Active', 'Paused', 'Finished'];
+  
+  const includedReplyio = replyioRecords
+    .filter(r => 
+      REPLYIO_SNAPSHOT_STATUSES.includes(r.Status) && 
+      ((r["# of Deliveries"] || 0) + (r["# of Bounces"] || 0)) > 0
+    )
     .map(r => ({
       snapshot_date: today,
       platform: "replyio" as const,
@@ -273,13 +285,13 @@ async function captureSnapshots(
       ooos: r["# of OOOs"] || 0,
     }));
   
-  console.log(`[sync-nocodb] Capturing snapshots: ${activeSmartlead.length} SmartLead, ${activeReplyio.length} Reply.io`);
+  console.log(`[sync-nocodb] Capturing snapshots: ${includedSmartlead.length} SmartLead, ${includedReplyio.length} Reply.io`);
   
   // Upsert SmartLead snapshots
-  if (activeSmartlead.length > 0) {
+  if (includedSmartlead.length > 0) {
     const { error } = await supabase
       .from("nocodb_campaign_daily_snapshots")
-      .upsert(activeSmartlead, { 
+      .upsert(includedSmartlead, { 
         onConflict: "snapshot_date,platform,campaign_id",
         ignoreDuplicates: false 
       });
@@ -288,15 +300,15 @@ async function captureSnapshots(
       console.error("[sync-nocodb] SmartLead snapshot error:", error);
       result.errors++;
     } else {
-      result.smartlead = activeSmartlead.length;
+      result.smartlead = includedSmartlead.length;
     }
   }
   
   // Upsert Reply.io snapshots
-  if (activeReplyio.length > 0) {
+  if (includedReplyio.length > 0) {
     const { error } = await supabase
       .from("nocodb_campaign_daily_snapshots")
-      .upsert(activeReplyio, { 
+      .upsert(includedReplyio, { 
         onConflict: "snapshot_date,platform,campaign_id",
         ignoreDuplicates: false 
       });
@@ -305,7 +317,7 @@ async function captureSnapshots(
       console.error("[sync-nocodb] Reply.io snapshot error:", error);
       result.errors++;
     } else {
-      result.replyio = activeReplyio.length;
+      result.replyio = includedReplyio.length;
     }
   }
   
