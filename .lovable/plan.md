@@ -16,12 +16,12 @@ Based on the CTO audit report and detailed remediation prompt, this plan organiz
 | Positive Replies Sync | Done | Edge function sync |
 | Disposition Simplification | Done | `DispositionPieChart.tsx` |
 | **Testing Framework** | ✅ Done | `vitest.config.ts`, `src/test/setup.ts` |
+| **MSW Handlers** | ✅ Done | `src/test/mocks/handlers.ts` |
 | **Unit Tests: Metrics** | ✅ Done | `src/lib/__tests__/metrics.test.ts` (56 tests) |
 | **Unit Tests: Call Scoring** | ✅ Done | `src/lib/__tests__/callScoring.test.ts` (28 tests) |
 | **Error Boundary Component** | ✅ Done | `src/components/error/ErrorBoundary.tsx` |
 | **Logger Utility** | ✅ Done | `src/lib/logger.ts` |
-
-### Not Yet Implemented
+| **Campaign Table Components** | ✅ Done | `src/components/campaigns/table/` (Header, Sort hook) |
 | Item | Priority | Effort |
 |------|----------|--------|
 | Webhook Retry Queue | High | 4 hours |

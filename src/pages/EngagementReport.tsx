@@ -64,7 +64,6 @@ export default function EngagementReport() {
     const hasWeeklyData = data.weeklyPerformance && data.weeklyPerformance.length > 0;
 
     if (hasLinkedCampaigns && hasSentEmails && !hasWeeklyData) {
-      console.log('[EngagementReport] Auto-triggering backfill for engagement:', engagementId);
       backfillAttemptedRef.current = true;
       handleGenerateWeeklyBreakdown();
     }
