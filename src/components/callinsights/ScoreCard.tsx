@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getScoreStatus, ScoreThresholds } from '@/lib/callingConfig';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 
 interface ScoreCardProps {
   title: string;
@@ -11,20 +12,31 @@ interface ScoreCardProps {
   icon: React.ReactNode;
   description: string;
   thresholds?: ScoreThresholds;
+  metricKey?: string;
 }
 
-export function ScoreCard({ title, score, trend, icon, description, thresholds }: ScoreCardProps) {
+export function ScoreCard({ title, score, trend, icon, description, thresholds, metricKey }: ScoreCardProps) {
   const defaultThresholds: ScoreThresholds = { excellent: 8, good: 6, average: 4, poor: 0 };
   const status = getScoreStatus(score, thresholds ?? defaultThresholds);
+
+  const titleContent = (
+    <div className="flex items-center gap-2 text-muted-foreground">
+      {icon}
+      <span className="text-sm font-medium">{title}</span>
+    </div>
+  );
 
   return (
     <Card>
       <CardContent className="pt-6">
         <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            {icon}
-            <span className="text-sm font-medium">{title}</span>
-          </div>
+          {metricKey ? (
+            <MetricTooltip metricKey={metricKey} showIcon>
+              {titleContent}
+            </MetricTooltip>
+          ) : (
+            titleContent
+          )}
           {trend !== undefined && trend !== 0 && (
             <Badge 
               variant={trend >= 0 ? 'default' : 'destructive'} 

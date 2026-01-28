@@ -1,6 +1,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { ArrowUp, ArrowDown, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { InfoTooltip } from '@/components/ui/metric-tooltip';
 
 interface MetricCardWithBenchmarkProps {
   label: string;
@@ -12,6 +13,7 @@ interface MetricCardWithBenchmarkProps {
   trend?: number;
   higherIsBetter?: boolean;
   className?: string;
+  metricKey?: string;
 }
 
 export function MetricCardWithBenchmark({
@@ -24,6 +26,7 @@ export function MetricCardWithBenchmark({
   trend,
   higherIsBetter = true,
   className,
+  metricKey,
 }: MetricCardWithBenchmarkProps) {
   const getPerformanceStatus = () => {
     if (!benchmark && !benchmarkRangeHigh) return 'neutral';
@@ -74,7 +77,10 @@ export function MetricCardWithBenchmark({
     <Card className={cn('relative overflow-hidden', className)}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between mb-2">
-          <span className="text-sm text-muted-foreground font-medium">{label}</span>
+          <span className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+            {label}
+            {metricKey && <InfoTooltip metricKey={metricKey} />}
+          </span>
           {trend !== undefined && (
             <div className={cn(
               'flex items-center text-xs font-medium',

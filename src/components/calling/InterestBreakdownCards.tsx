@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Flame } from 'lucide-react';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 
 interface InterestBreakdownCardsProps {
   breakdown: {
@@ -17,6 +18,7 @@ export function InterestBreakdownCards({ breakdown, totalCalls, positiveValues }
     {
       label: 'YES',
       sublabel: '(Hot)',
+      metricKey: 'interest_yes',
       count: breakdown.yes,
       percentage: totalCalls > 0 ? (breakdown.yes / totalCalls) * 100 : 0,
       color: 'text-green-600',
@@ -26,6 +28,7 @@ export function InterestBreakdownCards({ breakdown, totalCalls, positiveValues }
     {
       label: 'MAYBE',
       sublabel: '(Warm)',
+      metricKey: 'interest_maybe',
       count: breakdown.maybe,
       percentage: totalCalls > 0 ? (breakdown.maybe / totalCalls) * 100 : 0,
       color: 'text-amber-600',
@@ -35,6 +38,7 @@ export function InterestBreakdownCards({ breakdown, totalCalls, positiveValues }
     {
       label: 'NO',
       sublabel: '(Cold)',
+      metricKey: 'interest_no',
       count: breakdown.no,
       percentage: totalCalls > 0 ? (breakdown.no / totalCalls) * 100 : 0,
       color: 'text-red-600',
@@ -44,6 +48,7 @@ export function InterestBreakdownCards({ breakdown, totalCalls, positiveValues }
     {
       label: 'UNKNOWN',
       sublabel: '',
+      metricKey: 'interest_unknown',
       count: breakdown.unknown,
       percentage: totalCalls > 0 ? (breakdown.unknown / totalCalls) * 100 : 0,
       color: 'text-muted-foreground',
@@ -64,16 +69,17 @@ export function InterestBreakdownCards({ breakdown, totalCalls, positiveValues }
       <CardContent>
         <div className="grid grid-cols-4 gap-3">
           {cards.map((card) => (
-            <div 
-              key={card.label}
-              className={`p-4 rounded-lg border ${card.bgColor} ${card.borderColor} text-center`}
-            >
-              <p className={`text-xs font-medium ${card.color}`}>
-                {card.label} {card.sublabel}
-              </p>
-              <p className={`text-2xl font-bold ${card.color}`}>{card.count}</p>
-              <p className="text-xs text-muted-foreground">{card.percentage.toFixed(1)}%</p>
-            </div>
+            <MetricTooltip key={card.label} metricKey={card.metricKey}>
+              <div 
+                className={`p-4 rounded-lg border ${card.bgColor} ${card.borderColor} text-center cursor-help`}
+              >
+                <p className={`text-xs font-medium ${card.color}`}>
+                  {card.label} {card.sublabel}
+                </p>
+                <p className={`text-2xl font-bold ${card.color}`}>{card.count}</p>
+                <p className="text-xs text-muted-foreground">{card.percentage.toFixed(1)}%</p>
+              </div>
+            </MetricTooltip>
           ))}
         </div>
         <p className="text-xs text-muted-foreground mt-3">

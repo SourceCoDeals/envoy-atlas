@@ -1,5 +1,6 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { ArrowUp, ArrowDown, Minus, Mail, MessageSquare, ThumbsUp, Calendar } from 'lucide-react';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 import type { HeroMetric } from '@/hooks/useOverviewDashboard';
 
 interface HeroMetricsGridProps {
@@ -20,12 +21,20 @@ const colorMap: Record<string, string> = {
   'Meeting Booked Rate': 'text-chart-4',
 };
 
+const metricKeyMap: Record<string, string> = {
+  'Emails Sent': 'emails_sent',
+  'Reply Rate': 'reply_rate',
+  'Positive Reply Rate': 'positive_reply_rate',
+  'Meeting Booked Rate': 'meeting_booked_rate',
+};
+
 export function HeroMetricsGrid({ metrics }: HeroMetricsGridProps) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
       {metrics.map((metric) => {
         const Icon = iconMap[metric.label] || Mail;
         const iconColor = colorMap[metric.label] || 'text-primary';
+        const metricKey = metricKeyMap[metric.label] || 'emails_sent';
         
         const TrendIcon = metric.trend === 'up' ? ArrowUp : metric.trend === 'down' ? ArrowDown : Minus;
         const trendColor = metric.trend === 'up' 
@@ -53,9 +62,11 @@ export function HeroMetricsGrid({ metrics }: HeroMetricsGridProps) {
                 <p className="text-2xl sm:text-3xl font-bold tracking-tight font-mono">
                   {formattedValue}
                 </p>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  {metric.label}
-                </p>
+                <MetricTooltip metricKey={metricKey} showIcon>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    {metric.label}
+                  </p>
+                </MetricTooltip>
               </div>
               
               <p className="text-[10px] sm:text-xs text-muted-foreground mt-2">

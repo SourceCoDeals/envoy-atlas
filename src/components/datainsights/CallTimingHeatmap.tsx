@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { formatHourLabel, BUSINESS_HOURS_ARRAY } from '@/lib/timezone';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 
 interface HourlyData {
   hour: number;
@@ -49,7 +50,9 @@ export function CallTimingHeatmap({ data, className }: CallTimingHeatmapProps) {
     <Card className={className}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Best Time to Call (ET)</CardTitle>
+          <MetricTooltip metricKey="best_time_to_call" showIcon>
+            <CardTitle className="text-base">Best Time to Call (ET)</CardTitle>
+          </MetricTooltip>
           {bestHour && bestHour.connects > 0 && (
             <span className="text-sm text-muted-foreground">
               Peak: <span className="font-medium text-primary">{formatHour(bestHour.hour)}</span>

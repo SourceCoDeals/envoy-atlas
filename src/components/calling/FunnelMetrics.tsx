@@ -1,6 +1,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Phone, PhoneCall, CheckCircle, Calendar, Clock, Star, Flame } from 'lucide-react';
 import { CallingMetricsConfig, getScoreStatus, getScoreStatusColor, formatScore, formatCallingDuration } from '@/lib/callingConfig';
+import { MetricTooltip } from '@/components/ui/metric-tooltip';
 
 interface FunnelMetricsProps {
   totalCalls: number;
@@ -38,6 +39,7 @@ export function FunnelMetrics({
       iconColor: 'text-primary',
       iconBg: 'bg-primary/10',
       label: 'DIALS',
+      metricKey: 'dials',
       value: totalCalls.toLocaleString(),
       subValue: null,
       subLabel: null,
@@ -47,6 +49,7 @@ export function FunnelMetrics({
       iconColor: 'text-chart-2',
       iconBg: 'bg-chart-2/10',
       label: 'CONNECTS',
+      metricKey: 'connects',
       value: connections.toLocaleString(),
       subValue: `${connectRate.toFixed(1)}%`,
       subLabel: 'of dials',
@@ -56,6 +59,7 @@ export function FunnelMetrics({
       iconColor: 'text-chart-3',
       iconBg: 'bg-chart-3/10',
       label: 'COMPLETED',
+      metricKey: 'completed',
       value: completed.toLocaleString(),
       subValue: `${completionRate.toFixed(1)}%`,
       subLabel: 'of connects',
@@ -65,6 +69,7 @@ export function FunnelMetrics({
       iconColor: 'text-chart-4',
       iconBg: 'bg-chart-4/10',
       label: 'MEETINGS',
+      metricKey: 'meetings',
       value: meetings.toLocaleString(),
       subValue: `${meetingRate.toFixed(1)}%`,
       subLabel: 'of completed',
@@ -74,19 +79,21 @@ export function FunnelMetrics({
       iconColor: 'text-orange-500',
       iconBg: 'bg-orange-500/10',
       label: 'ACTIVATED',
+      metricKey: 'activated',
       value: activated.toLocaleString(),
       subValue: `${activationRate.toFixed(1)}%`,
       subLabel: 'willing to sell',
     },
   ];
 
-  // Row 2: Quality metrics (3 cards)
+  // Row 2: Quality metrics (2 cards)
   const bottomRowCards = [
     {
       icon: Clock,
       iconColor: 'text-blue-500',
       iconBg: 'bg-blue-500/10',
       label: 'TALK TIME',
+      metricKey: 'talk_time',
       value: formatCallingDuration(talkTimeSeconds),
       subValue: `${Math.round(avgTalkTime / 60)}m/call`,
       subLabel: null,
@@ -96,6 +103,7 @@ export function FunnelMetrics({
       iconColor: getScoreStatusColor(overallStatus).replace('bg-', 'text-').replace('/10', ''),
       iconBg: getScoreStatusColor(overallStatus),
       label: 'AVG SCORE',
+      metricKey: 'avg_score',
       value: formatScore(avgScore, config),
       subValue: '/10',
       subLabel: null,
@@ -114,7 +122,9 @@ export function FunnelMetrics({
                   <card.icon className={`h-5 w-5 ${card.iconColor}`} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs text-muted-foreground font-medium">{card.label}</p>
+                  <MetricTooltip metricKey={card.metricKey}>
+                    <p className="text-xs text-muted-foreground font-medium">{card.label}</p>
+                  </MetricTooltip>
                   <p className="text-2xl font-bold">{card.value}</p>
                   {card.subValue && (
                     <p className="text-xs text-muted-foreground truncate">
@@ -139,7 +149,9 @@ export function FunnelMetrics({
                   <card.icon className={`h-5 w-5 ${card.iconColor}`} />
                 </div>
                 <div className="flex-1">
-                  <p className="text-xs text-muted-foreground font-medium">{card.label}</p>
+                  <MetricTooltip metricKey={card.metricKey}>
+                    <p className="text-xs text-muted-foreground font-medium">{card.label}</p>
+                  </MetricTooltip>
                   <p className="text-2xl font-bold">
                     {card.value}
                     {card.subValue && <span className="text-sm text-muted-foreground">{card.subValue}</span>}
