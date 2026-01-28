@@ -1,5 +1,4 @@
 
-
 # Envoy Atlas Remediation Plan - Implementation Roadmap
 
 Based on the CTO audit report and detailed remediation prompt, this plan organizes work into three phases by priority.
@@ -13,19 +12,22 @@ Based on the CTO audit report and detailed remediation prompt, this plan organiz
 |------|--------|----------|
 | Reply Rate Standardization | Done | `src/lib/metrics.ts` - `calculateReplyRateFromDelivered()` |
 | Data Source Badges | Done | `src/components/ui/data-source-badge.tsx` |
-| WoW Cap at 999% | Done | `useOverviewDashboard.tsx` |
+| WoW Cap at 999% | Done | `src/lib/metrics.ts` - `calculateWoWChange()` |
 | Positive Replies Sync | Done | Edge function sync |
 | Disposition Simplification | Done | `DispositionPieChart.tsx` |
+| **Testing Framework** | ✅ Done | `vitest.config.ts`, `src/test/setup.ts` |
+| **Unit Tests: Metrics** | ✅ Done | `src/lib/__tests__/metrics.test.ts` (56 tests) |
+| **Unit Tests: Call Scoring** | ✅ Done | `src/lib/__tests__/callScoring.test.ts` (28 tests) |
+| **Error Boundary Component** | ✅ Done | `src/components/error/ErrorBoundary.tsx` |
+| **Logger Utility** | ✅ Done | `src/lib/logger.ts` |
 
 ### Not Yet Implemented
 | Item | Priority | Effort |
 |------|----------|--------|
-| Testing Framework (Vitest) | Critical | 4-6 hours |
-| Error Boundaries | High | 2 hours |
-| Logger Utility | Medium | 1 hour |
 | Webhook Retry Queue | High | 4 hours |
 | call_analysis Table | Medium | 3 hours |
 | Performance Indexes | Medium | 1 hour |
+| Sync Status Hook | High | 2 hours |
 
 ---
 
