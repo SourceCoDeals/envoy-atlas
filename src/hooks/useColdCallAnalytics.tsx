@@ -36,6 +36,7 @@ export interface ColdCall {
   direction: string | null;
   called_date: string | null;
   called_date_time: string | null;
+  nocodb_created_at: string | null; // Actual call timestamp from NocoDB
   call_duration_sec: number | null;
   call_recording_url: string | null;
   call_transcript: string | null;
@@ -499,10 +500,13 @@ export function useColdCallAnalytics(dateRange: DateRange = '30d') {
         hourlyMap.set(h, { calls: 0, connections: 0 });
       });
 
+      // Use nocodb_created_at for hourly timing - this has more accurate call times
       coldCalls.forEach(call => {
-        if (call.called_date_time) {
+        // Prefer nocodb_created_at as it has more accurate timing data
+        const timestamp = call.nocodb_created_at || call.called_date_time;
+        if (timestamp) {
           try {
-            const dt = parseISO(call.called_date_time);
+            const dt = parseISO(timestamp);
             // Use DST-aware Eastern Time conversion
             const hour = toEasternHour(dt);
             
