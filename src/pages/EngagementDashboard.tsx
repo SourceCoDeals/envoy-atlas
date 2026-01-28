@@ -103,6 +103,10 @@ const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'secon
   closed: { label: 'Complete', variant: 'secondary' },
 };
 
+// Known sponsor names used to validate campaign attribution
+// Campaigns containing these sponsor names should NOT be attributed to engagements with different sponsors
+const KNOWN_SPONSORS = ['trivest', 'trinity', 'stadion', 'alpine', 'verde', 'arch city', 'gp partners', 'new heritage', 'kelso'];
+
 export default function EngagementDashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -239,6 +243,12 @@ export default function EngagementDashboard() {
       const allCampaigns = campaignsRes.data || [];
       const allColdCalls = coldCallsRes.data || [];
 
+      // Build engagement name lookup for attribution validation
+      const engagementNameMap: Record<string, string> = {};
+      for (const eng of engagementList) {
+        engagementNameMap[eng.id] = (eng.name || '').toLowerCase();
+      }
+
       const metricsMap: Record<string, EngagementMetrics> = {};
       
       // Initialize all engagements with zero metrics
@@ -278,14 +288,30 @@ export default function EngagementDashboard() {
         }
       }
 
-      // Aggregate campaign/email data
+      // Aggregate campaign/email data with attribution validation
+      // Filter out campaigns that are clearly misattributed (different sponsor in campaign name vs engagement)
       for (const campaign of allCampaigns) {
         const m = metricsMap[campaign.engagement_id];
-        if (m) {
-          m.emailsSent += campaign.total_sent || 0;
-          m.positiveReplies += campaign.positive_replies || 0;
-          m.meetingsSet += campaign.total_meetings || 0;
+        if (!m) continue;
+        
+        // Skip campaigns that appear misattributed
+        // A campaign is suspicious if it contains a known sponsor name that doesn't match the engagement
+        const engName = engagementNameMap[campaign.engagement_id] || '';
+        const campName = ((campaign as any).name || '').toLowerCase();
+        
+        // Check if campaign contains a sponsor name that doesn't match the engagement
+        const hasMismatchedSponsor = KNOWN_SPONSORS.some(sponsor => 
+          campName.includes(sponsor) && !engName.includes(sponsor)
+        );
+        
+        if (hasMismatchedSponsor) {
+          // Skip this campaign - it's likely misattributed
+          continue;
         }
+        
+        m.emailsSent += campaign.total_sent || 0;
+        m.positiveReplies += campaign.positive_replies || 0;
+        m.meetingsSet += campaign.total_meetings || 0;
       }
 
       // Aggregate cold_calls data (if engagement_id is set)

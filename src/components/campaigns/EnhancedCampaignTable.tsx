@@ -33,6 +33,9 @@ interface EnhancedCampaignTableProps {
 type SortField = 'name' | 'score' | 'health' | 'total_leads' | 'created_at' | 'updated_at' | 'total_sent' | 'reply_rate' | 'positive_rate' | 'meetings' | 'confidence' | 'engagement_name';
 type SortDirection = 'asc' | 'desc';
 
+// Active statuses that should always appear at the top of the table
+const ACTIVE_STATUSES = ['active', 'started', 'running'];
+
 interface CampaignWithScore extends CampaignWithMetrics {
   tier: CampaignTier;
   estimatedPositiveRate: number;
@@ -193,8 +196,16 @@ export function EnhancedCampaignTable({
       result = result.filter(c => c.engagement_id === localEngagementFilter);
     }
 
-    // Sort by selected field
+    // Sort with two-tier priority: active status first, then user-selected field
     result.sort((a, b) => {
+      // TIER 1: Active status priority - active campaigns ALWAYS appear first
+      const aIsActive = ACTIVE_STATUSES.includes(a.status?.toLowerCase() || '');
+      const bIsActive = ACTIVE_STATUSES.includes(b.status?.toLowerCase() || '');
+      
+      if (aIsActive && !bIsActive) return -1;
+      if (!aIsActive && bIsActive) return 1;
+      
+      // TIER 2: User-selected sort field (within each tier)
       let aVal: number | string | null;
       let bVal: number | string | null;
 
@@ -245,7 +256,6 @@ export function EnhancedCampaignTable({
           bVal = b.total_sent ?? 0;
           break;
         case 'health':
-          // Sort by health - no metricsStatus.overall, just use a simplified approach
           aVal = a.total_sent ?? 0;
           bVal = b.total_sent ?? 0;
           break;
