@@ -1,56 +1,230 @@
 
-# Update GP Partners Engagement Dashboard Data
+# Fix Email Dashboard Overview - Use NocoDB as Source of Truth
 
-## Current Status
+## Summary of Issues Found
 
-The GP Partners engagement is already showing **accurate totals** for the linked campaigns that have NocoDB data:
-
-| Metric | Value |
-|--------|-------|
-| Emails Sent | 33,682 |
-| Total Replies | 162 |
-| Positive Replies | 43 |
-| Linked Campaigns | 19 |
-
-## The Paused Campaign Data Gap
-
-I found that 3 paused campaigns have **internal data** that isn't reflected in NocoDB:
-
-| Campaign | Internal Sent | NocoDB Sent |
-|----------|--------------|-------------|
-| `[paused] GP Partners - Re-Engage \| TM` | 886 | 0 |
-| `[paused] GP Partners - Re-Engage \| No Name - TM` | 370 | 0 |
-| `OZ GP Partners LI + Email` | 15 | 0 (not in NocoDB) |
-
-**Why?** These campaigns were paused before NocoDB sync captured their metrics. The data exists in SmartLead but was never synced to NocoDB.
-
-## Solution Options
-
-### Option 1: Manual NocoDB Sync (Recommended)
-Trigger a manual sync to pull the latest data from SmartLead/Reply.io into NocoDB tables. This would fetch the current totals for all campaigns including paused ones.
-
-**Action**: Run the `sync-nocodb-campaigns` Edge Function which will now include PAUSED campaigns due to our recent update.
-
-### Option 2: Use Internal Metrics as Fallback
-Modify the Engagement Dashboard to also check `campaigns.total_sent` when NocoDB data is missing. This adds complexity but covers edge cases.
-
-**Implementation**: Update `fetchEngagementMetrics` in `EngagementDashboard.tsx` to fall back to internal campaign metrics when NocoDB lookup returns null.
+| Issue | Current Source | Problem | Fix |
+|-------|---------------|---------|-----|
+| Emails Sent (2M+) | `campaigns` table | Stale/inflated internal data | Use NocoDB SmartLead + Reply.io |
+| Positive Reply Rate | `positive / sent` | SmartLead uses `delivered` | Change to `positive / delivered` |
+| Active Campaigns (1400) | `campaigns` table | Internal duplicates | Use NocoDB active status counts |
+| Weekly Chart (900k) | `sent_delta` | First-day anomaly not filtered | Use cumulative delta window function |
 
 ---
 
-## Recommended Action
+## Solution: Refactor to Use NocoDB Tables Directly
 
-**Trigger a NocoDB sync** to pull the paused campaign data. Since we just updated `sync-nocodb-campaigns` to include PAUSED status campaigns, running it should populate the missing data.
+### 1. Create New Hook: `useNocoDBDashboard`
 
-Would you like me to:
-1. **Call the sync function** to update NocoDB with paused campaign data
-2. **Add fallback logic** to also check internal campaign metrics when NocoDB is empty
-3. **Both** - sync now and add fallback for robustness
+A new hook that queries NocoDB tables directly for all hero metrics and weekly data.
+
+```typescript
+// src/hooks/useNocoDBDashboard.tsx
+
+export function useNocoDBDashboard() {
+  // Fetch from nocodb_smartlead_campaigns and nocodb_replyio_campaigns
+  // Combine totals for hero metrics
+  // Query nocodb_campaign_daily_deltas for weekly chart
+}
+```
+
+**Data Sources**:
+- **Hero Metrics**: `nocodb_smartlead_campaigns` + `nocodb_replyio_campaigns`
+- **Weekly Chart**: `nocodb_campaign_daily_deltas` view (proper day-over-day changes)
+- **Active Campaigns**: Count from NocoDB where status = 'ACTIVE' or 'Active'
 
 ---
 
-## Technical Notes
+### 2. Hero Metrics - NocoDB Totals
 
-- The Engagement Dashboard (lines 238-272) correctly queries NocoDB as the source of truth
-- The paused campaigns with `total_sent > 0` internally but `nocodb_sent = 0` represent historical data that wasn't captured before the sync was implemented
-- Our Edge Function update ensures this won't happen for future paused campaigns
+**Emails Sent**:
+```sql
+-- SmartLead: SUM(total_emails_sent)
+-- Reply.io: SUM(deliveries + bounces)
+```
+
+**Positive Replies**:
+```sql
+-- SmartLead: SUM(leads_interested)
+-- Reply.io: 0 (not available)
+```
+
+**Reply Rate** (using delivered denominator):
+```typescript
+// Delivered = sent - bounced
+const delivered = Math.max(0, totalSent - totalBounced);
+const replyRate = calculateRate(totalReplied, delivered);
+```
+
+**Positive Reply Rate** (using delivered denominator to match SmartLead):
+```typescript
+const positiveRate = calculateRate(totalPositive, delivered);
+```
+
+---
+
+### 3. Active Campaign Count - NocoDB Status
+
+Query both NocoDB tables and filter by active status:
+
+```typescript
+// SmartLead: status = 'ACTIVE'
+// Reply.io: status = 'Active'
+const activeCampaigns = smartleadActive + replyioActive;
+```
+
+Expected result: **~114 active** (52 SmartLead + 62 Reply.io)
+
+---
+
+### 4. Weekly Chart - Use Delta View Correctly
+
+The `nocodb_campaign_daily_deltas` view calculates proper day-over-day changes using window functions. This is better than `nocodb_daily_totals.sent_delta`.
+
+**Key fix**: Query the deltas view and aggregate by week:
+
+```typescript
+const { data: deltas } = await supabase
+  .from('nocodb_campaign_daily_deltas')
+  .select('snapshot_date, emails_sent_delta, emails_replied_delta, positive_delta')
+  .gte('snapshot_date', week12Start);
+
+// Group by week and sum deltas
+```
+
+**Filter first-snapshot anomalies**:
+```typescript
+// Only include rows where we have a previous day comparison
+// The deltas view handles this via LAG() window function
+// Rows with NULL in prior_* columns are first-day entries
+```
+
+---
+
+## Technical Implementation
+
+### File Changes
+
+| File | Changes |
+|------|---------|
+| `src/hooks/useNocoDBDashboard.tsx` | **NEW** - Dedicated hook for NocoDB-sourced dashboard |
+| `src/hooks/useOverviewDashboard.tsx` | Update to use new hook or inline NocoDB queries |
+| `src/components/dashboard/HeroMetricsGrid.tsx` | No changes needed (receives data) |
+
+### Implementation Steps
+
+**Step 1**: Add NocoDB queries to `useOverviewDashboard.tsx`:
+
+```typescript
+// Replace campaigns table query with NocoDB queries
+const [smartleadRes, replyioRes] = await Promise.all([
+  supabase
+    .from('nocodb_smartlead_campaigns')
+    .select('campaign_id, total_emails_sent, total_replies, total_bounces, leads_interested, status'),
+  supabase
+    .from('nocodb_replyio_campaigns')
+    .select('campaign_id, deliveries, bounces, replies, status'),
+]);
+
+// Aggregate totals
+const smartleadTotals = smartleadRes.data?.reduce((acc, r) => ({
+  sent: acc.sent + (r.total_emails_sent || 0),
+  replied: acc.replied + (r.total_replies || 0),
+  bounced: acc.bounced + (r.total_bounces || 0),
+  positive: acc.positive + (r.leads_interested || 0),
+}), { sent: 0, replied: 0, bounced: 0, positive: 0 });
+
+const replyioTotals = replyioRes.data?.reduce((acc, r) => ({
+  sent: acc.sent + (r.deliveries || 0) + (r.bounces || 0),
+  replied: acc.replied + (r.replies || 0),
+  bounced: acc.bounced + (r.bounces || 0),
+  delivered: acc.delivered + (r.deliveries || 0),
+}), { sent: 0, replied: 0, bounced: 0, delivered: 0 });
+```
+
+**Step 2**: Update Hero Metric calculations:
+
+```typescript
+// Use delivered as denominator for rates (SmartLead convention)
+const totalSent = smartleadTotals.sent + replyioTotals.sent;
+const totalBounced = smartleadTotals.bounced + replyioTotals.bounced;
+const totalDelivered = Math.max(0, totalSent - totalBounced);
+const totalReplied = smartleadTotals.replied + replyioTotals.replied;
+const totalPositive = smartleadTotals.positive; // Reply.io doesn't have positive
+
+// Rates using delivered
+const replyRate = calculateRate(totalReplied, totalDelivered);
+const positiveRate = calculateRate(totalPositive, totalDelivered);
+```
+
+**Step 3**: Update Active Campaign count:
+
+```typescript
+const activeCampaigns = 
+  smartleadRes.data?.filter(c => c.status?.toUpperCase() === 'ACTIVE').length +
+  replyioRes.data?.filter(c => c.status === 'Active').length;
+```
+
+**Step 4**: Fix Weekly Chart data:
+
+```typescript
+// Query deltas view for weekly chart
+const { data: deltas } = await supabase
+  .from('nocodb_campaign_daily_deltas')
+  .select('snapshot_date, campaign_id, emails_sent_delta, emails_replied_delta, positive_delta')
+  .gte('snapshot_date', week12Start)
+  .lte('snapshot_date', todayStr);
+
+// Sum by week, excluding first-snapshot rows (emails_sent_delta = prior total)
+const weeklyMap = new Map<string, WeeklyData>();
+deltas?.forEach(d => {
+  // Skip first-snapshot anomalies (delta == cumulative total)
+  // The view should handle this, but add guard
+  const weekEndStr = getWeekEndStr(d.snapshot_date);
+  const week = weeklyMap.get(weekEndStr) || createEmptyWeek(weekEndStr);
+  week.emailsSent += d.emails_sent_delta || 0;
+  week.replies += d.emails_replied_delta || 0;
+  week.positiveReplies += d.positive_delta || 0;
+  weeklyMap.set(weekEndStr, week);
+});
+```
+
+---
+
+## Expected Results After Fix
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Emails Sent | 2M+ | ~1.19M (NocoDB total) |
+| Reply Rate | X / sent | X / delivered |
+| Positive Rate | X / sent | X / delivered |
+| Active Campaigns | 1400 | ~114 |
+| Weekly Chart Max | ~900k | Actual weekly deltas |
+
+---
+
+## Data Validation Queries
+
+After implementation, verify with:
+
+```sql
+-- Verify NocoDB totals
+SELECT 
+  SUM(total_emails_sent) as sl_sent,
+  SUM(total_replies) as sl_replied,
+  SUM(leads_interested) as sl_positive
+FROM nocodb_smartlead_campaigns;
+
+SELECT 
+  SUM(deliveries + bounces) as rio_sent,
+  SUM(replies) as rio_replied
+FROM nocodb_replyio_campaigns;
+```
+
+---
+
+## Notes
+
+1. **Reply.io Positive Replies**: Not available in NocoDB - shows 0. This is a data gap, not a bug.
+2. **Weekly Chart**: Uses snapshot deltas which only exist from 2026-01-27 onward. Earlier weeks will fall back to `daily_metrics` or show no data.
+3. **WoW Comparisons**: Will still use `daily_metrics` for week-over-week since snapshots are too recent.
