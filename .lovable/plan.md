@@ -1,14 +1,30 @@
 
 # Fix Email Dashboard Overview - Use NocoDB as Source of Truth
 
-## Summary of Issues Found
+## ✅ COMPLETED
 
-| Issue | Current Source | Problem | Fix |
-|-------|---------------|---------|-----|
-| Emails Sent (2M+) | `campaigns` table | Stale/inflated internal data | Use NocoDB SmartLead + Reply.io |
-| Positive Reply Rate | `positive / sent` | SmartLead uses `delivered` | Change to `positive / delivered` |
-| Active Campaigns (1400) | `campaigns` table | Internal duplicates | Use NocoDB active status counts |
-| Weekly Chart (900k) | `sent_delta` | First-day anomaly not filtered | Use cumulative delta window function |
+### Implementation Summary
+
+Created `useNocoDBDashboard` hook and updated `useOverviewDashboard` to use NocoDB as source of truth.
+
+| Change | Details |
+|--------|---------|
+| **Hero Metrics** | Now sourced from `nocodb_smartlead_campaigns` + `nocodb_replyio_campaigns` |
+| **Rate Denominator** | Changed to `delivered` (sent - bounced) per SmartLead convention |
+| **Active Campaigns** | Uses NocoDB status filters: `ACTIVE` (SmartLead) / `Active` (Reply.io) |
+| **Weekly Chart** | Uses `nocodb_campaign_daily_deltas` with first-snapshot anomaly filter |
+
+### Expected Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Emails Sent | 2M+ | ~1.19M |
+| Active Campaigns | 1400 | 114 |
+| Weekly Chart Max | ~900k | Actual weekly deltas |
+
+---
+
+## Summary of Issues Found
 
 ---
 

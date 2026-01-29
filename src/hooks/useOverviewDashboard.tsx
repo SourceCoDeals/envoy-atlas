@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useNocoDBDashboard } from '@/hooks/useNocoDBDashboard';
 import { calculateRate, calculateWoWChange } from '@/lib/metrics';
 import { logger } from '@/lib/logger';
-import { startOfWeek, endOfWeek, subWeeks, subDays, format, parseISO, isWithinInterval } from 'date-fns';
+import { startOfWeek, endOfWeek, subWeeks, subDays, format, parseISO } from 'date-fns';
 
 // ===== Types =====
 export interface HeroMetric {
@@ -96,6 +97,16 @@ const ACTIVE_CAMPAIGN_STATUSES = ['active', 'started', 'running'];
 // ===== Hook =====
 export function useOverviewDashboard(): OverviewDashboardData {
   const { currentWorkspace } = useWorkspace();
+  
+  // Use NocoDB as the source of truth for hero metrics and weekly chart
+  const { 
+    loading: nocoLoading, 
+    hasData: nocoHasData, 
+    totals: nocoTotals, 
+    weeklyData: nocoWeeklyData,
+    refetch: refetchNoco 
+  } = useNocoDBDashboard();
+  
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
   
@@ -107,7 +118,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
   });
   
   const [rawMetrics, setRawMetrics] = useState<{
-    last30: { sent: number; replied: number; positive: number; meetings: number };
+    last30: { sent: number; replied: number; positive: number; meetings: number; delivered: number };
     prev7: { sent: number; replied: number; positive: number; meetings: number };
     last7: { sent: number; replied: number; positive: number; meetings: number };
     weeklyBreakdown: WeeklyData[];
@@ -125,7 +136,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       prevReplyRate?: number;
     }>;
   }>({
-    last30: { sent: 0, replied: 0, positive: 0, meetings: 0 },
+    last30: { sent: 0, replied: 0, positive: 0, meetings: 0, delivered: 0 },
     prev7: { sent: 0, replied: 0, positive: 0, meetings: 0 },
     last7: { sent: 0, replied: 0, positive: 0, meetings: 0 },
     weeklyBreakdown: [],
@@ -332,8 +343,8 @@ export function useOverviewDashboard(): OverviewDashboardData {
         }
       });
       
-      // Use campaign totals for main metrics display
-      const last30Agg = campaignTotals;
+      // Use campaign totals for main metrics display, add delivered = sent (approximation)
+      const last30Agg = { ...campaignTotals, delivered: campaignTotals.sent };
 
       // Build weekly breakdown (last 12 weeks)
       // Priority: Use snapshot deltas when available, fall back to daily_metrics
@@ -474,9 +485,10 @@ export function useOverviewDashboard(): OverviewDashboardData {
     fetchData();
   }, [fetchData]);
 
-  // Compute hero metrics with WoW comparison (capped at 999%)
+  // Compute hero metrics using NocoDB as source of truth
+  // WoW comparison still uses daily_metrics (rawMetrics.last7 / prev7)
   const heroMetrics = useMemo((): HeroMetric[] => {
-    const { last30, last7, prev7 } = rawMetrics;
+    const { last7, prev7 } = rawMetrics;
     
     // Helper to calculate WoW change with safeguards using centralized calculateWoWChange
     const calcChange = (current: number, previous: number): { change: number; trend: 'up' | 'down' | 'neutral' } => {
@@ -493,6 +505,7 @@ export function useOverviewDashboard(): OverviewDashboardData {
       };
     };
 
+    // WoW rates for trend indicators (still using daily_metrics for comparison)
     const last7ReplyRate = calculateRate(last7.replied, last7.sent);
     const prev7ReplyRate = calculateRate(prev7.replied, prev7.sent);
     const last7PositiveRate = calculateRate(last7.positive, last7.sent);
@@ -505,37 +518,39 @@ export function useOverviewDashboard(): OverviewDashboardData {
     const positiveRateChange = calcChange(last7PositiveRate, prev7PositiveRate);
     const meetingRateChange = calcChange(last7MeetingRate, prev7MeetingRate);
 
+    // Use NocoDB totals for the main metric values
+    // Rates use DELIVERED as denominator (SmartLead convention)
     return [
       {
         label: 'Emails Sent',
-        value: last30.sent,
+        value: nocoTotals.totalSent,
         format: 'number',
         change: sentChange.change,
         trend: sentChange.trend,
       },
       {
         label: 'Reply Rate',
-        value: calculateRate(last30.replied, last30.sent),
+        value: nocoTotals.replyRate, // Already calculated with delivered denominator
         format: 'percent',
         change: replyRateChange.change,
         trend: replyRateChange.trend,
       },
       {
         label: 'Positive Reply Rate',
-        value: calculateRate(last30.positive, last30.sent),
+        value: nocoTotals.positiveRate, // Already calculated with delivered denominator
         format: 'percent',
         change: positiveRateChange.change,
         trend: positiveRateChange.trend,
       },
       {
         label: 'Meeting Booked Rate',
-        value: calculateRate(last30.meetings, last30.sent),
+        value: calculateRate(nocoTotals.totalMeetings, nocoTotals.totalDelivered),
         format: 'percent',
         change: meetingRateChange.change,
         trend: meetingRateChange.trend,
       },
     ];
-  }, [rawMetrics]);
+  }, [rawMetrics, nocoTotals]);
 
   // Compute alert campaigns
   const alertCampaigns = useMemo((): AlertCampaign[] => {
@@ -611,17 +626,49 @@ export function useOverviewDashboard(): OverviewDashboardData {
       .slice(0, 5);
   }, [rawMetrics.campaigns]);
 
+  // Combine loading states
+  const isLoading = loading || nocoLoading;
+  
+  // Prefer NocoDB data for hasData check
+  const hasAnyData = nocoHasData || hasData;
+  
+  // Use NocoDB weekly data when available, fall back to rawMetrics
+  const weeklyDataOutput: WeeklyData[] = nocoWeeklyData.length > 0
+    ? nocoWeeklyData.map(w => ({
+        weekEnding: w.weekEnding,
+        weekLabel: w.weekLabel,
+        emailsSent: w.emailsSent,
+        replies: w.replies,
+        positiveReplies: w.positiveReplies,
+        meetingsBooked: 0, // NocoDB doesn't track meetings
+        replyRate: w.replyRate,
+        positiveRate: w.positiveRate,
+      }))
+    : rawMetrics.weeklyBreakdown;
+
+  // Enhance todaysPulse with NocoDB active campaign count
+  const enhancedTodaysPulse: TodaysPulse = {
+    ...todaysPulse,
+    activeCampaigns: nocoTotals.activeCampaigns || todaysPulse.activeCampaigns,
+  };
+  
+  // Combined refetch
+  const refetchAll = useCallback(() => {
+    fetchData();
+    refetchNoco();
+  }, [fetchData, refetchNoco]);
+
   return {
-    loading,
-    hasData,
-    todaysPulse,
+    loading: isLoading,
+    hasData: hasAnyData,
+    todaysPulse: enhancedTodaysPulse,
     heroMetrics,
-    weeklyData: rawMetrics.weeklyBreakdown,
+    weeklyData: weeklyDataOutput,
     alertCampaigns,
     topCampaigns,
     dataCompleteness: rawMetrics.dataCompleteness,
-    dataSource,
+    dataSource: nocoWeeklyData.length > 0 ? 'snapshots' : dataSource,
     snapshotSummary,
-    refetch: fetchData,
+    refetch: refetchAll,
   };
 }
